@@ -422,11 +422,23 @@ describe("Etapa 5 Commit 3 — faixa 'Próximos N dias' e calendário", () => {
         dispatchId: "disp-100",
         campaignId: "camp-100",
         campaignName: "Campanha Black Friday",
-        dispatchName: "Lote 1",
+        loteCount: 1,
+        leadsTotal: 500,
         targetCount: 500,
         scheduledAt: "2026-10-26T10:00:00.000Z",
+        firstScheduledAt: "2026-10-26T10:00:00.000Z",
+        lastScheduledAt: "2026-10-26T10:00:00.000Z",
         status: "scheduled",
-        evolutionInstanceId: "inst-1",
+        lotes: [
+          {
+            dispatchId: "disp-100",
+            dispatchName: "Lote 1",
+            scheduledAt: "2026-10-26T10:00:00.000Z",
+            targetCount: 500,
+            status: "scheduled",
+            evolutionInstanceId: "inst-1",
+          },
+        ],
       });
     });
   });

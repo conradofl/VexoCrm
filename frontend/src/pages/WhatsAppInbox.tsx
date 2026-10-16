@@ -50,6 +50,8 @@ import {
   Pencil,
   Ban,
   X,
+  Video,
+  PhoneCall,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useCampanhas } from "@/hooks/useCampanhas";
@@ -110,6 +112,9 @@ import {
 import { SingleFollowupReminderModal } from "@/components/followup/SingleFollowupReminderModal";
 import { EditFollowupScheduleModal } from "@/components/followup/EditFollowupScheduleModal";
 import { CreateLeadReminderModal } from "@/components/inbox/CreateLeadReminderModal";
+import { ScheduleMeetingModal } from "@/components/inbox/ScheduleMeetingModal";
+import { RegisterCallModal } from "@/components/inbox/RegisterCallModal";
+import { MeetingPostCallCheckinCard } from "@/components/inbox/MeetingPostCallCheckinCard";
 import {
   useInboxRemindersSummary,
   useCompleteLeadReminder,
@@ -352,6 +357,9 @@ export default function WhatsAppInbox({
   const [isApplyFollowupModalOpen, setIsApplyFollowupModalOpen] = useState(false);
   const [isCreateReminderModalOpen, setIsCreateReminderModalOpen] = useState(false);
   const [isEditScheduleModalOpen, setIsEditScheduleModalOpen] = useState(false);
+  const [isScheduleMeetingModalOpen, setIsScheduleMeetingModalOpen] = useState(false);
+  const [isRegisterCallModalOpen, setIsRegisterCallModalOpen] = useState(false);
+  const [activeMeetingToEdit, setActiveMeetingToEdit] = useState<LeadReminder | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -730,6 +738,8 @@ export default function WhatsAppInbox({
   const activeSchedule = selectedSummary?.activeSchedule || null;
   const activeReminders = selectedSummary?.activeReminders || [];
   const pendingReminder = activeReminders.find((r) => r.status === "pending") || null;
+  const activeMeeting = activeReminders.find((r) => r.activityType === "meeting" && r.status === "pending") || null;
+  const regularPendingReminder = activeReminders.find((r) => (r.activityType === "reminder" || !r.activityType) && r.status === "pending") || null;
 
   const completedRemindersQuery = useLeadReminders(
     clientId,
@@ -2977,12 +2987,25 @@ export default function WhatsAppInbox({
                     </Button>
                   )}
 
+                  {/* Card de Check-in Pós-Reunião Google Meet */}
+                  {activeMeeting && (
+                    <MeetingPostCallCheckinCard
+                      meeting={activeMeeting}
+                      clientId={clientId}
+                      onReschedule={() => {
+                        setActiveMeetingToEdit(activeMeeting);
+                        setIsScheduleMeetingModalOpen(true);
+                      }}
+                      onStageChange={(newStage) => handleUpdateFunnelStage(newStage)}
+                    />
+                  )}
+
                   {/* Card de Lembrete Pessoal Pendente no Dossiê */}
-                  {pendingReminder && (
+                  {regularPendingReminder && (
                     <div
                       className={cn(
                         "rounded-xl border p-2.5 text-xs flex items-start justify-between gap-2 shadow-2xs",
-                        pendingReminder.isOverdue
+                        regularPendingReminder.isOverdue
                           ? "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-200"
                           : "border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200"
                       )}
@@ -2991,7 +3014,7 @@ export default function WhatsAppInbox({
                         <div
                           className={cn(
                             "flex items-center gap-1.5 font-bold",
-                            pendingReminder.isOverdue
+                            regularPendingReminder.isOverdue
                               ? "text-rose-800 dark:text-rose-300"
                               : "text-amber-800 dark:text-amber-300"
                           )}
@@ -2999,41 +3022,41 @@ export default function WhatsAppInbox({
                           <Bell
                             className={cn(
                               "h-3.5 w-3.5 shrink-0",
-                              pendingReminder.isOverdue
+                              regularPendingReminder.isOverdue
                                 ? "text-rose-600 dark:text-rose-400"
                                 : "text-amber-600 dark:text-amber-400"
                             )}
                           />
-                          {pendingReminder.isOverdue && (
+                          {regularPendingReminder.isOverdue && (
                             <span className="rounded bg-rose-600 px-1 py-0.5 text-[9px] font-extrabold uppercase text-white tracking-wider shrink-0">
                               Venceu
                             </span>
                           )}
-                          <span className="truncate">{pendingReminder.title}</span>
+                          <span className="truncate">{regularPendingReminder.title}</span>
                         </div>
-                        {pendingReminder.notes && (
+                        {regularPendingReminder.notes && (
                           <p
                             className={cn(
                               "text-[11px] line-clamp-2",
-                              pendingReminder.isOverdue
+                              regularPendingReminder.isOverdue
                                 ? "text-rose-700/80 dark:text-rose-300/80"
                                 : "text-amber-700/80 dark:text-amber-300/80"
                             )}
                           >
-                            {pendingReminder.notes}
+                            {regularPendingReminder.notes}
                           </p>
                         )}
                         <div
                           className={cn(
                             "flex items-center gap-2 text-[10px] pt-0.5 font-mono",
-                            pendingReminder.isOverdue
+                            regularPendingReminder.isOverdue
                               ? "text-rose-600 dark:text-rose-400"
                               : "text-amber-600 dark:text-amber-400"
                           )}
                         >
-                          <span>📅 {formatScheduleDate(pendingReminder.remindAt)}</span>
-                          {pendingReminder.assignedToName && (
-                            <span>· 👤 {pendingReminder.assignedToName}</span>
+                          <span>📅 {formatScheduleDate(regularPendingReminder.remindAt)}</span>
+                          {regularPendingReminder.assignedToName && (
+                            <span>· 👤 {regularPendingReminder.assignedToName}</span>
                           )}
                         </div>
                       </div>
@@ -3044,7 +3067,7 @@ export default function WhatsAppInbox({
                           variant="outline"
                           onClick={async () => {
                             try {
-                              await completeLeadReminder.mutateAsync(pendingReminder.id);
+                              await completeLeadReminder.mutateAsync(regularPendingReminder.id);
                               toast.success("Lembrete concluído!");
                             } catch (err: any) {
                               toast.error(err?.message || "Erro ao concluir lembrete.");
@@ -3072,7 +3095,7 @@ export default function WhatsAppInbox({
                           <DropdownMenuContent align="end" className="w-32">
                             <DropdownMenuItem
                               onClick={() => {
-                                setEditingReminder(pendingReminder);
+                                setEditingReminder(regularPendingReminder);
                                 setIsCreateReminderModalOpen(true);
                               }}
                               className="cursor-pointer text-xs flex items-center gap-2"
@@ -3084,7 +3107,7 @@ export default function WhatsAppInbox({
                               onClick={async () => {
                                 if (window.confirm("Deseja realmente excluir este lembrete?")) {
                                   try {
-                                    await deleteLeadReminder.mutateAsync(pendingReminder.id);
+                                    await deleteLeadReminder.mutateAsync(regularPendingReminder.id);
                                     toast.success("Lembrete excluído!");
                                   } catch (err: any) {
                                     toast.error(err?.message || "Erro ao excluir lembrete.");
@@ -3167,6 +3190,34 @@ export default function WhatsAppInbox({
                         )}
                       </div>
                     )}
+                  </div>
+
+                  {/* Bloco C: Atividades Comerciais Diretas (Google Meet & Ligação Telefônica) */}
+                  <div className="grid grid-cols-2 gap-2 pt-0.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setActiveMeetingToEdit(null);
+                        setIsScheduleMeetingModalOpen(true);
+                      }}
+                      className="w-full justify-center h-8 text-[11px] font-bold rounded-xl border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/20 cursor-pointer shadow-2xs"
+                      title="Agendar call no Google Meet e enviar convite no WhatsApp"
+                    >
+                      <Video className="mr-1.5 h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                      📅 Agendar Call (Meet)
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsRegisterCallModalOpen(true)}
+                      className="w-full justify-center h-8 text-[11px] font-bold rounded-xl border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-200 hover:bg-blue-500/20 cursor-pointer shadow-2xs"
+                      title="Registrar ligação telefônica (Atendeu, Ocupado, etc.)"
+                    >
+                      <PhoneCall className="mr-1.5 h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                      📞 Registrar Ligação
+                    </Button>
                   </div>
 
                   {/* Ações de Agendamento com Estado e Lembrete Pessoal */}
@@ -3294,6 +3345,37 @@ export default function WhatsAppInbox({
         ]}
         apiBase={API_BASE_URL}
         getToken={getIdToken}
+      />
+
+      {/* Modal de Agendamento de Call / Google Meet */}
+      <ScheduleMeetingModal
+        open={isScheduleMeetingModalOpen}
+        onOpenChange={(open) => {
+          setIsScheduleMeetingModalOpen(open);
+          if (!open) setActiveMeetingToEdit(null);
+        }}
+        lead={{
+          id: matchedLead?.id,
+          nome: matchedLead?.nome || selectedChat?.name || "Lead",
+          phone: rawPhone,
+        }}
+        clientId={clientId}
+        onSendWhatsappInvite={(text) => {
+          setDraft(text);
+        }}
+        initialMeeting={activeMeetingToEdit}
+      />
+
+      {/* Modal de Registro de Ligação Telefônica */}
+      <RegisterCallModal
+        open={isRegisterCallModalOpen}
+        onOpenChange={setIsRegisterCallModalOpen}
+        lead={{
+          id: matchedLead?.id,
+          nome: matchedLead?.nome || selectedChat?.name || "Lead",
+          phone: rawPhone,
+        }}
+        clientId={clientId}
       />
 
       {/* Modal de Confirmação para Arquivamento em Massa */}

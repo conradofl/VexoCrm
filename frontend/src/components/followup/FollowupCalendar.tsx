@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   MessageCircle,
   X,
   Loader2,
@@ -12,6 +14,8 @@ import {
   Clock,
   MapPin,
   Sparkles,
+  Video,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,7 +27,7 @@ import { useCancelFollowupJob } from "@/hooks/useFollowupQueue";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 
 // Calendário do módulo de Follow-up (Etapa 5 Commit 3 / Marco 1 & 5 Fase 3). É LENTE, não superfície de
-// criação: exibe followups, campanhas programadas e eventos/festas com esteiras.
+// criação: exibe followups, campanhas programadas e eventos/festas/calls.
 
 const WEEKDAY_LABELS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 
@@ -52,6 +56,7 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
   const [cursor, setCursor] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [filter, setFilter] = useState<CalendarFilter>("all");
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Record<string, boolean>>({});
 
   const monthStr = monthKey(cursor);
   const { data: month, isLoading: monthLoading } = useFollowupCalendarMonth(effectiveTenantId, monthStr);
@@ -97,6 +102,10 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
   const visibleFollowups = filter === "all" || filter === "followups" ? dayFollowups : [];
   const visibleEvents = filter === "all" || filter === "events" ? dayEvents : [];
   const hasNoItems = visibleCampaigns.length === 0 && visibleFollowups.length === 0 && visibleEvents.length === 0;
+
+  const toggleCampaignExpanded = (campId: string) => {
+    setExpandedCampaigns((prev) => ({ ...prev, [campId]: !prev[campId] }));
+  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -254,9 +263,9 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
                       <Badge
                         variant="outline"
                         className="text-[9px] h-4 px-1 w-full flex items-center justify-center bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20 font-medium truncate"
-                        title={`${campCount} campanha(s) · ${campLeads.toLocaleString("pt-BR")} leads`}
+                        title={`${campCount} ${campCount === 1 ? "Campanha" : "Campanhas"} · ${campLeads.toLocaleString("pt-BR")} leads`}
                       >
-                        📢 {campCount}
+                        📢 {campCount} {campCount === 1 ? "Campanha" : "Campanhas"}{campLeads > 0 ? ` (${campLeads.toLocaleString("pt-BR")} leads)` : ""}
                       </Badge>
                     )}
                     {showFollowup && (
@@ -322,13 +331,13 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Seção 🎪 Eventos & Festas do Dia */}
+                  {/* Seção 🎪 Eventos & Reuniões do Dia */}
                   {visibleEvents.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between pb-1 border-b border-border/50">
                         <div className="flex items-center gap-1.5 text-xs font-bold text-pink-700 dark:text-pink-300">
                           <span>🎪</span>
-                          <span>Eventos & Festas do Dia</span>
+                          <span>Eventos & Reuniões do Dia</span>
                         </div>
                         <Badge
                           variant="outline"
@@ -338,49 +347,89 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
                         </Badge>
                       </div>
                       <div className="space-y-2">
-                        {visibleEvents.map((ev) => (
-                          <div
-                            key={ev.id}
-                            className="rounded-lg border border-pink-200/70 dark:border-pink-900/40 bg-pink-50/30 dark:bg-pink-950/20 p-2.5 space-y-1.5 text-xs"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="font-semibold text-foreground truncate" title={ev.name}>
-                                  🎪 {ev.name}
-                                </p>
-                                {ev.location && (
-                                  <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1 mt-0.5">
-                                    <MapPin className="h-3 w-3 text-pink-600 dark:text-pink-400 shrink-0" />
-                                    {ev.location}
+                        {visibleEvents.map((ev) => {
+                          const isMeeting = Boolean(ev.isMeeting || ev.meetingUrl);
+                          return (
+                            <div
+                              key={ev.id}
+                              className={cn(
+                                "rounded-lg border p-2.5 space-y-1.5 text-xs transition-colors",
+                                isMeeting
+                                  ? "border-emerald-300/80 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/20"
+                                  : "border-pink-200/70 dark:border-pink-900/40 bg-pink-50/30 dark:bg-pink-950/20"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-foreground truncate" title={ev.name}>
+                                    {isMeeting ? "📅 " : "🎪 "}
+                                    {ev.name}
                                   </p>
+                                  {ev.location && (
+                                    <p className="text-[10px] text-muted-foreground truncate flex items-center gap-1 mt-0.5">
+                                      {isMeeting ? (
+                                        <Video className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                      ) : (
+                                        <MapPin className="h-3 w-3 text-pink-600 dark:text-pink-400 shrink-0" />
+                                      )}
+                                      {ev.location}
+                                    </p>
+                                  )}
+                                </div>
+                                {ev.date && (
+                                  <span className="text-[10px] text-muted-foreground font-mono shrink-0 flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    {formatTime(ev.date)}
+                                  </span>
                                 )}
                               </div>
-                              {ev.date && (
-                                <span className="text-[10px] text-muted-foreground font-mono shrink-0 flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  {formatTime(ev.date)}
-                                </span>
-                              )}
+                              <div className="pt-1 flex items-center justify-end gap-1.5">
+                                {isMeeting && ev.meetingUrl && (
+                                  <a href={ev.meetingUrl} target="_blank" rel="noopener noreferrer">
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      className="h-6 text-[10px] gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                                    >
+                                      <Video className="h-3 w-3" />
+                                      Entrar no Meet
+                                      <ExternalLink className="h-2.5 w-2.5 opacity-80" />
+                                    </Button>
+                                  </a>
+                                )}
+                                {isMeeting && ev.phone && (
+                                  <Link to={`/crm/whatsapp?phone=${encodeURIComponent(ev.phone)}`}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[10px] gap-1 text-emerald-700 dark:text-emerald-300 border-emerald-300/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                                    >
+                                      <MessageCircle className="h-3 w-3" />
+                                      WhatsApp
+                                    </Button>
+                                  </Link>
+                                )}
+                                {!isMeeting && (
+                                  <Link to="/crm/livpub?tab=eventos">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[10px] gap-1 hover:bg-pink-100 dark:hover:bg-pink-900/40 text-pink-700 dark:text-pink-300 border-pink-300/50"
+                                    >
+                                      <CalendarDays className="h-3 w-3 text-pink-600 dark:text-pink-400" />
+                                      Ver evento
+                                    </Button>
+                                  </Link>
+                                )}
+                              </div>
                             </div>
-                            <div className="pt-1 flex items-center justify-end">
-                              <Link to="/crm/livpub?tab=eventos">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 text-[10px] gap-1 hover:bg-pink-100 dark:hover:bg-pink-900/40 text-pink-700 dark:text-pink-300 border-pink-300/50"
-                                >
-                                  <CalendarDays className="h-3 w-3 text-pink-600 dark:text-pink-400" />
-                                  Ver evento
-                                </Button>
-                              </Link>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
 
-                  {/* Seção 📢 Campanhas Programadas */}
+                  {/* Seção 📢 Campanhas Programadas (Card Master Consolidado) */}
                   {visibleCampaigns.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between pb-1 border-b border-border/50">
@@ -396,58 +445,110 @@ export default function FollowupCalendar({ tenantId }: { tenantId?: string }) {
                         </Badge>
                       </div>
                       <div className="space-y-2">
-                        {visibleCampaigns.map((camp) => (
-                          <div
-                            key={camp.dispatchId}
-                            className="rounded-lg border border-purple-200/70 dark:border-purple-900/40 bg-purple-50/30 dark:bg-purple-950/20 p-2.5 space-y-1.5 text-xs"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="font-semibold text-foreground truncate" title={camp.campaignName}>
-                                  {camp.campaignName}
-                                </p>
-                                {camp.dispatchName && camp.dispatchName !== camp.campaignName && (
-                                  <p className="text-[10px] text-muted-foreground truncate">{camp.dispatchName}</p>
-                                )}
-                              </div>
-                              <Badge
-                                variant="outline"
-                                className="text-[9px] px-1.5 py-0 capitalize shrink-0 bg-background/80"
-                              >
-                                {camp.status === "scheduled"
-                                  ? "Agendada"
-                                  : camp.status === "draft"
-                                  ? "Rascunho"
-                                  : camp.status}
-                              </Badge>
-                            </div>
-                            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
-                              <span className="flex items-center gap-1">
-                                <Users className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-                                <strong className="text-foreground font-medium">
-                                  {camp.targetCount.toLocaleString("pt-BR")}
-                                </strong>{" "}
-                                leads
-                              </span>
-                              <span className="flex items-center gap-1 font-mono text-[10px]">
-                                <Clock className="h-3 w-3" />
-                                {formatTime(camp.scheduledAt)}
-                              </span>
-                            </div>
-                            <div className="pt-1 flex items-center justify-end">
-                              <Link to="/crm/campanhas">
-                                <Button
+                        {visibleCampaigns.map((camp) => {
+                          const campId = camp.campaignId || camp.dispatchId;
+                          const isExpanded = Boolean(expandedCampaigns[campId]);
+                          const loteCount = camp.loteCount || (camp.lotes?.length || 1);
+                          const leadsTotal = camp.leadsTotal || camp.targetCount || 0;
+                          const firstTime = camp.firstScheduledAt ? formatTime(camp.firstScheduledAt) : formatTime(camp.scheduledAt);
+                          const lastTime = camp.lastScheduledAt ? formatTime(camp.lastScheduledAt) : firstTime;
+                          const hasMultipleLotes = loteCount > 1;
+
+                          return (
+                            <div
+                              key={campId}
+                              className="rounded-lg border border-purple-200/70 dark:border-purple-900/40 bg-purple-50/30 dark:bg-purple-950/20 p-2.5 space-y-2 text-xs"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-foreground truncate" title={camp.campaignName}>
+                                    📢 {camp.campaignName}
+                                  </p>
+                                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                                    {loteCount} {loteCount === 1 ? "lote agendado" : "lotes agendados"} hoje •{" "}
+                                    <strong className="text-foreground font-medium">
+                                      {leadsTotal.toLocaleString("pt-BR")}
+                                    </strong>{" "}
+                                    leads
+                                  </p>
+                                </div>
+                                <Badge
                                   variant="outline"
-                                  size="sm"
-                                  className="h-6 text-[10px] gap-1 hover:bg-purple-100 dark:hover:bg-purple-900/40"
+                                  className="text-[9px] px-1.5 py-0 capitalize shrink-0 bg-background/80"
                                 >
-                                  <FileSpreadsheet className="h-3 w-3 text-purple-600 dark:text-purple-400" />
-                                  Ver campanha
-                                </Button>
-                              </Link>
+                                  {camp.status === "scheduled"
+                                    ? "Agendada"
+                                    : camp.status === "draft"
+                                    ? "Rascunho"
+                                    : camp.status}
+                                </Badge>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                                <span className="flex items-center gap-1 font-mono text-[10px]">
+                                  <Clock className="h-3 w-3 text-purple-600 dark:text-purple-400" />
+                                  {hasMultipleLotes ? `Janela: ${firstTime} → ${lastTime}` : `Horário: ${firstTime}`}
+                                </span>
+                                <Link to="/crm/campanhas">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-[10px] gap-1 hover:bg-purple-100 dark:hover:bg-purple-900/40 text-purple-700 dark:text-purple-300"
+                                  >
+                                    <FileSpreadsheet className="h-3 w-3" />
+                                    Ver campanha
+                                  </Button>
+                                </Link>
+                              </div>
+
+                              {/* Gaveta Retrátil (Accordion Colapsável) */}
+                              {hasMultipleLotes && camp.lotes && camp.lotes.length > 0 && (
+                                <div className="pt-1.5 border-t border-purple-200/50 dark:border-purple-900/30">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => toggleCampaignExpanded(campId)}
+                                    className="w-full h-6 text-[10px] text-purple-700 dark:text-purple-300 hover:bg-purple-100/50 dark:hover:bg-purple-900/30 flex items-center justify-between px-1"
+                                  >
+                                    <span className="flex items-center gap-1">
+                                      {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                      {isExpanded
+                                        ? `Ocultar grade de horários dos ${loteCount} lotes`
+                                        : `Ver grade de horários dos ${loteCount} lotes`}
+                                    </span>
+                                    <span className="text-[9px] font-mono opacity-70">
+                                      {firstTime} → {lastTime}
+                                    </span>
+                                  </Button>
+
+                                  {isExpanded && (
+                                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto pr-0.5">
+                                      {camp.lotes.map((lote, idx) => (
+                                        <div
+                                          key={lote.dispatchId || `lote-${idx}`}
+                                          className="rounded bg-background/80 border border-purple-200/60 dark:border-purple-900/40 p-1.5 text-[10px] space-y-0.5"
+                                        >
+                                          <div className="flex items-center justify-between font-mono">
+                                            <span className="font-semibold text-purple-800 dark:text-purple-300">
+                                              #{idx + 1}
+                                            </span>
+                                            <span className="text-muted-foreground flex items-center gap-0.5">
+                                              <Clock className="h-2.5 w-2.5" />
+                                              {formatTime(lote.scheduledAt)}
+                                            </span>
+                                          </div>
+                                          <div className="text-[9px] text-muted-foreground truncate">
+                                            {lote.targetCount} leads
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}

@@ -37,13 +37,24 @@ export function registerRemindersRoutes(app, deps) {
           status TEXT NOT NULL DEFAULT 'pending',
           completed_at TIMESTAMPTZ,
           completed_by_uid TEXT,
+          activity_type TEXT DEFAULT 'reminder',
+          meeting_url TEXT,
+          call_status TEXT,
+          meeting_outcome TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
+        ALTER TABLE public.lead_reminders
+          ADD COLUMN IF NOT EXISTS activity_type TEXT DEFAULT 'reminder',
+          ADD COLUMN IF NOT EXISTS meeting_url TEXT,
+          ADD COLUMN IF NOT EXISTS call_status TEXT,
+          ADD COLUMN IF NOT EXISTS meeting_outcome TEXT;
         CREATE INDEX IF NOT EXISTS idx_lead_reminders_client_phone
           ON public.lead_reminders (client_id, phone);
         CREATE INDEX IF NOT EXISTS idx_lead_reminders_client_status_remind
           ON public.lead_reminders (client_id, status, remind_at);
+        CREATE INDEX IF NOT EXISTS idx_lead_reminders_activity_type
+          ON public.lead_reminders (client_id, activity_type);
       `).catch(() => {});
     } catch {
       // Ignora erro de boot caso pool não esteja pronto
@@ -308,10 +319,14 @@ export function registerRemindersRoutes(app, deps) {
 
     try {
       const params = [clientId, status];
-      let phoneFilter = "";
+      let extraFilters = "";
       if (canonicalPhone) {
         params.push(canonicalPhone);
-        phoneFilter = `AND phone = $${params.length}`;
+        extraFilters += ` AND phone = $${params.length}`;
+      }
+      if (req.query.activityType) {
+        params.push(normalizeString(req.query.activityType));
+        extraFilters += ` AND activity_type = $${params.length}`;
       }
 
       const { rows } = await pgDatabasePool.query(
@@ -320,9 +335,10 @@ export function registerRemindersRoutes(app, deps) {
            remind_at, assigned_to_uid, assigned_to_name,
            created_by_uid, created_by_name, status,
            completed_at, completed_by_uid, created_at, updated_at,
+           activity_type, meeting_url, call_status, meeting_outcome,
            (remind_at < NOW()) AS is_overdue
          FROM public.lead_reminders
-         WHERE client_id = $1 AND status = $2 ${phoneFilter}
+         WHERE client_id = $1 AND status = $2 ${extraFilters}
          ORDER BY remind_at ASC`,
         params
       );
@@ -333,7 +349,7 @@ export function registerRemindersRoutes(app, deps) {
     }
   });
 
-  // ─── POST /api/reminders — Cria novo lembrete pessoal (interno) ───
+  // ─── POST /api/reminders — Cria novo lembrete pessoal ou atividade (reunião/chamada) ───
   app.post("/api/reminders", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
     if (!ensureDb(res)) return;
 
@@ -353,10 +369,7 @@ export function registerRemindersRoutes(app, deps) {
       return sendError(res, 400, "MISSING_TITLE", "O título do lembrete não pode ficar em branco.");
     }
 
-    const rawRemindAt = normalizeString(body.remindAt);
-    if (!rawRemindAt) {
-      return sendError(res, 400, "MISSING_REMIND_AT", "Defina a data e hora do lembrete.");
-    }
+    const rawRemindAt = normalizeString(body.remindAt) || new Date().toISOString();
     const remindAtDate = new Date(rawRemindAt);
     if (isNaN(remindAtDate.getTime())) {
       return sendError(res, 400, "INVALID_REMIND_AT", "Data e hora do lembrete inválidas.");
@@ -365,6 +378,11 @@ export function registerRemindersRoutes(app, deps) {
     const leadId = normalizeString(body.leadId) || null;
     const leadName = normalizeString(body.leadName) || null;
     const notes = normalizeString(body.notes) || null;
+    const activityType = normalizeString(body.activityType) || normalizeString(body.activity_type) || "reminder";
+    const meetingUrl = normalizeString(body.meetingUrl) || normalizeString(body.meeting_url) || null;
+    const callStatus = normalizeString(body.callStatus) || normalizeString(body.call_status) || null;
+    const meetingOutcome = normalizeString(body.meetingOutcome) || normalizeString(body.meeting_outcome) || null;
+    const initialStatus = normalizeString(body.status) || (activityType === "call" ? "completed" : "pending");
 
     // Regra de atribuição: se assigned_to_uid for nulo/vazio, pertence ao criador
     const createdByUid = req.authAccess?.uid || req.authUser?.uid || "system";
@@ -382,8 +400,9 @@ export function registerRemindersRoutes(app, deps) {
         `INSERT INTO public.lead_reminders (
            client_id, lead_id, phone, lead_name, title, notes,
            remind_at, assigned_to_uid, assigned_to_name,
-           created_by_uid, created_by_name, status
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')
+           created_by_uid, created_by_name, status,
+           activity_type, meeting_url, call_status, meeting_outcome
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING *`,
         [
           clientId,
@@ -397,6 +416,11 @@ export function registerRemindersRoutes(app, deps) {
           assignedToName,
           createdByUid,
           createdByName,
+          initialStatus,
+          activityType,
+          meetingUrl,
+          callStatus,
+          meetingOutcome,
         ]
       );
 
@@ -503,6 +527,27 @@ export function registerRemindersRoutes(app, deps) {
       }
     }
 
+    if (body.activityType !== undefined) {
+      params.push(normalizeString(body.activityType) || "reminder");
+      updates.push(`activity_type = $${params.length}`);
+    }
+
+    if (body.meetingUrl !== undefined) {
+      params.push(normalizeString(body.meetingUrl) || null);
+      updates.push(`meeting_url = $${params.length}`);
+    }
+
+    if (body.callStatus !== undefined) {
+      params.push(normalizeString(body.callStatus) || null);
+      updates.push(`call_status = $${params.length}`);
+    }
+
+    if (body.meetingOutcome !== undefined) {
+      const outcome = normalizeString(body.meetingOutcome) || null;
+      params.push(outcome);
+      updates.push(`meeting_outcome = $${params.length}`);
+    }
+
     if (!updates.length) {
       return sendError(res, 400, "NO_UPDATES", "Nenhum campo para atualizar.");
     }
@@ -522,7 +567,41 @@ export function registerRemindersRoutes(app, deps) {
         return sendError(res, 404, "NOT_FOUND", "Lembrete não encontrado ou não autorizado.");
       }
 
-      return res.json({ success: true, reminder: rows[0] });
+      const updatedReminder = rows[0];
+
+      // Se meetingOutcome for informado, atualizar o funil do lead automaticamente
+      if (body.meetingOutcome && updatedReminder) {
+        const outcome = normalizeString(body.meetingOutcome);
+        let targetStage = null;
+        if (outcome === "won") targetStage = "buyer";
+        else if (outcome === "proposal") targetStage = "open_budget";
+        else if (outcome === "lost") targetStage = "lost";
+
+        if (targetStage) {
+          try {
+            if (updatedReminder.lead_id) {
+              await pgDatabasePool.query(
+                `UPDATE public.leads
+                 SET stage = $1, stage_source = 'meeting_outcome', updated_at = NOW()
+                 WHERE id = $2 AND client_id = $3`,
+                [targetStage, updatedReminder.lead_id, clientId]
+              );
+            } else if (updatedReminder.phone) {
+              await pgDatabasePool.query(
+                `UPDATE public.leads
+                 SET stage = $1, stage_source = 'meeting_outcome', updated_at = NOW()
+                 WHERE client_id = $2
+                   AND regexp_replace(telefone, '\\D', '', 'g') = regexp_replace($3, '\\D', '', 'g')`,
+                [targetStage, clientId, updatedReminder.phone]
+              );
+            }
+          } catch (leadErr) {
+            console.warn("[reminders/patch] erro ao sincronizar stage do lead:", leadErr?.message || leadErr);
+          }
+        }
+      }
+
+      return res.json({ success: true, reminder: updatedReminder });
     } catch (err) {
       return sendError(res, 500, "UPDATE_REMINDER_FAILED", err instanceof Error ? err.message : "Erro ao atualizar lembrete");
     }

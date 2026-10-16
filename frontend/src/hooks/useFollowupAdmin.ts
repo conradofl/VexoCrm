@@ -418,6 +418,10 @@ export interface CalendarEventItem {
   date?: string;
   esteiras_status?: Record<string, string>;
   esteirasStatus?: Record<string, string>;
+  isMeeting?: boolean;
+  meetingUrl?: string | null;
+  leadName?: string | null;
+  phone?: string | null;
 }
 
 export interface CalendarMonthBreakdown {
@@ -446,6 +450,15 @@ export function useFollowupCalendarMonth(clientId?: string, month?: string) {
   });
 }
 
+export interface CalendarCampaignLote {
+  dispatchId: string;
+  dispatchName?: string;
+  scheduledAt: string;
+  targetCount: number;
+  status: string;
+  evolutionInstanceId?: string | null;
+}
+
 export interface CalendarCampaignItem {
   dispatchId: string;
   campaignId: string;
@@ -455,6 +468,28 @@ export interface CalendarCampaignItem {
   scheduledAt: string;
   status: string;
   evolutionInstanceId?: string | null;
+  loteCount?: number;
+  leadsTotal?: number;
+  firstScheduledAt?: string;
+  lastScheduledAt?: string;
+  lotes?: CalendarCampaignLote[];
+}
+
+export interface CalendarMeetingItem {
+  id: string;
+  leadId?: string | null;
+  leadName?: string | null;
+  phone?: string | null;
+  title?: string;
+  notes?: string | null;
+  remindAt: string;
+  scheduledAt?: string;
+  assignedToName?: string | null;
+  activityType: "meeting" | "call" | "reminder";
+  meetingUrl?: string | null;
+  callStatus?: string | null;
+  meetingOutcome?: string | null;
+  status: string;
 }
 
 export interface CalendarDayItem {
@@ -476,6 +511,7 @@ export interface CalendarDay {
   followups?: CalendarDayItem[];
   campaigns?: CalendarCampaignItem[];
   events?: CalendarEventItem[];
+  meetings?: CalendarMeetingItem[];
 }
 
 export function useFollowupCalendarDay(clientId?: string, date?: string) {

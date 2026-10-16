@@ -409,6 +409,11 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads' AND column_name='opt_out')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads' AND column_name='metadata')
     ) AS ok`,
+    "20261016140000_enhance_lead_reminders_activities.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_reminders' AND column_name='activity_type')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_reminders' AND column_name='meeting_url')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_reminders' AND column_name='meeting_outcome')
+    ) AS ok`,
   };
 
   const query = checks[filename];

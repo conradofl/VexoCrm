@@ -28,6 +28,10 @@ export interface LeadReminder {
   isDueTodayOrOverdue?: boolean;
   isOverdue?: boolean;
   isForCurrentUser?: boolean;
+  activityType?: "reminder" | "meeting" | "call";
+  meetingUrl?: string | null;
+  callStatus?: "answered" | "no_answer" | "busy" | "voicemail" | string | null;
+  meetingOutcome?: "won" | "proposal" | "rescheduled" | "no_show" | "lost" | string | null;
 }
 
 export interface InboxSummaryItem {
@@ -62,6 +66,10 @@ export interface CreateLeadReminderPayload {
   remindAt: string;
   assignedToUid?: string | null;
   assignedToName?: string | null;
+  activityType?: "reminder" | "meeting" | "call";
+  meetingUrl?: string | null;
+  callStatus?: "answered" | "no_answer" | "busy" | "voicemail" | string | null;
+  meetingOutcome?: "won" | "proposal" | "rescheduled" | "no_show" | "lost" | string | null;
 }
 
 /**
@@ -246,6 +254,10 @@ export function useLeadReminders(
         updatedAt: item.updatedAt || item.updated_at,
         isDueTodayOrOverdue: Boolean(item.isDueTodayOrOverdue ?? item.is_due_today_or_overdue),
         isOverdue: Boolean(item.isOverdue ?? item.is_overdue),
+        activityType: item.activityType || item.activity_type || "reminder",
+        meetingUrl: item.meetingUrl || item.meeting_url || null,
+        callStatus: item.callStatus || item.call_status || null,
+        meetingOutcome: item.meetingOutcome || item.meeting_outcome || null,
       }));
     },
     staleTime: 5000,
@@ -261,6 +273,10 @@ export interface UpdateLeadReminderPayload {
   assignedToUid?: string | null;
   assignedToName?: string | null;
   status?: "pending" | "completed";
+  activityType?: "reminder" | "meeting" | "call";
+  meetingUrl?: string | null;
+  callStatus?: "answered" | "no_answer" | "busy" | "voicemail" | string | null;
+  meetingOutcome?: "won" | "proposal" | "rescheduled" | "no_show" | "lost" | string | null;
 }
 
 /**
@@ -295,6 +311,10 @@ export function useUpdateLeadReminder(clientId: string | null | undefined) {
       queryClient.invalidateQueries({ queryKey: ["inbox-reminders-summary"] });
       queryClient.invalidateQueries({ queryKey: ["lead-reminders"] });
       queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+      queryClient.invalidateQueries({ queryKey: ["fup-calendar-day"] });
+      queryClient.invalidateQueries({ queryKey: ["fup-calendar-month"] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["leads-crm"] });
     },
   });
 }

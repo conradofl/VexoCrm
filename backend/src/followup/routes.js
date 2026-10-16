@@ -1429,7 +1429,7 @@ function normalizeInstanceList(list, fallback) {
       const counts = groupPendingJobsByDay(jobs, { timezone });
 
       const { rows: dispatches } = await query(
-        `SELECT d.scheduled_at, d.target_count, d.status
+        `SELECT d.scheduled_at, d.target_count, d.status, d.campaign_id
            FROM public.campaign_dispatches d
           WHERE d.client_id = $1
             AND d.status IN ('scheduled', 'draft', 'pending')
@@ -1446,12 +1446,15 @@ function normalizeInstanceList(list, fallback) {
         [clientId, monthStart.toISOString(), monthEnd.toISOString()]
       );
 
-      const dayCampaignCounts = new Map();
+      // PARTE 1: Agrupar por campaign_id distinto por dia (Roll-up por Campanha)
+      // Em vez de somar +1 por lote, armazenar um Set de campaign_ids únicos por dia
+      const dayCampaignSets = new Map();
       const dayCampaignLeads = new Map();
       for (const d of dispatches || []) {
         if (!d.scheduled_at) continue;
         const key = dayKeyInTimezone(new Date(d.scheduled_at), timezone);
-        dayCampaignCounts.set(key, (dayCampaignCounts.get(key) || 0) + 1);
+        if (!dayCampaignSets.has(key)) dayCampaignSets.set(key, new Set());
+        dayCampaignSets.get(key).add(d.campaign_id || d.id);
         dayCampaignLeads.set(key, (dayCampaignLeads.get(key) || 0) + (Number(d.target_count) || 0));
       }
 
@@ -1470,12 +1473,40 @@ function normalizeInstanceList(list, fallback) {
         });
       }
 
+      // PARTE 2: Buscar reuniões/calls agendadas em lead_reminders para o mês
+      try {
+        const { rows: reminderRows = [] } = await query(
+          `SELECT id, lead_name, phone, remind_at, title, notes, meeting_url, activity_type, status, meeting_outcome
+             FROM public.lead_reminders
+            WHERE client_id = $1
+              AND remind_at >= $2 AND remind_at < $3
+            ORDER BY remind_at ASC`,
+          [clientId, monthStart.toISOString(), monthEnd.toISOString()]
+        );
+        for (const rem of reminderRows) {
+          if (!rem.remind_at) continue;
+          const key = dayKeyInTimezone(new Date(rem.remind_at), timezone);
+          if (!dayEvents.has(key)) dayEvents.set(key, []);
+          dayEvents.get(key).push({
+            id: rem.id,
+            name: rem.title || `Reunião com ${rem.lead_name || "Lead"}`,
+            location: rem.meeting_url ? `Google Meet: ${rem.meeting_url}` : "Reunião Comercial",
+            date: rem.remind_at,
+            isMeeting: true,
+            meetingUrl: rem.meeting_url,
+            activityType: rem.activity_type || "meeting",
+          });
+        }
+      } catch {
+        // fallback silencioso
+      }
+
       const dayCounts = {};
       const dayBreakdown = {};
       for (let d = 1; d <= daysInMonth; d++) {
         const key = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
         const fuCount = counts.get(key) || 0;
-        const campCount = dayCampaignCounts.get(key) || 0;
+        const campCount = dayCampaignSets.has(key) ? dayCampaignSets.get(key).size : 0;
         const campLeads = dayCampaignLeads.get(key) || 0;
         const eventsForDay = dayEvents.get(key) || [];
         const total = fuCount + campCount;
@@ -1552,6 +1583,25 @@ function normalizeInstanceList(list, fallback) {
         [clientId, dayStart.toISOString(), dayEnd.toISOString()]
       );
 
+      // PARTE 2: Buscar reuniões/calls agendadas para o dia em lead_reminders
+      let reminderRows = [];
+      try {
+        const resRem = await query(
+          `SELECT id, client_id, lead_id, phone, lead_name, title, notes,
+                  remind_at, assigned_to_uid, assigned_to_name,
+                  created_by_uid, created_by_name, status,
+                  activity_type, meeting_url, call_status, meeting_outcome
+             FROM public.lead_reminders
+            WHERE client_id = $1
+              AND remind_at >= $2 AND remind_at < $3
+            ORDER BY remind_at ASC`,
+          [clientId, dayStart.toISOString(), dayEnd.toISOString()]
+        );
+        reminderRows = resRem.rows || [];
+      } catch {
+        // fallback silencioso
+      }
+
       const formattedFollowups = items.map((it) => ({
         jobId: it.job_id,
         scheduleId: it.schedule_id,
@@ -1564,16 +1614,47 @@ function normalizeInstanceList(list, fallback) {
         status: it.status,
       }));
 
-      const formattedCampaigns = campaignRows.map((c) => ({
-        dispatchId: c.dispatch_id,
-        campaignId: c.campaign_id,
-        campaignName: c.campaign_name,
-        dispatchName: c.dispatch_name,
-        targetCount: Number(c.target_count) || 0,
-        scheduledAt: c.scheduled_at,
-        status: c.status,
-        evolutionInstanceId: c.evolution_instance_id,
-      }));
+      // PARTE 1: Agrupar lotes retornando campanhas consolidadas
+      const campaignGroups = new Map();
+      for (const c of campaignRows || []) {
+        const campId = c.campaign_id || c.dispatch_id;
+        const count = Number(c.target_count) || 0;
+        if (!campaignGroups.has(campId)) {
+          campaignGroups.set(campId, {
+            campaignId: c.campaign_id,
+            campaignName: c.campaign_name,
+            dispatchId: c.dispatch_id, // compatibilidade
+            status: c.status,
+            loteCount: 0,
+            leadsTotal: 0,
+            targetCount: 0, // compatibilidade
+            scheduledAt: c.scheduled_at,
+            firstScheduledAt: c.scheduled_at,
+            lastScheduledAt: c.scheduled_at,
+            lotes: [],
+          });
+        }
+        const g = campaignGroups.get(campId);
+        g.loteCount += 1;
+        g.leadsTotal += count;
+        g.targetCount += count;
+        if (new Date(c.scheduled_at) > new Date(g.lastScheduledAt)) {
+          g.lastScheduledAt = c.scheduled_at;
+        }
+        if (new Date(c.scheduled_at) < new Date(g.firstScheduledAt)) {
+          g.firstScheduledAt = c.scheduled_at;
+          g.scheduledAt = c.scheduled_at;
+        }
+        g.lotes.push({
+          dispatchId: c.dispatch_id,
+          dispatchName: c.dispatch_name,
+          scheduledAt: c.scheduled_at,
+          targetCount: count,
+          status: c.status,
+          evolutionInstanceId: c.evolution_instance_id,
+        });
+      }
+      const formattedCampaigns = Array.from(campaignGroups.values());
 
       const formattedEvents = (eventRows || []).map((ev) => ({
         id: ev.id,
@@ -1584,6 +1665,40 @@ function normalizeInstanceList(list, fallback) {
         esteirasStatus: ev.esteiras_status,
       }));
 
+      const formattedMeetings = reminderRows.map((r) => ({
+        id: r.id,
+        leadId: r.lead_id,
+        leadName: r.lead_name,
+        phone: r.phone,
+        title: r.title,
+        notes: r.notes,
+        remindAt: r.remind_at,
+        scheduledAt: r.remind_at,
+        assignedToName: r.assigned_to_name,
+        activityType: r.activity_type || "reminder",
+        meetingUrl: r.meeting_url,
+        callStatus: r.call_status,
+        meetingOutcome: r.meeting_outcome,
+        status: r.status,
+      }));
+
+      // Injeta reuniões do Google Meet na lista de eventos para aparecerem diretamente na aba Eventos
+      const meetingEvents = formattedMeetings
+        .filter((m) => m.activityType === "meeting")
+        .map((m) => ({
+          id: m.id,
+          name: m.title || `Reunião com ${m.leadName || "Lead"}`,
+          date: m.remindAt,
+          location: m.meetingUrl ? `Google Meet: ${m.meetingUrl}` : "Online",
+          esteiras_status: m.status,
+          esteirasStatus: m.status,
+          isMeeting: true,
+          meetingUrl: m.meetingUrl,
+          leadName: m.leadName,
+          phone: m.phone,
+        }));
+      const allEvents = [...formattedEvents, ...meetingEvents];
+
       return res.json({
         success: true,
         tenantId: clientId,
@@ -1591,7 +1706,8 @@ function normalizeInstanceList(list, fallback) {
         items: formattedFollowups,
         followups: formattedFollowups,
         campaigns: formattedCampaigns,
-        events: formattedEvents,
+        events: allEvents,
+        meetings: formattedMeetings,
       });
     } catch (err) {
       return sendErr(res, 500, "CALENDAR_DAY_FETCH_FAILED", err.message);
