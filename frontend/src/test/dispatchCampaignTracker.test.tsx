@@ -18,6 +18,7 @@ const bulkActionMutate = vi.fn();
 const summaryMockFn = vi.fn();
 const updateCampaignMutateAsync = vi.fn().mockResolvedValue({ id: "camp-1", name: "Novo Nome" });
 const deleteCampaignMutateAsync = vi.fn().mockResolvedValue(undefined);
+const triggerDispatchMutate = vi.fn();
 
 vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
   const actual: any = await importOriginal();
@@ -28,6 +29,7 @@ vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
     useCampaignDispatchBulkAction: () => ({ mutate: bulkActionMutate, isPending: false }),
     useUpdateCampaign: () => ({ mutateAsync: updateCampaignMutateAsync, isPending: false }),
     useDeleteCampaign: () => ({ mutateAsync: deleteCampaignMutateAsync, isPending: false }),
+    useTriggerDispatch: () => ({ mutate: triggerDispatchMutate, isPending: false }),
   };
 });
 
@@ -373,5 +375,32 @@ describe("DispatchCampaignTracker", () => {
     fireEvent.click(confirmBtn);
 
     expect(deleteCampaignMutateAsync).toHaveBeenCalledWith("c-delete");
+  });
+
+  it("exibe botão ⚡ Disparar Lote 1 Agora quando a campanha está agendada e aciona o lote ao clicar", async () => {
+    setupSummary({
+      active: [
+        makeCampaign({
+          campaignId: "c-scheduled",
+          campaignName: "Campanha Agendada",
+          status: "agendada",
+          batches: [
+            makeBatch({ id: "batch-first", status: "scheduled" }),
+            makeBatch({ id: "batch-second", status: "scheduled" }),
+          ],
+        }),
+      ],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    const triggerBtn = screen.getByTestId("btn-trigger-batch-1-c-scheduled");
+    expect(triggerBtn).toBeTruthy();
+    expect(triggerBtn.textContent).toContain("⚡ Disparar Lote 1 Agora");
+
+    fireEvent.click(triggerBtn);
+
+    expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-first", expect.any(Object));
   });
 });

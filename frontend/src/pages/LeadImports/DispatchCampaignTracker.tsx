@@ -54,6 +54,7 @@ import {
   useCampaignDispatchBulkAction,
   useUpdateCampaign,
   useDeleteCampaign,
+  useTriggerDispatch,
   DISPATCH_AGGREGATE_STATUS_COLORS,
   DISPATCH_SQUARE_STATE_BY_STATUS,
   DISPATCH_SQUARE_STATE_LABELS,
@@ -231,6 +232,7 @@ export function DispatchCampaignTracker({
                   campaign={c}
                   onOpenDispatch={onOpenDispatch}
                   onOpenCampaignRecipients={(cId, filter) => setCampaignRecipientsModal({ campaignId: cId, initialFilter: filter })}
+                  showEmergencyTrigger={true}
                 />
               )}
             />
@@ -293,6 +295,32 @@ function CampaignCard({
 }) {
   const color = getStableColor(campaign.campaignId);
   const [isRenaming, setIsRenaming] = useState(false);
+  const triggerDispatch = useTriggerDispatch(campaign.campaignId);
+
+  const isScheduled = campaign.status === "agendada";
+  const batch1 =
+    campaign.batches.find(
+      (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused"
+    ) || campaign.batches[0];
+
+  const handleTriggerBatch1 = () => {
+    if (!batch1) return;
+    triggerDispatch.mutate(batch1.id, {
+      onSuccess: () => {
+        toast({
+          title: "Lote 1 disparado",
+          description: "O envio do primeiro lote foi iniciado imediatamente.",
+        });
+      },
+      onError: (err: any) => {
+        toast({
+          title: "Erro ao disparar lote",
+          description: err.message || "Falha ao iniciar o disparo do lote.",
+          variant: "destructive",
+        });
+      },
+    });
+  };
 
   const handleHeaderClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement | null;
@@ -443,6 +471,29 @@ function CampaignCard({
         </div>
       </div>
 
+      {/* Botão de Ação Rápida de Emergência quando agendada */}
+      {isScheduled && batch1 && (
+        <div className="pt-2 mt-1 border-t border-border/40">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid={`btn-trigger-batch-1-${campaign.campaignId}`}
+            disabled={triggerDispatch.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleTriggerBatch1();
+            }}
+            className="w-full h-8 text-xs font-semibold border-amber-300 bg-amber-50/70 hover:bg-amber-100 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50 shadow-xs flex items-center justify-center gap-1.5 transition-colors"
+          >
+            {triggerDispatch.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+            ) : null}
+            ⚡ Disparar Lote 1 Agora
+          </Button>
+        </div>
+      )}
+
       {/* 
         Parte que abre: tudo o que existia continua existindo aqui dentro.
       */}
@@ -472,12 +523,40 @@ export function CampaignDetails({
   campaign,
   onOpenDispatch,
   onOpenCampaignRecipients,
+  showEmergencyTrigger = false,
 }: {
   campaign: DispatchSummaryCampaign;
   onOpenDispatch: (dispatchId: string) => void;
   onOpenCampaignRecipients?: (campaignId: string, initialFilter?: string) => void;
+  showEmergencyTrigger?: boolean;
 }) {
   const bulkAction = useCampaignDispatchBulkAction();
+  const triggerDispatch = useTriggerDispatch(campaign.campaignId);
+
+  const isScheduled = campaign.status === "agendada";
+  const batch1 =
+    campaign.batches.find(
+      (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused"
+    ) || campaign.batches[0];
+
+  const handleTriggerBatch1 = () => {
+    if (!batch1) return;
+    triggerDispatch.mutate(batch1.id, {
+      onSuccess: () => {
+        toast({
+          title: "Lote 1 disparado",
+          description: "O envio do primeiro lote foi iniciado imediatamente.",
+        });
+      },
+      onError: (err: any) => {
+        toast({
+          title: "Erro ao disparar lote",
+          description: err.message || "Falha ao iniciar o disparo do lote.",
+          variant: "destructive",
+        });
+      },
+    });
+  };
 
   const total = campaign.leadsTotal || 1;
   const sentPct = Math.round((campaign.sentTotal / total) * 100);
@@ -510,6 +589,22 @@ export function CampaignDetails({
     <>
       {/* Ações em massa */}
       <div className="flex items-center gap-1.5 flex-wrap">
+        {showEmergencyTrigger && isScheduled && batch1 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid={`btn-trigger-batch-1-details-${campaign.campaignId}`}
+            disabled={triggerDispatch.isPending}
+            onClick={() => handleTriggerBatch1()}
+            className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50 flex items-center gap-1.5 text-xs font-semibold shadow-xs"
+          >
+            {triggerDispatch.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+            ) : null}
+            ⚡ Disparar Lote 1 Agora
+          </Button>
+        )}
         {campaign.leadsActionable.pause > 0 && (
           <BulkActionButton
             action="pause"

@@ -1468,8 +1468,9 @@ export function registerCampaignsRoutes(app, deps) {
       }
     }
 
-    if ("scheduledFor" in req.body) {
-      const scheduledFor = normalizeString(req.body?.scheduledFor) || null;
+    const rawScheduledFor = "scheduledFor" in req.body ? req.body.scheduledFor : req.body.scheduled_for;
+    if ("scheduledFor" in req.body || "scheduled_for" in req.body) {
+      const scheduledFor = normalizeString(rawScheduledFor) || null;
       if (scheduledFor) {
         const scheduledTime = new Date(scheduledFor).getTime();
         if (Number.isNaN(scheduledTime)) {
@@ -1614,6 +1615,34 @@ export function registerCampaignsRoutes(app, deps) {
       if (error) {
         sendError(res, 500, "CAMPAIGN_UPDATE_FAILED", "Failed to update campaign", error.message);
         return;
+      }
+
+      // Se a data de agendamento da campanha mudou, recalcula os lotes pendentes
+      if (updates.scheduled_for && pgDatabasePool) {
+        try {
+          const newBaseDate = new Date(updates.scheduled_for);
+          if (!Number.isNaN(newBaseDate.getTime())) {
+            // Busca todos os lotes que ainda não foram disparados
+            const { rows: pendingBatches } = await pgDatabasePool.query(
+              `SELECT id, "offset", target_count FROM public.campaign_dispatches
+               WHERE campaign_id = $1 AND status IN ('scheduled', 'draft', 'paused')
+               ORDER BY scheduled_at ASC, id ASC`,
+              [id]
+            );
+            // Atualiza cada lote preservando o intervalo de horas (ex: 1h entre lotes)
+            for (let i = 0; i < pendingBatches.length; i++) {
+              const batchDate = new Date(newBaseDate.getTime() + (i * 60 * 60 * 1000)); // intervalo de horas
+              await pgDatabasePool.query(
+                `UPDATE public.campaign_dispatches 
+                 SET scheduled_at = $1, status = 'scheduled', updated_at = now()
+                 WHERE id = $2`,
+                [batchDate.toISOString(), pendingBatches[i].id]
+              );
+            }
+          }
+        } catch (scheduleCascadeErr) {
+          console.error("cascade scheduled_for to pending dispatches error:", scheduleCascadeErr);
+        }
       }
 
       res.json({

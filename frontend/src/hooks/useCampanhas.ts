@@ -1042,6 +1042,8 @@ export function useTriggerDispatch(campaignId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
       qc.invalidateQueries({ queryKey: ["all-dispatches"] });
+      qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
+      qc.invalidateQueries({ queryKey: ["campaigns"] });
     },
   });
 }
