@@ -403,4 +403,79 @@ describe("DispatchCampaignTracker", () => {
 
     expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-first", expect.any(Object));
   });
+
+  it("separa o próximo lote do término estimado no cabeçalho e no rodapé do cartão expandido", async () => {
+    setupSummary({
+      active: [
+        makeCampaign({
+          campaignId: "c-eta-test",
+          campaignName: "Campanha Com ETA",
+          status: "agendada",
+          nextScheduledAt: "2026-10-20T10:00:00Z",
+          eta: { label: "terça-feira, às 14h" },
+          batches: [makeBatch({ id: "b1", status: "scheduled", scheduledAt: "2026-10-20T10:00:00Z" })],
+        }),
+      ],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    // Na coluna/campo de data: Próximo lote e Término abaixo
+    const dateField = screen.getByTestId("dispatch-date-c-eta-test");
+    expect(dateField.textContent).toContain("20/10/26");
+    expect(dateField.textContent).toContain("Término: terça-feira, às 14h");
+
+    // Expande o cartão
+    expandFirstCard();
+
+    // No rodapé expandido: dois indicadores separados
+    expect(screen.getByText(/Próximo lote: 20\/10\/26/)).toBeTruthy();
+    expect(screen.getByText("🏁 Término estimado:")).toBeTruthy();
+    expect(screen.getByText("terça-feira, às 14h")).toBeTruthy();
+  });
+
+  it("permite selecionar qual lote disparar no cartão expandido e aciona o lote selecionado", async () => {
+    setupSummary({
+      active: [
+        makeCampaign({
+          campaignId: "c-selector-test",
+          campaignName: "Campanha Com Vários Lotes",
+          status: "agendada",
+          batches: [
+            makeBatch({ id: "batch-1", status: "done", targetCount: 10, sentCount: 10 }),
+            makeBatch({ id: "batch-2", status: "scheduled", targetCount: 10, sentCount: 0 }),
+            makeBatch({ id: "batch-3", status: "scheduled", targetCount: 10, sentCount: 0 }),
+          ],
+        }),
+      ],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    expandFirstCard();
+
+    // O select de lotes deve estar presente e inicializado no primeiro pendente (batch-2)
+    const select = screen.getByTitle("Selecione a partir de qual lote deseja iniciar ou retomar") as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    expect(select.value).toBe("batch-2");
+
+    // Botão dinâmico reflete o Lote 2
+    const triggerBtn = screen.getByRole("button", { name: /⚡ Disparar Lote 2 Agora/i });
+    expect(triggerBtn).toBeTruthy();
+
+    // Altera seleção para Lote 3
+    fireEvent.change(select, { target: { value: "batch-3" } });
+    expect(select.value).toBe("batch-3");
+
+    // Botão dinâmico agora reflete o Lote 3
+    const triggerBtn3 = screen.getByRole("button", { name: /⚡ Disparar Lote 3 Agora/i });
+    expect(triggerBtn3).toBeTruthy();
+
+    // Clica no botão e aciona a mutação para batch-3
+    fireEvent.click(triggerBtn3);
+    expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-3", expect.any(Object));
+  });
 });
+

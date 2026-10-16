@@ -36,7 +36,18 @@ function makeDeps({ clientId = "tenant-1", poolQueries = [], overrides = {} } = 
           ],
         };
       }
+      if (sql.includes("FROM public.campaign_dispatches") && sql.includes('"offset" > $3')) {
+        return {
+          rows: [
+            { id: "batch-2" },
+            { id: "batch-3" },
+          ],
+        };
+      }
       if (sql.includes("UPDATE public.campaign_dispatches")) {
+        return { rowCount: 1 };
+      }
+      if (sql.includes("UPDATE public.campaigns")) {
         return { rowCount: 1 };
       }
       return { rows: [] };
@@ -86,38 +97,74 @@ function makeDeps({ clientId = "tenant-1", poolQueries = [], overrides = {} } = 
         res.body = { error: { code, message } };
       }),
       supabase: {
-        from: (table) => ({
-          select: () => ({
-            eq: () => ({
-              single: async () => ({
-                data: {
-                  id: "camp-1",
-                  client_id: clientId,
-                  analytics_meta: { sequence: [{ type: "text", text: "Olá" }] },
-                },
-                error: null,
-              }),
-            }),
-          }),
-          update: () => ({
-            eq: () => ({
-              eq: () => ({
-                select: () => ({
+        from: (table) => {
+          if (table === "campaign_dispatches") {
+            return {
+              select: () => ({
+                eq: (col, val) => ({
                   single: async () => ({
                     data: {
-                      id: "camp-1",
-                      name: "Campanha Atualizada",
-                      client_id: clientId,
+                      id: val || "batch-1",
+                      campaign_id: "camp-1",
                       status: "scheduled",
-                      scheduled_for: "2099-05-10T14:00:00.000Z",
+                      offset: 0,
+                      target_count: 50,
                     },
                     error: null,
                   }),
                 }),
               }),
+              update: (fields) => ({
+                eq: (col1, val1) => ({
+                  neq: () => ({
+                    select: () => Promise.resolve({
+                      data: [{ id: val1 }],
+                      error: null,
+                    }),
+                  }),
+                  select: () => ({
+                    single: async () => ({
+                      data: { id: val1, ...fields },
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return {
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: {
+                    id: "camp-1",
+                    client_id: clientId,
+                    analytics_meta: { sequence: [{ type: "text", text: "Olá" }] },
+                  },
+                  error: null,
+                }),
+              }),
             }),
-          }),
-        }),
+            update: () => ({
+              eq: () => ({
+                eq: () => ({
+                  select: () => ({
+                    single: async () => ({
+                      data: {
+                        id: "camp-1",
+                        name: "Campanha Atualizada",
+                        client_id: clientId,
+                        status: "scheduled",
+                        scheduled_for: "2099-05-10T14:00:00.000Z",
+                      },
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        },
       },
       validateCampaignAnalyticsMeta: () => ({ valid: true, analyticsMeta: { sequence: [{ type: "text", text: "Olá" }] } }),
       validateN8nInboundBearer: () => true,
@@ -206,3 +253,54 @@ describe("Propagação Automática na Edição (PATCH /api/campaigns/:id)", () =
     expect(updateQueries[2].params[0]).toBe(new Date("2099-06-01T12:00:00.000Z").toISOString());
   });
 });
+
+describe("Disparo Manual com Cascata (POST /api/campaigns/dispatches/:dispatchId/trigger)", () => {
+  it("reagenda lotes subsequentes com intervalo de 1h e atualiza timestamp da campanha para recontagem do ETA", async () => {
+    const { deps, poolQueries } = makeDeps();
+    const handler = getRouteHandler(deps, "/api/campaigns/dispatches/:dispatchId/trigger", "post");
+
+    const req = {
+      params: { dispatchId: "batch-1" },
+      body: {},
+    };
+    const res = fakeRes();
+
+    const before = Date.now();
+    await handler(req, res);
+    const after = Date.now();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, status: "running", dispatchId: "batch-1" });
+
+    // Verifica consulta dos lotes subsequentes (offset > 0)
+    const subsequentQuery = poolQueries.find(
+      (q) => q.sql.includes("FROM public.campaign_dispatches") && q.sql.includes('"offset" > $3')
+    );
+    expect(subsequentQuery).toBeDefined();
+    expect(subsequentQuery.params[0]).toBe("camp-1");
+    expect(subsequentQuery.params[1]).toBe("batch-1");
+    expect(subsequentQuery.params[2]).toBe(0);
+
+    // Deve ter atualizado os lotes subsequentes (batch-2 e batch-3)
+    const updateDispatches = poolQueries.filter((q) => q.sql.includes("UPDATE public.campaign_dispatches"));
+    expect(updateDispatches).toHaveLength(2);
+
+    // batch-2: ~now + 1h
+    const timeBatch2 = new Date(updateDispatches[0].params[0]).getTime();
+    expect(timeBatch2).toBeGreaterThanOrEqual(before + 3600000);
+    expect(timeBatch2).toBeLessThanOrEqual(after + 3600000);
+    expect(updateDispatches[0].params[1]).toBe("batch-2");
+
+    // batch-3: ~now + 2h
+    const timeBatch3 = new Date(updateDispatches[1].params[0]).getTime();
+    expect(timeBatch3).toBeGreaterThanOrEqual(before + 7200000);
+    expect(timeBatch3).toBeLessThanOrEqual(after + 7200000);
+    expect(updateDispatches[1].params[1]).toBe("batch-3");
+
+    // Verifica que a campanha mãe teve seu updated_at atualizado para recalcular o ETA
+    const updateCampaign = poolQueries.find((q) => q.sql.includes("UPDATE public.campaigns"));
+    expect(updateCampaign).toBeDefined();
+    expect(updateCampaign.params[0]).toBe("camp-1");
+  });
+});
+

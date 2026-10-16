@@ -9,6 +9,7 @@ import { CampaignRecipientsDialog } from "./CampaignRecipientsDialog";
 // Os quadrados de lote continuam com as cores exatas de estado (verde, vermelho, azul, cinza).
 
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2,
   Pause,
@@ -73,8 +74,28 @@ import { DispatchKpiCardsView } from "./DispatchKpiCards";
 // O servidor limita a 5000 por página; só acima disso a paginação volta a aparecer, com aviso no filtro.
 const PAGE_SIZE_ENDED = 5000;
 
-const dispatchDateOrEta = (c: DispatchSummaryCampaign) =>
-  c.eta ? c.eta.label : c.status === "concluida" ? "Concluído" : "Sem agendamento";
+const renderDispatchNextAndEta = (c: DispatchSummaryCampaign) => {
+  if (c.status === "concluida") {
+    return <span className="text-emerald-600 font-medium text-xs">Concluído</span>;
+  }
+  const nextText = c.status === "enviando"
+    ? "Disparando agora"
+    : c.nextScheduledAt
+      ? formatDateTime(c.nextScheduledAt)
+      : "Sem agendamento";
+  return (
+    <div className="flex flex-col text-xs leading-tight">
+      <span className="font-medium text-slate-800 dark:text-slate-200">
+        {nextText}
+      </span>
+      {c.eta?.label && (
+        <span className="text-[11px] text-muted-foreground mt-0.5" title="Previsão de conclusão de toda a campanha">
+          Término: {c.eta.label}
+        </span>
+      )}
+    </div>
+  );
+};
 
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
 export const DISPATCH_FIELDS: RecordField<DispatchSummaryCampaign>[] = [
@@ -82,7 +103,7 @@ export const DISPATCH_FIELDS: RecordField<DispatchSummaryCampaign>[] = [
   { key: "status", label: "Estado", render: (c) => c.statusLabel },
   { key: "chip", label: "Chip", render: (c) => c.chipName || "Sem chip" },
   { key: "leads", label: "Leads", render: (c) => `${c.leadsTotal} leads · ${c.loteCount} ${c.loteCount === 1 ? "lote" : "lotes"}` },
-  { key: "date", label: "Próximo envio", render: dispatchDateOrEta },
+  { key: "date", label: "Próximo lote", render: renderDispatchNextAndEta },
 ];
 const dispatchField = (key: string) => DISPATCH_FIELDS.find((f) => f.key === key)!;
 const EMPTY_CAMPAIGNS: DispatchSummaryCampaign[] = [];
@@ -294,6 +315,7 @@ function CampaignCard({
   onToggleExpand: () => void;
 }) {
   const color = getStableColor(campaign.campaignId);
+  const qc = useQueryClient();
   const [isRenaming, setIsRenaming] = useState(false);
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
 
@@ -307,9 +329,12 @@ function CampaignCard({
     if (!batch1) return;
     triggerDispatch.mutate(batch1.id, {
       onSuccess: () => {
+        qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
+        qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+        qc.invalidateQueries({ queryKey: ["all-dispatches"] });
         toast({
           title: "Lote 1 disparado",
-          description: "O envio do primeiro lote foi iniciado imediatamente.",
+          description: "Disparo iniciado e previsão de término recalculada a partir de agora.",
         });
       },
       onError: (err: any) => {
@@ -460,19 +485,18 @@ function CampaignCard({
           >
             {dispatchField("leads").render(campaign)}
           </span>
-          <span
+          <div
             data-field="date"
             data-testid={`dispatch-date-${campaign.campaignId}`}
-            className="text-[11px] text-muted-foreground shrink-0 truncate max-w-[140px]"
-            title={dispatchDateOrEta(campaign)}
+            className="text-[11px] text-muted-foreground shrink-0 text-right"
           >
             {dispatchField("date").render(campaign)}
-          </span>
+          </div>
         </div>
       </div>
 
       {/* Botão de Ação Rápida de Emergência quando agendada */}
-      {isScheduled && batch1 && (
+      {!isExpanded && isScheduled && batch1 && (
         <div className="pt-2 mt-1 border-t border-border/40">
           <Button
             type="button"
@@ -502,7 +526,12 @@ function CampaignCard({
           data-testid={`dispatch-details-${campaign.campaignId}`}
           className="mt-3.5 pt-3.5 border-t border-border/80 space-y-3 animate-in fade-in duration-150"
         >
-          <CampaignDetails campaign={campaign} onOpenDispatch={onOpenDispatch} onOpenCampaignRecipients={onOpenCampaignRecipients} />
+          <CampaignDetails
+            campaign={campaign}
+            onOpenDispatch={onOpenDispatch}
+            onOpenCampaignRecipients={onOpenCampaignRecipients}
+            showEmergencyTrigger={true}
+          />
         </div>
       )}
 
@@ -530,22 +559,35 @@ export function CampaignDetails({
   onOpenCampaignRecipients?: (campaignId: string, initialFilter?: string) => void;
   showEmergencyTrigger?: boolean;
 }) {
+  const qc = useQueryClient();
   const bulkAction = useCampaignDispatchBulkAction();
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
 
-  const isScheduled = campaign.status === "agendada";
-  const batch1 =
+  // Inicializa com o primeiro lote pendente/agendado ou o lote 1
+  const defaultBatch =
     campaign.batches.find(
-      (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused"
+      (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused" || b.status === "interrupted"
     ) || campaign.batches[0];
+  const [selectedBatchId, setSelectedBatchId] = useState<string>(defaultBatch?.id || "");
+  // Garante sincronia caso os lotes recarreguem
+  useEffect(() => {
+    if (defaultBatch?.id && !selectedBatchId) {
+      setSelectedBatchId(defaultBatch.id);
+    }
+  }, [defaultBatch?.id]);
+  const selectedBatchIndex = campaign.batches.findIndex((b) => b.id === selectedBatchId);
+  const currentSelectedBatch = campaign.batches[selectedBatchIndex];
 
-  const handleTriggerBatch1 = () => {
-    if (!batch1) return;
-    triggerDispatch.mutate(batch1.id, {
+  const handleTriggerBatch = (batchId: string, batchNumber: number) => {
+    triggerDispatch.mutate(batchId, {
       onSuccess: () => {
+        // Força recálculo imediato na tela de todos os tempos e estimativas
+        qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
+        qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+        qc.invalidateQueries({ queryKey: ["all-dispatches"] });
         toast({
-          title: "Lote 1 disparado",
-          description: "O envio do primeiro lote foi iniciado imediatamente.",
+          title: `Lote ${batchNumber} disparado`,
+          description: "Disparo iniciado e previsão de término recalculada a partir de agora.",
         });
       },
       onError: (err: any) => {
@@ -589,21 +631,32 @@ export function CampaignDetails({
     <>
       {/* Ações em massa */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        {showEmergencyTrigger && isScheduled && batch1 && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            data-testid={`btn-trigger-batch-1-details-${campaign.campaignId}`}
-            disabled={triggerDispatch.isPending}
-            onClick={() => handleTriggerBatch1()}
-            className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/50 flex items-center gap-1.5 text-xs font-semibold shadow-xs"
-          >
-            {triggerDispatch.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-            ) : null}
-            ⚡ Disparar Lote 1 Agora
-          </Button>
+        {showEmergencyTrigger && campaign.batches.length > 0 && currentSelectedBatch && (
+          <div className="flex items-center gap-1.5">
+            <select
+              value={selectedBatchId}
+              onChange={(e) => setSelectedBatchId(e.target.value)}
+              className="h-8 text-xs font-medium rounded-md border border-amber-300 bg-amber-50/70 text-amber-900 px-2 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300 focus:outline-none"
+              title="Selecione a partir de qual lote deseja iniciar ou retomar"
+            >
+              {campaign.batches.map((b, idx) => (
+                <option key={b.id} value={b.id}>
+                  Lote {idx + 1} ({b.status === "done" ? "Concluído" : b.status === "running" ? "Enviando" : b.sentCount > 0 ? `${b.sentCount}/${b.targetCount} enviados` : `${b.targetCount} leads`})
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={triggerDispatch.isPending || currentSelectedBatch.status === "running" || currentSelectedBatch.status === "done"}
+              onClick={() => handleTriggerBatch(currentSelectedBatch.id, selectedBatchIndex + 1)}
+              className="border-amber-400 bg-amber-100 hover:bg-amber-200 text-amber-900 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200 flex items-center gap-1 text-xs font-semibold shadow-xs"
+            >
+              {triggerDispatch.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+              ⚡ Disparar Lote {selectedBatchIndex + 1} Agora
+            </Button>
+          </div>
         )}
         {campaign.leadsActionable.pause > 0 && (
           <BulkActionButton
@@ -688,13 +741,21 @@ export function CampaignDetails({
         />
       </div>
 
-      {/* Próximo envio com ícone de relógio */}
-      {campaign.eta && (
-        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-          <Clock className="h-3 w-3 shrink-0" />
-          <span>Próximo lote: {campaign.eta.label}</span>
-        </p>
-      )}
+      {/* Indicadores de Próximo Lote e Término Estimado */}
+      <div className="flex items-center gap-4 text-[11px] text-muted-foreground flex-wrap pt-0.5">
+        {campaign.nextScheduledAt && (
+          <p className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
+            <Clock className="h-3 w-3 shrink-0 text-amber-500" />
+            <span>Próximo lote: {formatDateTime(campaign.nextScheduledAt)}</span>
+          </p>
+        )}
+        {campaign.eta && (
+          <p className="flex items-center gap-1.5 text-slate-500">
+            <span className="font-semibold text-slate-600 dark:text-slate-400">🏁 Término estimado:</span>
+            <span>{campaign.eta.label}</span>
+          </p>
+        )}
+      </div>
 
       {/* 
         Faixa de quadrados numerados por lote — as cores dos quadrados

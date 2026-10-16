@@ -5522,6 +5522,42 @@ export function registerCampaignsRoutes(app, deps) {
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
 
+      // Propagação em cascata dos lotes subsequentes da mesma campanha
+      if (pgDatabasePool) {
+        try {
+          const currentOffset = Number(dispatch.offset ?? 0);
+          const { rows: subsequentBatches } = await pgDatabasePool.query(
+            `SELECT id FROM public.campaign_dispatches
+             WHERE campaign_id = $1 
+               AND id <> $2
+               AND "offset" > $3
+               AND status IN ('scheduled', 'draft', 'paused')
+             ORDER BY "offset" ASC, id ASC`,
+            [dispatch.campaign_id, dispatchId, currentOffset]
+          );
+          // 1. Reagenda os lotes seguintes em cascata a partir do momento atual (now)
+          const now = Date.now();
+          for (let i = 0; i < subsequentBatches.length; i++) {
+            const nextTime = new Date(now + ((i + 1) * 60 * 60 * 1000)); // +1h, +2h a partir de AGORA
+            await pgDatabasePool.query(
+              `UPDATE public.campaign_dispatches
+               SET scheduled_at = $1, status = 'scheduled', updated_at = now()
+               WHERE id = $2`,
+              [nextTime.toISOString(), subsequentBatches[i].id]
+            );
+          }
+          // 2. Atualiza a campanha mãe para que o cálculo de ETA use o timestamp de agora como âncora
+          await pgDatabasePool.query(
+            `UPDATE public.campaigns 
+             SET updated_at = now() 
+             WHERE id = $1`,
+            [dispatch.campaign_id]
+          );
+        } catch (cascadeErr) {
+          console.error("[campaign-dispatch] cascade subsequent batches error:", cascadeErr);
+        }
+      }
+
       res.json({ success: true, status: "running", dispatchId });
 
       // Executa o disparo em background (fire-and-forget da resposta HTTP)
