@@ -25,7 +25,7 @@ import {
   sanitizePhone,
   buildPhoneLookupVariants,
 } from "../services/leadImport.js";
-import { logCampaignDispatch, checkEvolutionInstanceHealth, DEFAULT_REQUEST_TIMEOUT_MS } from "../services/evolution.js";
+import { logCampaignDispatch, checkEvolutionInstanceHealth, DEFAULT_REQUEST_TIMEOUT_MS, getLeadClientEvolutionInstances } from "../services/evolution.js";
 import {
   getSegmentationCatalog,
   isFilterShape,
@@ -1770,7 +1770,60 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     return { continued: false, reason: "campaign_already_complete", finalized: true, campaignId: campaign.id };
   }
 
-  const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaign);
+  let sendingEvolutionInstanceId = null;
+  // Fonte 1: Instância receptora do webhook de resposta
+  const incomingInstance = normalizeString(replyPayload.instance || replyPayload.instanceName || replyPayload.instance_name);
+  if (incomingInstance) {
+    const instances = await getLeadClientEvolutionInstances(clientId).catch(() => []);
+    const matched = (instances || []).find(
+      (i) => String(i.id).toLowerCase() === incomingInstance.toLowerCase() ||
+             String(i.name || "").toLowerCase() === incomingInstance.toLowerCase()
+    );
+    if (matched) sendingEvolutionInstanceId = matched.id;
+  }
+  // Fonte 2: O lote original do lead (se ainda não resolvido)
+  if (!sendingEvolutionInstanceId && progress?.dispatchId) {
+    const { data: disp } = await supabase
+      .from("campaign_dispatches")
+      .select("evolution_instance_id")
+      .eq("id", progress.dispatchId)
+      .maybeSingle();
+    if (disp?.evolution_instance_id) sendingEvolutionInstanceId = disp.evolution_instance_id;
+  }
+  // Fonte 3: Histórico de envio do lead nesta campanha
+  if (!sendingEvolutionInstanceId && pgDatabasePool) {
+    const runRes = await pgDatabasePool.query(
+      `SELECT evolution_instance_id FROM public.campaign_dispatch_runs
+       WHERE campaign_id = $1 AND phone = $2 AND evolution_instance_id IS NOT NULL
+       ORDER BY created_at DESC LIMIT 1`,
+      [campaign.id, phone]
+    ).catch(() => ({ rows: [] }));
+    if (runRes.rows[0]?.evolution_instance_id) {
+      sendingEvolutionInstanceId = runRes.rows[0].evolution_instance_id;
+    }
+  }
+
+  logCampaignDispatch("info", "reply_continuation_chip_resolved", {
+    clientId,
+    campaignId: campaign.id,
+    phone: maskPhoneForLog(phone),
+    sendingEvolutionInstanceId: sendingEvolutionInstanceId || null,
+  });
+
+  const campaignWithChip = sendingEvolutionInstanceId
+    ? {
+        ...campaign,
+        analytics_meta: {
+          ...analyticsMeta,
+          dispatchOptions: {
+            ...analyticsMeta?.dispatchOptions,
+            evolutionInstanceId: sendingEvolutionInstanceId,
+          },
+        },
+      }
+    : campaign;
+
+  const dispatchSettings = await resolveCampaignDispatchSettings(clientId, campaignWithChip);
   const { webhookUrl, webhookToken } = dispatchSettings;
   logCampaignDispatch("info", "settings_resolved", {
     clientId,

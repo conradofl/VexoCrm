@@ -1053,11 +1053,17 @@ export function registerCampaignsRoutes(app, deps) {
         `id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, starts_at, ends_at, chatbot_prompt_type, mode, campaign_prompt_id, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, analytics_meta, ${CAMPAIGN_RECURRENCE_COLUMNS}`;
       const fallbackCampaignSelect =
         "id, name, client_id, import_id, limit_per_run, webhook_url, webhook_token, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at";
+      const isArchivedQuery = req.query.archived === "true";
+      const fifteenDaysAgoIso = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
       let query = supabase
         .from("campaigns")
-        .select(campaignSelect)
-        .is("archived_at", null)
-        .order("created_at", { ascending: false });
+        .select(campaignSelect);
+      if (isArchivedQuery) {
+        query = query.not("archived_at", "is", null).gte("archived_at", fifteenDaysAgoIso);
+      } else {
+        query = query.is("archived_at", null);
+      }
+      query = query.order("created_at", { ascending: false });
 
       const isInternalOperator =
         req.authAccess?.role === "internal" &&
@@ -1089,9 +1095,13 @@ export function registerCampaignsRoutes(app, deps) {
       if (error) {
         let fallbackQuery = supabase
           .from("campaigns")
-          .select(fallbackCampaignSelect)
-          .is("archived_at", null)
-          .order("created_at", { ascending: false });
+          .select(fallbackCampaignSelect);
+        if (isArchivedQuery) {
+          fallbackQuery = fallbackQuery.not("archived_at", "is", null).gte("archived_at", fifteenDaysAgoIso);
+        } else {
+          fallbackQuery = fallbackQuery.is("archived_at", null);
+        }
+        fallbackQuery = fallbackQuery.order("created_at", { ascending: false });
         if (clientId) {
           fallbackQuery = fallbackQuery.eq("client_id", clientId);
         }
@@ -1663,7 +1673,7 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
-  // DELETE /api/campaigns/:id — exclui campanha
+  // DELETE /api/campaigns/:id — soft-delete (lixeira com retenção de 15 dias)
   app.delete("/api/campaigns/:id", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
     if (!ensureDb(res)) return;
 
@@ -1673,7 +1683,7 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       const { data: campaign, error: fetchError } = await supabase
         .from("campaigns")
-        .select("id, client_id")
+        .select("id, client_id, archived_at")
         .eq("id", id)
         .single();
 
@@ -1685,20 +1695,116 @@ export function registerCampaignsRoutes(app, deps) {
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
 
-      const { error } = await supabase
+      const nowIso = new Date().toISOString();
+      const { error: archiveError } = await supabase
         .from("campaigns")
-        .delete()
+        .update({
+          archived_at: nowIso,
+          status: "archived",
+          updated_at: nowIso,
+        })
         .eq("id", id)
         .eq("client_id", authorizedClientId);
 
-      if (error) {
-        sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to delete campaign", error.message);
+      if (archiveError) {
+        sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to archive campaign", archiveError.message);
         return;
       }
 
-      res.json({ success: true });
+      // Cancelar lotes pendentes sem apagar histórico
+      if (pgDatabasePool) {
+        await pgDatabasePool.query(
+          `UPDATE public.campaign_dispatches
+           SET status = 'cancelled', updated_at = now()
+           WHERE campaign_id = $1 AND client_id = $2 AND status IN ('draft', 'scheduled', 'paused')`,
+          [id, authorizedClientId]
+        ).catch((err) => console.warn("[campaign-delete] error cancelling batches:", err?.message || err));
+      } else {
+        await supabase
+          .from("campaign_dispatches")
+          .update({ status: "cancelled", updated_at: nowIso })
+          .eq("campaign_id", id)
+          .eq("client_id", authorizedClientId)
+          .in("status", ["draft", "scheduled", "paused"]);
+      }
+
+      res.json({ success: true, archived: true });
     } catch (error) {
       console.error("campaign delete error:", error);
+      sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
+    }
+  });
+
+  // POST /api/campaigns/:id/restore — restaura campanha da lixeira (até 15 dias)
+  app.post("/api/campaigns/:id/restore", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+
+    const id = normalizeString(req.params?.id);
+    if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
+
+    try {
+      const { data: campaign, error: fetchError } = await supabase
+        .from("campaigns")
+        .select("id, client_id, archived_at, status")
+        .eq("id", id)
+        .single();
+
+      if (fetchError || !campaign) {
+        sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+        return;
+      }
+
+      const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+      if (!authorizedClientId) return;
+
+      if (!campaign.archived_at) {
+        sendError(res, 400, "CAMPAIGN_NOT_ARCHIVED", "A campanha não está na lixeira");
+        return;
+      }
+
+      const archivedTime = new Date(campaign.archived_at).getTime();
+      const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
+      if (Date.now() - archivedTime > fifteenDaysMs) {
+        sendError(res, 400, "RETENTION_EXPIRED", "Campanha arquivada há mais de 15 dias não pode ser restaurada");
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const { error: restoreError } = await supabase
+        .from("campaigns")
+        .update({
+          archived_at: null,
+          status: "paused",
+          updated_at: nowIso,
+        })
+        .eq("id", id)
+        .eq("client_id", authorizedClientId);
+
+      if (restoreError) {
+        sendError(res, 500, "CAMPAIGN_RESTORE_FAILED", "Failed to restore campaign", restoreError.message);
+        return;
+      }
+
+      // Reativa os lotes cancelados para paused
+      if (pgDatabasePool) {
+        await pgDatabasePool.query(
+          `UPDATE public.campaign_dispatches
+           SET status = 'paused', updated_at = now()
+           WHERE campaign_id = $1 AND client_id = $2 AND status = 'cancelled'`,
+          [id, authorizedClientId]
+        ).catch((err) => console.warn("[campaign-restore] error reactivating batches:", err?.message || err));
+      } else {
+        await supabase
+          .from("campaign_dispatches")
+          .update({ status: "paused", updated_at: nowIso })
+          .eq("campaign_id", id)
+          .eq("client_id", authorizedClientId)
+          .eq("status", "cancelled");
+      }
+
+      res.json({ success: true, restored: true });
+    } catch (error) {
+      console.error("campaign restore error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
@@ -3867,7 +3973,7 @@ export function registerCampaignsRoutes(app, deps) {
     if (!authorizedClientId) return;
     if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
 
-    const scope = req.query.scope === "ended" ? "ended" : "active";
+    const scope = req.query.scope === "trashed" ? "trashed" : (req.query.scope === "ended" ? "ended" : "active");
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 20, 1), DISPATCH_SUMMARY_MAX_PAGE_SIZE);
 
@@ -3880,6 +3986,7 @@ export function registerCampaignsRoutes(app, deps) {
           SELECT
             d.campaign_id,
             c.name AS campaign_name,
+            c.archived_at,
             COUNT(*)::int AS lote_count,
             SUM(COALESCE(d.sent_count, 0))::int AS sent_total,
             SUM(COALESCE(d.failed_count, 0))::int AS failed_total,
@@ -3897,22 +4004,39 @@ export function registerCampaignsRoutes(app, deps) {
           FROM public.campaign_dispatches d
           JOIN public.campaigns c ON c.id = d.campaign_id
           WHERE d.client_id = $1
-          GROUP BY d.campaign_id, c.name
+          GROUP BY d.campaign_id, c.name, c.archived_at
         `,
         [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES]
       );
 
       const active = [];
       const ended = [];
+      const trashed = [];
+      const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
+
       for (const row of grouped) {
-        (isCampaignActive(row.statuses) ? active : ended).push(row);
+        if (row.archived_at) {
+          const archivedTime = new Date(row.archived_at).getTime();
+          if (archivedTime >= fifteenDaysAgo) {
+            trashed.push(row);
+          }
+        } else if (isCampaignActive(row.statuses)) {
+          active.push(row);
+        } else {
+          ended.push(row);
+        }
       }
       const byRecency = (a, b) => new Date(b.last_updated_at) - new Date(a.last_updated_at);
       active.sort(byRecency);
       ended.sort(byRecency);
+      trashed.sort(byRecency);
 
       const offset = (page - 1) * pageSize;
-      const pageRows = scope === "active" ? active : ended.slice(offset, offset + pageSize);
+      let targetList = active;
+      if (scope === "ended") targetList = ended;
+      else if (scope === "trashed") targetList = trashed;
+
+      const pageRows = scope === "active" ? active : targetList.slice(offset, offset + pageSize);
 
       // Consulta 2 de 3: quantos leads já responderam, por campanha — uma
       // consulta agrupada com todos os campaign_id de uma vez.
@@ -3973,8 +4097,10 @@ export function registerCampaignsRoutes(app, deps) {
         const instance = row.evolution_instance_id ? instanceById.get(row.evolution_instance_id) : null;
         const dailyLimit = instance ? resolveChipDailyLimit(instance) : 0;
         const sentToday = instance ? Number(instance.sent_count_today || 0) : 0;
-        const status = aggregateDispatchStatus(row.statuses);
-        const eta = estimateDispatchCompletion({
+        const isArchived = Boolean(row.archived_at);
+        const status = isArchived ? "arquivada" : aggregateDispatchStatus(row.statuses);
+        const statusLabel = isArchived ? "Na Lixeira" : (AGGREGATE_STATUS_LABELS[status] || null);
+        const eta = isArchived ? null : estimateDispatchCompletion({
           pendingLeads: row.leads_pending,
           dailyLimit,
           sentToday,
@@ -3984,6 +4110,7 @@ export function registerCampaignsRoutes(app, deps) {
         return {
           campaignId: row.campaign_id,
           campaignName: row.campaign_name,
+          archivedAt: row.archived_at || null,
           chipName: instance?.name || null,
           loteCount: row.lote_count,
           leadsTotal: row.leads_total,
@@ -3992,7 +4119,7 @@ export function registerCampaignsRoutes(app, deps) {
           failedTotal: row.failed_total,
           repliedCount: repliedMap[row.campaign_id] || 0,
           status,
-          statusLabel: AGGREGATE_STATUS_LABELS[status] || null,
+          statusLabel,
           nextScheduledAt: row.next_scheduled_at,
           eta,
           leadsActionable: {
@@ -4019,14 +4146,18 @@ export function registerCampaignsRoutes(app, deps) {
       // outra consulta.
       const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
       const cutoff = Date.now() - THIRTY_DAYS_MS;
-      const recentRows = grouped.filter((r) => r.last_updated_at && new Date(r.last_updated_at).getTime() >= cutoff);
+      const recentRows = grouped.filter((r) => !r.archived_at && r.last_updated_at && new Date(r.last_updated_at).getTime() >= cutoff);
       const kpiSentTotal = recentRows.reduce((sum, r) => sum + (r.sent_total || 0), 0);
       const kpiFailedTotal = recentRows.reduce((sum, r) => sum + (r.failed_total || 0), 0);
       const kpiAttempts = kpiSentTotal + kpiFailedTotal;
 
       res.json({
         campaigns: pageRows.map(buildRow),
-        counts: { active: active.length, ended: ended.length },
+        counts: { active: active.length, ended: ended.length, trashed: trashed.length },
+        scope,
+        page,
+        pageSize,
+        totalForScope: scope === "active" ? active.length : (scope === "trashed" ? trashed.length : ended.length),
         scope,
         page,
         pageSize,
@@ -5723,6 +5854,7 @@ export function registerCampaignsRoutes(app, deps) {
           campaignMatch: activeWaitCampaign,
           replyPayload: {
             ...body,
+            instance: body.instance || body.instanceName || body.instance_name || req.params?.instanceName || null,
             message: replyText,
           },
         });

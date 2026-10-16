@@ -21,6 +21,7 @@ export const AGGREGATE_STATUS_LABELS = {
   cancelada: "Cancelada",
   agendada: "Agendada",
   pausada: "Pausada",
+  arquivada: "Na Lixeira",
 };
 
 /**

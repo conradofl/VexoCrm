@@ -2880,7 +2880,11 @@ export function registerChatbotRoutes(app, deps) {
             phone,
             repliedAt: new Date().toISOString(),
             campaignMatch: activeWaitCampaignToDispatch,
-            replyPayload: {},
+            replyPayload: {
+              ...body,
+              instance: body.instance || body.instanceName || body.instance_name || req.params?.instanceName || null,
+              message: messageData?.text || "",
+            },
           });
 
           console.log("[campaign-routing] campaign_progression", {

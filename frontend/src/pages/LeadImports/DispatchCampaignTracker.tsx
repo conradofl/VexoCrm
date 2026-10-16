@@ -21,6 +21,7 @@ import {
   ChevronDown,
   Pencil,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +56,7 @@ import {
   useCampaignDispatchBulkAction,
   useUpdateCampaign,
   useDeleteCampaign,
+  useRestoreCampaign,
   useTriggerDispatch,
   DISPATCH_AGGREGATE_STATUS_COLORS,
   DISPATCH_SQUARE_STATE_BY_STATUS,
@@ -119,8 +121,9 @@ export function DispatchCampaignTracker({
   onOpenDispatch,
   onCriarCampanhaComFila,
 }: DispatchCampaignTrackerProps) {
-  const [tab, setTab] = useState<"active" | "ended">("active");
+  const [tab, setTab] = useState<"active" | "ended" | "trashed">("active");
   const [endedPage, setEndedPage] = useState(1);
+  const [trashedPage, setTrashedPage] = useState(1);
   const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
   const [campaignRecipientsModal, setCampaignRecipientsModal] = useState<{
     campaignId: string;
@@ -130,9 +133,10 @@ export function DispatchCampaignTracker({
 
   const activeQuery = useDispatchSummary(clientId, "active", 1, PAGE_SIZE_ENDED);
   const endedQuery = useDispatchSummary(clientId, "ended", endedPage, PAGE_SIZE_ENDED);
-  const current = tab === "active" ? activeQuery : endedQuery;
+  const trashedQuery = useDispatchSummary(clientId, "trashed", trashedPage, PAGE_SIZE_ENDED);
+  const current = tab === "active" ? activeQuery : (tab === "ended" ? endedQuery : trashedQuery);
 
-  const counts = current.data?.counts ?? activeQuery.data?.counts ?? endedQuery.data?.counts ?? { active: 0, ended: 0 };
+  const counts = current.data?.counts ?? activeQuery.data?.counts ?? endedQuery.data?.counts ?? trashedQuery.data?.counts ?? { active: 0, ended: 0, trashed: 0 };
   const kpis = current.data?.kpis;
 
   // O filtro age sobre o que a aba carregou — que é tudo, exceto acima do teto do servidor (aviso abaixo).
@@ -141,7 +145,7 @@ export function DispatchCampaignTracker({
   const totalInScope = current.data?.totalForScope ?? loadedCampaigns.length;
   const partialNote =
     totalInScope > loadedCampaigns.length
-      ? `O filtro vale só para as ${loadedCampaigns.length} carregadas${tab === "ended" ? " nesta página" : ""}; há ${totalInScope} no total.`
+      ? `O filtro vale só para as ${loadedCampaigns.length} carregadas${tab !== "active" ? " nesta página" : ""}; há ${totalInScope} no total.`
       : null;
 
   return (
@@ -162,7 +166,7 @@ export function DispatchCampaignTracker({
         {/* Cartões do topo — somam Ativas + Encerradas, período explícito */}
         {kpis && <DispatchKpiCardsView kpis={kpis} />}
 
-        {/* Abas Ativas / Encerradas, com contagem em cada uma */}
+        {/* Abas Ativas / Encerradas / Lixeira, com contagem em cada uma */}
         <div className="flex items-center gap-2 border-b border-border">
           <button
             type="button"
@@ -192,6 +196,21 @@ export function DispatchCampaignTracker({
           >
             Encerradas ({counts.ended})
           </button>
+          <button
+            type="button"
+            data-testid="tab-trashed-campaigns"
+            onClick={() => {
+              setTab("trashed");
+              setExpandedCampaignId(null);
+              filterControls.clear();
+            }}
+            className={cn(
+              "px-3 py-2 text-xs font-bold border-b-2 -mb-px transition-colors",
+              tab === "trashed" ? "border-indigo-600 text-indigo-600 dark:text-indigo-400" : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Lixeira ({counts.trashed ?? 0})
+          </button>
         </div>
 
         <ListFilterBar
@@ -214,14 +233,18 @@ export function DispatchCampaignTracker({
                   ? "Nenhuma campanha encontrada"
                   : tab === "active"
                   ? "Nenhuma campanha ativa"
-                  : "Nenhuma campanha encerrada"
+                  : tab === "ended"
+                  ? "Nenhuma campanha encerrada"
+                  : "Lixeira vazia"
               }
               description={
                 filterControls.isFiltered
                   ? "Nenhuma campanha corresponde à busca ou aos filtros. Use \"Limpar filtros\" para ver todas."
                   : tab === "active"
                   ? "Campanhas agendadas, enviando ou pausadas aparecem aqui."
-                  : "Campanhas concluídas ou canceladas aparecem aqui."
+                  : tab === "ended"
+                  ? "Campanhas concluídas ou canceladas aparecem aqui."
+                  : "Campanhas excluídas nos últimos 15 dias aparecem aqui para restauração."
               }
             />
           </div>
@@ -258,18 +281,21 @@ export function DispatchCampaignTracker({
               )}
             />
 
-            {tab === "ended" && (current.data?.totalForScope ?? 0) > PAGE_SIZE_ENDED && (
+            {tab !== "active" && (current.data?.totalForScope ?? 0) > PAGE_SIZE_ENDED && (
               <div className="flex items-center justify-between pt-2">
                 <span className="text-xs text-muted-foreground">
-                  Página {endedPage} de {Math.ceil((current.data?.totalForScope ?? 0) / PAGE_SIZE_ENDED)}
+                  Página {tab === "ended" ? endedPage : trashedPage} de {Math.ceil((current.data?.totalForScope ?? 0) / PAGE_SIZE_ENDED)}
                 </span>
                 <div className="flex items-center gap-1.5">
                   <Button
                     size="sm"
                     variant="outline"
                     className="h-7 w-7 p-0"
-                    disabled={endedPage <= 1}
-                    onClick={() => setEndedPage((p) => Math.max(1, p - 1))}
+                    disabled={(tab === "ended" ? endedPage : trashedPage) <= 1}
+                    onClick={() => {
+                      if (tab === "ended") setEndedPage((p) => Math.max(1, p - 1));
+                      else setTrashedPage((p) => Math.max(1, p - 1));
+                    }}
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                   </Button>
@@ -277,8 +303,11 @@ export function DispatchCampaignTracker({
                     size="sm"
                     variant="outline"
                     className="h-7 w-7 p-0"
-                    disabled={endedPage >= Math.ceil((current.data?.totalForScope ?? 0) / PAGE_SIZE_ENDED)}
-                    onClick={() => setEndedPage((p) => p + 1)}
+                    disabled={(tab === "ended" ? endedPage : trashedPage) >= Math.ceil((current.data?.totalForScope ?? 0) / PAGE_SIZE_ENDED)}
+                    onClick={() => {
+                      if (tab === "ended") setEndedPage((p) => p + 1);
+                      else setTrashedPage((p) => p + 1);
+                    }}
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </Button>
@@ -627,76 +656,87 @@ export function CampaignDetails({
     );
   };
 
+  const isTrashed = campaign.status === "arquivada" || Boolean(campaign.archivedAt);
+
   return (
     <>
       {/* Ações em massa */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        {showEmergencyTrigger && campaign.batches.length > 0 && currentSelectedBatch && (
-          <div className="flex items-center gap-1.5">
-            <select
-              value={selectedBatchId}
-              onChange={(e) => setSelectedBatchId(e.target.value)}
-              className="h-8 text-xs font-medium rounded-md border border-amber-300 bg-amber-50/70 text-amber-900 px-2 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300 focus:outline-none"
-              title="Selecione a partir de qual lote deseja iniciar ou retomar"
-            >
-              {campaign.batches.map((b, idx) => (
-                <option key={b.id} value={b.id}>
-                  Lote {idx + 1} ({b.status === "done" ? "Concluído" : b.status === "running" ? "Enviando" : b.sentCount > 0 ? `${b.sentCount}/${b.targetCount} enviados` : `${b.targetCount} leads`})
-                </option>
-              ))}
-            </select>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={triggerDispatch.isPending || currentSelectedBatch.status === "running" || currentSelectedBatch.status === "done"}
-              onClick={() => handleTriggerBatch(currentSelectedBatch.id, selectedBatchIndex + 1)}
-              className="border-amber-400 bg-amber-100 hover:bg-amber-200 text-amber-900 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200 flex items-center gap-1 text-xs font-semibold shadow-xs"
-            >
-              {triggerDispatch.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
-              ⚡ Disparar Lote {selectedBatchIndex + 1} Agora
-            </Button>
-          </div>
-        )}
-        {campaign.leadsActionable.pause > 0 && (
-          <BulkActionButton
-            action="pause"
-            icon={<Pause className="h-3.5 w-3.5 mr-1" />}
-            label="Pausar"
-            leadsCount={campaign.leadsActionable.pause}
+        {isTrashed ? (
+          <RestoreCampaignButton
+            campaignId={campaign.campaignId}
             campaignName={campaign.campaignName}
-            pending={bulkAction.isPending}
-            onConfirm={() => handleBulkAction("pause")}
-            className="border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400"
           />
-        )}
-        {campaign.leadsActionable.resume > 0 && (
-          <ResumeActionButton
-            leadsCount={campaign.leadsActionable.resume}
-            campaignName={campaign.campaignName}
-            pending={bulkAction.isPending}
-            onConfirm={(scheduledAt) => handleBulkAction("resume", scheduledAt)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
-          />
-        )}
-        {campaign.leadsActionable.cancel > 0 && (
-          <BulkActionButton
-            action="cancel"
-            icon={<X className="h-3.5 w-3.5 mr-1" />}
-            label="Cancelar o que falta"
-            leadsCount={campaign.leadsActionable.cancel}
-            campaignName={campaign.campaignName}
-            pending={bulkAction.isPending}
-            onConfirm={() => handleBulkAction("cancel")}
-            className="border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-400"
-            destructive
-          />
-        )}
+        ) : (
+          <>
+            {showEmergencyTrigger && campaign.batches.length > 0 && currentSelectedBatch && (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={selectedBatchId}
+                  onChange={(e) => setSelectedBatchId(e.target.value)}
+                  className="h-8 text-xs font-medium rounded-md border border-amber-300 bg-amber-50/70 text-amber-900 px-2 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300 focus:outline-none"
+                  title="Selecione a partir de qual lote deseja iniciar ou retomar"
+                >
+                  {campaign.batches.map((b, idx) => (
+                    <option key={b.id} value={b.id}>
+                      Lote {idx + 1} ({b.status === "done" ? "Concluído" : b.status === "running" ? "Enviando" : b.sentCount > 0 ? `${b.sentCount}/${b.targetCount} enviados` : `${b.targetCount} leads`})
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={triggerDispatch.isPending || currentSelectedBatch.status === "running" || currentSelectedBatch.status === "done"}
+                  onClick={() => handleTriggerBatch(currentSelectedBatch.id, selectedBatchIndex + 1)}
+                  className="border-amber-400 bg-amber-100 hover:bg-amber-200 text-amber-900 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200 flex items-center gap-1 text-xs font-semibold shadow-xs"
+                >
+                  {triggerDispatch.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+                  ⚡ Disparar Lote {selectedBatchIndex + 1} Agora
+                </Button>
+              </div>
+            )}
+            {campaign.leadsActionable.pause > 0 && (
+              <BulkActionButton
+                action="pause"
+                icon={<Pause className="h-3.5 w-3.5 mr-1" />}
+                label="Pausar"
+                leadsCount={campaign.leadsActionable.pause}
+                campaignName={campaign.campaignName}
+                pending={bulkAction.isPending}
+                onConfirm={() => handleBulkAction("pause")}
+                className="border-amber-200 text-amber-600 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-400"
+              />
+            )}
+            {campaign.leadsActionable.resume > 0 && (
+              <ResumeActionButton
+                leadsCount={campaign.leadsActionable.resume}
+                campaignName={campaign.campaignName}
+                pending={bulkAction.isPending}
+                onConfirm={(scheduledAt) => handleBulkAction("resume", scheduledAt)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
+              />
+            )}
+            {campaign.leadsActionable.cancel > 0 && (
+              <BulkActionButton
+                action="cancel"
+                icon={<X className="h-3.5 w-3.5 mr-1" />}
+                label="Cancelar o que falta"
+                leadsCount={campaign.leadsActionable.cancel}
+                campaignName={campaign.campaignName}
+                pending={bulkAction.isPending}
+                onConfirm={() => handleBulkAction("cancel")}
+                className="border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-900/40 dark:text-rose-400"
+                destructive
+              />
+            )}
 
-        <DeleteCampaignButton
-          campaignId={campaign.campaignId}
-          campaignName={campaign.campaignName}
-        />
+            <DeleteCampaignButton
+              campaignId={campaign.campaignId}
+              campaignName={campaign.campaignName}
+            />
+          </>
+        )}
       </div>
 
       {/* Barra de progresso: enviado, falhou, restante */}
@@ -1085,8 +1125,8 @@ function DeleteCampaignButton({
     try {
       await deleteCampaign.mutateAsync(campaignId);
       toast({
-        title: "Campanha excluída",
-        description: `A campanha "${campaignName}" foi excluída com sucesso.`,
+        title: "Campanha movida para a lixeira",
+        description: `A campanha "${campaignName}" foi movida para a lixeira e pode ser restaurada em até 15 dias.`,
       });
       setOpen(false);
     } catch (err: any) {
@@ -1114,9 +1154,9 @@ function DeleteCampaignButton({
       </AlertDialogTrigger>
       <AlertDialogContent data-testid={`dialog-delete-campaign-${campaignId}`}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Excluir campanha "{campaignName}"?</AlertDialogTitle>
+          <AlertDialogTitle>Mover campanha "{campaignName}" para a lixeira?</AlertDialogTitle>
           <AlertDialogDescription>
-            Esta ação não pode ser desfeita. Todos os disparos e histórico associados a esta campanha serão removidos.
+            Deseja mover esta campanha para a lixeira? Os dados de quem já recebeu mensagens permanecem salvos no histórico.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -1133,10 +1173,55 @@ function DeleteCampaignButton({
             className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white"
           >
             {deleteCampaign.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-            Excluir definitivamente
+            Mover para a lixeira
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function RestoreCampaignButton({
+  campaignId,
+  campaignName,
+}: {
+  campaignId: string;
+  campaignName: string;
+}) {
+  const restoreCampaign = useRestoreCampaign();
+
+  const handleRestore = async () => {
+    try {
+      await restoreCampaign.mutateAsync(campaignId);
+      toast({
+        title: "Campanha restaurada",
+        description: `A campanha "${campaignName}" foi restaurada com sucesso.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: "Erro ao restaurar campanha",
+        description: err?.message || "Tente novamente mais tarde.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      data-testid={`btn-restore-campaign-${campaignId}`}
+      disabled={restoreCampaign.isPending}
+      onClick={handleRestore}
+      className="h-8 text-xs font-bold rounded-xl px-2.5 border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 ml-auto"
+    >
+      {restoreCampaign.isPending ? (
+        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+      ) : (
+        <RotateCcw className="h-3.5 w-3.5 mr-1" />
+      )}
+      Restaurar Campanha
+    </Button>
   );
 }

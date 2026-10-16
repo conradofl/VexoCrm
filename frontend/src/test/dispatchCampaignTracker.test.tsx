@@ -18,6 +18,7 @@ const bulkActionMutate = vi.fn();
 const summaryMockFn = vi.fn();
 const updateCampaignMutateAsync = vi.fn().mockResolvedValue({ id: "camp-1", name: "Novo Nome" });
 const deleteCampaignMutateAsync = vi.fn().mockResolvedValue(undefined);
+const restoreCampaignMutateAsync = vi.fn().mockResolvedValue(undefined);
 const triggerDispatchMutate = vi.fn();
 
 vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
@@ -29,6 +30,7 @@ vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
     useCampaignDispatchBulkAction: () => ({ mutate: bulkActionMutate, isPending: false }),
     useUpdateCampaign: () => ({ mutateAsync: updateCampaignMutateAsync, isPending: false }),
     useDeleteCampaign: () => ({ mutateAsync: deleteCampaignMutateAsync, isPending: false }),
+    useRestoreCampaign: () => ({ mutateAsync: restoreCampaignMutateAsync, isPending: false }),
     useTriggerDispatch: () => ({ mutate: triggerDispatchMutate, isPending: false }),
   };
 });
@@ -72,14 +74,14 @@ function makeCampaign(overrides: Partial<any> = {}) {
   };
 }
 
-function setupSummary({ active, ended }: { active: any[]; ended: any[] }) {
+function setupSummary({ active = [], ended = [], trashed = [] }: { active?: any[]; ended?: any[]; trashed?: any[] }) {
   summaryMockFn.mockImplementation((scope: string) => {
-    const campaigns = scope === "active" ? active : ended;
+    const campaigns = scope === "active" ? active : (scope === "trashed" ? trashed : ended);
     return {
       isLoading: false,
       data: {
         campaigns,
-        counts: { active: active.length, ended: ended.length },
+        counts: { active: active.length, ended: ended.length, trashed: trashed.length },
         scope,
         page: 1,
         pageSize: scope === "active" ? 100 : 20,
@@ -369,12 +371,43 @@ describe("DispatchCampaignTracker", () => {
     const deleteBtn = screen.getByTestId("btn-delete-campaign-c-delete");
     fireEvent.click(deleteBtn);
 
-    expect(screen.getByText(/Excluir campanha "Campanha Para Excluir"\?/i)).toBeTruthy();
+    expect(screen.getByText(/Mover campanha "Campanha Para Excluir" para a lixeira\?/i)).toBeTruthy();
 
     const confirmBtn = screen.getByTestId("btn-confirm-delete-campaign");
     fireEvent.click(confirmBtn);
 
     expect(deleteCampaignMutateAsync).toHaveBeenCalledWith("c-delete");
+  });
+
+  it("exibe aba Lixeira e permite restaurar campanha excluída", async () => {
+    setupSummary({
+      active: [],
+      ended: [],
+      trashed: [
+        makeCampaign({
+          campaignId: "c-trashed",
+          campaignName: "Campanha Na Lixeira",
+          status: "arquivada",
+          statusLabel: "Na Lixeira",
+          archivedAt: "2026-10-15T00:00:00Z",
+        }),
+      ],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="sonhare" onOpenDispatch={vi.fn()} />);
+
+    const trashTab = screen.getByTestId("tab-trashed-campaigns");
+    expect(trashTab.textContent).toContain("Lixeira (1)");
+    fireEvent.click(trashTab);
+
+    expandFirstCard();
+
+    const restoreBtn = screen.getByTestId("btn-restore-campaign-c-trashed");
+    expect(restoreBtn).toBeTruthy();
+    expect(restoreBtn.textContent).toContain("Restaurar Campanha");
+
+    fireEvent.click(restoreBtn);
+    expect(restoreCampaignMutateAsync).toHaveBeenCalledWith("c-trashed");
   });
 
   it("exibe botão ⚡ Disparar Lote 1 Agora quando a campanha está agendada e aciona o lote ao clicar", async () => {

@@ -788,6 +788,34 @@ export function useDeleteCampaign() {
   });
 }
 
+export function useRestoreCampaign() {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const res = await fetchCampaignsApi(`/api/campaigns/${id}/restore`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await readApiErrorMessage(res, "Erro ao restaurar campanha");
+        throw new Error(`Erro ao restaurar campanha: ${res.status} ${err}`);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["dispatch-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["all-dispatches"] });
+      queryClient.invalidateQueries({ queryKey: ["campaign-dispatches"] });
+    },
+  });
+}
+
 export function useTriggerCampaign() {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();
@@ -1243,7 +1271,7 @@ export function useRunPendingDispatchLeads() {
 // GET /api/campaigns/dispatch-summary: uma linha agregada por campanha, não
 // por lote. batches[] é a faixa de quadrados (só da página atual).
 
-export type DispatchAggregateStatus = "enviando" | "concluida" | "cancelada" | "agendada" | "pausada";
+export type DispatchAggregateStatus = "enviando" | "concluida" | "cancelada" | "agendada" | "pausada" | "arquivada";
 
 export const DISPATCH_AGGREGATE_STATUS_LABELS: Record<DispatchAggregateStatus, string> = {
   enviando: "Enviando",
@@ -1251,6 +1279,7 @@ export const DISPATCH_AGGREGATE_STATUS_LABELS: Record<DispatchAggregateStatus, s
   cancelada: "Cancelada",
   agendada: "Agendada",
   pausada: "Pausada",
+  arquivada: "Na Lixeira",
 };
 
 export const DISPATCH_AGGREGATE_STATUS_COLORS: Record<DispatchAggregateStatus, string> = {
@@ -1259,6 +1288,7 @@ export const DISPATCH_AGGREGATE_STATUS_COLORS: Record<DispatchAggregateStatus, s
   cancelada: "border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400",
   agendada: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400",
   pausada: "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/30 dark:text-orange-400",
+  arquivada: "border-zinc-300 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-400",
 };
 
 // Cada quadrado da faixa de lotes é um dos 5 estados visuais (a legenda da
@@ -1324,6 +1354,7 @@ export interface DispatchSummaryEta {
 export interface DispatchSummaryCampaign {
   campaignId: string;
   campaignName: string;
+  archivedAt?: string | null;
   chipName: string | null;
   loteCount: number;
   leadsTotal: number;
@@ -1349,8 +1380,8 @@ export interface DispatchSummaryKpis {
 
 export interface DispatchSummaryResponse {
   campaigns: DispatchSummaryCampaign[];
-  counts: { active: number; ended: number };
-  scope: "active" | "ended";
+  counts: { active: number; ended: number; trashed?: number };
+  scope: "active" | "ended" | "trashed";
   page: number;
   pageSize: number;
   totalForScope: number;
@@ -1359,7 +1390,7 @@ export interface DispatchSummaryResponse {
 
 export function useDispatchSummary(
   clientId: string | null,
-  scope: "active" | "ended",
+  scope: "active" | "ended" | "trashed",
   page: number = 1,
   pageSize: number = 20
 ) {
