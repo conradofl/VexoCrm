@@ -1,0 +1,436 @@
+/* frontend/src/pages/LandingPage/landing.css */
+/* Arquitetura de Design Reversa do Xperiun adaptada para o Vexo OS */
+
+:root {
+  --bw: #F5F5FF;
+  --bw-75: rgba(245, 245, 255, 0.75);
+  --bw-50: rgba(245, 245, 255, 0.50);
+  --bw-25: rgba(245, 245, 255, 0.25);
+  --bw-10: rgba(245, 245, 255, 0.10);
+  --bw-5: rgba(245, 245, 255, 0.05);
+
+  --bb: #00000A;
+  --bb-80: rgba(0, 0, 10, 0.80);
+
+  --pc100: #C8C8FF;
+  --pc200: #9696FF;
+  --pc300: #6464FF;
+  --pc400: #644BFF;
+  --pc500: #4B00FF;
+
+  --pp100: #C8AFFF;
+  --pp200: #AF96FF;
+  --pp300: #9664FF;
+  --pp400: #9632FF;
+  --pp500: #9600FF;
+
+  --dn100: #5A5A64;
+  --dn500: #32323C;
+  --dn700: #1E1E28;
+  --dn800: #14141E;
+  --dn900: #0A0A14;
+}
+
+/* Layer Hero (Fixed Viewport) */
+#layer-hero {
+  position: fixed;
+  inset: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  z-index: 10;
+  pointer-events: auto;
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+}
+
+#layer-hero.is-out {
+  opacity: 0 !important;
+  filter: blur(14px) !important;
+  transform: translateY(-80px) scale(0.94) !important;
+  pointer-events: none !important;
+}
+
+/* Hero Content (Responsive Flex Layout — Zero Overflow/Clipping) */
+.hero-inner {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  padding: clamp(16px, 2.8vh, 28px) clamp(20px, 3.5vw, 40px);
+}
+
+.hero-header {
+  position: relative;
+  z-index: 20;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 16px;
+}
+
+/* Navbar em Cápsula de Vidro Fosco com Brilho Neon */
+.hero-nav-capsule {
+  background: rgba(14, 13, 30, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 5px 8px;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 0.3s ease;
+}
+
+.hero-nav-capsule:hover {
+  border-color: rgba(185, 95, 255, 0.28);
+  box-shadow: 0 6px 32px rgba(150, 0, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Links de Navegação com Iluminação ao Passar o Mouse */
+.hero-nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: rgba(245, 245, 255, 0.72);
+  border-radius: 9999px;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.hero-nav-link:hover {
+  color: #FFFFFF;
+  background: rgba(150, 0, 255, 0.22);
+  border-color: rgba(215, 145, 255, 0.45);
+  box-shadow: 0 0 18px rgba(180, 75, 255, 0.55);
+  transform: translateY(-1px);
+}
+
+/* Indicador de Item Selecionado */
+.hero-nav-link.is-selected {
+  color: #FFFFFF;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 14px rgba(150, 0, 255, 0.4);
+}
+
+/* Botão de Acesso à Plataforma no Header */
+.hero-header-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #FFFFFF;
+  border-radius: 9999px;
+  text-decoration: none;
+  background: linear-gradient(90deg, rgba(150, 0, 255, 0.35), rgba(75, 0, 255, 0.35));
+  border: 1px solid rgba(215, 145, 255, 0.45);
+  box-shadow: 0 0 15px rgba(150, 0, 255, 0.35);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.hero-header-cta:hover {
+  background: linear-gradient(90deg, rgba(165, 30, 255, 0.65), rgba(95, 20, 255, 0.65));
+  border-color: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 0 25px rgba(180, 60, 255, 0.75);
+  transform: translateY(-1px);
+}
+
+/* Centro de Conversão */
+.hero-content {
+  position: relative;
+  z-index: 10;
+  flex: 1 1 auto;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+  gap: clamp(14px, 2.2vh, 22px);
+  padding: 8px 0;
+}
+
+.hero-h1 {
+  font-size: clamp(30px, 4.4vw, 58px);
+  font-weight: 300;
+  line-height: 1.14;
+  color: var(--bw);
+  max-width: 24ch;
+  margin: 0 auto;
+  letter-spacing: -0.02em;
+}
+
+.hero-h1 strong {
+  font-weight: 700;
+  background: linear-gradient(90deg, #FFFFFF, #D7B4FF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-p {
+  font-size: clamp(14px, 1.5vw, 17.5px);
+  font-weight: 300;
+  line-height: 1.55;
+  color: var(--bw-75);
+  max-width: 580px;
+  margin: 0 auto;
+}
+
+/* Xperiun Pill Button */
+.xp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 13px 32px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background-image: linear-gradient(90deg, var(--pp300), var(--pc500), var(--pc300));
+  background-size: 200% auto;
+  color: var(--bw);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(150, 0, 255, 0.35);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.xp-btn:hover {
+  background-position: right center;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(150, 0, 255, 0.55);
+}
+
+/* Rodapé do Hero: 100% visível, nítido e com amplo respiro */
+.hero-bottom {
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-bottom: clamp(16px, 3vh, 32px);
+  box-sizing: border-box;
+  gap: 16px;
+}
+
+.hero-bottom-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(8px, 1.2vh, 12px);
+  list-style: none;
+  font-size: clamp(12.5px, 1.15vw, 14px);
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 0;
+  margin: 0;
+}
+
+.hero-bottom-list li {
+  display: flex;
+  align-items: center;
+  border-left: 2.5px solid #B65DFF;
+  padding-left: 12px;
+  line-height: 1.4;
+  letter-spacing: 0.015em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  transition: all 0.25s ease;
+}
+
+.hero-bottom-list li:hover {
+  color: #FFFFFF;
+  border-left-color: #E2B5FF;
+  transform: translateX(2px);
+}
+
+/* Content Stream com transição suave e etérea */
+#layer-content {
+  position: relative;
+  margin-top: 100vh;
+  z-index: 20;
+  background: var(--bb);
+  padding-bottom: 60px;
+  box-shadow: 0 -24px 80px rgba(150, 0, 255, 0.12);
+}
+
+/* Atmospheric Feathering Top Rim: dissolve suave sobre o hero ao rolar */
+#layer-content::before {
+  content: '';
+  position: absolute;
+  top: -140px;
+  left: 0;
+  right: 0;
+  height: 140px;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 10, 0.35) 30%, rgba(0, 0, 10, 0.90) 75%, var(--bb) 100%);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Linha sutil de horizonte neon no topo do conteúdo */
+#layer-content::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(880px, 85vw);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(185, 95, 255, 0.45) 50%, transparent);
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Section Titles (Idênticos ao Xperiun) */
+.sec-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--pp200);
+  margin-bottom: 12px;
+}
+
+.sec-title {
+  font-size: clamp(28px, 3.8vw, 48px);
+  font-weight: 300;
+  line-height: 1.15;
+  color: var(--bw);
+  letter-spacing: -0.02em;
+}
+
+.sec-title strong {
+  font-weight: 700;
+}
+
+.sec-lede {
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1.5;
+  color: var(--bw-75);
+  margin-top: 12px;
+}
+
+/* Manifesto Section */
+.manifesto-line {
+  font-size: clamp(22px, 2.5vw, 36px);
+  font-weight: 300;
+  line-height: 1.3;
+  color: var(--dn100);
+  transition: color 0.3s ease;
+}
+
+.manifesto-line.active {
+  color: var(--bw);
+}
+
+.manifesto-line strong {
+  font-weight: 600;
+  color: var(--pc200);
+}
+
+/* Lateral Section Dots */
+.home-dots {
+  position: fixed;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.home-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(245, 245, 255, 0.2);
+  transition: all 0.25s ease;
+}
+
+.home-dot.active {
+  background: var(--pp300);
+  box-shadow: 0 0 10px var(--pp300);
+  transform: scale(1.4);
+}
+
+/* Ambient Lighting & Cosmic Nebulas para as seções */
+.ambient-glow-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+.section-ambient-glow {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: 0;
+  will-change: transform, opacity;
+}
+
+.glow-purple {
+  background: radial-gradient(circle, rgba(175, 45, 255, 0.28) 0%, rgba(110, 10, 230, 0.12) 50%, transparent 75%);
+}
+
+.glow-indigo {
+  background: radial-gradient(circle, rgba(75, 0, 255, 0.25) 0%, rgba(120, 40, 255, 0.10) 50%, transparent 75%);
+}
+
+.glow-cyan {
+  background: radial-gradient(circle, rgba(0, 255, 180, 0.16) 0%, rgba(0, 120, 255, 0.06) 50%, transparent 75%);
+}
+
+/* Slide in suave da direita para a esquerda ao rolar a página */
+.slide-in-right {
+  opacity: 0;
+  transform: translateX(70px);
+  transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1), transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.slide-in-right.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Cartões com Iluminação e Micro-interações */
+.ambient-card {
+  position: relative;
+  background: rgba(12, 11, 26, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.ambient-card:hover {
+  border-color: rgba(195, 110, 255, 0.38);
+  box-shadow: 0 12px 40px rgba(150, 0, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transform: translateY(-3px);
+}
+

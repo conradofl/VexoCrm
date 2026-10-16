@@ -67,7 +67,7 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
   });
 
   describe("3. Conteúdo e Estrutura da Landing Page (LandingPage.tsx)", () => {
-    it("renderiza a headline principal focada em WhatsApp, vendas e contratos", () => {
+    it("renderiza a headline principal focada em inteligência comercial para quem decide vendas", () => {
       render(
         <MemoryRouter>
           <LandingPage />
@@ -75,50 +75,48 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
       );
 
       expect(
-        screen.getByText(/Transforme conversas de WhatsApp em vendas fechadas e contratos assinados/i)
+        screen.getByText(/A inteligência comercial para/i)
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/quem decide vendas/i)
       ).toBeInTheDocument();
     });
 
-    it("exibe todos os 4 Pilares Reais do Vexo OS", () => {
+    it("exibe os 4 Princípios do Método Vexo de acelerar vendas", () => {
       render(
         <MemoryRouter>
           <LandingPage />
         </MemoryRouter>
       );
 
-      // Pilar 1
-      expect(screen.getByText("Agentes Inteligentes no WhatsApp")).toBeInTheDocument();
-      // Pilar 2
-      expect(screen.getByText("Ativação de Base & Recuperação")).toBeInTheDocument();
-      // Pilar 3
-      expect(screen.getByText("Funil com Inviolabilidade Manual")).toBeInTheDocument();
-      // Pilar 4
-      expect(screen.getByText("Contratos & Fechamento Ágil")).toBeInTheDocument();
+      expect(screen.getByText("Decisão antes da burocracia.")).toBeInTheDocument();
+      expect(screen.getByText("Conversa antes da ferramenta.")).toBeInTheDocument();
+      expect(screen.getByText("Trava humana antes da autonomia cega.")).toBeInTheDocument();
+      expect(screen.getByText("Contrato assinado antes da vaidade.")).toBeInTheDocument();
     });
 
-    it("exibe as métricas de impacto comercial da operação (24/7, 14 Dias, Zero Furos)", () => {
+    it("exibe as credenciais de autoridade no rodapé do hero", () => {
       render(
         <MemoryRouter>
           <LandingPage />
         </MemoryRouter>
       );
 
-      expect(screen.getByText("24/7")).toBeInTheDocument();
-      expect(screen.getByText("14 Dias")).toBeInTheDocument();
-      expect(screen.getByText("Zero Furos")).toBeInTheDocument();
+      expect(screen.getByText("De gente de Negócio, Para gente de Negócio")).toBeInTheDocument();
+      expect(screen.getByText("Milhares de conversas ativadas no ecossistema")).toBeInTheDocument();
+      expect(screen.getByText("Você sempre no controle do funil & Contratos em PDF")).toBeInTheDocument();
     });
 
-    it("exibe os botões de CTA primário e secundário (Agendar Demonstração)", () => {
+    it("exibe os botões de CTA primário e de acesso à plataforma", () => {
       render(
         <MemoryRouter>
           <LandingPage />
         </MemoryRouter>
       );
 
-      // CTA para demonstração no WhatsApp
-      const demoLinks = screen.getAllByRole("link", { name: /Agendar Demonstração/i });
-      expect(demoLinks.length).toBeGreaterThan(0);
-      expect(demoLinks[0]).toHaveAttribute("href", expect.stringContaining("wa.me"));
+      // CTA principal da página
+      const demoButton = screen.getByRole("button", { name: /Conhecer Vexo OS/i });
+      expect(demoButton).toBeInTheDocument();
 
       // CTA de acesso à plataforma
       const accessButtons = screen.getAllByText(/Acessar Plataforma/i);
@@ -136,7 +134,7 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
         </MemoryRouter>
       );
 
-      expect(screen.getByText(/Transforme conversas de WhatsApp/i)).toBeInTheDocument();
+      expect(screen.getByText(/A inteligência comercial para/i)).toBeInTheDocument();
     });
 
     it("redireciona para /login se acessado via domínio do CRM e não autenticado", () => {
