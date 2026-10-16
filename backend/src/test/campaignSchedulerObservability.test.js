@@ -453,4 +453,291 @@ describe("Agendador Observável de Campanhas (Bloco 1)", () => {
       process.env.CAMPAIGN_SCHEDULER_TOKEN = originalToken;
     }
   });
+
+  it("[TESTE OBRIGATÓRIO E] Head-of-Line Blocking: lotes pausados antigos não impedem a avaliação e disparo de lotes scheduled legítimos", async () => {
+    // 15 lotes pausados manualmente no passado (ex: 2026-09-01)
+    const pausedDispatches = Array.from({ length: 15 }, (_, i) => ({
+      id: `disp-paused-old-${i + 1}`,
+      campaign_id: `camp-paused-${i + 1}`,
+      client_id: TENANT,
+      name: `Lote Pausado Antigo ${i + 1}`,
+      steps: [{ id: "s1", type: "text", text: "Olá", order: 1 }],
+      trigger_type: "scheduled",
+      scheduled_at: "2026-09-01T10:00:00.000Z",
+      status: "paused",
+      evolution_instance_id: null,
+      limit_per_run: 5,
+      offset: 0,
+      error_message: "Pausado manualmente pelo usuário",
+    }));
+
+    // 1 lote agendado legítimo para hoje
+    const scheduledDispatch = {
+      id: "disp-legitimo-hoje",
+      campaign_id: "camp-ativa",
+      client_id: TENANT,
+      name: "Lote 3 Legítimo Agendado",
+      steps: [{ id: "s1", type: "text", text: "Olá", order: 1 }],
+      trigger_type: "scheduled",
+      scheduled_at: "2026-10-14T08:00:00.000Z",
+      status: "scheduled",
+      evolution_instance_id: null,
+      limit_per_run: 5,
+      offset: 0,
+      error_message: null,
+    };
+
+    const tables = {
+      campaign_dispatches: [...pausedDispatches, scheduledDispatch],
+      campaigns: [
+        ...Array.from({ length: 15 }, (_, i) => ({
+          id: `camp-paused-${i + 1}`,
+          name: `Campanha Pausada ${i + 1}`,
+          client_id: TENANT,
+          status: "active",
+          analytics_meta: {},
+        })),
+        {
+          id: "camp-ativa",
+          name: "Campanha Ativa",
+          client_id: TENANT,
+          status: "active",
+          analytics_meta: {},
+        },
+      ],
+    };
+
+    const supabase = fakeSupabase(tables);
+
+    const mockN8nSettings = {
+      send_window_enabled: true,
+      send_window_start: "00:00",
+      send_window_end: "23:59",
+      send_window_days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+      send_window_timezone: "America/Sao_Paulo",
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ key: { id: "wa-1" } }),
+      text: async () => '{"key":{"id":"wa-1"}}',
+    });
+
+    const deps = {
+      ensureDb: () => true,
+      getLeadClientN8nSettings: async () => mockN8nSettings,
+      materializeRecurringOccurrences: async () => ({ materialized: 0 }),
+      resolveCampaignDispatchSettings: async () => ({
+        webhookUrl: "https://evolution.test/message/sendText/inst-1",
+        webhookToken: "secret",
+        source: "campaign_evolution_instance",
+        selectedEvolutionInstanceId: "11111111-2222-4333-8444-555555555555",
+      }),
+      buildDispatchLeads: async () => [{ id: "lead-1", nome: "Lead 1", telefone: "5511999991000", client_id: TENANT }],
+      getClientName: async () => "Tenant Teste",
+      getLeadClientEvolutionInstances: async () => [],
+      canCampaignBeDispatched: () => true,
+      checkEvolutionInstanceHealth: async () => ({ state: "open" }),
+      findConcurrentRunningDispatch: async () => null,
+      pgDatabasePool: {
+        query: async (sql) => {
+          const t = String(sql);
+          if (t.includes("COUNT(*) FILTER")) return { rows: [{ sent: 1, failed: 0, skipped: 0 }] };
+          if (t.includes("is_recurring") || t.includes("recurring")) return { rows: [], rowCount: 0 };
+          if (t.includes("campaign_dispatch_occurrences")) return { rows: [], rowCount: 0 };
+          if (t.includes("INSERT INTO public.campaign_dispatch_runs")) return { rows: [{ id: "run-1" }], rowCount: 1 };
+          return { rows: [], rowCount: 1 };
+        },
+      },
+      requireAppViewAccess: () => (req, res, next) => next(),
+      requireCampaignDispatchAccess: () => (req, res, next) => next(),
+      requireFirebaseAuth: (req, res, next) => next(),
+      requireInternalPageAccess: () => (req, res, next) => next(),
+      resolveAuthorizedClientId: () => TENANT,
+      normalizeString: (s) => String(s || "").trim(),
+      normalizeTenantKey: (s) => String(s || "").trim(),
+      supabase,
+    };
+
+    const dummyApp = { get() {}, post() {}, put() {}, patch() {}, delete() {}, use() {} };
+    const { runDueIndependentDispatches } = registerCampaignsRoutes(dummyApp, deps);
+
+    // Mesmo com limit 10 ou 50, o lote scheduled deve ser priorizado e processado!
+    const result = await runDueIndependentDispatches({ limit: 50 });
+
+    expect(result.success).toBe(true);
+    expect(result.processed).toBe(1);
+    expect(result.items.some((i) => i.id === "disp-legitimo-hoje" && i.status === "success")).toBe(true);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("[TESTE OBRIGATÓRIO F] Lote fora da janela de envio tem seu scheduled_at atualizado para a próxima abertura no banco", async () => {
+    const initialScheduledAt = "2026-10-14T08:00:00.000Z";
+    const tables = {
+      campaign_dispatches: [
+        {
+          id: "disp-janela-update",
+          campaign_id: "camp-1",
+          client_id: TENANT,
+          name: "Lote com Janela Fechada",
+          steps: [{ id: "s1", type: "text", text: "Olá", order: 1 }],
+          trigger_type: "scheduled",
+          scheduled_at: initialScheduledAt,
+          status: "scheduled",
+          evolution_instance_id: null,
+          limit_per_run: 5,
+          offset: 0,
+          error_message: null,
+        },
+      ],
+      campaigns: [
+        {
+          id: "camp-1",
+          name: "Campanha 1",
+          client_id: TENANT,
+          status: "active",
+          mode: "campanha",
+          analytics_meta: {},
+        },
+      ],
+    };
+
+    const supabase = fakeSupabase(tables);
+
+    const mockN8nSettings = {
+      send_window_enabled: true,
+      send_window_start: "03:00",
+      send_window_end: "04:00",
+      send_window_days: ["mon", "tue", "wed", "thu", "fri"],
+      send_window_timezone: "America/Sao_Paulo",
+    };
+
+    const deps = {
+      ensureDb: () => true,
+      getLeadClientN8nSettings: async () => mockN8nSettings,
+      materializeRecurringOccurrences: async () => ({ materialized: 0 }),
+      runCampaignDispatch: vi.fn(),
+      findConcurrentRunningDispatch: async () => null,
+      pgDatabasePool: null,
+      requireAppViewAccess: () => (req, res, next) => next(),
+      requireCampaignDispatchAccess: () => (req, res, next) => next(),
+      requireFirebaseAuth: (req, res, next) => next(),
+      requireInternalPageAccess: () => (req, res, next) => next(),
+      resolveAuthorizedClientId: () => TENANT,
+      normalizeString: (s) => String(s || "").trim(),
+      normalizeTenantKey: (s) => String(s || "").trim(),
+      supabase,
+    };
+
+    const dummyApp = { get() {}, post() {}, put() {}, patch() {}, delete() {}, use() {} };
+    const { runDueIndependentDispatches } = registerCampaignsRoutes(dummyApp, deps);
+
+    const result = await runDueIndependentDispatches({ limit: 50 });
+
+    expect(result.success).toBe(true);
+    expect(result.processed).toBe(0);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].code).toBe("OUTSIDE_SEND_WINDOW");
+
+    // scheduled_at deve ter sido atualizado no banco para a próxima data/hora de abertura
+    const updatedDispatch = tables.campaign_dispatches[0];
+    expect(updatedDispatch.scheduled_at).toBe(result.skipped[0].nextOpening);
+    expect(updatedDispatch.scheduled_at).not.toBe(initialScheduledAt);
+    expect(updatedDispatch.error_message).toContain("Aguardando janela de envio");
+  });
+
+  it("[TESTE OBRIGATÓRIO G] Lote de campanha mãe inativa (status='paused', 'cancelled' ou archived) é ignorado com CAMPAIGN_INACTIVE", async () => {
+    const tables = {
+      campaign_dispatches: [
+        {
+          id: "disp-camp-pausada",
+          campaign_id: "camp-pausada",
+          client_id: TENANT,
+          name: "Lote de Campanha Pausada",
+          steps: [{ id: "s1", type: "text", text: "Olá", order: 1 }],
+          trigger_type: "scheduled",
+          scheduled_at: "2026-10-14T08:00:00.000Z",
+          status: "scheduled",
+          evolution_instance_id: null,
+          limit_per_run: 5,
+          offset: 0,
+          error_message: null,
+        },
+        {
+          id: "disp-camp-arquivada",
+          campaign_id: "camp-arquivada",
+          client_id: TENANT,
+          name: "Lote de Campanha Arquivada",
+          steps: [{ id: "s1", type: "text", text: "Olá", order: 1 }],
+          trigger_type: "scheduled",
+          scheduled_at: "2026-10-14T08:00:00.000Z",
+          status: "scheduled",
+          evolution_instance_id: null,
+          limit_per_run: 5,
+          offset: 0,
+          error_message: null,
+        },
+      ],
+      campaigns: [
+        {
+          id: "camp-pausada",
+          name: "Campanha Pausada",
+          client_id: TENANT,
+          status: "paused",
+          analytics_meta: {},
+        },
+        {
+          id: "camp-arquivada",
+          name: "Campanha Arquivada",
+          client_id: TENANT,
+          status: "active",
+          archived_at: "2026-10-14T09:00:00.000Z",
+          analytics_meta: {},
+        },
+      ],
+    };
+
+    const supabase = fakeSupabase(tables);
+
+    const mockN8nSettings = {
+      send_window_enabled: false,
+    };
+
+    const mockRunCampaignDispatch = vi.fn();
+
+    const deps = {
+      ensureDb: () => true,
+      getLeadClientN8nSettings: async () => mockN8nSettings,
+      materializeRecurringOccurrences: async () => ({ materialized: 0 }),
+      runCampaignDispatch: mockRunCampaignDispatch,
+      findConcurrentRunningDispatch: async () => null,
+      pgDatabasePool: null,
+      requireAppViewAccess: () => (req, res, next) => next(),
+      requireCampaignDispatchAccess: () => (req, res, next) => next(),
+      requireFirebaseAuth: (req, res, next) => next(),
+      requireInternalPageAccess: () => (req, res, next) => next(),
+      resolveAuthorizedClientId: () => TENANT,
+      normalizeString: (s) => String(s || "").trim(),
+      normalizeTenantKey: (s) => String(s || "").trim(),
+      supabase,
+    };
+
+    const dummyApp = { get() {}, post() {}, put() {}, patch() {}, delete() {}, use() {} };
+    const { runDueIndependentDispatches } = registerCampaignsRoutes(dummyApp, deps);
+
+    const result = await runDueIndependentDispatches({ limit: 50 });
+
+    expect(result.success).toBe(true);
+    expect(result.processed).toBe(0);
+    expect(result.skipped).toHaveLength(2);
+    expect(result.skipped[0].code).toBe("CAMPAIGN_INACTIVE");
+    expect(result.skipped[0].reason).toContain("Campanha mãe está inativa");
+    expect(result.skipped[1].code).toBe("CAMPAIGN_INACTIVE");
+    expect(result.skipped[1].reason).toContain("Campanha mãe está inativa (arquivada)");
+    expect(mockRunCampaignDispatch).not.toHaveBeenCalled();
+  });
 });
+

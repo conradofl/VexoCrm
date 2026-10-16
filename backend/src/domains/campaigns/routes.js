@@ -2174,7 +2174,7 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
-  async function runDueIndependentDispatches({ limit = 10 } = {}) {
+  async function runDueIndependentDispatches({ limit = 50 } = {}) {
     if (!supabase) return { success: false, processed: 0, reason: "DATABASE_NOT_CONFIGURED" };
 
     let recurrence = null;
@@ -2187,15 +2187,47 @@ export function registerCampaignsRoutes(app, deps) {
     const now = new Date().toISOString();
 
     try {
-      const { data: dispatches, error: fetchErr } = await supabase
+      // 1. Prioriza lotes com status = 'scheduled' (evita Head-of-Line Blocking causado por lotes paused antigos)
+      const { data: scheduledDispatches, error: scheduledErr } = await supabase
         .from("campaign_dispatches")
         .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset, error_message")
-        .in("status", ["scheduled", "paused"])
+        .eq("status", "scheduled")
         .lte("scheduled_at", now)
         .order("scheduled_at", { ascending: true })
         .limit(limit);
 
-      if (fetchErr) throw fetchErr;
+      if (scheduledErr) throw scheduledErr;
+
+      let dispatches = Array.isArray(scheduledDispatches) ? [...scheduledDispatches] : [];
+
+      // 2. Se ainda houver vagas até o limite do tick (50), busca lotes 'paused' que sejam retomáveis automaticamente
+      const remainingLimit = limit - dispatches.length;
+      if (remainingLimit > 0) {
+        let pausedQuery = supabase
+          .from("campaign_dispatches")
+          .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset, error_message")
+          .eq("status", "paused")
+          .lte("scheduled_at", now)
+          .order("scheduled_at", { ascending: true });
+
+        if (typeof pausedQuery.or === "function") {
+          pausedQuery = pausedQuery.or(`error_message.ilike.%fora da janela de envio%,error_message.ilike.%${QUOTA_PAUSE_MARKER}%`);
+        }
+
+        const { data: pausedDispatches, error: pausedErr } = await pausedQuery.limit(limit);
+
+        if (pausedErr) throw pausedErr;
+
+        if (Array.isArray(pausedDispatches) && pausedDispatches.length > 0) {
+          // Filtra em memória para garantir exclusão de lotes pausados manualmente ou não-retomáveis
+          const resumablePaused = pausedDispatches.filter((d) => {
+            const errMsg = String(d.error_message || "");
+            return errMsg.includes("fora da janela de envio") || errMsg.includes(QUOTA_PAUSE_MARKER);
+          });
+          dispatches.push(...resumablePaused.slice(0, remainingLimit));
+        }
+      }
+
       const dueCount = dispatches ? dispatches.length : 0;
       if (dueCount === 0) {
         const nowMs = Date.now();
@@ -2209,8 +2241,46 @@ export function registerCampaignsRoutes(app, deps) {
 
       const results = [];
       const skipped = [];
+      const campaignCache = new Map();
+
       for (const dispatch of dispatches) {
         try {
+          // Obtém dados da campanha mãe (com cache no tick para evitar queries repetidas)
+          let campaign = campaignCache.get(dispatch.campaign_id);
+          if (!campaign) {
+            const { data: campData, error: campErr } = await supabase
+              .from("campaigns")
+              .select("id, name, client_id, import_id, limit_per_run, analytics_meta, webhook_url, webhook_token, status, archived_at")
+              .eq("id", dispatch.campaign_id)
+              .single();
+
+            if (campErr || !campData) {
+              throw new Error(campErr?.message || "Campaign not found");
+            }
+            campaign = campData;
+            campaignCache.set(dispatch.campaign_id, campaign);
+          }
+
+          // Lotes de campanhas cujo status mãe seja paused, cancelled ou arquivada devem ser desconsiderados
+          const campStatus = String(campaign.status || "").toLowerCase().trim();
+          const isMotherCampaignInactive =
+            Boolean(campaign.archived_at) ||
+            ["paused", "pausada", "cancelled", "cancelada", "archived", "arquivada"].includes(campStatus);
+
+          if (isMotherCampaignInactive) {
+            const reason = `Campanha mãe está inativa (${campaign.archived_at ? "arquivada" : campStatus})`;
+            console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+            skipped.push({
+              id: dispatch.id,
+              campaignId: dispatch.campaign_id,
+              name: dispatch.name,
+              status: dispatch.status,
+              reason,
+              code: "CAMPAIGN_INACTIVE",
+            });
+            continue;
+          }
+
           let resumingFromQuota = false;
           if (dispatch.status === "paused") {
             const errMsg = String(dispatch.error_message || "");
@@ -2246,11 +2316,18 @@ export function registerCampaignsRoutes(app, deps) {
               console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
 
               const dbReason = `Pausado — fora da janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}). Retomará na próxima janela (abre ${nextOpeningStr}).`;
-              if (dispatch.error_message !== dbReason) {
+              const nextOpeningIso = nextOpeningDate.toISOString();
+              if (dispatch.error_message !== dbReason || dispatch.scheduled_at !== nextOpeningIso) {
                 await supabase
                   .from("campaign_dispatches")
-                  .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                  .update({
+                    error_message: dbReason,
+                    scheduled_at: nextOpeningIso,
+                    updated_at: new Date().toISOString(),
+                  })
                   .eq("id", dispatch.id);
+                dispatch.error_message = dbReason;
+                dispatch.scheduled_at = nextOpeningIso;
               }
 
               skipped.push({
@@ -2284,11 +2361,18 @@ export function registerCampaignsRoutes(app, deps) {
               console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
 
               const dbReason = `Aguardando janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}, abre ${nextOpeningStr})`;
-              if (dispatch.error_message !== dbReason) {
+              const nextOpeningIso = nextOpeningDate.toISOString();
+              if (dispatch.error_message !== dbReason || dispatch.scheduled_at !== nextOpeningIso) {
                 await supabase
                   .from("campaign_dispatches")
-                  .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                  .update({
+                    error_message: dbReason,
+                    scheduled_at: nextOpeningIso,
+                    updated_at: new Date().toISOString(),
+                  })
                   .eq("id", dispatch.id);
+                dispatch.error_message = dbReason;
+                dispatch.scheduled_at = nextOpeningIso;
               }
 
               skipped.push({
@@ -2306,16 +2390,6 @@ export function registerCampaignsRoutes(app, deps) {
             }
           }
 
-          const { data: campaign, error: campErr } = await supabase
-            .from("campaigns")
-            .select("id, name, client_id, import_id, limit_per_run, analytics_meta, webhook_url, webhook_token")
-            .eq("id", dispatch.campaign_id)
-            .single();
-
-          if (campErr || !campaign) {
-            throw new Error(campErr?.message || "Campaign not found");
-          }
-
           // Lote pausado por cota: só retoma quando o chip que ENVIA (o dono do webhook deste lote, o mesmo que o
           // runCampaignDispatch usa) tem cota hoje para o próximo lead inteiro (todas as mensagens dele). Sem isso o
           // lote voltaria a rodar e pausaria de novo no mesmo dia, a cada tick de 30s.
@@ -2323,7 +2397,8 @@ export function registerCampaignsRoutes(app, deps) {
             const sendingInstance = await resolveSendingInstance({ clientId: dispatch.client_id, campaign, dispatch });
             if (sendingInstance) {
               const tenantSettings = await getLeadClientN8nSettings(dispatch.client_id);
-              const tenantTimezone = resolveSendWindowConfig(tenantSettings).timezone || "America/Sao_Paulo";
+              const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
+              const tenantTimezone = sendWindowConfig.timezone || "America/Sao_Paulo";
               const limit = resolveEvolutionInstanceDailyLimit(sendingInstance);
               const currentUsage = await getEvolutionInstanceDailyUsage(sendingInstance.id, getDateKey(new Date(), tenantTimezone));
               // as mesmas mensagens que o runCampaignDispatch enviaria por lead (mesma regra de plano de passos)
@@ -2338,12 +2413,20 @@ export function registerCampaignsRoutes(app, deps) {
                 const reason = `Cota do chip insuficiente: cota diária ${limit}, uso atual ${currentUsage}, necessário para o próximo lead ${needed} (faltam ${(currentUsage + needed) - limit})`;
                 console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
 
+                const nextOpeningDate = getNextSendWindowOpening(new Date(), sendWindowConfig);
+                const nextOpeningIso = nextOpeningDate.toISOString();
                 const dbReason = `Pausado — cota diária do chip atingida (${currentUsage}/${limit} msgs hoje, necessário ${needed} para próximo lead). Retomará amanhã. ${QUOTA_PAUSE_MARKER}`;
-                if (dispatch.error_message !== dbReason) {
+                if (dispatch.error_message !== dbReason || dispatch.scheduled_at !== nextOpeningIso) {
                   await supabase
                     .from("campaign_dispatches")
-                    .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                    .update({
+                      error_message: dbReason,
+                      scheduled_at: nextOpeningIso,
+                      updated_at: new Date().toISOString(),
+                    })
                     .eq("id", dispatch.id);
+                  dispatch.error_message = dbReason;
+                  dispatch.scheduled_at = nextOpeningIso;
                 }
 
                 skipped.push({
@@ -2461,7 +2544,7 @@ export function registerCampaignsRoutes(app, deps) {
     console.log(`[campaign-dispatch-scheduler] agendador iniciado (pid=${process.pid}, interval=30000ms)`);
     _dueDispatchInterval = setInterval(async () => {
       try {
-        await runDueIndependentDispatches({ limit: 10 });
+        await runDueIndependentDispatches({ limit: 50 });
       } catch (err) {
         console.error("[campaign-dispatch-scheduler] background tick failed:", err);
       }
