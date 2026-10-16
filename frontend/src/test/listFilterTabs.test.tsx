@@ -26,6 +26,7 @@ vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
     ...actual,
     useDispatchSummary: (clientId: any, scope: string, page: number, pageSize: number) => summaryMock(clientId, scope, page, pageSize),
     useCampaignDispatchBulkAction: () => ({ mutate: vi.fn(), isPending: false }),
+    useTriggerDispatch: () => ({ mutate: vi.fn(), isPending: false }),
   };
 });
 vi.mock("../pages/LeadImports/DispatchKpiCards", () => ({

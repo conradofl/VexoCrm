@@ -2747,7 +2747,12 @@ export function registerCampaignsRoutes(app, deps) {
     const leadsDoCiclo = [];
     for (const l of leads) {
       const digits = normalizeString(l.telefone).replace(/\D/g, "");
-      const jaRecebeu = (digits && jaNoCiclo.phones.has(digits)) || (l.id && jaNoCiclo.leadIds.has(String(l.id)));
+      const ddiDigits = digits.startsWith("55") ? digits : `55${digits}`;
+      const nonDdiDigits = digits.startsWith("55") ? digits.slice(2) : digits;
+      const jaRecebeu =
+        (digits && (jaNoCiclo.phones.has(digits) || jaNoCiclo.phones.has(ddiDigits) || jaNoCiclo.phones.has(nonDdiDigits))) ||
+        (l.id && jaNoCiclo.leadIds.has(String(l.id))) ||
+        (l.lead_id && jaNoCiclo.leadIds.has(String(l.lead_id)));
       if (!jaRecebeu) {
         leadsDoCiclo.push(l);
         continue;

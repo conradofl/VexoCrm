@@ -162,6 +162,7 @@ type TimelineItem =
       author: string;
       fromMe: true;
       timestamp: number;
+      createdAt?: string | null;
       type: "internal_note";
       hasMedia: false;
       isInternalNote: true;
@@ -369,6 +370,7 @@ export default function WhatsAppInbox({
   }, [searchQuery]);
 
   const chatsContainerRef = useRef<HTMLDivElement | null>(null);
+  const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const prevScrollHeightRef = useRef<number>(0);
   const prevScrollTopRef = useRef<number>(0);
@@ -635,9 +637,16 @@ export default function WhatsAppInbox({
       );
 
     const normalMessages = rawMessages.map((m): TimelineItem => ({ ...m, isInternalNote: false }));
-    return [...normalMessages, ...notesForChat].sort(
-      (a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0)
-    );
+    return [...normalMessages, ...notesForChat].sort((a, b) => {
+      const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
+      if (timeDiff !== 0) return timeDiff;
+      // Desempate por createdAt com milissegundos
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      // Desempate final por ID determinístico
+      return String(a.id).localeCompare(String(b.id));
+    });
   }, [rawMessages, internalNotes, selectedChatId]);
 
   const { isAdminUser, canAccessInternalPage } = useAuth();
@@ -916,6 +925,9 @@ export default function WhatsAppInbox({
 
   useEffect(() => {
     setLiveSummary(null);
+    if (selectedChatId) {
+      setTimeout(() => chatTextareaRef.current?.focus(), 100);
+    }
   }, [selectedChatId]);
 
   useEffect(() => {
@@ -1159,15 +1171,22 @@ export default function WhatsAppInbox({
       setDraft("");
       toast.success("Nota interna salva com sucesso");
       scrollToBottom("smooth");
+      setTimeout(() => chatTextareaRef.current?.focus(), 10);
       return;
     }
 
     try {
-      await sendMessage.mutateAsync(trimmedDraft);
+      // Limpa o draft e re-foca IMEDIATAMENTE antes do await para o operador não perder o cursor
       setDraft("");
+      setTimeout(() => chatTextareaRef.current?.focus(), 10);
+
+      await sendMessage.mutateAsync(trimmedDraft);
       scrollToBottom("smooth");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Falha ao enviar mensagem.");
+    } finally {
+      // Garante que mesmo após retorno da rede o foco continua na caixa
+      setTimeout(() => chatTextareaRef.current?.focus(), 50);
     }
   };
 
@@ -2549,8 +2568,27 @@ export default function WhatsAppInbox({
                 </div>
               </div>
 
+              {/* Barra de Emojis Rápidos Gratuitos */}
+              <div className="flex items-center gap-1 overflow-x-auto py-1 px-1 scrollbar-none">
+                {["😊", "👍", "🙏", "❤️", "👋", "😂", "👏", "🤝", "🎯", "🚀", "💬", "✨", "🏢", "🗳️"].map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => {
+                      setDraft((prev) => prev + emoji);
+                      chatTextareaRef.current?.focus();
+                    }}
+                    className="h-6 w-6 flex items-center justify-center text-sm rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    title={`Inserir ${emoji}`}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+
               <div className="relative">
                 <Textarea
+                  ref={chatTextareaRef}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleKeyDown}
@@ -2560,7 +2598,7 @@ export default function WhatsAppInbox({
                       : "Escreva uma nota interna visível apenas para a sua equipe..."
                   }
                   rows={3}
-                  disabled={!selectedChat || sendMessage.isPending || sendMediaMessage.isPending}
+                  disabled={!selectedChat} // NÃO desabilita mais no isPending para nunca perder o foco!
                   className={cn(
                     "text-xs rounded-xl pr-20 resize-none font-sans",
                     compositionMode === "internal_note" &&

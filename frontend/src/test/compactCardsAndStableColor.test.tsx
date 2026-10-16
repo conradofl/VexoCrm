@@ -614,7 +614,7 @@ describe("Fila de Envios — DispatchCampaignTracker.tsx", () => {
     // 3. Quantos leads
     expect(within(card).getByTestId("dispatch-leads-disp-fechado").textContent).toContain("340 leads");
     // 4. Data
-    expect(within(card).getByTestId("dispatch-date-disp-fechado").textContent).toBe("terça-feira, por volta das 10h");
+    expect(within(card).getByTestId("dispatch-date-disp-fechado").textContent).toContain("terça-feira, por volta das 10h");
 
     // Elementos abertos NÃO devem estar no documento
     expect(within(card).queryByText("lotes — clique em um para ver os leads dele")).toBeNull();

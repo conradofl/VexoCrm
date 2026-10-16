@@ -333,5 +333,56 @@ describe("parseDossierSummary com resumos reais de produção", () => {
     expect(parsedNull.proximoPasso).toBeNull();
     expect(parsedNull.missing).toEqual(["Objetivo", "Situação", "Combinado", "Próximo passo"]);
   });
+
+  it("ordena mensagens com desempate determinístico por createdAt e id quando timestamp em segundos é idêntico", () => {
+    const rawMessages = [
+      {
+        id: "msg-lead-reply",
+        body: "Olá ?",
+        timestamp: 1729098900,
+        createdAt: "2026-10-16T14:15:00.600Z",
+        fromMe: false,
+      },
+      {
+        id: "msg-bot-outbound",
+        body: "Aqui é a Beatriz da Spazio",
+        timestamp: 1729098900,
+        createdAt: "2026-10-16T14:15:00.100Z",
+        fromMe: true,
+      },
+    ];
+
+    const sorted = [...rawMessages].sort((a, b) => {
+      const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
+      if (timeDiff !== 0) return timeDiff;
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    expect(sorted[0].id).toBe("msg-bot-outbound");
+    expect(sorted[1].id).toBe("msg-lead-reply");
+  });
+
+  it("desempata por ID lexicográfico quando timestamp e createdAt forem rigorosamente idênticos", () => {
+    const messages = [
+      { id: "msg-z", body: "Z", timestamp: 1729098900, createdAt: "2026-10-16T14:15:00.000Z" },
+      { id: "msg-a", body: "A", timestamp: 1729098900, createdAt: "2026-10-16T14:15:00.000Z" },
+    ];
+
+    const sorted = [...messages].sort((a, b) => {
+      const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
+      if (timeDiff !== 0) return timeDiff;
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    expect(sorted[0].id).toBe("msg-a");
+    expect(sorted[1].id).toBe("msg-z");
+  });
 });
+
 

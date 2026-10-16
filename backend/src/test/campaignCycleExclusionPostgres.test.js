@@ -29,7 +29,8 @@ const SCHEMA = `
   CREATE TABLE public.leads_clients (id TEXT PRIMARY KEY, name TEXT);
   CREATE TABLE public.leads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, telefone TEXT, nome TEXT, tipo_cliente TEXT,
-    faixa_consumo TEXT, qualificacao TEXT, cidade TEXT, estado TEXT, status TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    faixa_consumo TEXT, qualificacao TEXT, cidade TEXT, estado TEXT, status TEXT, opt_out BOOLEAN DEFAULT false,
+    metadata JSONB DEFAULT '{}'::jsonb, dados JSONB DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE TABLE public.campaigns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, name TEXT NOT NULL, import_id UUID,

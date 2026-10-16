@@ -1457,7 +1457,7 @@ export async function findLeadsAlreadyReachedInCycle(pool, { campaignId, dispatc
     SELECT r.phone, r.lead_id
       FROM public.campaign_dispatch_runs r
       JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-     WHERE r.campaign_id = $1
+     WHERE (r.campaign_id = $1 OR d.campaign_id = $1)
        AND r.dispatch_id <> $2
        AND r.status IN ('sent', 'claimed')
        ${comRecorte ? recorte : ""}`;
@@ -1473,7 +1473,14 @@ export async function findLeadsAlreadyReachedInCycle(pool, { campaignId, dispatc
   const leadIds = new Set();
   for (const row of rows || []) {
     const digits = normalizeString(row.phone).replace(/\D/g, "");
-    if (digits) phones.add(digits);
+    if (digits) {
+      phones.add(digits);
+      if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+        phones.add(digits.slice(2));
+      } else if (digits.length === 10 || digits.length === 11) {
+        phones.add(`55${digits}`);
+      }
+    }
     if (row.lead_id) leadIds.add(String(row.lead_id));
   }
   return { phones, leadIds };
