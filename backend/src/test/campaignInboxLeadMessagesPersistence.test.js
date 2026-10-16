@@ -202,4 +202,127 @@ describe("Persistência de Mensagens de Campanha e Chatbot no Inbox (lead_messag
     expect(Number.isNaN(parseTime(msgSemDeliveredAt))).toBe(true);
     expect(Number.isNaN(parseTime(msgComDeliveredAt))).toBe(false);
   });
+
+  it("Gravação com mediaUrl e contentType preenche colunas media_url, content_type e meta.mediaUrl", async () => {
+    const insertedRows = [];
+    const poolQueries = [];
+    const mockSupabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            in: () => ({
+              order: () => ({
+                limit: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                }),
+              }),
+            }),
+          }),
+        }),
+        insert: (rows) => {
+          const arr = Array.isArray(rows) ? rows : [rows];
+          insertedRows.push(...arr);
+          return Promise.resolve({ error: null });
+        },
+      }),
+    };
+
+    const mockPool = {
+      query: (sql, params) => {
+        poolQueries.push({ sql, params });
+        return Promise.resolve({ rows: [] });
+      },
+    };
+
+    const { appendLeadMessage } = createLeadMessaging({
+      supabase: mockSupabase,
+      pool: mockPool,
+      normalizeString: (s) => String(s || "").trim(),
+      leadsTableName: () => "leads",
+      isMissingSchemaError: () => false,
+    });
+
+    const testDataUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD...";
+    await appendLeadMessage({
+      clientId: CLIENT_ID,
+      campaignId: "camp-001",
+      phone: PHONE,
+      senderType: "bot",
+      direction: "outbound",
+      messageText: "[Imagem] https://mesa-de-negocios.vexo.com.br",
+      deliveredAt: new Date().toISOString(),
+      waMessageId: "WA-IMG-12345",
+      mediaUrl: testDataUrl,
+      contentType: "image",
+    });
+
+    expect(insertedRows).toHaveLength(1);
+    const row = insertedRows[0];
+    expect(row.media_url).toBe(testDataUrl);
+    expect(row.content_type).toBe("image");
+    expect(row.meta.mediaUrl).toBe(testDataUrl);
+    expect(row.meta.contentType).toBe("image");
+
+    // Verifica que o update direto no pool também foi disparado para garantir sincronização
+    expect(poolQueries.length).toBeGreaterThan(0);
+    expect(poolQueries[0].sql).toContain("UPDATE public.lead_messages");
+    expect(poolQueries[0].params[0]).toBe(testDataUrl);
+    expect(poolQueries[0].params[2]).toBe("WA-IMG-12345");
+  });
+
+  it("Se PostgREST falhar, faz inserção direta no PostgreSQL via pool", async () => {
+    const poolQueries = [];
+    const mockSupabase = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            in: () => ({
+              order: () => ({
+                limit: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                }),
+              }),
+            }),
+          }),
+        }),
+        insert: () => Promise.resolve({ error: new Error("PGRST204: schema cache error") }),
+      }),
+    };
+
+    const mockPool = {
+      query: (sql, params) => {
+        poolQueries.push({ sql, params });
+        return Promise.resolve({ rows: [] });
+      },
+    };
+
+    const { appendLeadMessage } = createLeadMessaging({
+      supabase: mockSupabase,
+      pool: mockPool,
+      normalizeString: (s) => String(s || "").trim(),
+      leadsTableName: () => "leads",
+      isMissingSchemaError: () => false,
+    });
+
+    await appendLeadMessage({
+      clientId: CLIENT_ID,
+      campaignId: "camp-001",
+      phone: PHONE,
+      senderType: "bot",
+      direction: "outbound",
+      messageText: "Disparo seguro via Postgres direto",
+      deliveredAt: new Date().toISOString(),
+      waMessageId: "WA-DIRECT-999",
+      mediaUrl: "https://vexo.com.br/banner.png",
+      contentType: "image",
+    });
+
+    const insertQuery = poolQueries.find((q) => q.sql.includes("INSERT INTO public.lead_messages"));
+    expect(insertQuery).toBeDefined();
+    expect(insertQuery.params[0]).toBe(CLIENT_ID);
+    expect(insertQuery.params[12]).toBe("WA-DIRECT-999");
+    expect(insertQuery.params[14]).toBe("https://vexo.com.br/banner.png");
+    expect(insertQuery.params[15]).toBe("image");
+  });
 });
+

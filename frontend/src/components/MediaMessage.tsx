@@ -268,6 +268,20 @@ function ImageWithDescription({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [lightboxOpen]);
 
+  const handleOpenInNewTab = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (src.startsWith("data:")) {
+      e.preventDefault();
+      const win = window.open();
+      if (win) {
+        win.document.write(
+          `<body style="margin:0;background:#0b0e14;display:flex;align-items:center;justify-content:center;height:100vh;"><img src="${src}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;" /></body>`
+        );
+        win.document.title = alt || "Imagem";
+      }
+    }
+  };
+
   return (
     <div className="space-y-1.5">
       <div className="relative group overflow-hidden rounded-lg cursor-pointer">
@@ -294,6 +308,7 @@ function ImageWithDescription({
           href={src}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={handleOpenInNewTab}
           className={cn(
             "inline-flex items-center gap-1 text-[11px] font-medium transition-opacity opacity-80 hover:opacity-100",
             fromMe ? "text-emerald-100" : "text-muted-foreground"
@@ -339,7 +354,7 @@ function ImageWithDescription({
               href={src}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
+              onClick={handleOpenInNewTab}
               className="rounded-full bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 transition-colors flex items-center gap-1.5 text-xs font-medium cursor-pointer"
               title="Abrir imagem em nova aba"
             >
@@ -398,9 +413,19 @@ export function MediaMessage({
   mediaUrl,
   contentType,
 }: MediaMessageProps) {
+  // Chamada incondicional do hook para respeitar as Regras dos Hooks do React.
+  // Se mediaUrl já estiver preenchida (ex: imagem de campanha), desabilita a requisição externa.
+  const shouldFetchMedia = Boolean(hasMedia && !mediaUrl);
+  const { data: media, isLoading, error } = useMediaMessage(messageId, shouldFetchMedia, clientId);
+
   // Se a mensagem já possui mediaUrl (ex: imagem de campanha enviada com media_url), exibe diretamente
   if (mediaUrl) {
-    const isImage = contentType === "image" || !contentType || contentType.startsWith("image/");
+    const isImage =
+      contentType === "image" ||
+      !contentType ||
+      contentType.startsWith("image/") ||
+      mediaUrl.startsWith("data:image/") ||
+      mediaUrl.startsWith("http");
     if (isImage) {
       return (
         <div className={className}>
@@ -429,8 +454,6 @@ export function MediaMessage({
       );
     }
   }
-
-  const { data: media, isLoading, error } = useMediaMessage(messageId, hasMedia, clientId);
 
   if (!hasMedia) {
     return (

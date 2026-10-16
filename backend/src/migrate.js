@@ -414,6 +414,10 @@ async function isAlreadyApplied(pool, filename) {
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_reminders' AND column_name='meeting_url')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_reminders' AND column_name='meeting_outcome')
     ) AS ok`,
+    "20261016200000_retrofill_campaign_media_url.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_messages' AND column_name='media_url')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_messages' AND column_name='content_type')
+    ) AS ok`,
   };
 
   const query = checks[filename];

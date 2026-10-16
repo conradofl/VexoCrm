@@ -1,5 +1,5 @@
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
-import { supabase as liveSupabase } from "../../services/database.js";
+import { supabase as liveSupabase, pgDatabasePool } from "../../services/database.js";
 import { maskPhoneForLog } from "../../services/tenant.js";
 import { resolveInstanceIdentifier } from "../../services/evolution.js";
 
@@ -15,7 +15,14 @@ export { isGroupJid };
  * NOTA DE RESILIÊNCIA: Se a factory for chamada no topo de módulo antes do initDatabase(),
  * a closure captura o live-binding liveSupabase dinamicamente na chamada.
  */
-export function createLeadMessaging({ supabase: injectedSupabase, normalizeString, leadsTableName, isMissingSchemaError }) {
+export function createLeadMessaging({
+  supabase: injectedSupabase,
+  pool: injectedPool,
+  pgDatabasePool: injectedPgPool,
+  normalizeString,
+  leadsTableName,
+  isMissingSchemaError,
+}) {
   function maskSecretPresence(value) {
     return Boolean(normalizeString ? normalizeString(value) : value);
   }
@@ -211,6 +218,73 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
     if (error && (error.code === "23505" || String(error.message).includes("idx_lead_messages_wa_message_id"))) {
       console.info(`[lead-messages] wa_message_id '${waMessageId}' duplicado; insert ignorado com sucesso.`);
       error = null;
+    }
+
+    const pool = injectedPool || injectedPgPool || pgDatabasePool;
+
+    // Se o cliente Supabase PostgREST falhar, tenta gravação direta no PostgreSQL
+    if (error && pool) {
+      try {
+        await pool.query(
+          `INSERT INTO public.lead_messages (
+            client_id, lead_id, campaign_id, phone, sender_type, direction,
+            engagement_signal, message_text, delivered_at, message_timestamp,
+            meta, instance_name, wa_message_id, media_path, media_url, content_type
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+          ON CONFLICT (wa_message_id) DO UPDATE SET
+            media_url = COALESCE(EXCLUDED.media_url, public.lead_messages.media_url),
+            content_type = COALESCE(EXCLUDED.content_type, public.lead_messages.content_type),
+            meta = public.lead_messages.meta || EXCLUDED.meta;`,
+          [
+            clientId,
+            resolvedLeadId,
+            finalCampaignId,
+            canonicalPhone,
+            senderType,
+            direction,
+            engagementSignal,
+            normalizedMessage,
+            payload.delivered_at,
+            payload.message_timestamp,
+            JSON.stringify(payload.meta || {}),
+            canonicalInstanceName || instanceName || null,
+            waMessageId || null,
+            mediaPath || null,
+            resolvedMediaUrl,
+            resolvedContentType,
+          ]
+        );
+        error = null;
+      } catch (directInsertErr) {
+        // Segue para logging se ambas tentativas falharem
+      }
+    }
+
+    // Garante que media_url e content_type estejam diretamente gravados no PostgreSQL caso o PostgREST tenha ignorado ou sofrido atraso de schema cache
+    if (pool && resolvedMediaUrl) {
+      try {
+        if (waMessageId) {
+          await pool.query(
+            `UPDATE public.lead_messages
+             SET media_url = COALESCE(media_url, $1),
+                 content_type = COALESCE(content_type, $2),
+                 meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('mediaUrl', $1::text, 'media_url', $1::text, 'contentType', $2::text, 'content_type', $2::text)
+             WHERE wa_message_id = $3`,
+            [resolvedMediaUrl, resolvedContentType, waMessageId]
+          );
+        } else {
+          await pool.query(
+            `UPDATE public.lead_messages
+             SET media_url = COALESCE(media_url, $1),
+                 content_type = COALESCE(content_type, $2),
+                 meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('mediaUrl', $1::text, 'media_url', $1::text, 'contentType', $2::text, 'content_type', $2::text)
+             WHERE client_id = $3 AND phone = $4 AND direction = $5 AND delivered_at = $6`,
+            [resolvedMediaUrl, resolvedContentType, clientId, canonicalPhone, direction, payload.delivered_at]
+          );
+        }
+      } catch {
+        // Best effort
+      }
     }
 
     if (error && (!isMissingSchemaError || !isMissingSchemaError(error))) {
