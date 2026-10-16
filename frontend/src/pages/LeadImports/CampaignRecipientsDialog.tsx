@@ -31,6 +31,7 @@ import {
   AlertTriangle,
   PhoneOff,
   MessageSquareQuote,
+  Send,
 } from "lucide-react";
 import { useCampaignRecipients, fetchCampaignsApi, type CampaignRecipientItem } from "@/hooks/useCampanhas";
 import { useToast } from "@/hooks/use-toast";
@@ -41,12 +42,14 @@ interface CampaignRecipientsDialogProps {
   campaignId: string | null;
   initialFilter?: string;
   onClose: () => void;
+  onCriarCampanhaComFila?: (phones: string[]) => void;
 }
 
 export function CampaignRecipientsDialog({
   campaignId,
   initialFilter = "all",
   onClose,
+  onCriarCampanhaComFila,
 }: CampaignRecipientsDialogProps) {
   const [statusFilter, setStatusFilter] = useState<string>(initialFilter);
   const [searchQuery, setSearchQuery] = useState("");
@@ -82,7 +85,10 @@ export function CampaignRecipientsDialog({
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = downloadUrl;
-      const fileName = `destinatarios-${(data?.campaignName || "campanha").replace(/[^a-zA-Z0-9_-]/g, "_")}.csv`;
+      const rawName = (data?.campaignName || "campanha").replace(/[^a-zA-Z0-9_-]/g, "_");
+      const fileName = statusFilter === "pending"
+        ? `campanha_${rawName}_pendentes_na_fila.csv`
+        : `destinatarios-${rawName}.csv`;
       a.download = fileName;
       document.body.appendChild(a);
       a.click();
@@ -383,9 +389,25 @@ export function CampaignRecipientsDialog({
             {isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />}
             <span>Exibindo {recipients.length} destinatários</span>
           </div>
-          <Button onClick={onClose} variant="outline" className="h-8 text-xs font-bold rounded-xl px-4">
-            Fechar
-          </Button>
+          <div className="flex items-center gap-2">
+            {statusFilter === "pending" && recipients.length > 0 && (
+              <Button
+                size="sm"
+                variant="default"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl"
+                onClick={() => {
+                  // Dispara callback passando os telefones pendentes para o modal de criação de campanha
+                  onCriarCampanhaComFila?.(recipients.map((r: any) => r.phone || r.telefone).filter(Boolean));
+                }}
+              >
+                <Send className="mr-1.5 h-3.5 w-3.5" />
+                Disparar Campanha para estes {recipients.length} pendentes
+              </Button>
+            )}
+            <Button onClick={onClose} variant="outline" className="h-8 text-xs font-bold rounded-xl px-4">
+              Fechar
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

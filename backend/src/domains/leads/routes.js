@@ -3083,6 +3083,27 @@ export function registerLeadsRoutes(app, deps) {
       }
       if (req.body.temperature !== undefined) updates.temperature = req.body.temperature;
       if (req.body.nome !== undefined) updates.nome = req.body.nome;
+      if (req.body.opt_out !== undefined) {
+        const isOptOut = Boolean(req.body.opt_out);
+        updates.opt_out = isOptOut;
+        if (pgDatabasePool) {
+          try {
+            await pgDatabasePool.query(
+              `UPDATE public.leads 
+               SET opt_out = $1, 
+                   metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('opt_out', $2::text),
+                   updated_at = now() 
+               WHERE id = $3`,
+              [isOptOut, isOptOut ? "true" : "false", id]
+            );
+          } catch (e) {
+            console.warn("[leads/patch] erro ao persistir opt_out via pool:", e?.message || e);
+          }
+        }
+      }
+      if (req.body.metadata !== undefined && typeof req.body.metadata === "object") {
+        updates.metadata = req.body.metadata;
+      }
       if (req.body.assigned_to !== undefined || req.body.assignedTo !== undefined) {
         if (!isManagerOrAdmin(req.authAccess)) {
           sendError(res, 403, "FORBIDDEN", "Apenas gestores ou administradores podem reatribuir leads");

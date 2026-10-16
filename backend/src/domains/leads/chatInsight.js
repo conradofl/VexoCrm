@@ -34,6 +34,7 @@ Quando não houver NENHUMA intenção comercial (conversa puramente pessoal, ami
 
 REGRAS:
 · Só use 🚫 quando não houver NADA comercial. Na dúvida, prefira as linhas com "nada ainda".
+· Classificação de Intenção: Não classifique conversas institucionais, políticas, de votação, eleições de condomínio ou engajamento comunitário como 'Conversa pessoal'. Nesses cenários, o objetivo do contato é a conquista de voto, aliança ou adesão. Trate confirmações de apoio comunitário como engajamento positivo de campanha.
 · Citar um produto ou serviço de passagem, sem querer comprar, é 🚫.
 · Nunca transforme comentário casual ou piada em intenção de compra.
 · 🛑 Objeção real: o que fez a pessoa recuar nas palavras dela ("tá caro", "vou ver com meu sócio", "depois te chamo"). Se não houve objeção, "nada ainda".
@@ -80,6 +81,7 @@ Responda em UMA LINHA SÓ:
 
 Regras de escape:
 · Só use 🚫 quando não houver nada comercial. Na dúvida, prefira as linhas com "nada ainda".
+· Classificação de Intenção: Não classifique conversas institucionais, políticas, de votação, eleições de condomínio ou engajamento comunitário como 'Conversa pessoal'. Nesses cenários, o objetivo do contato é a conquista de voto, aliança ou adesão. Trate confirmações de apoio comunitário como engajamento positivo de campanha.
 · Citar um produto de passagem, sem querer comprar, é 🚫.
 · Nunca transforme comentário casual em intenção de compra.`;
 

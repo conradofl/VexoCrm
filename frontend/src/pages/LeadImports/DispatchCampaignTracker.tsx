@@ -89,9 +89,14 @@ const EMPTY_CAMPAIGNS: DispatchSummaryCampaign[] = [];
 interface DispatchCampaignTrackerProps {
   clientId: string | null;
   onOpenDispatch: (dispatchId: string) => void;
+  onCriarCampanhaComFila?: (phones: string[]) => void;
 }
 
-export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCampaignTrackerProps) {
+export function DispatchCampaignTracker({
+  clientId,
+  onOpenDispatch,
+  onCriarCampanhaComFila,
+}: DispatchCampaignTrackerProps) {
   const [tab, setTab] = useState<"active" | "ended">("active");
   const [endedPage, setEndedPage] = useState(1);
   const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
@@ -266,6 +271,7 @@ export function DispatchCampaignTracker({ clientId, onOpenDispatch }: DispatchCa
           campaignId={campaignRecipientsModal.campaignId}
           initialFilter={campaignRecipientsModal.initialFilter}
           onClose={() => setCampaignRecipientsModal(null)}
+          onCriarCampanhaComFila={onCriarCampanhaComFila}
         />
       )}
     </Card>

@@ -2469,6 +2469,13 @@ export default function LeadImports({
         <DispatchCampaignTracker
           clientId={activeClientId || null}
           onOpenDispatch={(dispId) => setPreviewDispatchId(dispId)}
+          onCriarCampanhaComFila={(phones) => {
+            setActiveTab("campanha");
+            toast({
+              title: "Lista de pendentes pronta",
+              description: `${phones.length} contatos prontos para nova campanha.`,
+            });
+          }}
         />
       )}
 

@@ -53,7 +53,7 @@ export function classifyLeadMessages(messages: (string | any)[] = []) {
   const fullText = normalizeText(textList.join(" "));
 
   // 1. Sinais de Fechamento / Comprador (buyer)
-  const buyerRegex = /\b(paguei|comprovante|chave pix|pix feito|pix enviado|manda a chave pix|manda o pix|manda o boleto|boleto pago|fechado|fechamos|vamos fechar|contrato assinado|ja transferi|acabei de pagar|vamos fazer|pode emitir|fechar o pedido)\b/i;
+  const buyerRegex = /\b(paguei|comprovante|chave pix|pix feito|pix enviado|manda a chave pix|manda o pix|manda o boleto|boleto pago|fechado|fechamos|vamos fechar|contrato assinado|ja transferi|acabei de pagar|vamos fazer o pagamento|vamos fazer o pix|vamos fechar negocio|vamos fechar o contrato|pode emitir|fechar o pedido)\b/i;
   if (buyerRegex.test(fullText)) {
     const match = fullText.match(buyerRegex);
     return {

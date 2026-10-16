@@ -48,8 +48,10 @@ import {
   Paperclip,
   Trash2,
   Pencil,
+  Ban,
   X,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
@@ -371,9 +373,20 @@ export default function WhatsAppInbox({
   const { selectedClientId } = useCrmClient();
   const clientId = propClientId || selectedClientId;
 
-  const { user } = useAuth();
+  const { user, getIdToken } = useAuth();
   const { data: tenants = [], isLoading: tenantsLoading } = useLeadClients();
   const activeTenant = tenants.find((t) => t.id === clientId) ?? null;
+  const podeGerarProposta = useMemo(() => {
+    const activeClientId = clientId;
+    const tenantSettings = (activeTenant as any)?.settings || activeTenant;
+    return (
+      activeClientId === "geracao-digital" ||
+      Boolean(
+        tenantSettings?.modulos_adicionais?.includes("propostas_comerciais") ||
+        (activeTenant as any)?.modulos_adicionais?.includes("propostas_comerciais")
+      )
+    );
+  }, [clientId, activeTenant]);
   const evolutionInstances = activeTenant?.n8n_settings?.evolution_instances ?? [];
   const hasConnectedInstances = evolutionInstances.some((inst) => inst.active);
 
@@ -619,7 +632,7 @@ export default function WhatsAppInbox({
     );
   }, [rawMessages, internalNotes, selectedChatId]);
 
-  const { getIdToken, isAdminUser, canAccessInternalPage } = useAuth();
+  const { isAdminUser, canAccessInternalPage } = useAuth();
   const canManageUsers = isAdminUser || canAccessInternalPage("usuarios");
   const adminUsersQuery = useAdminUsers();
   const operatorOptions = useMemo(() => {
@@ -679,6 +692,34 @@ export default function WhatsAppInbox({
     if (!chatCanonical) return null;
     return leadsByPhone.get(chatCanonical) || null;
   }, [selectedChat, leadsByPhone]);
+
+  const handleToggleOptOut = async (leadId: string, checked: boolean) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          opt_out: checked,
+          metadata: {
+            ...((matchedLead as any)?.metadata || {}),
+            opt_out: checked ? "true" : "false",
+          },
+        }),
+      });
+      if (!res.ok) {
+        const err = await readApiErrorMessage(res, "Falha ao atualizar opt-out do lead.");
+        throw new Error(err);
+      }
+      toast.success(checked ? "Disparos em massa bloqueados (Opt-out ativo)." : "Bloqueio de disparos removido.");
+      refetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao atualizar opt-out", { description: err.message });
+    }
+  };
 
   const selectedCanonicalPhone = useMemo(() => {
     if (!selectedChat?.id) return null;
@@ -2676,6 +2717,19 @@ export default function WhatsAppInbox({
                   </div>
                 )}
 
+                {matchedLead && (
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-muted/40 border border-border/50 text-xs w-full mt-2">
+                    <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
+                      <Ban className="h-3.5 w-3.5 text-rose-500" />
+                      Bloquear Disparos em Massa (Opt-out)
+                    </span>
+                    <Switch
+                      checked={Boolean((matchedLead as any)?.opt_out || (matchedLead?.dados as any)?.opt_out || (matchedLead as any)?.metadata?.opt_out === "true")}
+                      onCheckedChange={(checked) => handleToggleOptOut(matchedLead.id, checked)}
+                    />
+                  </div>
+                )}
+
                 {Boolean(matchedLead?.dados?.precisa_atencao_humana || (matchedLead as any)?.precisa_atencao_humana) && (
                   <div className="w-full mt-2.5 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-left flex items-start gap-2">
                     <ShieldAlert className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
@@ -2903,23 +2957,25 @@ export default function WhatsAppInbox({
                   Ações Rápidas
                 </span>
                 <div className="flex flex-col gap-2">
-                  {/* Botão Primário Destacado: Gerar Proposta Comercial */}
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => {
-                      const rawP = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
-                      const prospectName = matchedLead?.nome || selectedChat?.name || "";
-                      const params = new URLSearchParams();
-                      if (rawP) params.set("phone", rawP);
-                      if (prospectName) params.set("nome", prospectName);
-                      navigate(`/crm/propostas-gd?${params.toString()}`);
-                    }}
-                    className="w-full justify-center h-9 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs cursor-pointer"
-                  >
-                    <FileText className="mr-2 h-4 w-4" />
-                    Gerar Proposta Comercial
-                  </Button>
+                  {/* Botão Primário Destacado: Gerar Proposta Comercial (visível apenas para geracao-digital ou módulo habilitado) */}
+                  {podeGerarProposta && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => {
+                        const rawP = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
+                        const prospectName = matchedLead?.nome || selectedChat?.name || "";
+                        const params = new URLSearchParams();
+                        if (rawP) params.set("phone", rawP);
+                        if (prospectName) params.set("nome", prospectName);
+                        navigate(`/crm/propostas-gd?${params.toString()}`);
+                      }}
+                      className="w-full justify-center h-9 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs cursor-pointer"
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Gerar Proposta Comercial
+                    </Button>
+                  )}
 
                   {/* Card de Lembrete Pessoal Pendente no Dossiê */}
                   {pendingReminder && (

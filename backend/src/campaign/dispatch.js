@@ -142,12 +142,36 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
   let from = 0;
   let hasMore = true;
 
+  // ITEM B.4: Exclusão de Leads com Opt-out ("Não Enviar Mais Mensagens")
+  const optOutPhones = new Set();
+  if (pgDatabasePool) {
+    try {
+      const { rows = [] } = await pgDatabasePool.query(
+        `SELECT regexp_replace(l.telefone, '\\D', '', 'g') AS phone
+         FROM public.leads l
+         WHERE l.client_id = $1
+           AND (
+             l.opt_out IS TRUE
+             OR l.metadata->>'opt_out' = 'true'
+             OR l.dados->>'opt_out' = 'true'
+           )
+           AND l.telefone IS NOT NULL AND l.telefone <> ''`,
+        [clientId]
+      );
+      for (const r of rows) {
+        if (r.phone) optOutPhones.add(r.phone);
+      }
+    } catch {
+      // fallback silencioso caso colunas/pool não estejam disponíveis
+    }
+  }
+
   while (hasMore) {
     let query;
     if (importId === "__crm__") {
       query = supabase
         .from("leads")
-        .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status")
+        .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status, opt_out, metadata, dados")
         .eq("client_id", clientId)
         .not("telefone", "is", null)
         .order("created_at", { ascending: false })
@@ -214,6 +238,15 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
             ? item
             : (item.normalized_data && typeof item.normalized_data === "object" ? item.normalized_data : {});
 
+          const isOptOut =
+            item.opt_out === true ||
+            item.metadata?.opt_out === "true" ||
+            item.metadata?.opt_out === true ||
+            normalizedData.opt_out === true ||
+            normalizedData.opt_out === "true" ||
+            item.dados?.opt_out === true ||
+            item.dados?.opt_out === "true";
+
           return {
             id: item.id,
             import_id: isCrm ? "__crm__" : item.import_id,
@@ -230,9 +263,16 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
             data_hora: normalizeIsoDate(isCrm ? item.created_at : normalizedData.data_hora),
             qualificacao: normalizeString(isCrm ? item.qualificacao : normalizedData.qualificacao),
             created_at: item.created_at,
+            opt_out: isOptOut,
           };
         })
         .filter((item) => !!item.telefone)
+        .filter((item) => {
+          if (item.opt_out) return false;
+          const cleanPhone = (normalizeString(item.telefone) || "").replace(/\D/g, "");
+          if (cleanPhone && optOutPhones.has(cleanPhone)) return false;
+          return true;
+        })
         .filter((item) => segMatcher(item))
         .map((item) => [item.telefone, item])
     ).values()

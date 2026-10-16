@@ -3767,7 +3767,9 @@ export function registerCampaignsRoutes(app, deps) {
             SUM(COALESCE(d.sent_count, 0))::int AS sent_total,
             SUM(COALESCE(d.failed_count, 0))::int AS failed_total,
             SUM(COALESCE(d.target_count, 0))::int AS leads_total,
-            SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status NOT IN ('done','cancelled'))::int AS leads_pending,
+            SUM(
+              GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
+            ) FILTER (WHERE d.status NOT IN ('done','cancelled'))::int AS leads_pending,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($2::text[]))::int AS leads_pause_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($3::text[]))::int AS leads_resume_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($4::text[]))::int AS leads_cancel_target,
