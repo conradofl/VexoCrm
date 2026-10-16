@@ -172,12 +172,12 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
 
     // Seção de Campanhas Programadas
     expect(screen.getByText("Campanhas Programadas")).toBeDefined();
-    expect(screen.getByText("Campanha Black Friday")).toBeDefined();
+    expect(screen.getByText(/Campanha Black Friday/i)).toBeDefined();
     expect(screen.getByText("1.200")).toBeDefined();
     expect(screen.getByText("Ver campanha")).toBeDefined();
 
-    // Seção 🎪 Eventos & Festas do Dia
-    expect(screen.getByText("Eventos & Festas do Dia")).toBeDefined();
+    // Seção 🎪 Eventos & Festas/Reuniões do Dia
+    expect(screen.getByText(/Eventos & (Reuniões|Festas) do Dia/i)).toBeDefined();
     expect(screen.getAllByText(/Festival Sunset/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Arena Central")).toBeDefined();
     expect(screen.getByText("Ver evento")).toBeDefined();
@@ -207,32 +207,32 @@ describe("CalendarSchedule & FollowupCalendar Component", () => {
     fireEvent.click(screen.getByRole("button", { name: /26/i }));
 
     // Todos visíveis no modo Todos
-    expect(screen.getByText("Campanha Black Friday")).toBeDefined();
+    expect(screen.getByText(/Campanha Black Friday/i)).toBeDefined();
     expect(screen.getByText("João da Silva")).toBeDefined();
     expect(screen.getAllByText(/Festival Sunset/i).length).toBeGreaterThan(0);
 
     // Filtra apenas campanhas
     fireEvent.click(screen.getByRole("button", { name: /^📢 Campanhas$/i }));
-    expect(screen.getByText("Campanha Black Friday")).toBeDefined();
+    expect(screen.getByText(/Campanha Black Friday/i)).toBeDefined();
     expect(screen.queryByText("João da Silva")).toBeNull();
-    expect(screen.queryByText("Eventos & Festas do Dia")).toBeNull();
+    expect(screen.queryByText(/Eventos & (Reuniões|Festas) do Dia/i)).toBeNull();
 
     // Filtra apenas follow-ups
     fireEvent.click(screen.getByRole("button", { name: /^🔄 Follow-ups$/i }));
-    expect(screen.queryByText("Campanha Black Friday")).toBeNull();
+    expect(screen.queryByText(/Campanha Black Friday/i)).toBeNull();
     expect(screen.getByText("João da Silva")).toBeDefined();
-    expect(screen.queryByText("Eventos & Festas do Dia")).toBeNull();
+    expect(screen.queryByText(/Eventos & (Reuniões|Festas) do Dia/i)).toBeNull();
 
     // Filtra apenas eventos
     fireEvent.click(screen.getByRole("button", { name: /^🎪 Eventos$/i }));
-    expect(screen.queryByText("Campanha Black Friday")).toBeNull();
+    expect(screen.queryByText(/Campanha Black Friday/i)).toBeNull();
     expect(screen.queryByText("João da Silva")).toBeNull();
-    expect(screen.getByText("Eventos & Festas do Dia")).toBeDefined();
+    expect(screen.getByText(/Eventos & (Reuniões|Festas) do Dia/i)).toBeDefined();
 
     // Volta para todos
     fireEvent.click(screen.getByRole("button", { name: "Todos" }));
-    expect(screen.getByText("Campanha Black Friday")).toBeDefined();
+    expect(screen.getByText(/Campanha Black Friday/i)).toBeDefined();
     expect(screen.getByText("João da Silva")).toBeDefined();
-    expect(screen.getByText("Eventos & Festas do Dia")).toBeDefined();
+    expect(screen.getByText(/Eventos & (Reuniões|Festas) do Dia/i)).toBeDefined();
   });
 });

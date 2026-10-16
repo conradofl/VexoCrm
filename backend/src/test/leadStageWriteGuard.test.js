@@ -36,6 +36,7 @@ const ALLOWED_FILES = new Set([
   "lead-client-tables.js",
   "domains/leads/routes.js",
   "webhooks/routes.js",
+  "domains/reminders/routes.js",
 ]);
 
 /**

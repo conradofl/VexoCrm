@@ -9,6 +9,7 @@ import {
   Pause,
   Clock,
   Download,
+  ExternalLink,
   Maximize2,
   X,
 } from "lucide-react";
@@ -287,8 +288,21 @@ function ImageWithDescription({
         </div>
       </div>
 
-      {/* Botão de download na miniatura */}
-      <div className="flex items-center justify-between pt-0.5">
+      {/* Botões de abrir em nova aba e download na miniatura */}
+      <div className="flex items-center gap-3 pt-0.5">
+        <a
+          href={src}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            "inline-flex items-center gap-1 text-[11px] font-medium transition-opacity opacity-80 hover:opacity-100",
+            fromMe ? "text-emerald-100" : "text-muted-foreground"
+          )}
+          title="Abrir em nova aba"
+        >
+          <ExternalLink className="h-3 w-3" />
+          <span>Abrir</span>
+        </a>
         <a
           href={src}
           download={downloadName}
@@ -321,6 +335,17 @@ function ImageWithDescription({
           onClick={() => setLightboxOpen(false)}
         >
           <div className="absolute top-4 right-4 flex items-center gap-2">
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded-full bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 transition-colors flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+              title="Abrir imagem em nova aba"
+            >
+              <ExternalLink className="h-4 w-4" />
+              <span>Abrir</span>
+            </a>
             <a
               href={src}
               download={downloadName}
@@ -359,6 +384,8 @@ interface MediaMessageProps {
   fromMe: boolean;
   className?: string;
   clientId?: string | null;
+  mediaUrl?: string | null;
+  contentType?: string | null;
 }
 
 export function MediaMessage({
@@ -368,7 +395,41 @@ export function MediaMessage({
   fromMe,
   className,
   clientId,
+  mediaUrl,
+  contentType,
 }: MediaMessageProps) {
+  // Se a mensagem já possui mediaUrl (ex: imagem de campanha enviada com media_url), exibe diretamente
+  if (mediaUrl) {
+    const isImage = contentType === "image" || !contentType || contentType.startsWith("image/");
+    if (isImage) {
+      return (
+        <div className={className}>
+          <ImageWithDescription
+            src={mediaUrl}
+            alt="Imagem da Campanha"
+            description={null}
+            fromMe={fromMe}
+            fileName="campanha.jpg"
+          />
+          {fallbackBody &&
+            !fallbackBody.startsWith("[imagem") &&
+            !fallbackBody.startsWith("[image") &&
+            fallbackBody !== "[áudio]" &&
+            fallbackBody !== "[audio]" && (
+            <p
+              className={cn(
+                "mt-1.5 whitespace-pre-wrap break-words text-xs opacity-90 select-text",
+                fromMe ? "text-emerald-50" : "text-foreground"
+              )}
+            >
+              {normalizeMessageText(fallbackBody)}
+            </p>
+          )}
+        </div>
+      );
+    }
+  }
+
   const { data: media, isLoading, error } = useMediaMessage(messageId, hasMedia, clientId);
 
   if (!hasMedia) {

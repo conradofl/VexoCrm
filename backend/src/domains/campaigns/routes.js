@@ -463,6 +463,16 @@ export function registerCampaignsRoutes(app, deps) {
 
   setChipQuotaDbPool(pgDatabasePool);
 
+  if (pgDatabasePool && process.env.NODE_ENV !== "test") {
+    (async () => {
+      try {
+        await pgDatabasePool.query(`ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();`);
+      } catch (err) {
+        console.warn("[campaigns-schema] Aviso ao garantir updated_at em campaigns:", err?.message || err);
+      }
+    })();
+  }
+
   const { appendLeadMessage } = createLeadMessaging({
     supabase,
     normalizeString,
@@ -1696,7 +1706,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (!authorizedClientId) return;
 
       const nowIso = new Date().toISOString();
-      const { error: archiveError } = await supabase
+      let { error: archiveError } = await supabase
         .from("campaigns")
         .update({
           archived_at: nowIso,
@@ -1705,6 +1715,19 @@ export function registerCampaignsRoutes(app, deps) {
         })
         .eq("id", id)
         .eq("client_id", authorizedClientId);
+
+      // Blindagem defensiva: se falhar por ausência da coluna updated_at, retenta sem ela
+      if (archiveError && (String(archiveError.message).includes("updated_at") || archiveError.code === "42703")) {
+        const retry = await supabase
+          .from("campaigns")
+          .update({
+            archived_at: nowIso,
+            status: "archived",
+          })
+          .eq("id", id)
+          .eq("client_id", authorizedClientId);
+        archiveError = retry.error;
+      }
 
       if (archiveError) {
         sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to archive campaign", archiveError.message);
@@ -1770,7 +1793,7 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       const nowIso = new Date().toISOString();
-      const { error: restoreError } = await supabase
+      let { error: restoreError } = await supabase
         .from("campaigns")
         .update({
           archived_at: null,
@@ -1779,6 +1802,19 @@ export function registerCampaignsRoutes(app, deps) {
         })
         .eq("id", id)
         .eq("client_id", authorizedClientId);
+
+      // Blindagem defensiva: se falhar por ausência da coluna updated_at, retenta sem ela
+      if (restoreError && (String(restoreError.message).includes("updated_at") || restoreError.code === "42703")) {
+        const retry = await supabase
+          .from("campaigns")
+          .update({
+            archived_at: null,
+            status: "paused",
+          })
+          .eq("id", id)
+          .eq("client_id", authorizedClientId);
+        restoreError = retry.error;
+      }
 
       if (restoreError) {
         sendError(res, 500, "CAMPAIGN_RESTORE_FAILED", "Failed to restore campaign", restoreError.message);
@@ -3669,6 +3705,12 @@ export function registerCampaignsRoutes(app, deps) {
           const rawChip = activeChip?.instanceId || activeChip?.instanceName || instanceName || dispatch?.evolution_instance_id || campaign?.evolution_instance_id || null;
           const { canonicalName } = await resolveInstanceIdentifier({ clientId, identifier: rawChip });
           const chipName = canonicalName || rawChip;
+          const mediaUrl = step.mediaUrl || step.media_url || step.image?.url || step.image?.dataUrl || null;
+          const isImageStep = step.type === "image" || Boolean(mediaUrl);
+          const contentType = isImageStep ? "image" : (step.contentType || step.content_type || "text");
+          const stepCaption = step.caption || step.image?.caption || "";
+          const messageText = step.message || step.text || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
+
           await appendLeadMessage({
             clientId,
             campaignId: campaign.id,
@@ -3676,7 +3718,11 @@ export function registerCampaignsRoutes(app, deps) {
             phone,
             senderType: "bot",
             direction: "outbound",
-            messageText: step.text || (step.type === "image" ? `[Imagem: ${step.image?.name || "anexo"}]` : ""),
+            messageText,
+            media_url: mediaUrl,
+            mediaUrl,
+            content_type: contentType,
+            contentType,
             deliveredAt: sentAt || new Date().toISOString(),
             messageTimestamp: sentAt || new Date().toISOString(),
             instanceName: chipName,
@@ -3686,6 +3732,10 @@ export function registerCampaignsRoutes(app, deps) {
               stepId: step.id,
               stepType: step.type,
               stepOrder: step.order,
+              mediaUrl,
+              media_url: mediaUrl,
+              contentType,
+              content_type: contentType,
             },
           });
         } catch (err) {
@@ -5766,12 +5816,16 @@ export function registerCampaignsRoutes(app, deps) {
             );
           }
           // 2. Atualiza a campanha mãe para que o cálculo de ETA use o timestamp de agora como âncora
-          await pgDatabasePool.query(
-            `UPDATE public.campaigns 
-             SET updated_at = now() 
-             WHERE id = $1`,
-            [dispatch.campaign_id]
-          );
+          try {
+            await pgDatabasePool.query(
+              `UPDATE public.campaigns 
+               SET updated_at = now() 
+               WHERE id = $1`,
+              [dispatch.campaign_id]
+            );
+          } catch (updateErr) {
+            console.warn("[campaign-dispatch] cascade updated_at warning:", updateErr?.message || updateErr);
+          }
         } catch (cascadeErr) {
           console.error("[campaign-dispatch] cascade subsequent batches error:", cascadeErr);
         }

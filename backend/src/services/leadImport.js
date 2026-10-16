@@ -400,11 +400,16 @@ export function buildPhoneLookupVariants(value) {
       variants.add(nineAndRest); // 9 dígitos
       variants.add(rest); // 8 dígitos
     } else if (canonical.length === 12 && canonical.startsWith("55")) {
-      // Fixo BR (55 + DDD + 8 dígitos)
+      // 55 + DDD + 8 dígitos (celular sem o 9º dígito ou fixo BR)
       const ddd = canonical.slice(2, 4);
       const rest = canonical.slice(4);
+      const with9 = `55${ddd}9${rest}`; // 13 dígitos
+      variants.add(with9);
+      variants.add(`+${with9}`);
       variants.add(`${ddd}${rest}`);
+      variants.add(`${ddd}9${rest}`);
       variants.add(rest);
+      variants.add(`9${rest}`);
     }
   }
 

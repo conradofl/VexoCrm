@@ -2431,10 +2431,12 @@ export default function WhatsAppInbox({
                               )}
                               <MediaMessage
                                 messageId={"waMessageId" in item && item.waMessageId ? item.waMessageId : item.id}
-                                hasMedia={item.hasMedia}
+                                hasMedia={item.hasMedia || Boolean((item as any).media_url || (item as any).mediaUrl)}
                                 fallbackBody={item.body}
                                 fromMe={item.fromMe}
                                 clientId={clientId}
+                                mediaUrl={(item as any).media_url || (item as any).mediaUrl || null}
+                                contentType={(item as any).content_type || (item as any).contentType || null}
                                 className="font-normal select-text"
                               />
                               <div

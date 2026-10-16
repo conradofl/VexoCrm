@@ -501,28 +501,74 @@ export function detectMessageType(evolutionBody) {
   if (msg.audioMessage || msg.pttMessage) return "audio";
   if (msg.imageMessage) return "image";
   if (msg.videoMessage) return "video";
-  if (msg.documentMessage) return "document";
+  if (msg.documentMessage || msg.documentWithCaptionMessage) return "document";
   if (msg.stickerMessage) return "sticker";
   if (msg.reactionMessage) return "reaction";
+  if (
+    msg.buttonsResponseMessage ||
+    msg.templateButtonReplyMessage ||
+    msg.listResponseMessage ||
+    msg.interactiveResponseMessage
+  ) {
+    return "interactive";
+  }
   if (msg.conversation || msg.extendedTextMessage) return "text";
 
   // fallback: se tem texto no body diretamente
   const directText = evolutionBody?.message || evolutionBody?.text || evolutionBody?.body;
-  if (directText) return "text";
+  if (directText && typeof directText === "string" && directText.trim().toLowerCase() !== "unknown") return "text";
 
-  return "unknown";
+  return "text";
 }
 
 export function extractTextFromBody(evolutionBody) {
   const msg = evolutionBody?.data?.message || evolutionBody?.message || {};
-  return (
-    msg.conversation ||
-    msg.extendedTextMessage?.text ||
-    evolutionBody?.message ||
-    evolutionBody?.text ||
-    evolutionBody?.body ||
-    null
-  );
+
+  if (msg.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+  if (msg.conversation) return msg.conversation;
+
+  // Interações e botões
+  if (msg.buttonsResponseMessage?.selectedDisplayText) return msg.buttonsResponseMessage.selectedDisplayText;
+  if (msg.buttonsResponseMessage?.selectedButtonId) return msg.buttonsResponseMessage.selectedButtonId;
+  if (msg.templateButtonReplyMessage?.selectedDisplayText) return msg.templateButtonReplyMessage.selectedDisplayText;
+  if (msg.listResponseMessage?.title) {
+    return msg.listResponseMessage.description
+      ? `${msg.listResponseMessage.title} - ${msg.listResponseMessage.description}`
+      : msg.listResponseMessage.title;
+  }
+  if (msg.listResponseMessage?.description) return msg.listResponseMessage.description;
+  if (msg.listResponseMessage?.singleSelectReply?.selectedRowId) {
+    return msg.listResponseMessage.singleSelectReply.selectedRowId;
+  }
+  if (msg.interactiveResponseMessage?.body?.text) return msg.interactiveResponseMessage.body.text;
+
+  // Mídias
+  if (msg.imageMessage) {
+    return msg.imageMessage.caption || "[Imagem]";
+  }
+  if (msg.videoMessage) {
+    return msg.videoMessage.caption || "[Vídeo]";
+  }
+  if (msg.audioMessage || msg.pttMessage) {
+    return "[Áudio]";
+  }
+  if (msg.documentMessage || msg.documentWithCaptionMessage) {
+    const doc = msg.documentMessage || msg.documentWithCaptionMessage?.message?.documentMessage;
+    return doc?.fileName || doc?.caption || "[Documento]";
+  }
+  if (msg.stickerMessage) {
+    return "[Sticker]";
+  }
+  if (msg.reactionMessage) {
+    return msg.reactionMessage.text || "[Reação]";
+  }
+
+  const directText = evolutionBody?.message || evolutionBody?.text || evolutionBody?.body;
+  if (typeof directText === "string" && directText.trim() && directText.trim().toLowerCase() !== "unknown") {
+    return directText.trim();
+  }
+
+  return "[Mensagem]";
 }
 
 export function extractMediaBase64(evolutionBody) {
@@ -701,8 +747,19 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
     }
   }
 
+  const rawMsg = evolutionBody?.data?.message || evolutionBody?.message || {};
+  const imageMsg = rawMsg.imageMessage;
+  const mediaUrl = imageMsg?.url || evolutionBody?.data?.mediaUrl || evolutionBody?.mediaUrl || null;
+
+  if (type === "interactive") {
+    const text = extractTextFromBody(evolutionBody) || "[Interação]";
+    return { type, text, waMessageId, messageTimestamp, mediaPath: null };
+  }
+
   if (type === "text") {
-    return { type, text: extractTextFromBody(evolutionBody) || "", waMessageId, messageTimestamp };
+    const rawText = extractTextFromBody(evolutionBody) || "";
+    const text = (!rawText || rawText.trim().toLowerCase() === "unknown") ? "[Mensagem]" : rawText;
+    return { type, text, waMessageId, messageTimestamp };
   }
 
   // Se for grupo ou outbound (fromMe), descarta antes de puxar: evita custos e banda desnecessários
@@ -713,10 +770,14 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
   // Decisão de produto (Conrado): figurinha fica fora do storage por decisão explícita de produto, e não por esquecimento (mediaPath: null intencional).
   if (type === "sticker") return { type, text: "[sticker]", waMessageId, messageTimestamp, mediaPath: null };
   if (type === "reaction") return { type, text: "[reação]", waMessageId, messageTimestamp };
-  if (type === "video") return { type, text: caption ? `[vídeo] ${caption}` : "[vídeo]", waMessageId, messageTimestamp };
+  if (type === "video") {
+    const text = rawMsg.videoMessage?.caption || caption ? `[vídeo] ${rawMsg.videoMessage?.caption || caption}` : "[vídeo]";
+    return { type, text, contentType: "video", content_type: "video", waMessageId, messageTimestamp };
+  }
   if (type === "document") {
-    const name = evolutionBody?.data?.message?.documentMessage?.fileName || "documento";
-    return { type, text: `[documento: ${name}]`, waMessageId, messageTimestamp };
+    const doc = rawMsg.documentMessage || rawMsg.documentWithCaptionMessage?.message?.documentMessage;
+    const name = doc?.fileName || doc?.caption || "documento";
+    return { type, text: name.startsWith("[") ? name : `[documento: ${name}]`, contentType: "document", content_type: "document", waMessageId, messageTimestamp };
   }
 
   // Mídia elegível para transcrição/descrição: áudio e imagem
@@ -769,6 +830,8 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
           type,
           text: transcription,
           displayLabel: transcription,
+          contentType: "audio",
+          content_type: "audio",
           transcribed: true,
           transcriptionFailed: false,
           waMessageId,
@@ -781,6 +844,8 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
       type,
       text: "[áudio]",
       displayLabel: "[áudio]",
+      contentType: "audio",
+      content_type: "audio",
       transcribed: false,
       transcriptionFailed: true,
       waMessageId,
@@ -797,6 +862,10 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
         return {
           type,
           text: `[imagem: ${description}]${caption ? ` — legenda: "${caption}"` : ""}`,
+          contentType: "image",
+          content_type: "image",
+          mediaUrl,
+          media_url: mediaUrl,
           described: true,
           waMessageId,
           messageTimestamp,
@@ -804,12 +873,32 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
         };
       }
     }
-    return { type, text: caption ? `[imagem] ${caption}` : "[imagem]", described: false, waMessageId, messageTimestamp, mediaPath };
+    const text = caption || "[Imagem]";
+    return {
+      type,
+      text,
+      contentType: "image",
+      content_type: "image",
+      mediaUrl,
+      media_url: mediaUrl,
+      described: false,
+      waMessageId,
+      messageTimestamp,
+      mediaPath,
+    };
   }
 
-  return { type, text: `[${type}]`, waMessageId, messageTimestamp, mediaPath };
-
-  return { type: "unknown", text: "", waMessageId, messageTimestamp };
+  const fallbackText = extractTextFromBody(evolutionBody);
+  const safeText = (!fallbackText || fallbackText.trim().toLowerCase() === "unknown")
+    ? (type ? `[${type}]` : "[Mensagem]")
+    : fallbackText;
+  return {
+    type: type && type !== "unknown" ? type : "text",
+    text: safeText,
+    waMessageId,
+    messageTimestamp,
+    mediaPath,
+  };
 }
 
 // ─── Normalização de Origem de Marketing ──────────────────────────────────────

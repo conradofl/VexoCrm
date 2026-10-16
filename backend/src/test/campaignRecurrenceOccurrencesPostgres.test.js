@@ -32,6 +32,9 @@ const BASE_SCHEMA = `
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
     nome TEXT, telefone TEXT, tipo_cliente TEXT, faixa_consumo TEXT, qualificacao TEXT, cidade TEXT, estado TEXT, status TEXT,
+    opt_out BOOLEAN DEFAULT false,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    dados JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE TABLE public.campaigns (
@@ -46,6 +49,7 @@ const BASE_SCHEMA = `
     scheduled_for TIMESTAMPTZ,
     last_triggered_at TIMESTAMPTZ,
     archived_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT now(),
     analytics_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
     campaign_prompt_id UUID,
     mode TEXT,

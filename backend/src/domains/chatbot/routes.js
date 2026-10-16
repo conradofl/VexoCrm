@@ -133,6 +133,18 @@ export function registerChatbotRoutes(app, deps) {
 
   const lastKanbanDivergenceByTenant = new Map();
 
+  // Garante colunas de mídia no lead_messages de forma idempotente e segura
+  if (pgDatabasePool && process.env.NODE_ENV !== "test") {
+    (async () => {
+      try {
+        await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS media_url TEXT;");
+        await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS content_type TEXT;");
+      } catch (err) {
+        console.warn("[chatbot-schema] Aviso ao garantir media_url e content_type em lead_messages:", err?.message || err);
+      }
+    })();
+  }
+
   // Aceita um chip ou VÁRIOS separados por vírgula ("Chip A,Chip B") — o inbox
   // permite selecionar mais de um chip ao mesmo tempo. Devolve todos os aliases
   // (nome amigável, id e nome extraído da URL da Evolution) via helper único canônico.
@@ -400,6 +412,8 @@ export function registerChatbotRoutes(app, deps) {
     try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS contact_name TEXT;").catch(() => {}); } catch(e) {}
     try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT false;").catch(() => {}); } catch(e) {}
     try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS message_timestamp TIMESTAMPTZ;").catch(() => {}); } catch(e) {}
+    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS media_url TEXT;").catch(() => {}); } catch(e) {}
+    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS content_type TEXT;").catch(() => {}); } catch(e) {}
 
     try {
       await pgDatabasePool.query(`
@@ -1319,15 +1333,49 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
 
-      // Conversas de grupo/LID são gravadas com o jid inteiro em phone
-      // (ex.: "120363...@g.us"). sanitizePhone removeria o sufixo e a busca não
-      // casaria — era por isso que clicar num grupo mostrava "Sem mensagens
-      // carregadas". Aceita as duas formas: o chatId como veio e só os dígitos.
-      const isJidChat = chatId.includes("@");
-      const cleanPhone = isJidChat ? chatId : sanitizePhone(chatId);
-      const phoneVariants = isJidChat
-        ? [chatId]
-        : Array.from(new Set([chatId, cleanPhone, ...buildPhoneLookupVariants(chatId)].filter(Boolean)));
+      // Suporte unificado com e sem 9º dígito brasileiro (DDD > 30 e geral) e formatos com/sem JID.
+      // Conversas de grupo mantêm o JID do grupo intacto ("...@g.us").
+      const isGroup = isGroupJid(chatId) || chatId.endsWith("@g.us");
+      let cleanPhone = chatId;
+      let phoneVariants = [chatId];
+
+      if (!isGroup) {
+        const rawDigits = chatId.replace(/\D/g, "");
+        const canonical = sanitizePhone(rawDigits || chatId);
+        cleanPhone = canonical || rawDigits || chatId;
+
+        const baseSet = new Set([
+          chatId,
+          cleanPhone,
+          rawDigits,
+          ...buildPhoneLookupVariants(chatId),
+          ...buildPhoneLookupVariants(rawDigits),
+        ].filter(Boolean));
+
+        if (rawDigits.startsWith("55")) {
+          const ddd = rawDigits.slice(2, 4);
+          if (rawDigits.length === 12) {
+            // 55 + DDD + 8 dígitos -> adiciona versão de 13 dígitos com 9
+            const rest = rawDigits.slice(4);
+            baseSet.add(`55${ddd}9${rest}`);
+            baseSet.add(`+55${ddd}9${rest}`);
+          } else if (rawDigits.length === 13 && rawDigits[4] === "9") {
+            // 55 + DDD + 9 + 8 dígitos -> adiciona versão de 12 dígitos sem 9
+            const rest = rawDigits.slice(5);
+            baseSet.add(`55${ddd}${rest}`);
+            baseSet.add(`+55${ddd}${rest}`);
+          }
+        }
+
+        const list = Array.from(baseSet);
+        for (const v of list) {
+          if (!v.includes("@")) {
+            baseSet.add(`${v}@s.whatsapp.net`);
+            baseSet.add(`${v}@c.us`);
+          }
+        }
+        phoneVariants = Array.from(baseSet);
+      }
 
       const userUid = req.authAccess?.uid || req.authUser?.uid || null;
 
@@ -1430,6 +1478,8 @@ export function registerChatbotRoutes(app, deps) {
           wa_message_id,
           sender_type,
           media_path,
+          media_url,
+          content_type,
           meta
         FROM public.lead_messages
         WHERE client_id = $1 AND phone = ANY($2)
@@ -1440,7 +1490,19 @@ export function registerChatbotRoutes(app, deps) {
         ORDER BY COALESCE(message_timestamp, delivered_at, created_at) DESC NULLS LAST, id DESC
         LIMIT $3
       `;
-      const result = await pgDatabasePool.query(queryText, queryParams);
+      let result;
+      try {
+        result = await pgDatabasePool.query(queryText, queryParams);
+      } catch (err) {
+        if (err.code === "42703" || err.message?.includes("media_url") || err.message?.includes("content_type")) {
+          const fallbackQueryText = queryText
+            .replace("media_url,\n          content_type,", "")
+            .replace("media_url, content_type,", "");
+          result = await pgDatabasePool.query(fallbackQueryText, queryParams);
+        } else {
+          throw err;
+        }
+      }
 
       // Supressão de duplicatas históricas na leitura (reversível, sem apagar do banco):
       // 1. Linhas com o mesmo wa_message_id
@@ -1483,16 +1545,18 @@ export function registerChatbotRoutes(app, deps) {
         const text = row.message_text || "";
         const meta = row.meta || {};
         const metaMediaType = meta.mediaType || meta.messageType || null;
+        const mediaUrl = row.media_url || meta.mediaUrl || meta.media_url || null;
+        const contentType = row.content_type || meta.contentType || meta.content_type || (mediaUrl ? "image" : null);
 
         let deducedType = "chat";
-        if (metaMediaType === "audio" || text.startsWith("[áudio]") || text.startsWith("[audio]")) deducedType = "audio";
-        else if (metaMediaType === "image" || text.startsWith("[imagem") || text.startsWith("[image")) deducedType = "image";
-        else if (metaMediaType === "video" || text.startsWith("[vídeo]") || text.startsWith("[video]")) deducedType = "video";
-        else if (metaMediaType === "document" || text.startsWith("[documento]") || text.startsWith("[document]") || text.startsWith("[arquivo]")) deducedType = "document";
+        if (contentType === "image" || metaMediaType === "image" || mediaUrl || text.startsWith("[imagem") || text.startsWith("[image")) deducedType = "image";
+        else if (contentType === "audio" || metaMediaType === "audio" || text.startsWith("[áudio]") || text.startsWith("[audio]")) deducedType = "audio";
+        else if (contentType === "video" || metaMediaType === "video" || text.startsWith("[vídeo]") || text.startsWith("[video]")) deducedType = "video";
+        else if (contentType === "document" || metaMediaType === "document" || text.startsWith("[documento]") || text.startsWith("[document]") || text.startsWith("[arquivo]")) deducedType = "document";
         else if (metaMediaType === "sticker" || text.startsWith("[sticker]")) deducedType = "sticker";
 
         const isMediaPrefix = deducedType !== "chat";
-        const hasMedia = Boolean(row.media_path) || isMediaPrefix;
+        const hasMedia = Boolean(row.media_path || mediaUrl) || isMediaPrefix;
 
         return {
           id: String(row.id),
@@ -1506,6 +1570,10 @@ export function registerChatbotRoutes(app, deps) {
           messageTimestamp: row.message_timestamp,
           waMessageId: row.wa_message_id,
           mediaPath: row.media_path || null,
+          mediaUrl,
+          media_url: mediaUrl,
+          contentType,
+          content_type: contentType,
           meta,
           phone: row.phone,
           direction: row.direction,
@@ -2604,6 +2672,10 @@ export function registerChatbotRoutes(app, deps) {
       return;
     }
 
+    if (typeof messageData.text === "string" && messageData.text.trim().toLowerCase() === "unknown") {
+      messageData.text = messageData.type === "image" ? "[Imagem]" : "[Mensagem]";
+    }
+
     // ── ETAPA 3: GRAVAÇÃO DA MENSAGEM (SEMPRE, INBOUND OU OUTBOUND/FROM_ME) ──
     // Se fromMe = true: gravada como direction "outbound" e senderType "device".
     // Se fromMe = false: gravada como direction "inbound" e senderType "lead".
@@ -2615,6 +2687,8 @@ export function registerChatbotRoutes(app, deps) {
         senderType: fromMe ? "device" : "lead",
         direction: fromMe ? "outbound" : "inbound",
         messageText: messageData.text,
+        mediaUrl: messageData.mediaUrl || messageData.media_url || null,
+        contentType: messageData.contentType || messageData.content_type || (messageData.type === "image" ? "image" : null),
         meta: {
           source: fromMe ? "device-whatsapp-webhook" : "hardcoded-chat-webhook",
           messageType: messageData.type || null,

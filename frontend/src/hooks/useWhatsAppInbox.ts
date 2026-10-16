@@ -58,6 +58,11 @@ export interface WhatsAppMessage {
   type: string | null;
   hasMedia: boolean;
   mediaPath?: string | null;
+  mediaUrl?: string | null;
+  media_url?: string | null;
+  contentType?: string | null;
+  content_type?: string | null;
+  meta?: any;
   waMessageId?: string | null;
   phone?: string | null;
   direction?: string | null;

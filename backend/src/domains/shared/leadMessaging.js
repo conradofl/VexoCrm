@@ -39,6 +39,10 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
     waMessageId = null,
     messageTimestamp = null,
     mediaPath = null,
+    mediaUrl = null,
+    media_url = null,
+    contentType = null,
+    content_type = null,
   }) {
     const supabase = injectedSupabase || liveSupabase;
     if (!supabase) {
@@ -134,6 +138,9 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
       }
     }
 
+    const resolvedMediaUrl = mediaUrl || media_url || null;
+    const resolvedContentType = contentType || content_type || (resolvedMediaUrl ? "image" : null);
+
     const payload = {
       client_id: clientId,
       lead_id: resolvedLeadId,
@@ -145,18 +152,35 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
       message_text: normalizedMessage,
       delivered_at: deliveredAt || new Date().toISOString(),
       message_timestamp: messageTimestamp || deliveredAt || new Date().toISOString(),
-      meta: meta && typeof meta === "object" ? meta : {},
+      meta: {
+        ...(meta && typeof meta === "object" ? meta : {}),
+        ...(resolvedMediaUrl ? { mediaUrl: resolvedMediaUrl, media_url: resolvedMediaUrl } : {}),
+        ...(resolvedContentType ? { contentType: resolvedContentType, content_type: resolvedContentType } : {}),
+      },
       instance_name: canonicalInstanceName || instanceName || null,
       wa_message_id: waMessageId || null,
       media_path: mediaPath || null,
+      media_url: resolvedMediaUrl,
+      content_type: resolvedContentType,
     };
 
     let { error } = await supabase.from("lead_messages").insert(payload);
+
+    // Se falhar por colunas media_url / content_type inexistentes, tenta sem elas
+    if (error && (String(error.message).includes("media_url") || String(error.message).includes("content_type"))) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.media_url;
+      delete fallbackPayload.content_type;
+      const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);
+      error = retryRes.error;
+    }
 
     // Se falhar por coluna media_path inexistente, tenta sem ela
     if (error && String(error.message).includes("media_path")) {
       const fallbackPayload = { ...payload };
       delete fallbackPayload.media_path;
+      delete fallbackPayload.media_url;
+      delete fallbackPayload.content_type;
       const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);
       error = retryRes.error;
     }
@@ -166,6 +190,8 @@ export function createLeadMessaging({ supabase: injectedSupabase, normalizeStrin
       const fallbackPayload = { ...payload };
       delete fallbackPayload.message_timestamp;
       delete fallbackPayload.media_path;
+      delete fallbackPayload.media_url;
+      delete fallbackPayload.content_type;
       const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);
       error = retryRes.error;
     }

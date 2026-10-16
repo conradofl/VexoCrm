@@ -1981,6 +1981,12 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
 
       try {
         const chipName = activeChip?.instanceId || activeChip?.instanceName || instanceName || dispatchSettings?.instanceName || null;
+        const mediaUrl = step.mediaUrl || step.media_url || step.image?.url || step.image?.dataUrl || null;
+        const isImageStep = step.type === "image" || Boolean(mediaUrl);
+        const contentType = isImageStep ? "image" : (step.contentType || step.content_type || "text");
+        const stepCaption = step.caption || step.image?.caption || "";
+        const messageText = step.message || step.text || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
+
         await appendLeadMessage({
           clientId,
           campaignId: campaign.id,
@@ -1988,7 +1994,11 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
           phone,
           senderType: "bot",
           direction: "outbound",
-          messageText: step.text || (step.type === "image" ? `[Imagem: ${step.image?.name || "anexo"}]` : ""),
+          messageText,
+          media_url: mediaUrl,
+          mediaUrl,
+          content_type: contentType,
+          contentType,
           deliveredAt: sentAt || new Date().toISOString(),
           messageTimestamp: sentAt || new Date().toISOString(),
           instanceName: chipName,
@@ -1997,6 +2007,10 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
             stepId: step.id,
             stepType: step.type,
             stepOrder: step.order ?? originalStepIndex + 1,
+            mediaUrl,
+            media_url: mediaUrl,
+            contentType,
+            content_type: contentType,
           },
         });
       } catch (err) {
