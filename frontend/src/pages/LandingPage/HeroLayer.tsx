@@ -1,22 +1,19 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { ArrowRight } from "lucide-react";
-import { Link } from "react-router-dom";
 import { LightBeamCanvas } from "./LightBeamCanvas";
 
 interface HeroLayerProps {
   isHeroOut: boolean;
   scrollY?: number;
   onOpenModal: () => void;
-  crmHref: string;
-  primaryLabel: string;
+  crmHref?: string;
+  primaryLabel?: string;
 }
 
 export function HeroLayer({
   isHeroOut,
   scrollY = 0,
   onOpenModal,
-  crmHref,
-  primaryLabel,
 }: HeroLayerProps) {
   // Transição contínua suave e cinematográfica ao rolar a página
   const progress = Math.min(1, Math.max(0, scrollY / 380));
@@ -26,25 +23,6 @@ export function HeroLayer({
   // O desfoque óptico só entra suavemente no terço final da saída, mantendo o texto nítido no início
   const heroBlur = progress > 0.55 ? (progress - 0.55) * 14 : 0;
   const isPointerDisabled = isHeroOut || progress > 0.85;
-
-  // Estado para destacar o item de navegação ativo/selecionado
-  const [activeNav, setActiveNav] = useState<string>("");
-
-  useEffect(() => {
-    function handleHashChange() {
-      setActiveNav(window.location.hash || "");
-    }
-    handleHashChange();
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
-
-  const navItems = [
-    { href: "#sec-tese", label: "Posicionamento" },
-    { href: "#sec-metodo", label: "Método" },
-    { href: "#sec-modulos", label: "Módulos" },
-    { href: "#sec-faq", label: "FAQ" },
-  ];
 
   return (
     <div
@@ -63,60 +41,8 @@ export function HeroLayer({
       <LightBeamCanvas />
 
       <div className="hero-inner">
-        {/* Top Header Ampliado com Cápsula de Vidro Fosco & Iluminação ao Passar o Mouse */}
-        <header className="hero-header">
-          {/* Logo Ampliado e Refinado */}
-          <a href="#" className="flex items-center gap-3 group focus:outline-none">
-            <div className="flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#A020F0] via-[#7B1FA2] to-[#4B00FF] text-white font-extrabold text-lg shadow-[0_0_20px_rgba(160,32,240,0.55)] border border-white/20 transition-transform duration-300 group-hover:scale-105 group-hover:shadow-[0_0_28px_rgba(180,60,255,0.8)]">
-              V
-            </div>
-            <div className="flex flex-col">
-              <span className="font-extrabold tracking-[0.22em] text-sm sm:text-base text-white uppercase drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-                VEXO OS
-              </span>
-              <span className="text-[10px] tracking-wider text-[#D7B4FF] uppercase font-mono hidden sm:block">
-                Sales Intelligence
-              </span>
-            </div>
-          </a>
-
-          {/* Barra de Navegação em Cápsula Fosca com Iluminação no Hover e Seleção */}
-          <nav className="hero-nav-capsule flex items-center gap-1 sm:gap-2">
-            {navItems.map((item) => {
-              const isSelected = activeNav === item.href;
-              return (
-                <a
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setActiveNav(item.href)}
-                  className={`hero-nav-link ${isSelected ? "is-selected" : ""}`}
-                >
-                  {item.label}
-                </a>
-              );
-            })}
-
-            {/* Divisor vertical sutil */}
-            <div className="hidden sm:block h-5 w-[1px] bg-white/15 mx-1" />
-
-            {/* Botão de Acesso à Plataforma */}
-            {crmHref.startsWith("http") ? (
-              <a
-                href={crmHref}
-                className="hero-header-cta"
-              >
-                {primaryLabel}
-              </a>
-            ) : (
-              <Link
-                to={crmHref}
-                className="hero-header-cta"
-              >
-                {primaryLabel}
-              </Link>
-            )}
-          </nav>
-        </header>
+        {/* Espaçador superior preservando o centro perfeito do Hero abaixo da Navbar fixa */}
+        <div className="hero-top-spacer h-12 sm:h-14 w-full flex-shrink-0" aria-hidden="true" />
 
         {/* Centro de Conversão */}
         <div className="hero-content">

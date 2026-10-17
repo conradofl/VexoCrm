@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getCrmLoginUrl } from "@/lib/domainRouting";
 import { ContentLayer } from "./LandingPage/ContentLayer";
 import { HeroLayer } from "./LandingPage/HeroLayer";
+import { LandingNavbar } from "./LandingPage/LandingNavbar";
 import { LeadCaptureModal } from "./LandingPage/LeadCaptureModal";
 import "./LandingPage/landing.css";
 
@@ -49,13 +50,18 @@ export default function LandingPage() {
 
   return (
     <div className="relative min-h-screen bg-[#00000A] text-[#F5F5FF] overflow-x-hidden selection:bg-[#9600FF] selection:text-white">
+      {/* Barra de Navegação Fixa no Topo que Acompanha toda a rolagem da página */}
+      <LandingNavbar
+        scrollY={scrollY}
+        crmHref={crmHref}
+        primaryLabel={primaryLabel}
+      />
+
       {/* Camada Fixa Superior (Hero com o "V" de Vexo e Luz de Lanterna Suave) */}
       <HeroLayer
         isHeroOut={isHeroOut}
         scrollY={scrollY}
         onOpenModal={() => setIsModalOpen(true)}
-        crmHref={crmHref}
-        primaryLabel={primaryLabel}
       />
 
       {/* Camada Deslizante de Conteúdo (Módulos, Pilares, FAQ e Rodapé) */}
