@@ -473,4 +473,137 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
     expect(dispatchesTable[dispatchId].sent_count).toBe(0);
     expect(dispatchesTable[dispatchId].failed_count).toBe(0);
   });
+
+  it("4. ignoreSendWindow = false respeita janela fechada e pausa o lote", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ key: { id: "EVO-OK-1" } }),
+    });
+
+    const dispatchId = "disp-e2e-window-pause";
+    const dispatchesTable = {
+      [dispatchId]: {
+        id: dispatchId,
+        campaign_id: "camp-e2e-1",
+        status: "running",
+        limit_per_run: 10,
+        offset: 0,
+        sent_count: 0,
+        failed_count: 0,
+        target_count: 1,
+        dispatch_options: { leadDelaySeconds: 0 },
+      },
+    };
+    const mockSupabase = createMockSupabase(dispatchesTable, dispatchId);
+
+    const mockPool = {
+      query: vi.fn(async (sql, params) => {
+        const sqlStr = String(sql || "");
+        if (sqlStr.includes("lead_import_items")) {
+          return {
+            rows: [
+              { id: "lead-1", nome: "Ana", telefone: "5511999990001", client_id: "tenant-e2e" },
+            ],
+          };
+        }
+        if (sqlStr.includes("INSERT INTO public.campaign_dispatch_runs")) {
+          return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
+        }
+        if (sqlStr.includes("COUNT(*) FILTER")) {
+          return {
+            rows: [{ sent: 0, failed: 0, skipped: 0 }],
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+    };
+
+    const routes = createTestContext(mockPool, {
+      getLeadClientN8nSettings: async () => ({
+        send_window_enabled: true,
+        send_window_start: "03:00",
+        send_window_end: "03:01", // fechado agora
+        send_window_days: ["seg"],
+      }),
+    });
+
+    await routes.runCampaignDispatch({
+      dispatch: dispatchesTable[dispatchId],
+      campaign: mockCampaign,
+      supabase: mockSupabase,
+      ignoreSendWindow: false,
+    });
+
+    expect(dispatchesTable[dispatchId].status).toBe("paused");
+    expect(dispatchesTable[dispatchId].error_message).toContain("Pausado — fora da janela de envio");
+  });
+
+  it("5. ignoreSendWindow = true faz bypass da janela de envio e conclui o lote com sucesso", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ key: { id: "EVO-OK-1" } }),
+    });
+
+    const dispatchId = "disp-e2e-window-bypass";
+    const dispatchesTable = {
+      [dispatchId]: {
+        id: dispatchId,
+        campaign_id: "camp-e2e-1",
+        status: "running",
+        limit_per_run: 10,
+        offset: 0,
+        sent_count: 0,
+        failed_count: 0,
+        target_count: 1,
+        dispatch_options: { leadDelaySeconds: 0 },
+      },
+    };
+    const mockSupabase = createMockSupabase(dispatchesTable, dispatchId);
+
+    const mockPool = {
+      query: vi.fn(async (sql, params) => {
+        const sqlStr = String(sql || "");
+        if (sqlStr.includes("lead_import_items")) {
+          return {
+            rows: [
+              { id: "lead-1", nome: "Ana", telefone: "5511999990001", client_id: "tenant-e2e" },
+            ],
+          };
+        }
+        if (sqlStr.includes("INSERT INTO public.campaign_dispatch_runs")) {
+          return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
+        }
+        if (sqlStr.includes("UPDATE public.campaign_dispatch_runs") && sqlStr.includes("status = 'sent'")) {
+          return { rowCount: 1, rows: [] };
+        }
+        if (sqlStr.includes("COUNT(*) FILTER")) {
+          return {
+            rows: [{ sent: 1, failed: 0, skipped: 0 }],
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+    };
+
+    const routes = createTestContext(mockPool, {
+      getLeadClientN8nSettings: async () => ({
+        send_window_enabled: true,
+        send_window_start: "03:00",
+        send_window_end: "03:01", // fechado agora
+        send_window_days: ["seg"],
+      }),
+    });
+
+    await routes.runCampaignDispatch({
+      dispatch: dispatchesTable[dispatchId],
+      campaign: mockCampaign,
+      supabase: mockSupabase,
+      ignoreSendWindow: true,
+    });
+
+    expect(dispatchesTable[dispatchId].status).toBe("done");
+    expect(dispatchesTable[dispatchId].sent_count).toBe(1);
+  });
 });

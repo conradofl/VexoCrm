@@ -72,10 +72,18 @@ export function LiveChatSimulator() {
   const [isSimulationApproved, setIsSimulationApproved] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isFirstRender = useRef(true);
 
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return; // Permite ao visitante no celular ver o início da conversa sem ser arremessado pro meio de uma mensagem cortada
+    }
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
   }, [messages, isTyping]);
 
@@ -157,22 +165,22 @@ export function LiveChatSimulator() {
   ];
 
   return (
-    <div className="relative w-full rounded-2xl border border-[rgba(245,245,255,0.12)] bg-[#0B0A1C]/95 p-4 sm:p-6 backdrop-blur-2xl shadow-[0_12px_50px_rgba(0,0,0,0.6)]">
+    <div className="relative w-full rounded-2xl border border-[rgba(245,245,255,0.12)] bg-[#0B0A1C]/95 p-3 sm:p-6 backdrop-blur-2xl shadow-[0_12px_50px_rgba(0,0,0,0.6)]">
       {/* Top Bar do Chat */}
-      <div className="flex items-center justify-between border-b border-white/8 pb-4 mb-4">
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#9600FF] to-[#4B00FF] text-white shadow-[0_0_16px_rgba(150,0,255,0.5)]">
-            <Bot className="h-5 w-5" />
+      <div className="flex items-center justify-between border-b border-white/8 pb-3.5 mb-3.5">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="relative flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#9600FF] to-[#4B00FF] text-white shadow-[0_0_16px_rgba(150,0,255,0.5)] shrink-0">
+            <Bot className="h-4 w-4 sm:h-5 sm:w-5" />
             <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0B0A1C] bg-[#00FF96] animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <span className="text-xs sm:text-sm font-bold text-white">Vexo Commercial Agent</span>
-              <span className="rounded-full bg-[#00FF96]/15 border border-[#00FF96]/30 px-2 py-0.5 text-[9px] font-mono text-[#00FF96]">
+              <span className="rounded-full bg-[#00FF96]/15 border border-[#00FF96]/30 px-1.5 sm:px-2 py-0.5 text-[8.5px] sm:text-[9px] font-mono text-[#00FF96]">
                 ONLINE 24/7
               </span>
             </div>
-            <span className="text-[10px] text-white/50">Tempo de resposta: &lt; 2s · RAG Ativo</span>
+            <span className="text-[9.5px] sm:text-[10px] text-white/50 block">Tempo de resposta: &lt; 2s · RAG Ativo</span>
           </div>
         </div>
 
@@ -185,14 +193,14 @@ export function LiveChatSimulator() {
         </button>
       </div>
 
-      {/* Chips Rápidos de Interação Conforme Especificação */}
-      <div className="mb-3 flex flex-wrap gap-1.5 sm:gap-2">
+      {/* Chips Rápidos de Interação (Scroll horizontal suave no celular, wrap no desktop) */}
+      <div className="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1.5 sm:pb-0 sm:flex-wrap no-scrollbar">
         {quickChips.map((chip) => (
           <button
             key={chip.label}
             onClick={() => handleSend(chip.prompt)}
             disabled={isTyping}
-            className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white/75 hover:bg-white/10 hover:border-[#9600FF]/50 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+            className="shrink-0 whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10.5px] sm:text-[11px] text-white/75 hover:bg-white/10 hover:border-[#9600FF]/50 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-50"
           >
             {chip.label}
           </button>
@@ -202,7 +210,7 @@ export function LiveChatSimulator() {
       {/* Stream de Mensagens com Rolagem */}
       <div
         ref={scrollRef}
-        className="space-y-3.5 max-h-[340px] sm:max-h-[380px] overflow-y-auto pr-1.5 custom-scrollbar"
+        className="space-y-3 max-h-[380px] sm:max-h-[420px] overflow-y-auto pr-1 custom-scrollbar"
       >
         {messages.map((msg) => (
           <div
@@ -210,34 +218,34 @@ export function LiveChatSimulator() {
             className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
           >
             {msg.sender === "user" ? (
-              <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-gradient-to-r from-white/10 to-white/5 border border-white/12 p-3 text-xs text-white/90 shadow-md">
-                <p className="leading-relaxed whitespace-pre-line">{msg.text}</p>
+              <div className="max-w-[88%] sm:max-w-[85%] rounded-2xl rounded-tr-sm bg-gradient-to-r from-white/10 to-white/5 border border-white/12 p-2.5 sm:p-3 text-[11.5px] sm:text-xs text-white/90 shadow-md">
+                <p className="leading-relaxed whitespace-pre-line break-words">{msg.text}</p>
                 <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-white/40">
                   <span>{msg.time}</span>
                   <CheckCheck className="h-3 w-3 text-sky-400" />
                 </div>
               </div>
             ) : (
-              <div className="max-w-[90%] rounded-2xl rounded-tl-sm bg-[#13112E] border border-[#9600FF]/35 p-3.5 text-xs text-white shadow-xl">
+              <div className="w-full sm:max-w-[92%] rounded-2xl rounded-tl-sm bg-[#13112E] border border-[#9600FF]/35 p-3 sm:p-3.5 text-[11.5px] sm:text-xs text-white shadow-xl">
                 {msg.badge && (
-                  <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#D7B4FF] mb-1.5">
-                    <Sparkles className="h-3 w-3 text-[#D7B4FF]" />
-                    <span>{msg.badge}</span>
+                  <div className="flex items-center gap-1.5 text-[9.5px] sm:text-[10px] font-mono text-[#D7B4FF] mb-1.5">
+                    <Sparkles className="h-3 w-3 text-[#D7B4FF] shrink-0" />
+                    <span className="truncate">{msg.badge}</span>
                   </div>
                 )}
-                <p className="leading-relaxed text-white/85 whitespace-pre-line">{msg.text}</p>
+                <p className="leading-relaxed text-white/85 whitespace-pre-line break-words">{msg.text}</p>
 
-                {/* Card de Simulação em PDF */}
+                {/* Card de Simulação em PDF (Totalmente protegido contra estouro no mobile) */}
                 {msg.contract && (
                   <div
                     onClick={() => setIsModalOpen(true)}
-                    className="mt-3 group rounded-xl border border-[#9600FF]/40 bg-[#1C1642] p-2.5 flex items-center justify-between gap-3 hover:border-[#9600FF]/80 hover:bg-[#231B54] transition-all cursor-pointer shadow-lg"
+                    className="mt-3 group rounded-xl border border-[#9600FF]/40 bg-[#1C1642] p-2.5 flex items-center justify-between gap-2.5 hover:border-[#9600FF]/80 hover:bg-[#231B54] transition-all cursor-pointer shadow-lg overflow-hidden"
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#9600FF]/30 text-[#D7B4FF] group-hover:scale-105 transition-transform shrink-0">
                         <FileText className="h-4 w-4" />
                       </div>
-                      <div className="overflow-hidden">
+                      <div className="min-w-0 flex-1">
                         <p className="text-[11px] font-bold text-white group-hover:text-[#D7B4FF] transition-colors truncate">
                           {msg.contract.name}
                         </p>
@@ -253,9 +261,9 @@ export function LiveChatSimulator() {
                   </div>
                 )}
 
-                <div className="mt-2.5 flex items-center justify-between text-[9px] text-white/40 pt-2 border-t border-white/5">
-                  <span className="text-[#D7B4FF] font-medium">🔒 Trava humana ativa: nada é enviado sem o seu OK</span>
-                  <span>{msg.time}</span>
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[9px] text-white/40 pt-2 border-t border-white/5">
+                  <span className="text-[#D7B4FF] font-medium leading-tight">🔒 Trava humana ativa: nada é enviado sem o seu OK</span>
+                  <span className="shrink-0">{msg.time}</span>
                 </div>
               </div>
             )}

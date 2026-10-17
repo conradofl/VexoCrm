@@ -78,11 +78,18 @@ function shuffledOrder(length, seed) {
   return order;
 }
 
-function leadVariableIsFilled(name, lead, phone) {
-  const key = normalizeString(name).toLowerCase();
+export function leadVariableIsFilled(name, lead, phone) {
+  const key = normalizeString(name).toLowerCase().replace(/[\s_-]/g, "");
   if (!key) return false;
-  if (key === "nome" || key === "name" || key === "cliente" || key === "lead_name") {
-    // {{nome}} tem fallback seguro para "cliente" e nunca bloqueia
+  if (
+    key === "nome" ||
+    key === "name" ||
+    key === "cliente" ||
+    key === "leadname" ||
+    key === "primeironome" ||
+    key === "firstname"
+  ) {
+    // {{nome}} e {{primeiro_nome}} têm fallback seguro para "cliente" e nunca bloqueiam
     return true;
   }
   if (key === "telefone" || key === "phone" || key === "celular") {
@@ -100,7 +107,7 @@ function leadVariableIsFilled(name, lead, phone) {
     ...customCampos,
   };
   for (const [dataKey, value] of Object.entries(customData)) {
-    if (dataKey.toLowerCase() !== key) continue;
+    if (dataKey.toLowerCase().replace(/[\s_-]/g, "") !== key && dataKey.toLowerCase() !== key) continue;
     if (typeof value === "number") return Number.isFinite(value);
     if (typeof value === "string") return value.trim() !== "";
   }

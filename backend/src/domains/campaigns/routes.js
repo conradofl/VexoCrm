@@ -3082,7 +3082,7 @@ export function registerCampaignsRoutes(app, deps) {
   }
   // ────────────────────────────────────────────────────────────────────────────
 
-  async function runCampaignDispatch({ dispatch, campaign, supabase: db }) {
+  async function runCampaignDispatch({ dispatch, campaign, supabase: db, ignoreSendWindow = false }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
     const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
@@ -3816,6 +3816,7 @@ export function registerCampaignsRoutes(app, deps) {
     let sentCount = 0;
     let failedCount = 0;
     let lastPauseCheckAt = 0;
+    let customPauseReason = null;
 
     const isDispatchStillRunning = async () => {
       const now = Date.now();
@@ -3838,29 +3839,32 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       // Checa se a janela de envio permitida do tenant fechou durante o processamento do lote
-      try {
-        const tenantSettings = await getLeadClientN8nSettings(clientId);
-        const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
-        if (!isWithinSendWindow(new Date(), sendWindowConfig)) {
-          const pauseMsg = `Pausado — fora da janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}). Retomará automaticamente na próxima janela.`;
-          console.info("[campaign-dispatch] Janela de envio fechou durante a execução do lote. Pausando lote:", {
-            dispatchId,
-            campaignId: campaign.id,
-            clientId,
-            pauseMsg,
-          });
-          await db
-            .from("campaign_dispatches")
-            .update({
-              status: "paused",
-              error_message: pauseMsg,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", dispatchId);
-          return false;
+      if (!ignoreSendWindow) {
+        try {
+          const tenantSettings = await getLeadClientN8nSettings(clientId);
+          const sendWindowConfig = resolveSendWindowConfig(tenantSettings);
+          if (!isWithinSendWindow(new Date(), sendWindowConfig)) {
+            const pauseMsg = `Pausado — fora da janela de envio (${sendWindowConfig.start}–${sendWindowConfig.end}). Retomará automaticamente na próxima janela.`;
+            customPauseReason = pauseMsg;
+            console.info("[campaign-dispatch] Janela de envio fechou durante a execução do lote. Pausando lote:", {
+              dispatchId,
+              campaignId: campaign.id,
+              clientId,
+              pauseMsg,
+            });
+            await db
+              .from("campaign_dispatches")
+              .update({
+                status: "paused",
+                error_message: pauseMsg,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", dispatchId);
+            return false;
+          }
+        } catch (err) {
+          console.warn("[campaign-dispatch] erro ao verificar janela de envio durante lote:", err?.message || err);
         }
-      } catch (err) {
-        console.warn("[campaign-dispatch] erro ao verificar janela de envio durante lote:", err?.message || err);
       }
 
       return true;
@@ -4067,7 +4071,7 @@ export function registerCampaignsRoutes(app, deps) {
         status: "paused",
         sent_count: totalSent,
         failed_count: totalFailed,
-        error_message: "Disparo pausado manualmente.",
+        error_message: customPauseReason || "Disparo pausado manualmente.",
         updated_at: new Date().toISOString(),
       }).eq("id", dispatchId);
       return;
@@ -6071,7 +6075,7 @@ export function registerCampaignsRoutes(app, deps) {
       res.json({ success: true, status: "running", dispatchId });
 
       // Executa o disparo em background (fire-and-forget da resposta HTTP)
-      runCampaignDispatch({ dispatch, campaign, supabase }).catch((err) => {
+      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: true }).catch((err) => {
         console.error("[campaign-dispatch] dispatch_run_failed", { dispatchId, error: err.message });
         supabase.from("campaign_dispatches").update({ status: "failed", error_message: err.message, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
       });

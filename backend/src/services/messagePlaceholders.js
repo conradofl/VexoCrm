@@ -11,6 +11,7 @@ function normalizeString(value) {
 /**
  * Substitui todas as variáveis de template no texto da mensagem antes do envio ao WhatsApp.
  * Suporta tokens case-insensitive com espaços internos opcionais:
+ * - {{primeiro_nome}}, {{primeironome}}, {{first_name}}, {{firstname}}
  * - {{nome}}, {{Nome}}, {{lead_name}}, {{cliente}}, {{name}}
  * - {{telefone}}, {{phone}}, {{celular}}
  * - {{scheduling_link}}, {{link}}, {{agendamento}}
@@ -41,6 +42,8 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
 
   // Fallback seguro: se não houver nome cadastrado, usa "cliente"
   const nomeResolvido = rawNome || "cliente";
+  // Extrai o primeiro nome (ex: "Conrado Finzi" -> "Conrado")
+  const primeiroNomeResolvido = rawNome ? rawNome.trim().split(/\s+/)[0] : "cliente";
 
   // 2. Resolução de Telefone
   const telResolvido =
@@ -63,6 +66,7 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
 
   // 4. Substituições principais
   raw = raw
+    .replace(/\{\{\s*(?:primeiro_nome|primeironome|primeiro\s+nome|first_name|firstname)\s*\}\}/gi, primeiroNomeResolvido)
     .replace(/\{\{\s*(?:nome|name|lead_name|cliente)\s*\}\}/gi, nomeResolvido)
     .replace(/\{\{\s*(?:telefone|phone|celular)\s*\}\}/gi, telResolvido);
 
@@ -134,6 +138,11 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
   delete customData.name;
   delete customData.lead_name;
   delete customData.cliente;
+  delete customData.primeiro_nome;
+  delete customData.primeironome;
+  delete customData["primeiro nome"];
+  delete customData.first_name;
+  delete customData.firstname;
   delete customData.telefone;
   delete customData.phone;
   delete customData.celular;
