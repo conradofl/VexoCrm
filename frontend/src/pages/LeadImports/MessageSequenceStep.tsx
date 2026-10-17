@@ -7,10 +7,65 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { EmojiPicker } from "./EmojiPicker";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import type { CampaignSequenceStep } from "@/hooks/useCampanhas";
 import type { StepActionButton } from "@/lib/leadImports/spreadsheet";
 
 type SequenceStep = CampaignSequenceStep & { buttons?: StepActionButton[] };
+
+function getStepChromaticStyle(order: number, type: "text" | "image") {
+  if (order === 1) {
+    return {
+      container:
+        "border-l-4 border-l-blue-600 dark:border-l-blue-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+      badge:
+        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800/70 border font-bold text-[10px] tracking-wide",
+      badgeText: "⚡ PASSO 1 · DISPARO INICIAL",
+      marker: "bg-blue-600 text-white dark:bg-blue-500",
+    };
+  }
+  if (order === 2) {
+    return {
+      container:
+        "border-l-4 border-l-emerald-600 dark:border-l-emerald-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+      badge:
+        "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800/70 border font-bold text-[10px] tracking-wide",
+      badgeText: "💬 PASSO 2 · PÓS-RESPOSTA",
+      marker: "bg-emerald-600 text-white dark:bg-emerald-500",
+    };
+  }
+  if (order === 3 || type === "image") {
+    const isImage = type === "image";
+    return {
+      container:
+        "border-l-4 border-l-amber-500 dark:border-l-amber-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+      badge:
+        "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-800/70 border font-bold text-[10px] tracking-wide",
+      badgeText: isImage ? `🖼️ PASSO ${order} · MÍDIA / IMAGEM` : "🖼️ PASSO 3 · MÍDIA / IMAGEM",
+      marker: "bg-amber-500 text-white dark:bg-amber-400 dark:text-slate-950",
+    };
+  }
+  // Passos subsequentes (4, 5...): alternar entre purple e rose
+  const isPurple = order % 2 === 0;
+  if (isPurple) {
+    return {
+      container:
+        "border-l-4 border-l-purple-600 dark:border-l-purple-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+      badge:
+        "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/80 dark:text-purple-300 dark:border-purple-800/70 border font-bold text-[10px] tracking-wide",
+      badgeText: `🔄 PASSO ${order} · SEQUÊNCIA`,
+      marker: "bg-purple-600 text-white dark:bg-purple-500",
+    };
+  }
+  return {
+    container:
+      "border-l-4 border-l-rose-600 dark:border-l-rose-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge:
+      "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800/70 border font-bold text-[10px] tracking-wide",
+    badgeText: `🎯 PASSO ${order} · CONTINUAÇÃO`,
+    marker: "bg-rose-600 text-white dark:bg-rose-500",
+  };
+}
 
 interface MessageSequenceStepProps {
   sequenceImageInputRef: RefObject<HTMLInputElement>;
@@ -96,18 +151,20 @@ export function MessageSequenceStep({
 
         {/* Vertical Step cards */}
         <div className="space-y-4 relative border-l border-slate-200/80 dark:border-white/10 ml-3.5 pl-5">
-          {campaignSequence.map((step, index) => (
-            <div key={step.id} className="relative space-y-3 rounded-xl border border-slate-200/80 bg-white/70 p-4 dark:border-white/5 dark:bg-black/35 shadow-sm">
-              {/* Left icon marker */}
-              <span className="absolute -left-[30px] top-4 flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-800 font-mono text-[9px] font-bold text-slate-500">
-                {step.order}
-              </span>
+          {campaignSequence.map((step, index) => {
+            const chromatic = getStepChromaticStyle(step.order, step.type);
+            return (
+              <div key={step.id} className={cn("relative space-y-3 p-4", chromatic.container)}>
+                {/* Left icon marker */}
+                <span className={cn("absolute -left-[30px] top-4 flex h-5 w-5 items-center justify-center rounded-full font-mono text-[9px] font-bold shadow-xs", chromatic.marker)}>
+                  {step.order}
+                </span>
 
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider">
-                    Passo {step.order} — {step.type === "image" ? "Imagem" : "Texto"}
-                  </Badge>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className={cn("px-2.5 py-0.5 rounded-full inline-flex items-center", chromatic.badge)}>
+                      {chromatic.badgeText}
+                    </span>
 
                   <div className="flex items-center gap-1">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Gatilho:</span>
@@ -460,7 +517,8 @@ export function MessageSequenceStep({
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex gap-2 pt-2">

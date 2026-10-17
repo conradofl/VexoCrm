@@ -238,9 +238,31 @@ export function SchedulingStep({
   const bridgingText = dispatchOptions.handoffBridgingText ?? defaultBridgingText;
   const openerText = dispatchOptions.handoffOpenerText ?? defaultOpenerText;
 
-  const targetHandoffChip = useMemo(() => {
-    return evolutionInstanceOptions.find((i) => i.id === dispatchOptions.handoffChipId) || null;
-  }, [evolutionInstanceOptions, dispatchOptions.handoffChipId]);
+  const selectedHandoffChipIds = useMemo(() => {
+    if (Array.isArray(dispatchOptions.handoffChipIds) && dispatchOptions.handoffChipIds.length > 0) {
+      return dispatchOptions.handoffChipIds;
+    }
+    return dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : [];
+  }, [dispatchOptions.handoffChipIds, dispatchOptions.handoffChipId]);
+
+  const targetHandoffChips = useMemo(() => {
+    return evolutionInstanceOptions.filter((i) => selectedHandoffChipIds.includes(i.id));
+  }, [evolutionInstanceOptions, selectedHandoffChipIds]);
+
+  const toggleHandoffChipId = (id: string) => {
+    setDispatchOptions((curr) => {
+      const currentList = Array.isArray(curr.handoffChipIds) && curr.handoffChipIds.length > 0
+        ? curr.handoffChipIds
+        : (curr.handoffChipId ? [curr.handoffChipId] : []);
+      const exists = currentList.includes(id);
+      const nextList = exists ? currentList.filter((item) => item !== id) : [...currentList, id];
+      return {
+        ...curr,
+        handoffChipIds: nextList,
+        handoffChipId: nextList[0] || null,
+      };
+    });
+  };
 
   const renderHandoffPreview = (text: string) => {
     return (text || "")
@@ -489,16 +511,20 @@ export function SchedulingStep({
         </div>
 
         {/* Passagem de Bastão (Transbordo de Chip) - Modelo A */}
-        <div className="rounded-xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/40 via-purple-50/20 to-slate-50/50 p-4 dark:border-indigo-900/50 dark:bg-slate-900/20 space-y-3.5 shadow-sm">
+        <div className="border-emerald-300/90 dark:border-emerald-700/80 bg-gradient-to-br from-emerald-50/70 via-teal-50/30 to-white dark:from-emerald-950/40 dark:via-teal-950/20 dark:to-slate-900/90 p-5 rounded-xl border shadow-xs space-y-3.5">
           <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-                <span className="text-sm">🤝</span>
-                Passagem de Bastão (Transbordo de Chip)
-                <InfoTip text="Dispare com um chip de prospecção (Chip Batedor) e, após o lead responder e avançar a régua, a conversa é transferida ativamente para um chip oficial (Chip Fechador)." />
-              </p>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold border bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-200 dark:border-emerald-700">
+                  🤝 Área de Fechamento de Vendas
+                </span>
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                  Passagem de Bastão (Transbordo de Chip)
+                  <InfoTip text="Dispare com um chip de prospecção (Chip Batedor) e, após o lead responder e avançar a régua, a conversa é transferida ativamente para um ou mais chips oficiais (Chips Fechadores em Rodízio)." />
+                </p>
+              </div>
               <p className="text-[10px] text-muted-foreground">
-                Transfere automaticamente o lead para um Chip Fechador com mensagem de abertura humanizada
+                Transfere automaticamente o lead para chip(s) fechador(es) com rodízio inteligente e mensagem humanizada
               </p>
             </div>
             <Switch
@@ -516,51 +542,79 @@ export function SchedulingStep({
           </div>
 
           {dispatchOptions.handoffEnabled && (
-            <div className="space-y-4 pt-2 animate-fadeIn border-t border-indigo-100/60 dark:border-white/5">
-              {/* Seleção do Chip Fechador */}
-              <div className="space-y-2">
+            <div className="space-y-4 pt-2 animate-fadeIn border-t border-emerald-200/60 dark:border-white/5">
+              {/* Seleção de Chips Fechadores (Multi-Select com Round-Robin) */}
+              <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] uppercase font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                    <ArrowRightLeft className="h-3 w-3 text-indigo-500" />
-                    Chip Fechador / Oficial de Destino (Recebe a conversa)
+                  <label className="text-[10px] uppercase font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                    <ArrowRightLeft className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                    Chips Fechadores / Oficiais de Destino
                   </label>
-                  {eligibleHandoffChips.length === 0 && (
+                  {eligibleHandoffChips.length === 0 ? (
                     <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
                       Requer ao menos 2 chips cadastrados
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      {selectedHandoffChipIds.length} {selectedHandoffChipIds.length === 1 ? "chip selecionado" : "chips em rodízio"}
                     </span>
                   )}
                 </div>
 
-                <Select
-                  value={dispatchOptions.handoffChipId || ""}
-                  onValueChange={(val) =>
-                    setDispatchOptions((curr) => ({
-                      ...curr,
-                      handoffChipId: val || null,
-                    }))
-                  }
-                >
-                  <SelectTrigger className="h-10 text-xs rounded-xl bg-white dark:bg-slate-900">
-                    <SelectValue placeholder="Selecione o chip de destino..." />
-                  </SelectTrigger>
-                  <SelectContent className={darkSelectContentClass}>
-                    {eligibleHandoffChips.length === 0 ? (
-                      <SelectItem value="none" disabled className={darkSelectItemClass}>
-                        Nenhum outro chip ativo encontrado
-                      </SelectItem>
-                    ) : (
-                      eligibleHandoffChips.map((inst) => (
-                        <SelectItem key={inst.id} value={inst.id} className={darkSelectItemClass}>
-                          {inst.name} {inst.chipState ? `(${inst.chipState})` : ""}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-                {selectedInst && targetHandoffChip && (
-                  <p className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1">
-                    🔄 Fluxo ativo: <strong>{selectedInst.name}</strong> (Disparo) ➔ <strong>{targetHandoffChip.name}</strong> (Fechador)
-                  </p>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
+                  Selecione 1 ou mais chips fechadores. Com múltiplos chips, os leads que responderem serão distribuídos em rodízio automático (Round-Robin) entre os consultores.
+                </p>
+
+                {eligibleHandoffChips.length === 0 ? (
+                  <div className="p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-300">
+                    Nenhum outro chip ativo encontrado. Conecte instâncias adicionais no módulo de WhatsApp para usar o transbordo.
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {eligibleHandoffChips.map((inst) => {
+                      const isSelected = selectedHandoffChipIds.includes(inst.id);
+                      return (
+                        <button
+                          key={inst.id}
+                          type="button"
+                          onClick={() => toggleHandoffChipId(inst.id)}
+                          className={cn(
+                            "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none",
+                            isSelected
+                              ? "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500 dark:border-emerald-500 shadow-xs"
+                              : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300/80 dark:border-slate-700 hover:border-emerald-400 dark:hover:border-emerald-600 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20"
+                          )}
+                        >
+                          <span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", isSelected ? "bg-white/20 text-white font-bold" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400")}>
+                            {isSelected ? "✓" : "+"}
+                          </span>
+                          <span>{inst.name}</span>
+                          {inst.chipState && (
+                            <span className={cn("text-[9px] px-1 py-0.2 rounded font-mono uppercase", isSelected ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500")}>
+                              {inst.chipState}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {selectedInst && targetHandoffChips.length > 0 && (
+                  <div className="p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/60 dark:border-emerald-900/40 dark:bg-emerald-950/20 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                    <span className="font-bold">🔄 Fluxo configurado:</span>
+                    <span>
+                      <strong>{selectedInst.name}</strong> (Disparo) ➔{" "}
+                      {targetHandoffChips.length === 1 ? (
+                        <strong>{targetHandoffChips[0].name}</strong>
+                      ) : (
+                        <span>
+                          <strong>{targetHandoffChips.map((c) => c.name).join(" • ")}</strong>{" "}
+                          <span className="text-[10px] text-emerald-700 dark:text-emerald-300">(Rodízio Round-Robin entre {targetHandoffChips.length} chips)</span>
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 )}
               </div>
 
@@ -582,7 +636,7 @@ export function SchedulingStep({
                             handoffBridgingText: (curr.handoffBridgingText ?? defaultBridgingText) + ` ${tag}`,
                           }))
                         }
-                        className="px-1.5 py-0.5 text-[9px] font-mono bg-slate-200/80 hover:bg-indigo-100 hover:text-indigo-700 dark:bg-slate-800 dark:hover:bg-indigo-950 rounded transition-colors"
+                        className="px-1.5 py-0.5 text-[9px] font-mono bg-slate-200/80 hover:bg-emerald-100 hover:text-emerald-800 dark:bg-slate-800 dark:hover:bg-emerald-950 rounded transition-colors"
                       >
                         {tag}
                       </button>
@@ -623,7 +677,7 @@ export function SchedulingStep({
                             handoffOpenerText: (curr.handoffOpenerText ?? defaultOpenerText) + ` ${tag}`,
                           }))
                         }
-                        className="px-1.5 py-0.5 text-[9px] font-mono bg-slate-200/80 hover:bg-indigo-100 hover:text-indigo-700 dark:bg-slate-800 dark:hover:bg-indigo-950 rounded transition-colors"
+                        className="px-1.5 py-0.5 text-[9px] font-mono bg-slate-200/80 hover:bg-emerald-100 hover:text-emerald-800 dark:bg-slate-800 dark:hover:bg-emerald-950 rounded transition-colors"
                       >
                         {tag}
                       </button>
@@ -647,8 +701,8 @@ export function SchedulingStep({
               </div>
 
               {/* Prévia Humanizada da Passagem de Bastão */}
-              <div className="rounded-xl border border-indigo-100 bg-white/70 dark:border-white/5 dark:bg-black/20 p-3 space-y-2">
-                <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+              <div className="rounded-xl border border-emerald-200/80 bg-white/80 dark:border-white/5 dark:bg-black/20 p-3 space-y-2">
+                <p className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
                   👁️ Prévia do Diálogo com Lead Exemplo ("Carlos")
                 </p>
                 <div className="space-y-2">
@@ -658,13 +712,15 @@ export function SchedulingStep({
                     </span>
                     {renderHandoffPreview(bridgingText)}
                   </div>
-                  <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold text-indigo-500 py-0.5">
+                  <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 py-0.5">
                     <Clock3 className="h-3 w-3" />
                     <span>Espera humanizada de ~4s e transferência de número</span>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/40 text-[11px] text-indigo-900 dark:text-indigo-200">
-                    <span className="font-bold text-[10px] text-indigo-600 dark:text-indigo-400 block mb-0.5">
-                      {targetHandoffChip?.name || "Chip Fechador (Chip B)"}:
+                  <div className="p-2.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/70 dark:border-emerald-800/40 text-[11px] text-emerald-950 dark:text-emerald-200">
+                    <span className="font-bold text-[10px] text-emerald-700 dark:text-emerald-400 block mb-0.5">
+                      {targetHandoffChips.length > 1
+                        ? `Chips Fechadores (${targetHandoffChips.map((c) => c.name).join(" / ")} · Round-Robin)`
+                        : targetHandoffChips[0]?.name || "Chip Fechador (Chip B)"}:
                     </span>
                     {renderHandoffPreview(openerText)}
                   </div>

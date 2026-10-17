@@ -177,6 +177,7 @@ export interface CampaignDispatchOptions {
   replyAgent?: "passos" | "campanha" | "atendimento";
   handoffEnabled?: boolean;
   handoffChipId?: string | null;
+  handoffChipIds?: string[];
   handoffBridgingText?: string;
   handoffOpenerText?: string;
 }

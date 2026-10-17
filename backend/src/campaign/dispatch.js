@@ -1735,17 +1735,33 @@ export async function executeCampaignChipHandoff({
   const analyticsMeta = campaign.analytics_meta || {};
   const dispatchOptions = analyticsMeta.dispatchOptions || {};
 
-  // 1. Verificar se dispatchOptions.handoffEnabled === true e se dispatchOptions.handoffChipId está configurado
-  if (!dispatchOptions.handoffEnabled || !dispatchOptions.handoffChipId) {
+  // 1. Verificar se dispatchOptions.handoffEnabled === true e se há chips fechadores configurados
+  const targetChipIds = (
+    Array.isArray(dispatchOptions.handoffChipIds) && dispatchOptions.handoffChipIds.length > 0
+      ? dispatchOptions.handoffChipIds
+      : dispatchOptions.handoffChipId
+      ? [dispatchOptions.handoffChipId]
+      : []
+  ).map((id) => normalizeString(id)).filter(Boolean);
+
+  if (!dispatchOptions.handoffEnabled || targetChipIds.length === 0) {
     return { executed: false, reason: "handoff_not_enabled" };
   }
 
-  const targetHandoffChipId = normalizeString(dispatchOptions.handoffChipId);
+  // 2. Distribuição determinística (Round-Robin) entre os chips fechadores
+  let rawLeadIndex = progress?.leadIndex ?? progress?.index ?? leadImportItem?.order ?? null;
+  if (rawLeadIndex === null || isNaN(Number(rawLeadIndex))) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    rawLeadIndex = digits ? Number(digits.slice(-4)) : 0;
+  }
+  const targetChipIndex = Math.abs(Number(rawLeadIndex) || 0) % targetChipIds.length;
+  const targetHandoffChipId = targetChipIds[targetChipIndex];
+
   if (!targetHandoffChipId) {
     return { executed: false, reason: "missing_handoff_chip_id" };
   }
 
-  // 2. Checar idempotência: verificar se progress.handoffCompleted já é true para este lead
+  // 3. Checar idempotência: verificar se progress.handoffCompleted já é true para este lead
   if (progress.handoffCompleted === true || progress.handoff_completed === true) {
     return { executed: false, reason: "handoff_already_completed", handoffCompleted: true };
   }
@@ -1945,6 +1961,8 @@ export async function executeCampaignChipHandoff({
         handoffAt,
         handoffTargetChipId: targetHandoffChipId,
         handoffTargetChipName: chipB.name,
+        handoffTargetChipIndex: targetChipIndex,
+        handoffChipsCount: targetChipIds.length,
       },
     });
   }
@@ -1983,6 +2001,8 @@ export async function executeCampaignChipHandoff({
     transferredFrom: chipAName,
     transferredTo: chipB.name,
     targetChipId: chipB.id,
+    targetChipIndex,
+    totalHandoffChips: targetChipIds.length,
     bridgingSent,
     openerSent: true,
   };

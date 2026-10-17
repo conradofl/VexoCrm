@@ -17,6 +17,14 @@ const mockInstances = [
     is_default: false,
     active: true,
   },
+  {
+    id: "chip-c-consultor2-uuid",
+    name: "CHIP CONSULTOR 2",
+    dispatch_webhook_url: "https://evo.vexo.com.br/message/sendText/chip-consultor2",
+    dispatch_webhook_token: "token-chip-c",
+    is_default: false,
+    active: true,
+  },
 ];
 
 let mockHealthStatus = { state: "open" };
@@ -169,6 +177,7 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
           evolutionInstanceId: "chip-a-batedor-uuid",
           handoffEnabled: true,
           handoffChipId: "chip-b-fechador-uuid",
+          handoffChipIds: ["chip-b-fechador-uuid"],
           handoffBridgingText: "Perfeito, {{nome}}! Vou pedir para o nosso especialista te chamar agora no WhatsApp dele para alinhar todos os detalhes.",
           handoffOpenerText: "Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha. Como posso te ajudar?",
         },
@@ -228,14 +237,11 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
           instance: "chip-batedor",
           text: "Sim, gostaria de ver!",
         },
-        delayMs: 1, // delay mínimo em teste
+        delayMs: 1,
       });
 
       expect(result.continued).toBe(true);
 
-      // Verificamos que o postEvolutionPayload foi chamado para os dois chips:
-      // 1. Mensagem de transbordo (bridge) do Chip A
-      // 2. Mensagem de abertura (opener) do Chip B
       const bridgeCall = mockEvolutionPayloads.find(
         (p) => p.url === "https://evo.vexo.com.br/message/sendText/chip-batedor"
       );
@@ -250,7 +256,6 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
       expect(openerCall.payload.text).toContain("Olá Carlos Silva! Minha equipe me passou seu contato");
       expect(openerCall.payload.campaign.mode).toBe("campaign_handoff_opener");
 
-      // Verificamos a persistência em lead_messages
       const bridgeMessage = mockInsertedLeadMessages.find(
         (m) => m.meta?.is_handoff_bridge === true
       );
@@ -265,12 +270,10 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
       expect(openerMessage.instance_name || openerMessage.instanceName).toBe("CHIP FECHADOR");
       expect(openerMessage.meta.transferred_from_chip).toBe("CHIP BATEDOR");
 
-      // Verificamos a atualização na tabela leads: assigned_chip e temperatura
       const leadUpdate = mockUpdatedLeads.find((u) => u.assigned_chip === "CHIP FECHADOR");
       expect(leadUpdate).toBeDefined();
       expect(leadUpdate.lead_temperature).toBe("QUENTE");
 
-      // Verificamos a atualização do progresso com handoffCompleted: true
       const progressUpdate = mockUpdatedProgressPatches.find(
         (p) => p.normalized_data?.campaign_progress?.["camp-handoff-1"]?.handoffCompleted === true
       );
@@ -324,7 +327,6 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
       expect(handoffResult.reason).toBe("chip_b_disconnected");
       expect(handoffResult.error).toContain("Evolution socket closed");
 
-      // Verificamos que o erro foi registrado no progresso para auditoria
       const failureProgressUpdate = mockUpdatedProgressPatches.find(
         (p) => p.normalized_data?.campaign_progress?.["camp-handoff-1"]?.handoffFailed === true
       );
@@ -333,11 +335,70 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
         failureProgressUpdate.normalized_data.campaign_progress["camp-handoff-1"].handoffError
       ).toContain("Evolution socket closed");
 
-      // Nenhuma abertura deve ter sido enviada pelo Chip B
       const openerCall = mockEvolutionPayloads.find(
         (p) => p.url === "https://evo.vexo.com.br/message/sendText/chip-fechador"
       );
       expect(openerCall).toBeUndefined();
+    });
+  });
+
+  describe("Teste 4: Rodízio de Múltiplos Chips no Transbordo (Round-Robin)", () => {
+    it("distribui os leads circularmente entre os chips fechadores selecionados", async () => {
+      const multiChipCampaign = {
+        ...mockCampaignData,
+        analytics_meta: {
+          ...mockCampaignData.analytics_meta,
+          dispatchOptions: {
+            ...mockCampaignData.analytics_meta.dispatchOptions,
+            handoffChipIds: ["chip-b-fechador-uuid", "chip-c-consultor2-uuid"],
+          },
+        },
+      };
+
+      // Lead 0 -> índice 0 % 2 = 0 -> Chip B
+      const handoffResult0 = await executeCampaignChipHandoff({
+        clientId: "tenant-vexo",
+        campaign: multiChipCampaign,
+        lead: { id: "lead-0", nome: "Lead Zero" },
+        phone: "5534984400049",
+        chipA: { name: "CHIP BATEDOR" },
+        progress: { leadIndex: 0, leadName: "Lead Zero" },
+        delayMs: 1,
+      });
+
+      expect(handoffResult0.executed).toBe(true);
+      expect(handoffResult0.transferredTo).toBe("CHIP FECHADOR");
+      expect(handoffResult0.targetChipIndex).toBe(0);
+
+      // Lead 1 -> índice 1 % 2 = 1 -> Chip C
+      const handoffResult1 = await executeCampaignChipHandoff({
+        clientId: "tenant-vexo",
+        campaign: multiChipCampaign,
+        lead: { id: "lead-1", nome: "Lead Um" },
+        phone: "5534984400050",
+        chipA: { name: "CHIP BATEDOR" },
+        progress: { leadIndex: 1, leadName: "Lead Um" },
+        delayMs: 1,
+      });
+
+      expect(handoffResult1.executed).toBe(true);
+      expect(handoffResult1.transferredTo).toBe("CHIP CONSULTOR 2");
+      expect(handoffResult1.targetChipIndex).toBe(1);
+
+      // Lead 2 -> índice 2 % 2 = 0 -> Chip B novamente
+      const handoffResult2 = await executeCampaignChipHandoff({
+        clientId: "tenant-vexo",
+        campaign: multiChipCampaign,
+        lead: { id: "lead-2", nome: "Lead Dois" },
+        phone: "5534984400051",
+        chipA: { name: "CHIP BATEDOR" },
+        progress: { leadIndex: 2, leadName: "Lead Dois" },
+        delayMs: 1,
+      });
+
+      expect(handoffResult2.executed).toBe(true);
+      expect(handoffResult2.transferredTo).toBe("CHIP FECHADOR");
+      expect(handoffResult2.targetChipIndex).toBe(0);
     });
   });
 });

@@ -209,6 +209,7 @@ const defaultDispatchOptions: CampaignDispatchOptions = {
   maxRepetitionsPerTemplate: 5,
   handoffEnabled: false,
   handoffChipId: null,
+  handoffChipIds: [],
   handoffBridgingText: "Perfeito, {{nome}}! Vou pedir para o nosso especialista te chamar agora no WhatsApp dele para alinhar todos os detalhes.",
   handoffOpenerText: "Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha. Como posso te ajudar?",
 };

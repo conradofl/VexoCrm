@@ -335,6 +335,9 @@ function normalizeDispatchOptions(rawOptions = {}, sequence = []) {
     replyPollIntervalSeconds,
     handoffEnabled: normalizeBoolean(rawOptions.handoffEnabled, false),
     handoffChipId: normalizeString(rawOptions.handoffChipId) || null,
+    handoffChipIds: Array.isArray(rawOptions.handoffChipIds)
+      ? rawOptions.handoffChipIds.map((id) => normalizeString(id)).filter(Boolean)
+      : (normalizeString(rawOptions.handoffChipId) ? [normalizeString(rawOptions.handoffChipId)] : []),
     handoffBridgingText: typeof rawOptions.handoffBridgingText === "string" ? rawOptions.handoffBridgingText : null,
     handoffOpenerText: typeof rawOptions.handoffOpenerText === "string" ? rawOptions.handoffOpenerText : null,
   };
