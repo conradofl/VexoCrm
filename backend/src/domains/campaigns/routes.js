@@ -1708,7 +1708,7 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
-  // DELETE /api/campaigns/:id — soft-delete (lixeira com retenção de 15 dias)
+  // DELETE /api/campaigns/:id — soft-delete (lixeira com retenção de 15 dias) ou hard-delete
   app.delete("/api/campaigns/:id", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
     if (!ensureDb(res)) return;
 
@@ -1716,45 +1716,160 @@ export function registerCampaignsRoutes(app, deps) {
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
 
     try {
-      const { data: campaign, error: fetchError } = await supabase
-        .from("campaigns")
-        .select("id, client_id, archived_at")
-        .eq("id", id)
-        .single();
+      let campaign = null;
+      if (pgDatabasePool) {
+        const { rows } = await pgDatabasePool.query(
+          `SELECT id, client_id, archived_at FROM public.campaigns WHERE id = $1`,
+          [id]
+        ).catch(() => ({ rows: [] }));
+        if (rows.length > 0) campaign = rows[0];
+      }
 
-      if (fetchError || !campaign) {
-        sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
-        return;
+      if (!campaign) {
+        const { data: cData, error: fetchError } = await supabase
+          .from("campaigns")
+          .select("id, client_id, archived_at")
+          .eq("id", id)
+          .single();
+
+        if (fetchError || !cData) {
+          sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+          return;
+        }
+        campaign = cData;
       }
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
 
-      const nowIso = new Date().toISOString();
-      let { error: archiveError } = await supabase
-        .from("campaigns")
-        .update({
-          archived_at: nowIso,
-          status: "archived",
-          updated_at: nowIso,
-        })
-        .eq("id", id)
-        .eq("client_id", authorizedClientId);
+      const isPermanent = req.query?.permanent === "true" || req.body?.permanent === true;
+      if (isPermanent) {
+        if (pgDatabasePool) {
+          await pgDatabasePool.query(
+            `DELETE FROM public.campaign_dispatch_runs WHERE campaign_id = $1 AND client_id = $2`,
+            [id, authorizedClientId]
+          ).catch((e) => console.warn("[campaign-delete] runs cleanup:", e?.message));
 
-      // Blindagem defensiva: se falhar por ausência da coluna updated_at, retenta sem ela
-      if (archiveError && (String(archiveError.message).includes("updated_at") || archiveError.code === "42703")) {
-        const retry = await supabase
-          .from("campaigns")
-          .update({
-            archived_at: nowIso,
-            status: "archived",
-          })
-          .eq("id", id)
-          .eq("client_id", authorizedClientId);
-        archiveError = retry.error;
+          await pgDatabasePool.query(
+            `DELETE FROM public.campaign_dispatch_logs WHERE campaign_id = $1 AND client_id = $2`,
+            [id, authorizedClientId]
+          ).catch((e) => console.warn("[campaign-delete] logs cleanup:", e?.message));
+
+          await pgDatabasePool.query(
+            `DELETE FROM public.campaign_dispatches WHERE campaign_id = $1 AND client_id = $2`,
+            [id, authorizedClientId]
+          ).catch((e) => console.warn("[campaign-delete] dispatches cleanup:", e?.message));
+
+          await pgDatabasePool.query(
+            `DELETE FROM public.campaigns WHERE id = $1 AND client_id = $2`,
+            [id, authorizedClientId]
+          );
+
+          return res.json({ success: true, deleted: true, permanent: true });
+        }
+
+        await supabase.from("campaign_dispatch_runs").delete().eq("campaign_id", id).eq("client_id", authorizedClientId);
+        await supabase.from("campaign_dispatches").delete().eq("campaign_id", id).eq("client_id", authorizedClientId);
+        const { error: delErr } = await supabase.from("campaigns").delete().eq("id", id).eq("client_id", authorizedClientId);
+        if (delErr) throw delErr;
+        return res.json({ success: true, deleted: true, permanent: true });
       }
 
+      const nowIso = new Date().toISOString();
+      let archiveError = null;
+
+      // 1. Tenta via Supabase (comportamento nativo compatível com mocks de teste)
+      const trySupabaseUpdate = async (payload) => {
+        try {
+          const result = await supabase
+            .from("campaigns")
+            .update(payload)
+            .eq("id", id)
+            .eq("client_id", authorizedClientId);
+          return result?.error || null;
+        } catch (err) {
+          return err;
+        }
+      };
+
+      // Tentativa 1: status = 'archived' com updated_at
+      archiveError = await trySupabaseUpdate({
+        archived_at: nowIso,
+        status: "archived",
+        updated_at: nowIso,
+      });
+
+      // Tentativa 2: status = 'archived' sem updated_at
       if (archiveError) {
+        archiveError = await trySupabaseUpdate({
+          archived_at: nowIso,
+          status: "archived",
+        });
+      }
+
+      // Tentativa 3: status = 'cancelled' (respeita check constraint campaigns_status_check caso rejeite 'archived')
+      if (archiveError) {
+        archiveError = await trySupabaseUpdate({
+          archived_at: nowIso,
+          status: "cancelled",
+        });
+      }
+
+      // Tentativa 4: apenas archived_at
+      if (archiveError) {
+        archiveError = await trySupabaseUpdate({
+          archived_at: nowIso,
+        });
+      }
+
+      // 2. Se pgDatabasePool estiver presente, aplica no pool com blindagem multi-nível
+      let poolSuccess = false;
+      if (pgDatabasePool) {
+        try {
+          const r = await pgDatabasePool.query(
+            `UPDATE public.campaigns
+             SET archived_at = now(), status = 'archived', updated_at = now()
+             WHERE id = $1 AND client_id = $2`,
+            [id, authorizedClientId]
+          );
+          if (r.rowCount > 0) poolSuccess = true;
+        } catch (errA) {
+          try {
+            const r = await pgDatabasePool.query(
+              `UPDATE public.campaigns
+               SET archived_at = now(), status = 'cancelled', updated_at = now()
+               WHERE id = $1 AND client_id = $2`,
+              [id, authorizedClientId]
+            );
+            if (r.rowCount > 0) poolSuccess = true;
+          } catch (errB) {
+            try {
+              const r = await pgDatabasePool.query(
+                `UPDATE public.campaigns
+                 SET archived_at = now(), status = 'cancelled'
+                 WHERE id = $1 AND client_id = $2`,
+                [id, authorizedClientId]
+              );
+              if (r.rowCount > 0) poolSuccess = true;
+            } catch (errC) {
+              try {
+                const r = await pgDatabasePool.query(
+                  `UPDATE public.campaigns
+                   SET archived_at = now()
+                   WHERE id = $1 AND client_id = $2`,
+                  [id, authorizedClientId]
+                );
+                if (r.rowCount > 0) poolSuccess = true;
+              } catch (errD) {
+                console.warn("[campaign-delete] pool archive warning:", errD?.message || errD);
+              }
+            }
+          }
+        }
+      }
+
+      if (archiveError && !poolSuccess) {
+        console.error("[campaign-delete] all archive attempts failed:", archiveError);
         sendError(res, 500, "CAMPAIGN_DELETE_FAILED", "Failed to archive campaign", archiveError.message);
         return;
       }
@@ -1791,15 +1906,27 @@ export function registerCampaignsRoutes(app, deps) {
     if (!id) { sendError(res, 400, "INVALID_PARAM", "Missing campaign id"); return; }
 
     try {
-      const { data: campaign, error: fetchError } = await supabase
-        .from("campaigns")
-        .select("id, client_id, archived_at, status")
-        .eq("id", id)
-        .single();
+      let campaign = null;
+      if (pgDatabasePool) {
+        const { rows } = await pgDatabasePool.query(
+          `SELECT id, client_id, archived_at, status FROM public.campaigns WHERE id = $1`,
+          [id]
+        ).catch(() => ({ rows: [] }));
+        if (rows.length > 0) campaign = rows[0];
+      }
 
-      if (fetchError || !campaign) {
-        sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
-        return;
+      if (!campaign) {
+        const { data: cData, error: fetchError } = await supabase
+          .from("campaigns")
+          .select("id, client_id, archived_at, status")
+          .eq("id", id)
+          .single();
+
+        if (fetchError || !cData) {
+          sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+          return;
+        }
+        campaign = cData;
       }
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
@@ -1818,30 +1945,76 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       const nowIso = new Date().toISOString();
-      let { error: restoreError } = await supabase
-        .from("campaigns")
-        .update({
+      let restoreError = null;
+
+      const trySupabaseRestore = async (payload) => {
+        try {
+          const res = await supabase
+            .from("campaigns")
+            .update(payload)
+            .eq("id", id)
+            .eq("client_id", authorizedClientId);
+          return res?.error || null;
+        } catch (e) {
+          return e;
+        }
+      };
+
+      restoreError = await trySupabaseRestore({
+        archived_at: null,
+        status: "paused",
+        updated_at: nowIso,
+      });
+
+      if (restoreError) {
+        restoreError = await trySupabaseRestore({
           archived_at: null,
           status: "paused",
-          updated_at: nowIso,
-        })
-        .eq("id", id)
-        .eq("client_id", authorizedClientId);
-
-      // Blindagem defensiva: se falhar por ausência da coluna updated_at, retenta sem ela
-      if (restoreError && (String(restoreError.message).includes("updated_at") || restoreError.code === "42703")) {
-        const retry = await supabase
-          .from("campaigns")
-          .update({
-            archived_at: null,
-            status: "paused",
-          })
-          .eq("id", id)
-          .eq("client_id", authorizedClientId);
-        restoreError = retry.error;
+        });
       }
 
       if (restoreError) {
+        restoreError = await trySupabaseRestore({
+          archived_at: null,
+        });
+      }
+
+      let poolRestored = false;
+      if (pgDatabasePool) {
+        try {
+          const r = await pgDatabasePool.query(
+            `UPDATE public.campaigns
+             SET archived_at = NULL, status = 'paused', updated_at = now()
+             WHERE id = $1 AND client_id = $2`,
+            [id, authorizedClientId]
+          );
+          if (r.rowCount > 0) poolRestored = true;
+        } catch (errA) {
+          try {
+            const r = await pgDatabasePool.query(
+              `UPDATE public.campaigns
+               SET archived_at = NULL, status = 'paused'
+               WHERE id = $1 AND client_id = $2`,
+              [id, authorizedClientId]
+            );
+            if (r.rowCount > 0) poolRestored = true;
+          } catch (errB) {
+            try {
+              const r = await pgDatabasePool.query(
+                `UPDATE public.campaigns
+                 SET archived_at = NULL
+                 WHERE id = $1 AND client_id = $2`,
+                [id, authorizedClientId]
+              );
+              if (r.rowCount > 0) poolRestored = true;
+            } catch (errC) {
+              console.warn("[campaign-restore] pool restore warning:", errC?.message || errC);
+            }
+          }
+        }
+      }
+
+      if (restoreError && !poolRestored) {
         sendError(res, 500, "CAMPAIGN_RESTORE_FAILED", "Failed to restore campaign", restoreError.message);
         return;
       }

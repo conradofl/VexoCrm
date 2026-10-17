@@ -96,6 +96,76 @@ describe("Campanhas: Soft-Delete (Lixeira 15 dias) e Restauração", () => {
     expect(dispatchesQuery.params).toEqual(["camp-123", "tenant-1"]);
   });
 
+  it("DELETE /api/campaigns/:id não falha se status 'archived' for rejeitado pela constraint de status, caindo para 'cancelled' com archived_at", async () => {
+    let updatedPayload = null;
+
+    const fakeSupabase = {
+      from: (table) => {
+        if (table === "campaigns") {
+          return {
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: { id: "camp-constraint-test", client_id: "tenant-1", archived_at: null },
+                  error: null,
+                }),
+              }),
+            }),
+            update: (payload) => ({
+              eq: (col1, val1) => ({
+                eq: (col2, val2) => {
+                  if (payload.status === "archived") {
+                    return { error: { message: 'new row for relation "campaigns" violates check constraint "campaigns_status_check"', code: "23514" } };
+                  }
+                  updatedPayload = payload;
+                  return { error: null };
+                },
+              }),
+            }),
+          };
+        }
+        return {};
+      },
+    };
+
+    const routes = {};
+    const fakeApp = {
+      get: (p, ...h) => { routes[`get ${p}`] = h[h.length - 1]; },
+      post: (p, ...h) => { routes[`post ${p}`] = h[h.length - 1]; },
+      delete: (p, ...h) => { routes[`delete ${p}`] = h[h.length - 1]; },
+      put: () => {},
+      patch: () => {},
+      use: () => {},
+    };
+
+    registerCampaignsRoutes(fakeApp, {
+      ensureDb: () => true,
+      resolveAuthorizedClientId: () => "tenant-1",
+      requireFirebaseAuth: (req, res, next) => next(),
+      requireCampaignDispatchAccess: (req, res, next) => next(),
+      requireAppViewAccess: () => (req, res, next) => next(),
+      requireInternalPageAccess: () => (req, res, next) => next(),
+      supabase: fakeSupabase,
+      pgDatabasePool: { query: vi.fn(async () => ({ rows: [] })) },
+      sendError: (res, status, code, msg) => {
+        res.status(status).json({ error: { code, msg } });
+      },
+      normalizeString: (s) => String(s || "").trim(),
+      internalErrorPayloadDetails: () => ({}),
+    });
+
+    const handler = routes["delete /api/campaigns/:id"];
+    const req = { params: { id: "camp-constraint-test" } };
+    const res = fakeRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ success: true, archived: true });
+    expect(updatedPayload).toBeDefined();
+    expect(updatedPayload.status).toBe("cancelled");
+    expect(updatedPayload.archived_at).toBeTruthy();
+  });
+
   it("POST /api/campaigns/:id/restore restaura campanha arquivada nos últimos 15 dias e reativa lotes", async () => {
     let restoredCampaign = null;
     let dispatchesQuery = null;
