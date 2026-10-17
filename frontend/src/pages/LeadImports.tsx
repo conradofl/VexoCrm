@@ -1224,10 +1224,10 @@ export default function LeadImports({
     if (!step) return;
     const currentButtons = step.buttons || [];
     if (currentButtons.length >= 3) {
-      toast({ title: "Limite atingido", description: "O limite máximo é de 3 botões por mensagem." });
+      toast({ title: "Limite atingido", description: "O limite máximo é de 3 opções de resposta por mensagem." });
       return;
     }
-    const updated = [...currentButtons, { displayText: "Link de Acesso", type: "url" as const, url: "{{scheduling_link}}" }];
+    const updated = [...currentButtons, { displayText: "", replyText: "", type: "reply" as const }];
     updateCampaignStep(stepId, { buttons: updated });
   }
 

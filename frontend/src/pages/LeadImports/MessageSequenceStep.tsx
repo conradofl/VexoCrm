@@ -466,11 +466,11 @@ export function MessageSequenceStep({
                 </div>
               )}
 
-              {/* WhatsApp Actions buttons */}
+              {/* WhatsApp Response Options */}
               {step.type === "text" && (
                 <div className="border-t border-slate-100 dark:border-white/5 pt-2 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-500">Links e opções de resposta (Max 3)</span>
+                    <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">Opções de Resposta para o Lead (Max 3)</span>
                     <button
                       type="button"
                       onClick={() => onAddStepButton(step.id)}
@@ -480,14 +480,8 @@ export function MessageSequenceStep({
                     </button>
                   </div>
 
-                  {/* O WhatsApp descontinuou botao interativo para conexoes nao-oficiais,
-                      entao links e opcoes vao ESCRITOS no corpo. Opcao em texto ainda
-                      cumpre o papel: oferece caminhos para o lead nao ter que formular a
-                      resposta sozinho, e o agente reconhece a escolha. */}
-                  <p className="text-[10px] rounded-md border border-slate-200 bg-slate-50 p-2 text-slate-600 dark:border-white/10 dark:bg-slate-900/30 dark:text-slate-300">
-                    Links e opções são <strong>escritos no final da mensagem</strong>, numerados. O
-                    WhatsApp deixa a URL clicável, e o agente da campanha reconhece a opção que o
-                    lead escolher — por número ou por texto.
+                  <p className="text-[10px] rounded-md border border-slate-200 bg-slate-50 p-2 text-slate-600 dark:border-white/10 dark:bg-slate-900/30 dark:text-slate-300 leading-relaxed">
+                    As opções são numeradas no final da mensagem (Ex: 1 - Sim, 2 - Não). O agente da campanha reconhece a escolha do lead por número ou texto.
                   </p>
 
                   {step.buttons && step.buttons.length > 0 && (
@@ -495,79 +489,33 @@ export function MessageSequenceStep({
                       {step.buttons.map((btn, btnIdx) => (
                         <div key={btnIdx} className="space-y-1 bg-slate-50 dark:bg-slate-900/40 p-2 rounded-lg border border-slate-200/60 dark:border-white/5">
                           <div className="flex gap-2 items-center">
-                            {/* "Opção de resposta" tem UM campo só. Com dois, o
-                                usuário preenchia um deles, a opção ficava sem
-                                rótulo e era descartada no envio — as opções
-                                simplesmente sumiam da mensagem. Link continua
-                                com dois, porque texto e URL são coisas
-                                diferentes. */}
-                            {btn.type === "url" && (
-                              <Input
-                                value={btn.displayText}
-                                placeholder="Nome do Botão (Ex: Agendar)"
-                                className="h-8 text-[11px] max-w-[130px]"
-                                onChange={(e) => onUpdateStepButton(step.id, btnIdx, { displayText: e.target.value })}
-                              />
-                            )}
-                            <Select
-                              value={btn.type}
-                              onValueChange={(val) =>
+                            <span className="text-[11px] font-mono font-bold text-slate-400 w-4 text-center shrink-0">
+                              {btnIdx + 1}.
+                            </span>
+                            <Input
+                              value={btn.displayText || btn.replyText || btn.url || ""}
+                              placeholder="Texto da opção (Ex: Quero saber mais, Sim, Não)"
+                              className="h-8 text-[11px] flex-1 bg-white dark:bg-slate-900"
+                              onChange={(e) =>
                                 onUpdateStepButton(step.id, btnIdx, {
-                                  type: val as "url" | "reply",
-                                  ...(val === "reply" ? { url: "" } : {}),
+                                  displayText: e.target.value,
+                                  replyText: e.target.value,
+                                  type: "reply",
+                                  url: "",
                                 })
                               }
-                            >
-                              <SelectTrigger className="h-8 text-[11px] max-w-[125px]">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="url">Link / URL</SelectItem>
-                                <SelectItem value="reply">Opção de resposta</SelectItem>
-                              </SelectContent>
-                            </Select>
-
-                            {btn.type === "url" ? (
-                              <Input
-                                value={btn.url || ""}
-                                placeholder="Link (Ex: {{scheduling_link}})"
-                                className="h-8 text-[11px] flex-1 font-mono"
-                                onChange={(e) => onUpdateStepButton(step.id, btnIdx, { url: e.target.value })}
-                              />
-                            ) : (
-                              <Input
-                                // Compatibilidade: quem ja tem os dois campos
-                                // preenchidos nao perde nada — usa o rotulo se
-                                // existir, senao o valor. E a escrita alimenta
-                                // os tres para o envio nao depender de qual foi.
-                                value={btn.displayText || btn.replyText || btn.url || ""}
-                                placeholder="Texto da opção (Ex: Quero agendar)"
-                                className="h-8 text-[11px] flex-1"
-                                onChange={(e) =>
-                                  onUpdateStepButton(step.id, btnIdx, {
-                                    displayText: e.target.value,
-                                    replyText: e.target.value,
-                                    url: "",
-                                  })
-                                }
-                              />
-                            )}
-
+                            />
                             <Button
                               type="button"
                               variant="ghost"
                               onClick={() => onRemoveStepButton(step.id, btnIdx)}
-                              className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                              className="h-8 w-8 p-0 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 shrink-0"
+                              title="Remover opção"
+                              aria-label="Remover opção"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
-
-                          <p className="text-[10px] text-slate-500 pl-1">
-                            {btn.type === "url"
-                              ? "🔗 Link externo: vai anexado ao final da mensagem, clicável."
-                              : "💬 Opção de resposta: aparece escrita e numerada no final da mensagem. O agente reconhece a escolha do lead — pelo número ou pelo texto."}
-                          </p>
                         </div>
                       ))}
                     </div>
@@ -580,17 +528,29 @@ export function MessageSequenceStep({
         </div>
 
         <div className="flex flex-wrap gap-2 pt-2">
-          <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => addCampaignStep("text")}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5 border-blue-300 dark:border-blue-700/80 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 font-medium"
+            onClick={() => addCampaignStep("text")}
+          >
             <Plus className="h-3.5 w-3.5" /> Envio de Texto
           </Button>
-          <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => addCampaignStep("image")}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5 border-amber-300 dark:border-amber-700/80 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30 font-medium"
+            onClick={() => addCampaignStep("image")}
+          >
             <Plus className="h-3.5 w-3.5" /> Envio de Imagem
           </Button>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-8 text-xs gap-1 border-cyan-300 dark:border-cyan-700/80 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/30 font-medium"
+            className="h-8 text-xs gap-1.5 border-cyan-300 dark:border-cyan-700/80 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/30 font-medium"
             onClick={() => addCampaignStep("link")}
           >
             <Link2 className="h-3.5 w-3.5" /> + Envio de Link
