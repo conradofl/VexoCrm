@@ -12,6 +12,7 @@ import {
   MessageCircle,
   MessageSquareQuote,
   Search,
+  RotateCcw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -26,7 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/use-toast";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, readApiErrorMessage } from "@/lib/api";
 import {
   useCampaignRecipients,
   CAMPAIGN_STATUS_LABELS,
@@ -193,6 +194,8 @@ export function LeadImportAuditReport({
   const [searchTerm, setSearchTerm] = useState("");
   const [creatingSubset, setCreatingSubset] = useState(false);
   const [deletingItems, setDeletingItems] = useState(false);
+  const [resettingHistory, setResettingHistory] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // ── Limpeza de estado e seleções ao trocar de empresa (tenant) ───────────
   useEffect(() => {
@@ -478,7 +481,7 @@ export function LeadImportAuditReport({
       isMounted = false;
       controller.abort();
     };
-  }, [selectedImportId, activeClientId, imports, getIdToken, auditTarget]);
+  }, [selectedImportId, activeClientId, imports, getIdToken, auditTarget, refreshKey]);
 
   const filteredItems = useMemo(() => {
     return auditItems.filter((item) => {
@@ -709,7 +712,10 @@ export function LeadImportAuditReport({
         }),
       });
 
-      if (!res.ok) throw new Error("Erro ao excluir leads");
+      if (!res.ok) {
+        const errorMsg = await readApiErrorMessage(res, "Erro ao excluir leads");
+        throw new Error(errorMsg);
+      }
 
       toast({
         title: "Leads excluídos",
@@ -718,6 +724,7 @@ export function LeadImportAuditReport({
 
       setAuditItems((prev) => prev.filter((i) => !selectedItemIds.has(i.lead_import_item_id)));
       setSelectedItemIds(new Set());
+      setRefreshKey((k) => k + 1);
     } catch (err) {
       toast({
         title: "Erro ao excluir",
@@ -726,6 +733,49 @@ export function LeadImportAuditReport({
       });
     } finally {
       setDeletingItems(false);
+    }
+  };
+
+  const handleResetDispatchHistory = async () => {
+    if (selectedItemIds.size === 0) return;
+    if (!confirm(`Deseja resetar o histórico de disparos de ${selectedItemIds.size} lead(s)? Eles voltarão a ser elegíveis para novos disparos nesta planilha.`)) return;
+
+    setResettingHistory(true);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/reports/reset-dispatch-history`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          clientId: activeClientId,
+          leadImportItemIds: Array.from(selectedItemIds),
+        }),
+      });
+
+      if (!res.ok) {
+        const errorMsg = await readApiErrorMessage(res, "Erro ao resetar histórico de disparos");
+        throw new Error(errorMsg);
+      }
+
+      const count = selectedItemIds.size;
+      toast({
+        title: "Histórico resetado",
+        description: `Histórico resetado: ${count} lead(s) liberado(s) para novos disparos.`,
+      });
+
+      setSelectedItemIds(new Set());
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      toast({
+        title: "Erro ao resetar disparos",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    } finally {
+      setResettingHistory(false);
     }
   };
 
@@ -1281,7 +1331,7 @@ export function LeadImportAuditReport({
                         <Button
                           size="sm"
                           onClick={handleCreateCohortCampaign}
-                          disabled={creatingSubset}
+                          disabled={creatingSubset || resettingHistory || deletingItems}
                           className="h-8 gap-1.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
                         >
                           {creatingSubset ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
@@ -1289,9 +1339,20 @@ export function LeadImportAuditReport({
                         </Button>
                         <Button
                           size="sm"
+                          variant="outline"
+                          onClick={handleResetDispatchHistory}
+                          disabled={resettingHistory || deletingItems || creatingSubset}
+                          className="h-8 gap-1.5 text-xs font-semibold rounded-xl border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                          title="Limpa o histórico de envios e réguas para permitir novos disparos a estes contatos"
+                        >
+                          {resettingHistory ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                          Resetar Disparos ({selectedItemIds.size})
+                        </Button>
+                        <Button
+                          size="sm"
                           variant="destructive"
                           onClick={handleDeleteImportItems}
-                          disabled={deletingItems}
+                          disabled={deletingItems || resettingHistory || creatingSubset}
                           className="h-8 gap-1 text-xs font-bold rounded-xl"
                           title="Excluir leads selecionados da planilha"
                         >

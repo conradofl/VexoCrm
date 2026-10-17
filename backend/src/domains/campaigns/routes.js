@@ -5473,43 +5473,82 @@ export function registerCampaignsRoutes(app, deps) {
     }
   });
 
-  // POST /api/campaigns/reports/delete-import-items — Deleta itens de importação
-  app.post("/api/campaigns/reports/delete-import-items", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+  const handleDeleteImportItems = async (req, res) => {
+    if (!ensureDb(res)) return;
+    const requestedClientId = normalizeString(req.body?.clientId || req.query?.clientId);
+    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!clientId) return;
+    const leadImportItemIds = Array.isArray(req.body?.leadImportItemIds) ? req.body.leadImportItemIds : [];
+    if (leadImportItemIds.length === 0) {
+      return sendError(res, 400, "MISSING_LEAD_IMPORT_ITEM_IDS", "Nenhum lead selecionado para exclusão");
+    }
+    try {
+      if (pgDatabasePool) {
+        // 1. Remove os runs de campanha associados a esses itens (tanto por lead_import_item_id quanto lead_id)
+        await pgDatabasePool.query(
+          `DELETE FROM public.campaign_dispatch_runs
+            WHERE client_id = $1
+              AND (lead_import_item_id = ANY($2::uuid[]) OR lead_id = ANY($2::uuid[]))`,
+          [clientId, leadImportItemIds]
+        );
+        // 2. Remove os itens da planilha
+        const { rowCount } = await pgDatabasePool.query(
+          `DELETE FROM public.lead_import_items
+            WHERE client_id = $1
+              AND id = ANY($2::uuid[])`,
+          [clientId, leadImportItemIds]
+        );
+        return res.json({ success: true, deletedCount: rowCount ?? 0 });
+      }
+      // Fallback Supabase caso sem pool
+      await supabase.from("campaign_dispatch_runs").delete().in("lead_id", leadImportItemIds).eq("client_id", clientId);
+      const { data, error } = await supabase.from("lead_import_items").delete().in("id", leadImportItemIds).eq("client_id", clientId).select("id");
+      if (error) throw error;
+      return res.json({ success: true, deletedCount: data?.length ?? 0 });
+    } catch (err) {
+      console.error("[delete-import-items] error:", err);
+      sendError(res, 500, "DELETE_IMPORT_ITEMS_FAILED", err instanceof Error ? err.message : "Erro ao excluir itens da planilha");
+    }
+  };
+  // Registrar para ambos os métodos (DELETE e POST)
+  app.delete("/api/campaigns/reports/delete-import-items", requireFirebaseAuth, requireCampaignDispatchAccess, handleDeleteImportItems);
+  app.post("/api/campaigns/reports/delete-import-items", requireFirebaseAuth, requireCampaignDispatchAccess, handleDeleteImportItems);
+
+  // POST /api/campaigns/reports/reset-dispatch-history — Reseta histórico de disparos de leads
+  app.post("/api/campaigns/reports/reset-dispatch-history", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
     if (!ensureDb(res)) return;
     const requestedClientId = normalizeString(req.body?.clientId);
     const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
     if (!clientId) return;
-
     const leadImportItemIds = Array.isArray(req.body?.leadImportItemIds) ? req.body.leadImportItemIds : [];
     if (leadImportItemIds.length === 0) {
-      return sendError(res, 400, "MISSING_LEAD_IMPORT_ITEM_IDS", "Missing leadImportItemIds array");
+      return sendError(res, 400, "MISSING_LEAD_IMPORT_ITEM_IDS", "Nenhum lead selecionado");
     }
-
     try {
-      // 1. Deletar os runs associados primeiro para manter a integridade referencial se houver FK
-      await supabase
-        .from("campaign_dispatch_runs")
-        .delete()
-        .in("lead_id", leadImportItemIds)
-        .eq("client_id", clientId);
-
-      // 2. Deletar os itens de importação
-      const { data, error } = await supabase
-        .from("lead_import_items")
-        .delete()
-        .in("id", leadImportItemIds)
-        .eq("client_id", clientId)
-        .select("id");
-
-      if (error) throw error;
-
-      res.json({
-        success: true,
-        deletedCount: data?.length ?? 0
-      });
+      if (pgDatabasePool) {
+        // 1. Remove os registros de disparo (runs) para que esses contatos voltem a ser elegíveis
+        await pgDatabasePool.query(
+          `DELETE FROM public.campaign_dispatch_runs
+            WHERE client_id = $1
+              AND (lead_import_item_id = ANY($2::uuid[]) OR lead_id = ANY($2::uuid[]))`,
+          [clientId, leadImportItemIds]
+        );
+        // 2. Limpa o progresso de régua/campanha no JSON de dados normalizados
+        await pgDatabasePool.query(
+          `UPDATE public.lead_import_items
+              SET normalized_data = COALESCE(normalized_data, '{}'::jsonb) - 'progress' - 'status_conversa',
+                  status_conversa = NULL
+            WHERE client_id = $1
+              AND id = ANY($2::uuid[])`,
+          [clientId, leadImportItemIds]
+        );
+        return res.json({ success: true, resetCount: leadImportItemIds.length });
+      }
+      await supabase.from("campaign_dispatch_runs").delete().in("lead_id", leadImportItemIds).eq("client_id", clientId);
+      return res.json({ success: true, resetCount: leadImportItemIds.length });
     } catch (err) {
-      console.error("[delete-import-items] error:", err);
-      sendError(res, 500, "DELETE_IMPORT_ITEMS_FAILED", err instanceof Error ? err.message : "Failed to delete import items");
+      console.error("[reset-dispatch-history] error:", err);
+      sendError(res, 500, "RESET_DISPATCH_FAILED", err instanceof Error ? err.message : "Erro ao resetar histórico de disparos");
     }
   });
 

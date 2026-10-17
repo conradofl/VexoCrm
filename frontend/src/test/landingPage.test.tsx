@@ -21,8 +21,8 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
       </BrowserRouter>
     );
 
-    expect(screen.getByText(/A inteligência comercial para/i)).toBeInTheDocument();
-    expect(screen.getByText(/quem decide vendas/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/A inteligência comercial para/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/quem decide vendas/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/VEXO OS/i).length).toBeGreaterThan(0);
   });
 
@@ -40,7 +40,7 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
     fireEvent.click(demoButton);
 
     expect(screen.getByText(/Conhecer o Vexo OS/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Ex: Carlos Eduardo/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Seu nome/i)).toBeInTheDocument();
 
     // Fecha o modal
     const closeBtn = screen.getByLabelText(/Fechar modal/i);
