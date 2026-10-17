@@ -982,6 +982,55 @@ export function useRewriteCampaignStep() {
   }>("/api/campaigns/ai/rewrite-step", "Erro ao reescrever passo");
 }
 
+export interface MagicCampaignStep {
+  order: number;
+  type: "text" | "link" | "image";
+  triggerMode: "immediate" | "after_reply" | "with_previous";
+  text: string;
+  linkUrl?: string;
+  buttons?: Array<{ type: "reply"; displayText: string; replyText: string }>;
+}
+
+export interface MagicCampaignResult {
+  campaignName: string;
+  rationale: string;
+  steps: MagicCampaignStep[];
+  agentPrompt: string;
+}
+
+export interface MagicCampaignPayload {
+  prompt: string;
+  niche?: string;
+  tone?: string;
+  clientId?: string;
+}
+
+export function useMagicCreateCampaign() {
+  const { getIdToken } = useAuth();
+  return useMutation({
+    mutationFn: async (payload: MagicCampaignPayload): Promise<MagicCampaignResult> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const res = await fetchCampaignsApi("/api/campaigns/ai/magic-create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Erro ao criar campanha com IA"));
+      }
+
+      const data = await readCampaignJson<{ item: MagicCampaignResult }>(res, "/api/campaigns/ai/magic-create");
+      return data.item;
+    },
+  });
+}
+
 // ── Campaign Dispatches ───────────────────────────────────────────────────────
 
 export function useCampaignDispatches(campaignId: string | null) {

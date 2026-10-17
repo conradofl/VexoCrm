@@ -19,6 +19,7 @@ interface PageShellProps {
   // Aceitas por páginas legadas/novas; ainda não renderizadas pelo shell atual.
   description?: string;
   icon?: React.ElementType;
+  titleExtra?: ReactNode;
   headerRight?: ReactNode;
   children: ReactNode;
   spacing?: string;
@@ -30,6 +31,7 @@ interface PageShellProps {
 export function PageShell({
   title,
   subtitle,
+  titleExtra,
   headerRight,
   children,
   spacing = "space-y-4",
@@ -250,9 +252,12 @@ export function PageShell({
           }
         >
           <div className="max-w-3xl">
-            <h1 className={compactHero ? "text-xl font-extrabold tracking-tight text-foreground" : "text-2xl font-extrabold tracking-tight text-foreground"}>
-              {title}
-            </h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className={compactHero ? "text-xl font-extrabold tracking-tight text-foreground" : "text-2xl font-extrabold tracking-tight text-foreground"}>
+                {title}
+              </h1>
+              {titleExtra}
+            </div>
             {subtitle && <p className={compactHero ? "mt-1 text-[11px] text-muted-foreground" : "mt-1.5 text-xs text-muted-foreground"}>{subtitle}</p>}
           </div>
           {headerRight && (

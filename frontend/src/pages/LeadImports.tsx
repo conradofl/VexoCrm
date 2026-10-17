@@ -54,6 +54,7 @@ import {
   type CampaignImageAsset,
   type CampaignSequenceStep,
   type CampaignAudienceCriteria,
+  type MagicCampaignResult,
 } from "@/hooks/useCampanhas";
 import { DispatchRecipientsDialog } from "./LeadImports/DispatchRecipientsDialog";
 import { DuplicateDispatchWarningDialog } from "./LeadImports/DuplicateDispatchWarningDialog";
@@ -79,6 +80,7 @@ import {
   campaignLocalDateTimeToUtcIso,
   campaignUtcIsoToLocalDateTime,
   createCampaignStep,
+  makeCampaignStepId,
   detectSpreadsheetColumns,
   getLeadField,
   normalizeCampaignSequence,
@@ -112,6 +114,7 @@ import { DispatchCampaignTracker } from "./LeadImports/DispatchCampaignTracker";
 import { LeadImportAuditReport } from "./LeadImports/LeadImportAuditReport";
 import { ImportViewerDialog } from "./LeadImports/ImportViewerDialog";
 import { DispatchPromptDialog } from "./LeadImports/DispatchPromptDialog";
+import { MagicCreatorModal } from "@/components/campaigns/MagicCreatorModal";
 
 type SheetTab = "campanha" | "enviadas" | "agendamentos" | "relatorios";
 type CampaignTemplateStrategy = "single" | "ai_variations";
@@ -661,6 +664,42 @@ export default function LeadImports({
     pendingRecipientsCount: number;
     isProcessing?: boolean;
   } | null>(null);
+
+  const [isMagicCreatorOpen, setIsMagicCreatorOpen] = useState(false);
+
+  const handleApplyMagicCampaign = useCallback((result: MagicCampaignResult) => {
+    if (result.campaignName) {
+      setCampaignName(result.campaignName);
+    }
+
+    if (Array.isArray(result.steps) && result.steps.length > 0) {
+      const mappedSteps = result.steps.map((s, idx) =>
+        createCampaignStep(
+          s.type === "image" ? "image" : s.type === "link" ? "link" : "text",
+          idx + 1,
+          {
+            id: makeCampaignStepId(),
+            text: s.text || "",
+            linkUrl: s.linkUrl || (s.type === "link" ? "https://{{scheduling_link}}" : ""),
+            triggerMode: s.triggerMode || (idx === 0 ? "immediate" : "after_reply"),
+            enabled: true,
+            buttons: s.buttons ? [...s.buttons] : [],
+          }
+        )
+      );
+      setCampaignSequence(mappedSteps);
+    }
+
+    if (result.agentPrompt) {
+      setCampaignAgentPrompt(result.agentPrompt);
+      setReplyAgent("campanha");
+    }
+
+    setIsMagicCreatorOpen(false);
+    toast({
+      title: "Campanha gerada e aplicada com sucesso!",
+    });
+  }, [setCampaignName, setCampaignSequence, setCampaignAgentPrompt, setReplyAgent]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const sequenceImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -2240,6 +2279,15 @@ export default function LeadImports({
     <PageShell
       title={title}
       subtitle={subtitle}
+      titleExtra={
+        <button
+          type="button"
+          onClick={() => setIsMagicCreatorOpen(true)}
+          className="bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-indigo-500 text-white shadow-md shadow-indigo-500/20 font-medium px-3.5 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-all active:scale-95"
+        >
+          ✨ Criar com IA
+        </button>
+      }
       headerRight={headerRight}
       spacing="space-y-6"
       showGlobalClientSelector={!fixedClientId}
@@ -2535,6 +2583,15 @@ export default function LeadImports({
           onCancelPreviousAndCreate={handleCancelPreviousAndCreate}
           onCreateAnyway={handleCreateAnyway}
           isProcessing={duplicateWarningState.isProcessing}
+        />
+      )}
+
+      {isMagicCreatorOpen && (
+        <MagicCreatorModal
+          open={isMagicCreatorOpen}
+          onOpenChange={setIsMagicCreatorOpen}
+          onApply={handleApplyMagicCampaign}
+          clientId={activeClientId}
         />
       )}
     </PageShell>

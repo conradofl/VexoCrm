@@ -53,6 +53,10 @@ import {
   suggestCampaignDelays,
   suggestCampaignSequence,
 } from "../../campaign-ai.js";
+import {
+  generateMagicCampaign,
+  getFallbackMagicCampaign,
+} from "../../services/magicCampaignCreator.js";
 import { resolveRequiredAuthorizedClientId } from "../../tenantScope.js";
 import {
   extractTextFromBody,
@@ -792,6 +796,27 @@ export function registerCampaignsRoutes(app, deps) {
     } catch (error) {
       console.error("campaign ai rewrite step error:", error);
       sendError(res, 502, "GROQ_REQUEST_FAILED", error instanceof Error ? error.message : "Falha ao consultar a Groq");
+    }
+  });
+
+  app.post("/api/campaigns/ai/magic-create", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    try {
+      const { prompt, niche, tone, clientId } = req.body || {};
+      const item = await generateMagicCampaign({
+        prompt,
+        niche,
+        tone,
+        clientId: clientId || req.query?.clientId || req.headers?.["x-client-id"],
+      });
+      res.json({ item });
+    } catch (error) {
+      console.error("campaign ai magic create error:", error);
+      const fallback = getFallbackMagicCampaign({
+        prompt: req.body?.prompt,
+        niche: req.body?.niche,
+        tone: req.body?.tone,
+      });
+      res.json({ item: fallback, isFallback: true });
     }
   });
 
