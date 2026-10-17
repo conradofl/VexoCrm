@@ -1,12 +1,12 @@
 // frontend/src/pages/LandingPage/LiveChatSimulator.tsx
 // Componente Interativo (Padrão 21st.dev):
-// Simulador Operacional do Agente Vexo com RAG, Chat Interativo em Tempo Real e Modal de Minuta Contratual em PDF
+// Simulador Operacional do Agente Vexo demonstrando a reativação de base parada (2.000 contatos)
+// com cronograma anti-bloqueio, estimativa de resposta e minuta de simulação em PDF
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   Bot,
-  Check,
   CheckCheck,
   FileCheck2,
   FileText,
@@ -14,8 +14,8 @@ import {
   Sparkles,
   X,
   ShieldCheck,
-  Download,
   ExternalLink,
+  Download,
 } from "lucide-react";
 
 interface ChatMessage {
@@ -37,18 +37,31 @@ export function LiveChatSimulator() {
       id: "msg-1",
       sender: "user",
       time: "10:42",
-      text: "Olá! Preciso saber se o Vexo OS consegue atender meu time de 8 corretores e já gerar a minuta do contrato direto com o cliente.",
+      text: "Oi, tudo bem? Vi vocês no Instagram. Tenho uns 2 mil contatos no WhatsApp mas confesso que a maioria tá parado há meses. Dá pra fazer alguma coisa com isso?",
     },
     {
       id: "msg-2",
       sender: "agent",
       time: "10:42",
-      badge: "Resposta baseada no Manual Comercial da Empresa",
-      text: "Olá! Perfeitamente. Para 8 corretores, o plano indicado é o Escala Comercial com rodízio inteligente de chips. A geração do contrato é instantânea: basta confirmar os dados que nossa IA monta a minuta completa em PDF.",
+      badge: "Vexo · 1,8s · RAG ativo",
+      text: "Dá, e normalmente é onde está o dinheiro mais barato 🙂\n\nDeixa eu te perguntar duas coisas rápidas:\n1. Esses 2 mil vieram de onde — site, indicação, grupo?\n2. Quando foi a última vez que alguém falou com eles?",
+    },
+    {
+      id: "msg-3",
+      sender: "user",
+      time: "10:43",
+      text: "Maioria é de grupo de WhatsApp e indicação. Última vez... uns 6 meses.",
+    },
+    {
+      id: "msg-4",
+      sender: "agent",
+      time: "10:43",
+      badge: "Vexo · 1,8s · RAG ativo",
+      text: "Perfeito. Base de grupo e indicação responde melhor que lista fria, e 6 meses é tempo bom pra reabordar sem parecer insistente.\n\nNuma campanha parecida, de 366 contatos nessa mesma situação:\n→ 62,7% responderam\n→ zero bloqueio de chip\n\nMontei uma simulação da sua: 2.000 contatos, 10 por lote, 1 lote por hora, dentro do horário comercial. Leva 2 dias e meio e não queima seu número.",
       contract: {
-        name: "Minuta_Contratual_Vexo.pdf",
-        details: "Cláusulas modulares · Cronograma quinzenal",
-        status: "Emitido",
+        name: "Simulacao_Reativacao_2000_contatos.pdf",
+        details: "Cronograma · Estimativa de resposta · Mensagens sugeridas",
+        status: "Gerado",
       },
     },
   ]);
@@ -56,7 +69,7 @@ export function LiveChatSimulator() {
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSigned, setIsSigned] = useState(false);
+  const [isSimulationApproved, setIsSimulationApproved] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -89,31 +102,31 @@ export function LiveChatSimulator() {
     setInputText("");
     setIsTyping(true);
 
-    // Simula raciocínio e geração contextual da IA comercial
+    // Simula raciocínio e geração contextual da IA comercial com balão "..."
     setTimeout(() => {
       let replyText = "";
       let hasContract = false;
-      let badge = "Consulta RAG ao Acervo de Regras Comerciais";
+      let badge = "Vexo · 1,8s · RAG ativo";
 
       const lower = text.toLowerCase();
-      if (lower.includes("preço") || lower.includes("custa") || lower.includes("valor")) {
+      if (lower.includes("parada") || lower.includes("reativação") || lower.includes("simular")) {
         replyText =
-          "O investimento para 8 corretores é de R$ 980/mês no plano Escala Comercial, incluindo instâncias ilimitadas de WhatsApp, IA treinada no seu manual de vendas e suporte prioritário via canal dedicado.";
-      } else if (lower.includes("contrato") || lower.includes("minuta") || lower.includes("gerar")) {
-        replyText =
-          "Minuta contratual gerada com sucesso! O documento foi pré-preenchido com cláusulas de proteção de dados, SLA de 99.9% e trava humana ativada. Clique no arquivo abaixo para revisar antes do envio.";
+          "Com base nos seus dados: podemos disparar em 3 chips em rodízio inteligente. Em 2 dias e meio sua base de 2.000 contatos é aquecida, e os interessados caem direto para o vendedor com histórico e qualificação pronta.";
         hasContract = true;
       } else if (lower.includes("trava") || lower.includes("humana") || lower.includes("seguran")) {
         replyText =
-          "A Trava Humana garante que a IA nunca feche ou altere condições sem o 'De Acordo' do seu vendedor. Você tem supervisão em tempo real e o controle da negociação é 100% da sua equipe.";
+          "A Trava Humana é inviolável: nenhuma mensagem ou proposta sai da sua empresa sem que o operador humano dê o 'De Acordo'. A IA sugere, você autoriza.";
         badge = "Protocolo de Segurança Comercial Vexo";
       } else if (lower.includes("bloqueio") || lower.includes("chip") || lower.includes("whatsapp")) {
         replyText =
-          "Nosso rodízio inteligente monitora aquecimento de chips e taxa de disparo em tempo real. Se um canal atingir o limite seguro, a conversa é transferida automaticamente sem o cliente perceber.";
+          "Zero bloqueio: operamos com lotes controlados (10 envios/hora por chip), rodízio de horário e variação sintática na abordagem para simular comportamento 100% humano perante o WhatsApp.";
         badge = "Módulo Anti-Bloqueio Multichip Ativo";
+      } else if (lower.includes("preço") || lower.includes("plano") || lower.includes("quanto")) {
+        replyText =
+          "Para campanhas com rodízio e anti-bloqueio, o plano Disparo começa em R$ 97/mês. Para ter o agente de IA qualificador atendendo 24/7 e gerando minutas, o plano Avançado sai por R$ 947/mês.";
       } else {
         replyText =
-          "Entendido! O Vexo OS orquestra todas as etapas do funil: qualificação automática, cálculo de propostas sob medida e formalização contratual em PDF pronta para assinatura digital.";
+          "Entendido! O Vexo OS integra base parada, cadência de reativação em lote e agentes de qualificação para transformar contatos esquecidos em contratos fechados.";
       }
 
       const agentMsg: ChatMessage = {
@@ -124,23 +137,23 @@ export function LiveChatSimulator() {
         text: replyText,
         contract: hasContract
           ? {
-              name: "Minuta_Contratual_Vexo.pdf",
-              details: "Cláusulas comerciais · SLA 99.9% · ICP-Brasil",
-              status: "Emitido",
+              name: "Simulacao_Reativacao_2000_contatos.pdf",
+              details: "Cronograma · Estimativa de resposta · Mensagens sugeridas",
+              status: "Gerado",
             }
           : undefined,
       };
 
       setMessages((prev) => [...prev, agentMsg]);
       setIsTyping(false);
-    }, 1100);
+    }, 1500);
   }
 
   const quickChips = [
-    { label: "💬 Preço 8 corretores", prompt: "Qual o investimento para um time de 8 corretores?" },
-    { label: "📄 Gerar Minuta Contratual", prompt: "Pode gerar uma minuta contratual modular agora?" },
-    { label: "🔒 Trava Humana", prompt: "Como funciona a trava humana para segurança da venda?" },
-    { label: "⚡ Anti-Bloqueio de Chips", prompt: "Como funciona a proteção anti-bloqueio de WhatsApp?" },
+    { label: "💬 Base parada", prompt: "Como vocês reativam contatos que não compram há mais de 6 meses?" },
+    { label: "📊 Simular reativação", prompt: "Pode simular o cronograma de disparo para minha base?" },
+    { label: "🔒 Trava Humana", prompt: "Como funciona a trava humana para segurança da operação?" },
+    { label: "⚡ Anti-Bloqueio", prompt: "Qual o segredo para ter zero bloqueios de chip nas campanhas?" },
   ];
 
   return (
@@ -168,11 +181,11 @@ export function LiveChatSimulator() {
           className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-[#9600FF]/40 bg-[#9600FF]/15 px-2.5 py-1 text-[11px] font-semibold text-[#D7B4FF] hover:bg-[#9600FF]/25 hover:border-[#9600FF]/60 transition-all cursor-pointer"
         >
           <FileCheck2 className="h-3.5 w-3.5" />
-          <span>Ver Minuta PDF</span>
+          <span>Ver PDF Simulação</span>
         </button>
       </div>
 
-      {/* Chips Rápidos de Interação */}
+      {/* Chips Rápidos de Interação Conforme Especificação */}
       <div className="mb-3 flex flex-wrap gap-1.5 sm:gap-2">
         {quickChips.map((chip) => (
           <button
@@ -198,7 +211,7 @@ export function LiveChatSimulator() {
           >
             {msg.sender === "user" ? (
               <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-gradient-to-r from-white/10 to-white/5 border border-white/12 p-3 text-xs text-white/90 shadow-md">
-                <p className="leading-relaxed">{msg.text}</p>
+                <p className="leading-relaxed whitespace-pre-line">{msg.text}</p>
                 <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-white/40">
                   <span>{msg.time}</span>
                   <CheckCheck className="h-3 w-3 text-sky-400" />
@@ -212,26 +225,26 @@ export function LiveChatSimulator() {
                     <span>{msg.badge}</span>
                   </div>
                 )}
-                <p className="leading-relaxed text-white/85">{msg.text}</p>
+                <p className="leading-relaxed text-white/85 whitespace-pre-line">{msg.text}</p>
 
-                {/* Card de Contrato Modular */}
+                {/* Card de Simulação em PDF */}
                 {msg.contract && (
                   <div
                     onClick={() => setIsModalOpen(true)}
                     className="mt-3 group rounded-xl border border-[#9600FF]/40 bg-[#1C1642] p-2.5 flex items-center justify-between gap-3 hover:border-[#9600FF]/80 hover:bg-[#231B54] transition-all cursor-pointer shadow-lg"
                   >
                     <div className="flex items-center gap-2.5">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#9600FF]/30 text-[#D7B4FF] group-hover:scale-105 transition-transform">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#9600FF]/30 text-[#D7B4FF] group-hover:scale-105 transition-transform shrink-0">
                         <FileText className="h-4 w-4" />
                       </div>
-                      <div>
-                        <p className="text-[11px] font-bold text-white group-hover:text-[#D7B4FF] transition-colors">
+                      <div className="overflow-hidden">
+                        <p className="text-[11px] font-bold text-white group-hover:text-[#D7B4FF] transition-colors truncate">
                           {msg.contract.name}
                         </p>
-                        <p className="text-[9px] text-white/50">{msg.contract.details}</p>
+                        <p className="text-[9px] text-white/50 truncate">{msg.contract.details}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <span className="rounded-md bg-[#00FF96]/15 border border-[#00FF96]/30 px-2 py-0.5 text-[9px] font-bold text-[#00FF96]">
                         {msg.contract.status}
                       </span>
@@ -241,7 +254,7 @@ export function LiveChatSimulator() {
                 )}
 
                 <div className="mt-2.5 flex items-center justify-between text-[9px] text-white/40 pt-2 border-t border-white/5">
-                  <span className="text-white/60">🔒 Trava humana ativa: vendedor no comando</span>
+                  <span className="text-[#D7B4FF] font-medium">🔒 Trava humana ativa: nada é enviado sem o seu OK</span>
                   <span>{msg.time}</span>
                 </div>
               </div>
@@ -249,14 +262,14 @@ export function LiveChatSimulator() {
           </div>
         ))}
 
-        {/* Indicador de Digitação do Agente */}
+        {/* Indicador de Digitação do Agente com Balão "..." */}
         {isTyping && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl rounded-tl-sm bg-[#13112E] border border-[#9600FF]/30 px-3.5 py-2.5 text-xs text-white/70 flex items-center gap-2 shadow-lg">
-              <span className="h-2 w-2 rounded-full bg-[#00FF96] animate-ping" />
-              <span className="text-[11px] font-medium text-[#D7B4FF]">
-                Vexo Commercial Agent consultando acervo...
-              </span>
+          <div className="flex justify-start animate-in fade-in duration-200">
+            <div className="rounded-2xl rounded-tl-sm bg-[#13112E] border border-[#9600FF]/30 px-4 py-3 text-xs text-white/70 flex items-center gap-2.5 shadow-lg">
+              <span className="h-2 w-2 rounded-full bg-[#D7B4FF] animate-bounce [animation-delay:-0.3s]" />
+              <span className="h-2 w-2 rounded-full bg-[#D7B4FF] animate-bounce [animation-delay:-0.15s]" />
+              <span className="h-2 w-2 rounded-full bg-[#D7B4FF] animate-bounce" />
+              <span className="text-[10px] font-mono text-white/40 ml-1">Vexo digitando...</span>
             </div>
           </div>
         )}
@@ -274,7 +287,7 @@ export function LiveChatSimulator() {
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Envie uma pergunta ou teste uma solicitação..."
+          placeholder="Envie uma pergunta ou simule sua base de contatos..."
           className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs text-white placeholder-white/35 focus:outline-none focus:border-[#9600FF]/70 focus:bg-white/8 transition-all"
         />
         <button
@@ -286,7 +299,7 @@ export function LiveChatSimulator() {
         </button>
       </form>
 
-      {/* MODAL DE PRÉ-VISUALIZAÇÃO DO CONTRATO GERADO */}
+      {/* MODAL DE PRÉ-VISUALIZAÇÃO DA SIMULAÇÃO GERADA */}
       {isModalOpen && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="relative w-full max-w-xl rounded-2xl border border-white/15 bg-[#0C0B1E] p-6 shadow-2xl text-white">
@@ -298,10 +311,10 @@ export function LiveChatSimulator() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white">
-                    Minuta_Contratual_Vexo.pdf
+                    Simulacao_Reativacao_2000_contatos.pdf
                   </h3>
                   <p className="text-[11px] text-white/50">
-                    Documento gerado automaticamente via RAG com regras comerciais
+                    Cronograma · Estimativa de resposta · Script homologado anti-bloqueio
                   </p>
                 </div>
               </div>
@@ -314,31 +327,33 @@ export function LiveChatSimulator() {
             </div>
 
             {/* Conteúdo da Minuta */}
-            <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 text-xs text-white/80 leading-relaxed font-light bg-black/30 p-4 rounded-xl border border-white/5 font-mono">
+            <div className="space-y-4 max-h-[320px] overflow-y-auto pr-2 text-xs text-white/80 leading-relaxed font-light bg-black/30 p-4 rounded-xl border border-white/5 font-mono">
               <div className="text-center font-bold text-white border-b border-white/10 pb-2">
-                INSTRUMENTO PARTICULAR DE LICENCIAMENTO COMERCIAL E IA
+                PLANO DE REATIVAÇÃO DE BASE COMERCIAL — VEXO OS
               </div>
               <p>
-                <strong>CONTRATADA:</strong> Vexo Tecnologia de Vendas LTDA, plataforma Vexo OS.
+                <strong>BASE ANALISADA:</strong> 2.000 contatos inativos (tempo de silêncio &gt; 6 meses).
                 <br />
-                <strong>CONTRATANTE:</strong> Sua Empresa Comercial / Time de Vendas.
+                <strong>ESTIMATIVA DE RESPOSTA HISTÓRICA:</strong> 62,7% em grupos/indicações (benchmark medido).
               </p>
               <div>
-                <strong className="text-[#D7B4FF]">CLÁUSULA 1ª — DO ESCOPO &amp; PLANO:</strong>
+                <strong className="text-[#D7B4FF]">1. CRONOGRAMA DE DISPARO FRACIONADO (ANTI-BLOQUEIO):</strong>
                 <p className="mt-1 text-white/70">
-                  Licença de acesso para 8 corretores comerciais, com rodízio inteligente multichip de WhatsApp, geração instantânea de propostas em PDF e agente de qualificação comercial 24/7.
+                  - Lotes de 10 contatos por hora, por chip, estritamente entre 09:00 e 18:00 de dias úteis.
+                  <br />
+                  - Duração prevista: 2 dias e meio para conclusão total da esteira sem risco de queima do número.
                 </p>
               </div>
               <div>
-                <strong className="text-[#D7B4FF]">CLÁUSULA 2ª — DA TRAVA HUMANA INVIOLÁVEL:</strong>
+                <strong className="text-[#D7B4FF]">2. SCRIPT DE ABORDAGEM HOMOLOGADO:</strong>
                 <p className="mt-1 text-white/70">
-                  Nenhuma automação ou agente de inteligência artificial poderá alterar valores, conceder descontos ou despachar contratos sem o expresso &apos;De Acordo&apos; do vendedor responsável.
+                  Mensagens personalizadas com menção à origem do contato e pergunta de desfecho leve, com variação sintática para cada destinatário.
                 </p>
               </div>
               <div>
-                <strong className="text-[#D7B4FF]">CLÁUSULA 3ª — DO SLA &amp; DISPONIBILIDADE:</strong>
+                <strong className="text-[#D7B4FF]">3. TRAVA HUMANA &amp; TRANSBORDO:</strong>
                 <p className="mt-1 text-white/70">
-                  Garantia de 99.9% de uptime operacional com redundância de servidores e migração automática entre instâncias de WhatsApp para prevenção de bloqueios.
+                  A IA assume as respostas imediatas e a triagem inicial. Assim que o cliente demonstra interesse concreto, o lead é distribuído ao vendedor com o resumo completo da conversa.
                 </p>
               </div>
             </div>
@@ -348,22 +363,22 @@ export function LiveChatSimulator() {
               <div className="flex items-center gap-2 text-xs">
                 <ShieldCheck className="h-4 w-4 text-[#00FF96]" />
                 <span className="text-white/60 text-[11px]">
-                  {isSigned
-                    ? "✓ Assinatura Digital Registrada via ICP-Brasil"
-                    : "Aguardando assinatura digital do cliente"}
+                  {isSimulationApproved
+                    ? "✓ Simulação Validada no Protocolo Vexo"
+                    : "Plano pronto para execução com trava humana"}
                 </span>
               </div>
 
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <button
-                  onClick={() => setIsSigned(true)}
+                  onClick={() => setIsSimulationApproved(true)}
                   className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    isSigned
+                    isSimulationApproved
                       ? "bg-[#00FF96]/20 text-[#00FF96] border border-[#00FF96]/40 cursor-default"
                       : "bg-gradient-to-r from-[#9600FF] to-[#4B00FF] text-white hover:brightness-110 shadow-[0_0_15px_rgba(150,0,255,0.4)]"
                   }`}
                 >
-                  {isSigned ? "Contrato Assinado! ✍️" : "Simular Assinatura Digital"}
+                  {isSimulationApproved ? "Simulação Aprovada! 🚀" : "Aprovar Esteira de Disparo"}
                 </button>
                 <button
                   onClick={() => setIsModalOpen(false)}

@@ -78,8 +78,8 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
         screen.getByText(/A inteligência comercial para/i)
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/quem decide vendas/i)
-      ).toBeInTheDocument();
+        screen.getAllByText(/quem decide vendas/i).length
+      ).toBeGreaterThanOrEqual(1);
     });
 
     it("exibe os 4 Princípios do Método Vexo de acelerar vendas", () => {
@@ -103,8 +103,41 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
       );
 
       expect(screen.getByText("De gente de Negócio, Para gente de Negócio")).toBeInTheDocument();
-      expect(screen.getByText("Milhares de conversas ativadas no ecossistema")).toBeInTheDocument();
+      expect(screen.getByText("Anti-bloqueio inteligente e conversas num lugar só")).toBeInTheDocument();
       expect(screen.getByText("Você sempre no controle do funil & Contratos em PDF")).toBeInTheDocument();
+    });
+
+    it("renderiza as novas seções da Parte 2: Prova, Módulos, Implantação, Planos e Diagnóstico", () => {
+      render(
+        <MemoryRouter>
+          <LandingPage />
+        </MemoryRouter>
+      );
+
+      // Seção 2: Prova
+      expect(screen.getByText(/Números de operação real, não de simulação/i)).toBeInTheDocument();
+
+      // Seção 6: Módulos
+      expect(screen.getByText(/Você escolhe por onde começar/i)).toBeInTheDocument();
+
+      // Seção 7: Implantação
+      expect(screen.getByText(/No ar em/i)).toBeInTheDocument();
+
+      // Seção 8: Planos
+      expect(screen.getByText(/Planos transparentes para/i)).toBeInTheDocument();
+      expect(screen.getAllByText("DISPARO").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("ESSENCIAL").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("AVANÇADO").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("PLUS").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText(/\+ R\$ 1\.500 setup/i)).toBeInTheDocument();
+      expect(screen.getByText(/\+ setup a partir de R\$ 3\.500/i)).toBeInTheDocument();
+      expect(screen.getByText(/O setup é o trabalho de colocar no ar/i)).toBeInTheDocument();
+
+      // Seção 9: FAQ
+      expect(screen.getByText(/E se eu escolher o módulo errado\?/i)).toBeInTheDocument();
+
+      // Seção 10: Diagnóstico Grátis
+      expect(screen.getByText(/Quanto dinheiro está parado/i)).toBeInTheDocument();
     });
 
     it("exibe os botões de CTA primário e de acesso à plataforma", () => {

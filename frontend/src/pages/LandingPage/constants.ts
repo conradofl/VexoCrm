@@ -1,40 +1,67 @@
 // frontend/src/pages/LandingPage/constants.ts
 
 import {
+  Activity,
+  ArchiveRestore,
   Bot,
+  Calendar,
+  Clock,
+  Database,
   FileSignature,
+  FileText,
   Filter,
+  Link2,
+  Radio,
   RefreshCw,
+  Send,
+  Sparkles,
+  Users,
 } from "lucide-react";
-import type { FaqItem, MethodologyStep, MetricItem, PillarItem, PlanItem } from "./types";
+import type {
+  FaqItem,
+  MethodologyStep,
+  ModuleItem,
+  PillarItem,
+  PlanCardItem,
+  PlanComparisonRow,
+} from "./types";
 
-export const DEMO_PHONE_NUMBER = "5534999996397";
+export const DEMO_PHONE_NUMBER = "5534991751267";
 
-export const METRICS: MetricItem[] = [
+// -------------------------------------------------------------
+// SEÇÃO 2 — NÚMEROS DE PROVA REAL
+// -------------------------------------------------------------
+export const PROOF_METRICS = [
   {
-    value: "24/7",
-    label: "Resposta Imediata",
-    detail: "Atendimento ativo em menos de 3 segundos sem fila ou janela morta.",
+    targetValue: 62.7,
+    suffix: "%",
+    label: "taxa de resposta numa campanha real",
+    decimals: 1,
   },
   {
-    value: "3 Faixas",
-    label: "Ativação de Base",
-    detail: "Nunca Abordados, Em Conversa e Negociação com cadências automáticas.",
+    targetValue: 366,
+    suffix: "",
+    label: "contatos ativados em 2 dias",
+    decimals: 0,
   },
   {
-    value: "Zero Furos",
-    label: "Contratos & Finanças",
-    detail: "Cláusulas modulares, cronogramas flexíveis e PDF pronto para assinar.",
+    targetValue: 0,
+    suffix: "",
+    label: "bloqueios de chip",
+    decimals: 0,
   },
 ];
 
+// -------------------------------------------------------------
+// SEÇÃO 4 — 4 PILARES DO MÉTODO VEXO
+// -------------------------------------------------------------
 export const FOUR_PILLARS: PillarItem[] = [
   {
     number: "01",
-    title: "Agentes Inteligentes no WhatsApp",
-    badge: "Atendimento 24/7 & RAG",
+    title: "Decisão antes da burocracia.",
+    badge: "Agilidade",
     description:
-      "Atendimento ativo sem perda de tempo de resposta. A IA qualifica oportunidades e responde com base documental segura.",
+      "O vendedor não pode perder tempo alimentando 30 campos de formulário. O Vexo OS resume a conversa e sugere o próximo passo.",
     items: [
       "Qualificação em tempo real sem travar a operação comercial",
       "Respostas contextualizadas com RAG de documentos e regras do negócio",
@@ -45,10 +72,10 @@ export const FOUR_PILLARS: PillarItem[] = [
   },
   {
     number: "02",
-    title: "Ativação de Base & Recuperação",
-    badge: "Contatos em 3 Faixas",
+    title: "Conversa antes da ferramenta.",
+    badge: "Naturalidade",
     description:
-      "Reative contatos dormentes e conduza conversas com ritmo constante sem depender de disparos genéricos.",
+      "A venda acontece na conversa real de WhatsApp. O sistema opera como suporte invisível, sem travar o ritmo comercial.",
     items: [
       "Classificação em 3 faixas comerciais: Nunca Abordados, Em Conversa e Em Negociação",
       "Cadências automáticas de follow-up guiadas por âncoras reais de calendário",
@@ -59,10 +86,10 @@ export const FOUR_PILLARS: PillarItem[] = [
   },
   {
     number: "03",
-    title: "Controle Total do Funil",
-    badge: "A IA Não Decide Sozinha",
+    title: "Trava humana antes da autonomia cega.",
+    badge: "Controle",
     description:
-      "A IA atende e organiza as informações, mas quem decide avançar, pausar ou fechar o negócio é sempre você e sua equipe.",
+      "A IA qualifica e responde, mas a decisão do vendedor é sagrada e inviolável. Nenhuma automação sobrescreve a escolha da sua equipe.",
     items: [
       "Identificação automática de intenções de compra, orçamento ou motivos de perda",
       "Segurança total: suas decisões manuais jamais são sobrescritas pela automação",
@@ -73,10 +100,10 @@ export const FOUR_PILLARS: PillarItem[] = [
   },
   {
     number: "04",
-    title: "Contratos & Fechamento Ágil",
-    badge: "Cláusulas Modulares & PDF",
+    title: "Contrato assinado antes da vaidade.",
+    badge: "Fechamento",
     description:
-      "Gere propostas e contratos blindados em segundos, eliminando idas e vindas de minutas manuais.",
+      "Métrica de vaidade não paga conta. Nosso foco é gerar a minuta comercial em PDF e coletar a assinatura na hora certa.",
     items: [
       "Montagem em blocos de cláusulas modulares com numeração ordinal contínua",
       "Cronograma flexível com suporte a parcelas semanais, quinzenais, mistas e permuta",
@@ -87,74 +114,284 @@ export const FOUR_PILLARS: PillarItem[] = [
   },
 ];
 
-export const METHODOLOGY: MethodologyStep[] = [
+// -------------------------------------------------------------
+// SEÇÃO 6 — OS 8 MÓDULOS DO CATÁLOGO
+// -------------------------------------------------------------
+export const CATALOG_MODULES: ModuleItem[] = [
   {
-    step: "01",
-    title: "Diagnóstico da Operação",
-    description:
-      "Mapeamos a entrada de leads, gargalos no atendimento, tempos mortos e principais objeções de fechamento antes de automatizar.",
+    number: "01",
+    title: "Agente de Atendimento 24/7",
+    description: "Responde, qualifica e marca reunião pelo seu manual comercial",
+    icon: Bot,
   },
   {
-    step: "02",
-    title: "Configuração dos 5 Pilares do Agente",
-    description:
-      "Definimos produtos, faixas de preço, tom de voz, regras comerciais invioláveis e exatamente o que a IA não pode prometer.",
+    number: "02",
+    title: "Campanhas & Disparo",
+    description: "Envio em lote com rodízio de chips, janela de horário e anti-bloqueio",
+    icon: Radio,
   },
   {
-    step: "03",
-    title: "Ativação & Ritmo Comercial",
-    description:
-      "Conectamos os chips de WhatsApp, acionamos disparos segmentados e acompanhamos o funil em tempo real com supervisão humana.",
-  },
-];
-
-export const PLANS: PlanItem[] = [
-  {
-    name: "Operação Essencial",
-    price: "Sob Consulta",
-    badge: "Começo Seguro",
-    description: "Ideal para empresas que querem profissionalizar o atendimento no WhatsApp e centralizar o funil.",
-    features: [
-      "Até 2 chips de WhatsApp integrados",
-      "Agente de qualificação 24/7 com RAG",
-      "Funil comercial com controle total (a IA não decide sozinha)",
-      "Ativação de contatos em 3 faixas",
-      "Suporte e onboarding assistido",
-    ],
-    featured: false,
+    number: "03",
+    title: "Follow-up Automático",
+    description: "Cadências que recuperam quem sumiu",
+    icon: RefreshCw,
   },
   {
-    name: "Escala Comercial",
-    price: "Mais Popular",
-    badge: "Operação Completa",
-    description: "Para equipes que precisam de múltiplos agentes, geração de contratos e esteira de automação ativa.",
-    features: [
-      "Múltiplas instâncias de WhatsApp com rodízio inteligente",
-      "Agentes treinados com documentação do negócio",
-      "Módulo de Contratos & Cronograma flexível",
-      "Cadências automáticas de pós-venda e follow-up",
-      "Sugestão inteligente de estágio no Inbox",
-      "Relatórios de inteligência comercial em tempo real",
-    ],
-    featured: true,
+    number: "04",
+    title: "Contratos & Propostas em PDF",
+    description: "Minuta modular gerada na conversa",
+    icon: FileSignature,
   },
   {
-    name: "Enterprise Multi-Instâncias",
-    price: "Customizado",
-    badge: "Grandes Volumes",
-    description: "Para redes, franqueadoras ou operações de alto volume com regras corporativas dedicadas.",
-    features: [
-      "Instâncias ilimitadas de WhatsApp",
-      "Isolamento multi-tenant robusto",
-      "Modelos contratuais complexos e personalizados",
-      "SLA dedicado de suporte e engenharia",
-      "Integrações de API e Webhooks customizados",
-    ],
-    featured: false,
+    number: "05",
+    title: "Extração Inteligente de Contatos",
+    description: "Conversas e grupos viram base organizada",
+    icon: Database,
+  },
+  {
+    number: "06",
+    title: "Leads Parados",
+    description: "Encontra quem está esquecido e devolve para a fila",
+    icon: ArchiveRestore,
+  },
+  {
+    number: "07",
+    title: "Links Rastreados",
+    description: "Descobre quem clicou e avisa o vendedor na hora",
+    icon: Activity,
+  },
+  {
+    number: "08",
+    title: "Calendário Comercial",
+    description: "Campanhas, follow-ups e reuniões numa visão só",
+    icon: Calendar,
   },
 ];
 
+// -------------------------------------------------------------
+// SEÇÃO 7 — LINHA DO TEMPO DA IMPLANTAÇÃO (3 DIAS)
+// -------------------------------------------------------------
+export const IMPLEMENTATION_STEPS: MethodologyStep[] = [
+  {
+    step: "DIA 1",
+    title: "Conexão de WhatsApp & Importação",
+    description: "Conectamos seu WhatsApp e importamos sua base.",
+  },
+  {
+    step: "DIA 2",
+    title: "Treinamento do Agente",
+    description: "Treinamos o agente com o manual comercial da sua empresa.",
+  },
+  {
+    step: "DIA 3",
+    title: "Primeira Campanha no Ar",
+    description: "Primeira campanha no ar com validação ao vivo.",
+  },
+];
+
+// -------------------------------------------------------------
+// SEÇÃO 8 — OS 4 PLANOS COMERCIAIS
+// -------------------------------------------------------------
+export const PRICING_PLANS: PlanCardItem[] = [
+  {
+    id: "disparo",
+    name: "DISPARO",
+    price: "R$ 97",
+    period: "/mês",
+    setup: "+ R$ 297 setup · Implantação guiada",
+    tagline: "Para quem está começando e precisa falar com a base que já tem.",
+    ctaText: "Começar",
+    ctaAction: "modal",
+    highlighted: false,
+    features: [
+      "Banco de leads com funil visual",
+      "Conversas do WhatsApp num lugar só",
+      "Campanhas com rodízio de horário e anti-bloqueio",
+      "1 número de WhatsApp · 1 usuário",
+      "Até 2.000 contatos · 1.000 mensagens/mês",
+      "Academy e documentação",
+    ],
+    excludedFeatures: ["Sem agente de IA — quem responde é você"],
+  },
+  {
+    id: "essencial",
+    name: "ESSENCIAL",
+    price: "R$ 247",
+    period: "/mês",
+    setup: "+ setup conforme o módulo escolhido",
+    tagline: "Para quem vende sozinho ou com até 3 pessoas.",
+    ctaText: "Escolher meu módulo",
+    ctaAction: "modal",
+    highlighted: false,
+    featuresHeader: "Tudo do Disparo, mais:",
+    features: [
+      "1 módulo do catálogo, à sua escolha",
+      "3 usuários",
+      "Até 10.000 contatos · 5.000 mensagens/mês",
+      "Suporte por e-mail em até 24h",
+    ],
+  },
+  {
+    id: "avancado",
+    name: "AVANÇADO",
+    price: "R$ 947",
+    period: "/mês",
+    setup: "+ R$ 1.500 setup · Implantação com treinamento do time",
+    tagline: "Para times de 4 a 15 pessoas vendendo.",
+    badge: "★ MAIS ESCOLHIDO",
+    ctaText: "Falar com a gente",
+    ctaAction: "modal",
+    highlighted: true,
+    featuresHeader: "Tudo do Essencial, mais:",
+    features: [
+      "3 módulos do catálogo",
+      "3 números com rodízio inteligente entre chips",
+      "Transbordo entre chips: o batedor abre, o fechador assume",
+      "10 usuários · 50.000 contatos · 25.000 mensagens/mês",
+      "Distribuição automática de leads entre vendedores",
+      "Relatórios de resposta e conversão por vendedor",
+      "Suporte por WhatsApp em até 8h",
+    ],
+  },
+  {
+    id: "plus",
+    name: "PLUS",
+    price: "R$ 1.847",
+    period: "/mês",
+    setup: "+ setup a partir de R$ 3.500 · Implantação dedicada",
+    tagline: "Para operações com mais de 15 pessoas ou mais de uma empresa.",
+    ctaText: "Falar com a gente",
+    ctaAction: "modal",
+    highlighted: false,
+    featuresHeader: "Tudo do Avançado, mais:",
+    features: [
+      "O catálogo completo — os 8 módulos",
+      "Números, usuários e contatos ilimitados",
+      "Várias empresas na mesma conta, com acesso separado por pessoa",
+      "Permissões por perfil e por módulo",
+      "Revisão mensal de operação — 1h por videochamada, com pauta",
+      "Suporte por WhatsApp em até 4h",
+    ],
+  },
+];
+
+// TABELA COMPARATIVA COMPLETA
+export const PLAN_COMPARISON_TABLE: PlanComparisonRow[] = [
+  {
+    feature: "Mensalidade",
+    disparo: "R$ 97",
+    essencial: "R$ 247",
+    avancado: "R$ 947",
+    plus: "R$ 1.847",
+  },
+  {
+    feature: "Setup",
+    disparo: "R$ 297",
+    essencial: "por módulo",
+    avancado: "R$ 1.500",
+    plus: "a partir de R$ 3.500",
+  },
+  {
+    feature: "Números de WhatsApp",
+    disparo: "1",
+    essencial: "1",
+    avancado: "3",
+    plus: "ilimitado",
+  },
+  {
+    feature: "Usuários",
+    disparo: "1",
+    essencial: "3",
+    avancado: "10",
+    plus: "ilimitado",
+  },
+  {
+    feature: "Contatos na base",
+    disparo: "2.000",
+    essencial: "10.000",
+    avancado: "50.000",
+    plus: "ilimitado",
+  },
+  {
+    feature: "Mensagens por mês",
+    disparo: "1.000",
+    essencial: "5.000",
+    avancado: "25.000",
+    plus: "ilimitado",
+  },
+  {
+    feature: "Módulos do catálogo",
+    disparo: "—",
+    essencial: "1",
+    avancado: "3",
+    plus: "os 8",
+  },
+  {
+    feature: "Agente de IA 24/7",
+    disparo: "—",
+    essencial: "se escolher",
+    avancado: "✓",
+    plus: "✓",
+  },
+  {
+    feature: "Transbordo entre chips",
+    disparo: "—",
+    essencial: "—",
+    avancado: "✓",
+    plus: "✓",
+  },
+  {
+    feature: "Distribuição de leads",
+    disparo: "—",
+    essencial: "—",
+    avancado: "✓",
+    plus: "✓",
+  },
+  {
+    feature: "Várias empresas",
+    disparo: "—",
+    essencial: "—",
+    avancado: "—",
+    plus: "✓",
+  },
+  {
+    feature: "Revisão mensal 1h",
+    disparo: "—",
+    essencial: "—",
+    avancado: "—",
+    plus: "✓",
+  },
+  {
+    feature: "Suporte",
+    disparo: "Academy",
+    essencial: "e-mail 24h",
+    avancado: "WhatsApp 8h",
+    plus: "WhatsApp 4h",
+  },
+];
+
+// -------------------------------------------------------------
+// SEÇÃO 9 — FAQ COMPLETO (9 PERGUNTAS)
+// -------------------------------------------------------------
 export const FAQS: FaqItem[] = [
+  {
+    question: "Preciso trocar meu número de WhatsApp?",
+    answer: "Não. O Vexo opera no número que seus clientes já conhecem.",
+  },
+  {
+    question: "Quanto tempo até a primeira campanha no ar?",
+    answer: "Três dias úteis, com sua base importada e o agente treinado.",
+  },
+  {
+    question: "E se eu escolher o módulo errado?",
+    answer:
+      "Depois de 3 meses você troca por outro do catálogo. A mensalidade não muda — você paga só o setup do novo. O módulo antigo é desligado e seus dados ficam guardados por 90 dias, caso queira voltar.",
+  },
+  {
+    question: "E se eu quiser sair? Levo meus dados?",
+    answer:
+      "Sim. Base completa em planilha, histórico de conversas e contratos gerados. Sem carência de saída.",
+  },
   {
     question: "O agente de IA substitui meu time de vendas?",
     answer:
@@ -182,10 +419,15 @@ export const FAQS: FaqItem[] = [
   },
 ];
 
-export const FOOTER_LINKS = [
-  { label: "Solução", href: "#solucao" },
-  { label: "Os 4 Pilares", href: "#pilares" },
-  { label: "Metodologia", href: "#metodologia" },
-  { label: "Planos", href: "#planos" },
-  { label: "FAQ", href: "#faq" },
+// -------------------------------------------------------------
+// SEÇÃO 12 — RODAPÉ INSTITUCIONAL
+// -------------------------------------------------------------
+export const FOOTER_NAV_LINKS = [
+  { label: "Posicionamento", href: "#sec-tese" },
+  { label: "Método", href: "#sec-metodo" },
+  { label: "Módulos", href: "#sec-modulos" },
+  { label: "Planos", href: "#sec-planos" },
+  { label: "FAQ", href: "#sec-faq" },
+  { label: "Diagnóstico grátis", href: "#sec-diagnostico" },
 ];
+export const FOOTER_LINKS = FOOTER_NAV_LINKS;

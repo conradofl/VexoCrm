@@ -19,7 +19,9 @@ export function LandingNavbar({
     { href: "#sec-tese", id: "sec-tese", label: "Posicionamento" },
     { href: "#sec-metodo", id: "sec-metodo", label: "Método" },
     { href: "#sec-modulos", id: "sec-modulos", label: "Módulos" },
+    { href: "#sec-planos", id: "sec-planos", label: "Planos" },
     { href: "#sec-faq", id: "sec-faq", label: "FAQ" },
+    { href: "#sec-diagnostico", id: "sec-diagnostico", label: "Diagnóstico" },
   ];
 
   // Monitora as seções visíveis na rolagem para acender a aba ativa na cápsula

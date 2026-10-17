@@ -1,22 +1,30 @@
 // frontend/src/pages/LandingPage/LeadCaptureModal.tsx
 
 import React, { useState } from "react";
-import { CheckCircle2, MessageSquare, Sparkles, X } from "lucide-react";
+import { CheckCircle2, FileText, MessageSquare, Sparkles, X } from "lucide-react";
 import { DEMO_PHONE_NUMBER } from "./constants";
 import type { LeadFormData } from "./types";
 
 interface LeadCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
+  mode?: "demo" | "diagnostico" | "plano";
+  planName?: string;
 }
 
-export function LeadCaptureModal({ isOpen, onClose }: LeadCaptureModalProps) {
+export function LeadCaptureModal({
+  isOpen,
+  onClose,
+  mode = "demo",
+  planName,
+}: LeadCaptureModalProps) {
   const [formData, setFormData] = useState<LeadFormData>({
     fullName: "",
     email: "",
     phone: "",
     company: "",
     teamSize: "1-5 vendedores",
+    baseSize: "Até 2.000 contatos",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -38,15 +46,28 @@ export function LeadCaptureModal({ isOpen, onClose }: LeadCaptureModalProps) {
     e.preventDefault();
     setIsSubmitting(true);
 
+    let subject = "Solicitação de Demonstração · Vexo OS";
+    let intentText = "Gostaria de agendar uma demonstração guiada do sistema e conhecer os agentes 24/7.";
+
+    if (mode === "diagnostico") {
+      subject = "Diagnóstico Comercial Grátis · Vexo OS";
+      intentText =
+        "Gostaria de receber o diagnóstico das 12 perguntas para saber quantos leads estão esquecidos e o potencial financeiro da minha base.";
+    } else if (mode === "plano" && planName) {
+      subject = `Interesse no Plano ${planName} · Vexo OS`;
+      intentText = `Tenho interesse em iniciar no Plano ${planName} com o Vexo OS.`;
+    }
+
     // Constrói mensagem contextualizada para WhatsApp
     const message = encodeURIComponent(
-      `*Solicitação de Demonstração · Vexo OS*\n\n` +
+      `*${subject}*\n\n` +
       `👤 *Nome:* ${formData.fullName}\n` +
       `🏢 *Empresa:* ${formData.company || "Não informado"}\n` +
+      `📊 *Base de Contatos:* ${formData.baseSize || "Não informado"}\n` +
       `👥 *Equipe Comercial:* ${formData.teamSize}\n` +
       `📱 *WhatsApp:* ${formData.phone}\n` +
       `✉️ *E-mail:* ${formData.email}\n\n` +
-      `Gostaria de agendar uma demonstração guiada do sistema e conhecer os agentes 24/7.`
+      `${intentText}`
     );
 
     setTimeout(() => {
@@ -58,11 +79,23 @@ export function LeadCaptureModal({ isOpen, onClose }: LeadCaptureModalProps) {
     }, 600);
   }
 
+  const modalTitle =
+    mode === "diagnostico"
+      ? "Diagnóstico Comercial Grátis"
+      : mode === "plano" && planName
+      ? `Começar no Plano ${planName}`
+      : "Conhecer o Vexo OS";
+
+  const modalSubtitle =
+    mode === "diagnostico"
+      ? "Informe seus dados para receber o diagnóstico de recuperação da sua base em 10 minutos."
+      : "Preencha abaixo para falar com um especialista comercial e ver a operação ao vivo.";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop de vidro jateado */}
       <div
-        className="fixed inset-0 bg-[#00000A]/80 backdrop-blur-md transition-opacity"
+        className="fixed inset-0 bg-[#00000A]/85 backdrop-blur-md transition-opacity"
         onClick={onClose}
       />
 
@@ -73,7 +106,7 @@ export function LeadCaptureModal({ isOpen, onClose }: LeadCaptureModalProps) {
 
         <button
           onClick={onClose}
-          className="absolute right-5 top-5 rounded-full p-2 text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+          className="absolute right-5 top-5 rounded-full p-2 text-white/50 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
           aria-label="Fechar modal"
         >
           <X className="h-5 w-5" />
@@ -86,11 +119,11 @@ export function LeadCaptureModal({ isOpen, onClose }: LeadCaptureModalProps) {
             </div>
             <h3 className="text-2xl font-bold text-white">Solicitação Confirmada!</h3>
             <p className="mt-2 text-sm text-white/70 max-w-sm">
-              Estamos direcionando você para o atendimento comercial prioritário no WhatsApp com seus dados pré-configurados.
+              Estamos direcionando você para o WhatsApp oficial com seus dados pré-configurados.
             </p>
             <div className="mt-6 flex items-center gap-2 text-xs font-mono text-[#00FF96]">
               <span className="h-2 w-2 rounded-full bg-[#00FF96] animate-ping" />
-              Conectando com especialista Vexo...
+              Conectando com o time Vexo...
             </div>
           </div>
         ) : (
@@ -100,105 +133,108 @@ export function LeadCaptureModal({ isOpen, onClose }: LeadCaptureModalProps) {
                 <span className="font-extrabold text-lg">V</span>
               </div>
               <div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#9600FF]/15 border border-[#9600FF]/30 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase text-[#D7B4FF]">
-                  <Sparkles className="h-3 w-3 text-[#D7B4FF]" />
-                  Acesso Exclusivo
-                </span>
-                <h3 className="text-xl font-bold text-white mt-1">Conhecer o Vexo OS</h3>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>{modalTitle}</span>
+                  <Sparkles className="h-4 w-4 text-[#D7B4FF]" />
+                </h3>
+                <p className="text-xs text-white/60">{modalSubtitle}</p>
               </div>
             </div>
 
-            <p className="text-xs text-white/60 mb-6">
-              Preencha os dados da sua operação para receber uma demonstração prática dos agentes inteligentes e do funil comercial.
-            </p>
-
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1.5">
-                  Seu Nome Completo
+                <label className="block text-xs font-medium text-white/70 mb-1.5">
+                  Nome Completo *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="Ex: Carlos Eduardo"
                   value={formData.fullName}
-                  onChange={(e) => setFormData((p) => ({ ...p, fullName: e.target.value }))}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:ring-1 focus:ring-[#9600FF] transition-all"
+                  onChange={(e) => setFormData((prev) => ({ ...prev, fullName: e.target.value }))}
+                  placeholder="Seu nome"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-xs text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:bg-white/8 transition-all"
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1.5">
-                    E-mail Corporativo
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="carlos@empresa.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:ring-1 focus:ring-[#9600FF] transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1.5">
-                    WhatsApp (com DDD)
+                  <label className="block text-xs font-medium text-white/70 mb-1.5">
+                    WhatsApp Comercial *
                   </label>
                   <input
                     type="tel"
                     required
-                    placeholder="(34) 99999-9999"
                     value={formData.phone}
                     onChange={handlePhoneChange}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:ring-1 focus:ring-[#9600FF] transition-all"
+                    placeholder="(00) 00000-0000"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-xs text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:bg-white/8 transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-white/70 mb-1.5">
+                    E-mail Corporativo *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={formData.email}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                    placeholder="seu@empresa.com"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-xs text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:bg-white/8 transition-all"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1.5">
+                  <label className="block text-xs font-medium text-white/70 mb-1.5">
                     Nome da Empresa
                   </label>
                   <input
                     type="text"
-                    required
-                    placeholder="Sua empresa"
                     value={formData.company}
-                    onChange={(e) => setFormData((p) => ({ ...p, company: e.target.value }))}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:ring-1 focus:ring-[#9600FF] transition-all"
+                    onChange={(e) => setFormData((prev) => ({ ...prev, company: e.target.value }))}
+                    placeholder="Sua empresa"
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-xs text-white placeholder-white/30 focus:border-[#9600FF] focus:outline-none focus:bg-white/8 transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1.5">
-                    Tamanho do Time Comercial
+                  <label className="block text-xs font-medium text-white/70 mb-1.5">
+                    Tamanho da Base
                   </label>
                   <select
-                    value={formData.teamSize}
-                    onChange={(e) => setFormData((p) => ({ ...p, teamSize: e.target.value }))}
-                    className="w-full rounded-xl border border-white/10 bg-[#121220] px-4 py-3 text-sm text-white focus:border-[#9600FF] focus:outline-none focus:ring-1 focus:ring-[#9600FF] transition-all"
+                    value={formData.baseSize}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, baseSize: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#120D2C] px-3.5 py-2.5 text-xs text-white focus:border-[#9600FF] focus:outline-none transition-all"
                   >
-                    <option value="1-3 vendedores">1 a 3 vendedores</option>
-                    <option value="4-10 vendedores">4 a 10 vendedores</option>
-                    <option value="11-30 vendedores">11 a 30 vendedores</option>
-                    <option value="+30 vendedores">+30 vendedores (Enterprise)</option>
+                    <option value="Até 2.000 contatos">Até 2.000 contatos</option>
+                    <option value="2.000 a 10.000 contatos">2.000 a 10.000 contatos</option>
+                    <option value="10.000 a 50.000 contatos">10.000 a 50.000 contatos</option>
+                    <option value="Mais de 50.000 contatos">Mais de 50.000 contatos</option>
                   </select>
                 </div>
               </div>
 
-              <div className="pt-3">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full rounded-xl bg-gradient-to-r from-[#9600FF] to-[#4B00FF] px-6 py-3.5 text-sm font-bold uppercase tracking-wider text-white shadow-[0_8px_25px_rgba(150,0,255,0.4)] hover:brightness-110 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  <span>{isSubmitting ? "Processando..." : "Confirmar Demonstração"}</span>
-                </button>
-              </div>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#9600FF] via-[#7B1FA2] to-[#4B00FF] text-white font-bold text-xs tracking-wide shadow-[0_0_20px_rgba(150,0,255,0.4)] hover:brightness-110 active:scale-[0.99] disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>
+                  {isSubmitting
+                    ? "Processando..."
+                    : mode === "diagnostico"
+                    ? "Receber Diagnóstico no WhatsApp"
+                    : "Avançar para WhatsApp Comercial"}
+                </span>
+              </button>
+
+              <p className="text-[10px] text-center text-white/40 pt-1 font-mono">
+                🔒 Seus dados são confidenciais e protegidos pela LGPD. Sem spam.
+              </p>
             </form>
           </>
         )}

@@ -71,7 +71,7 @@ export function HeroLayer({
         <div className="hero-bottom">
           <ul className="hero-bottom-list">
             <li>De gente de Negócio, Para gente de Negócio</li>
-            <li>Milhares de conversas ativadas no ecossistema</li>
+            <li>Anti-bloqueio inteligente e conversas num lugar só</li>
             <li>Você sempre no controle do funil &amp; Contratos em PDF</li>
           </ul>
 

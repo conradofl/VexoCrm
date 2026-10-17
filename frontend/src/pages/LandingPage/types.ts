@@ -24,13 +24,35 @@ export interface MethodologyStep {
   description: string;
 }
 
-export interface PlanItem {
+export interface ModuleItem {
+  number: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+export interface PlanCardItem {
+  id: string;
   name: string;
   price: string;
-  badge: string;
-  description: string;
+  period: string;
+  setup: string;
+  tagline: string;
+  badge?: string;
+  highlighted?: boolean;
+  ctaText: string;
+  ctaAction?: "modal" | "link";
+  featuresHeader?: string;
   features: string[];
-  featured: boolean;
+  excludedFeatures?: string[];
+}
+
+export interface PlanComparisonRow {
+  feature: string;
+  disparo: string;
+  essencial: string;
+  avancado: string;
+  plus: string;
 }
 
 export interface FaqItem {
@@ -43,5 +65,7 @@ export interface LeadFormData {
   email: string;
   phone: string;
   company: string;
-  teamSize: string;
+  teamSize?: string;
+  baseSize?: string;
+  source?: string;
 }

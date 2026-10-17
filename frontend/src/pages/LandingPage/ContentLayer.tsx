@@ -1,27 +1,29 @@
 // frontend/src/pages/LandingPage/ContentLayer.tsx
-//
-// Content Layer com a estrutura e leveza idêntica ao Xperiun:
-// - Iluminação e Nebulas Cósmicas integradas (Cores vibrantes, profundidade e movimento)
-// - Seção Manifesto / Tese com iluminação ambiente suave
-// - Seção Método Business-First (4 Princípios) com cartões holográficos
-// - Seção Módulos com IA operando em tempo real surgindo da direita para a esquerda
-// - Seção FAQ com micro-iluminação nos itens
-// - Seção CTA final com flare cósmico
+// Orquestrador de Conteúdo (Seções 2 a 12) na nova ordem estruturada
 
 import React, { useState, useRef, useEffect } from "react";
 import { ArrowRight, Bot, Check, FileSignature, Plus, RefreshCw, Sparkles } from "lucide-react";
-import { FAQS, FOOTER_LINKS } from "./constants";
+import { FAQS } from "./constants";
+import { FreeDiagnosisSection } from "./FreeDiagnosisSection";
+import { ImplementationTimeline } from "./ImplementationTimeline";
+import { LandingFooter } from "./LandingFooter";
+import type { LegalDocType } from "./LegalModal";
 import { LiveChatSimulator } from "./LiveChatSimulator";
+import { ModulesCatalogSection } from "./ModulesCatalogSection";
+import { PlansSection } from "./PlansSection";
+import { ProofSection } from "./ProofSection";
 import { SpotlightCard } from "./SpotlightCard";
 
 interface ContentLayerProps {
-  onOpenModal: () => void;
+  onOpenModal: (mode?: "demo" | "diagnostico" | "plano", planName?: string) => void;
+  onOpenLegal: (type: LegalDocType) => void;
   crmHref: string;
   primaryLabel: string;
 }
 
 export function ContentLayer({
   onOpenModal,
+  onOpenLegal,
   crmHref,
   primaryLabel,
 }: ContentLayerProps) {
@@ -32,7 +34,6 @@ export function ContentLayer({
   const simulatorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Em ambientes sem IntersectionObserver (ex: testes vitest), ativa imediatamente
     if (typeof IntersectionObserver === "undefined") {
       setIsSimulatorVisible(true);
       return;
@@ -61,17 +62,20 @@ export function ContentLayer({
   return (
     <div id="layer-content">
       {/* ========================================================= */}
-      {/* 1. SEÇÃO MANIFESTO / TESE (COM NEBULA CÓSMICA VIOLETA)   */}
+      {/* 2. SEÇÃO PROVA (NOVA - LOGO APÓS O HERO)                 */}
+      {/* ========================================================= */}
+      <ProofSection />
+
+      {/* ========================================================= */}
+      {/* 3. SEÇÃO POSICIONAMENTO / TESE (COM NEBULA CÓSMICA)      */}
       {/* ========================================================= */}
       <section
         id="sec-tese"
         className="relative py-28 px-6 sm:px-12 max-w-5xl mx-auto border-b border-white/5 overflow-hidden"
       >
-        {/* Iluminação Ambiente de Fundo */}
         <div className="section-ambient-glow glow-purple top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[380px] opacity-40 pointer-events-none" />
 
         <div className="relative z-10 space-y-12">
-          {/* Badge Iluminada */}
           <div className="inline-flex items-center gap-2 rounded-full border border-[#9600FF]/40 bg-[#9600FF]/15 px-3 py-1 text-xs text-[#D7B4FF] shadow-[0_0_15px_rgba(150,0,255,0.25)]">
             <Sparkles className="h-3.5 w-3.5" />
             <span className="font-mono uppercase tracking-wider text-[10px]">Posicionamento Vexo</span>
@@ -91,10 +95,9 @@ export function ContentLayer({
       </section>
 
       {/* ========================================================= */}
-      {/* 2. SEÇÃO MÉTODO VEXO (4 PRINCÍPIOS BUSINESS-FIRST)       */}
+      {/* 4. SEÇÃO MÉTODO VEXO (4 PRINCÍPIOS BUSINESS-FIRST)       */}
       {/* ========================================================= */}
       <section id="sec-metodo" className="relative py-24 px-6 sm:px-12 max-w-6xl mx-auto overflow-hidden">
-        {/* Iluminação Ambiente Holográfica */}
         <div className="section-ambient-glow glow-indigo -top-16 -left-16 w-[580px] h-[420px] opacity-35 pointer-events-none" />
         <div className="section-ambient-glow glow-cyan -bottom-20 -right-20 w-[480px] h-[380px] opacity-25 pointer-events-none" />
 
@@ -172,20 +175,19 @@ export function ContentLayer({
       </section>
 
       {/* ========================================================= */}
-      {/* 3. SEÇÃO MÓDULOS + 21ST.DEV LIVE SIMULATOR (SLIDE-IN)    */}
+      {/* 5. SEÇÃO SIMULAÇÃO AO VIVO (REATIVAÇÃO DE BASE PARADA)    */}
       {/* ========================================================= */}
-      <section id="sec-modulos" className="relative py-24 px-6 sm:px-12 max-w-6xl mx-auto border-t border-white/5 overflow-hidden">
-        {/* Iluminação Ambiente Violeta/Púrpura */}
+      <section id="sec-simulacao" className="relative py-24 px-6 sm:px-12 max-w-6xl mx-auto border-t border-white/5 overflow-hidden">
         <div className="section-ambient-glow glow-purple top-1/3 right-0 w-[600px] h-[500px] opacity-35 pointer-events-none" />
 
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-16">
+        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-6">
           <div>
             <span className="sec-eyebrow">Simulação ao Vivo</span>
             <h2 className="sec-title">
               Veja a IA operando <strong>em tempo real</strong>
             </h2>
             <p className="sec-lede">
-              Sem enrolação. O agente inteligente qualifica a intenção de compra, consulta o manual da sua empresa e gera o contrato modular pronto para assinar.
+              Sem enrolação. O agente inteligente analisa o histórico da base, monta a estratégia de reativação por lotes e gera a minuta com cronograma pronta para aprovação.
             </p>
 
             <div className="mt-8 space-y-4">
@@ -193,24 +195,23 @@ export function ContentLayer({
                 <div className="h-5 w-5 rounded-full bg-[#00FF96]/20 text-[#00FF96] flex items-center justify-center shrink-0 mt-0.5 shadow-[0_0_8px_rgba(0,255,150,0.3)]">
                   <Check className="h-3 w-3" />
                 </div>
-                <span><strong>RAG Documental:</strong> respostas embasadas em regras comerciais reais.</span>
+                <span><strong>RAG Documental:</strong> respostas embasadas nas regras da sua empresa.</span>
               </div>
               <div className="flex items-start gap-3 text-xs text-white/75">
                 <div className="h-5 w-5 rounded-full bg-[#00FF96]/20 text-[#00FF96] flex items-center justify-center shrink-0 mt-0.5 shadow-[0_0_8px_rgba(0,255,150,0.3)]">
                   <Check className="h-3 w-3" />
                 </div>
-                <span><strong>Anti-bloqueio:</strong> alternância automática de instâncias de WhatsApp.</span>
+                <span><strong>Zero Bloqueios:</strong> envios humanizados com rodízio inteligente de chips.</span>
               </div>
               <div className="flex items-start gap-3 text-xs text-white/75">
                 <div className="h-5 w-5 rounded-full bg-[#00FF96]/20 text-[#00FF96] flex items-center justify-center shrink-0 mt-0.5 shadow-[0_0_8px_rgba(0,255,150,0.3)]">
                   <Check className="h-3 w-3" />
                 </div>
-                <span><strong>Geração em 1 Clique:</strong> proposta em PDF enviada diretamente na conversa.</span>
+                <span><strong>Trava Humana Inviolável:</strong> a IA só dispara o que o vendedor aprovar.</span>
               </div>
             </div>
           </div>
 
-          {/* Componente 21st.dev: Live Chat Simulator com Animação de Entrada Lateral */}
           <div
             ref={simulatorRef}
             className={`slide-in-right ${isSimulatorVisible ? "visible" : ""}`}
@@ -221,10 +222,24 @@ export function ContentLayer({
       </section>
 
       {/* ========================================================= */}
-      {/* 4. SEÇÃO FAQ ACCORDION (LEVE E COM ILUMINAÇÃO SUTIL)     */}
+      {/* 6. SEÇÃO MÓDULOS (CATÁLOGO DOS 8 MÓDULOS)                 */}
+      {/* ========================================================= */}
+      <ModulesCatalogSection />
+
+      {/* ========================================================= */}
+      {/* 7. SEÇÃO IMPLANTAÇÃO (NO AR EM TRÊS DIAS)                */}
+      {/* ========================================================= */}
+      <ImplementationTimeline />
+
+      {/* ========================================================= */}
+      {/* 8. SEÇÃO PLANOS (4 CARTÕES + TABELA COMPARATIVA)          */}
+      {/* ========================================================= */}
+      <PlansSection onSelectPlan={(plan) => onOpenModal("plano", plan)} />
+
+      {/* ========================================================= */}
+      {/* 9. SEÇÃO FAQ ACCORDION (8 PERGUNTAS)                     */}
       {/* ========================================================= */}
       <section id="sec-faq" className="relative py-24 px-6 sm:px-12 max-w-4xl mx-auto border-t border-white/5 overflow-hidden">
-        {/* Iluminação Ambiente Índigo */}
         <div className="section-ambient-glow glow-indigo top-10 left-1/2 -translate-x-1/2 w-[520px] h-[320px] opacity-25 pointer-events-none" />
 
         <div className="relative z-10 mb-12 text-center">
@@ -277,10 +292,14 @@ export function ContentLayer({
       </section>
 
       {/* ========================================================= */}
-      {/* 5. SEÇÃO CTA FINAL (COM RADIANTE CÓSMICO E VIBRANTE)      */}
+      {/* 10. SEÇÃO DIAGNÓSTICO COMERCIAL GRÁTIS                   */}
+      {/* ========================================================= */}
+      <FreeDiagnosisSection onOpenDiagnosis={() => onOpenModal("diagnostico")} />
+
+      {/* ========================================================= */}
+      {/* 11. SEÇÃO CTA FINAL                                       */}
       {/* ========================================================= */}
       <section id="sec-cta" className="relative py-24 px-6 sm:px-12 max-w-6xl mx-auto border-t border-white/5 overflow-hidden">
-        {/* Grande Flare Cósmico no Rodapé */}
         <div className="section-ambient-glow glow-purple bottom-0 right-1/4 w-[750px] h-[450px] opacity-45 pointer-events-none" />
 
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-end">
@@ -290,7 +309,7 @@ export function ContentLayer({
               Você não precisa virar outra pessoa. Precisa virar a <strong>referência da sua área</strong>.
             </h2>
             <p className="sec-lede">
-              O Vexo OS foi construído pra esse passo. Centenas de empresas já estão acelerando esse caminho. Falta você.
+              O Vexo OS foi construído pra esse passo. Sua concorrência ainda está presa em planilhas manuais. Falta você.
             </p>
           </div>
 
@@ -303,13 +322,13 @@ export function ContentLayer({
                 Trava Humana Inviolável
               </span>
               <span className="rounded-full bg-[#9600FF]/15 border border-[#9600FF]/30 px-3.5 py-1 text-xs text-[#D7B4FF] shadow-[0_0_10px_rgba(150,0,255,0.2)]">
-                Contratos em PDF
+                Sem Fidelidade
               </span>
             </div>
 
             <div>
               <button
-                onClick={onOpenModal}
+                onClick={() => onOpenModal("demo")}
                 className="xp-btn"
               >
                 <span>Quero o Vexo OS</span>
@@ -321,26 +340,9 @@ export function ContentLayer({
       </section>
 
       {/* ========================================================= */}
-      {/* 6. RODAPÉ INSTITUCIONAL                                    */}
+      {/* 12. RODAPÉ COMPLETO                                       */}
       {/* ========================================================= */}
-      <footer className="pt-16 pb-8 px-6 sm:px-12 max-w-6xl mx-auto border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-6 text-xs text-white/40">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-gradient-to-br from-[#9600FF] to-[#4B00FF] text-white font-bold text-xs shadow-[0_0_10px_rgba(150,0,255,0.4)]">
-            V
-          </div>
-          <span className="font-bold uppercase tracking-wider text-white/80">Vexo OS</span>
-        </div>
-
-        <div className="flex items-center gap-6">
-          {FOOTER_LINKS.map((link) => (
-            <a key={link.href} href={link.href} className="hover:text-white transition-colors">
-              {link.label}
-            </a>
-          ))}
-        </div>
-
-        <p>© {new Date().getFullYear()} Vexo OS. Todos os direitos reservados.</p>
-      </footer>
+      <LandingFooter onOpenLegal={onOpenLegal} />
     </div>
   );
 }

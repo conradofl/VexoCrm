@@ -479,3 +479,39 @@ html {
   transform: translateY(-3px);
 }
 
+/* Pulso Suave no Botão de Diagnóstico (a cada 4s) */
+@keyframes pulseSubtle {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 25px rgba(160, 32, 240, 0.45);
+  }
+  50% {
+    transform: scale(1.025);
+    box-shadow: 0 0 40px rgba(160, 32, 240, 0.75);
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulseSubtle 4s infinite ease-in-out;
+}
+
+/* Acessibilidade: Desativa animações caso o usuário prefira movimento reduzido */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-pulse-subtle {
+    animation: none !important;
+  }
+  .slide-in-right {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+
