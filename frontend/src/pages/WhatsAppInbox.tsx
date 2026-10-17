@@ -1816,6 +1816,19 @@ export default function WhatsAppInbox({
                               <span>Atenção Humana</span>
                             </span>
                           )}
+                          {Boolean(chat.lastMessage?.meta?.is_handoff_bridge) && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
+                              title={
+                                chat.lastMessage?.meta?.transferred_to_chip
+                                  ? `Conversa transferida para ${chat.lastMessage.meta.transferred_to_chip}`
+                                  : "Conversa transferida para outro chip"
+                              }
+                            >
+                              <span>🤝</span>
+                              <span>Transferido para {chat.lastMessage?.meta?.transferred_to_chip || "outro chip"}</span>
+                            </span>
+                          )}
                           {isAwaitingReply && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300">
                               <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
@@ -2462,6 +2475,30 @@ export default function WhatsAppInbox({
                                 {item.fromMe && (item.senderType === "agent" || item.senderType === "user") && (
                                   <span className="text-[10px] text-emerald-100/90 flex items-center gap-0.5" title="Enviado pelo CRM (Conversas)">
                                     💻 <span className="hidden sm:inline text-[9px] opacity-90">CRM</span>
+                                  </span>
+                                )}
+                                {Boolean((item as any).meta?.is_handoff_bridge) && (
+                                  <span
+                                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/30 text-indigo-100 flex items-center gap-0.5 font-semibold"
+                                    title={
+                                      (item as any).meta?.transferred_to_chip
+                                        ? `Transferência para ${(item as any).meta.transferred_to_chip}`
+                                        : "Transferência de chip iniciada"
+                                    }
+                                  >
+                                    🤝 <span className="hidden sm:inline">Transferido</span>
+                                  </span>
+                                )}
+                                {Boolean((item as any).meta?.is_handoff_opener) && (
+                                  <span
+                                    className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-500/30 text-indigo-100 flex items-center gap-0.5 font-semibold"
+                                    title={
+                                      (item as any).meta?.transferred_from_chip
+                                        ? `Atendimento assumido de ${(item as any).meta.transferred_from_chip}`
+                                        : "Abertura pós-transferência"
+                                    }
+                                  >
+                                    🤝 <span className="hidden sm:inline">Chip Fechador</span>
                                   </span>
                                 )}
                                 <span>{formatTimestamp(item.timestamp)}</span>

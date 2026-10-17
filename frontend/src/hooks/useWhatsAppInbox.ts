@@ -23,6 +23,7 @@ export interface WhatsAppChat {
     senderType?: string | null;
     timestamp: number | null;
     type: string | null;
+    meta?: any;
   } | null;
   leadOrigin: string | null;
   sourceCampaignId: string | null;

@@ -43,6 +43,8 @@ import {
   dispatchCampaignSequence,
   getCampaignStepPlan,
   normalizeCampaignAnalyticsMeta,
+  postEvolutionPayload,
+  applyMessagePlaceholders,
 } from "../campaign-outbound.js";
 import { maskPhoneForLog, leadsTableName } from "../services/tenant.js";
 import {
@@ -1706,6 +1708,286 @@ export async function callCampaignQualificationWebhook({
   }
 }
 
+/**
+ * Executa a passagem de bastão (transbordo / handoff ativo) entre chips de campanha.
+ * - Chip A (Batedor): envia mensagem de aviso (ponte).
+ * - Delay humanizado (4s, ou reduzido em teste).
+ * - Chip B (Fechador): envia mensagem de abertura humanizada e assume o atendimento.
+ * - Idempotente: jamais dispara duas vezes para o mesmo lead.
+ */
+export async function executeCampaignChipHandoff({
+  clientId,
+  campaign,
+  lead,
+  phone,
+  repliedAt = new Date().toISOString(),
+  chipA = {},
+  dispatchSettings = {},
+  progress = {},
+  leadImportItemId = null,
+  leadImportItem = null,
+  delayMs = undefined,
+}) {
+  if (!supabase || !clientId || !phone || !campaign?.id) {
+    return { executed: false, reason: "missing_context" };
+  }
+
+  const analyticsMeta = campaign.analytics_meta || {};
+  const dispatchOptions = analyticsMeta.dispatchOptions || {};
+
+  // 1. Verificar se dispatchOptions.handoffEnabled === true e se dispatchOptions.handoffChipId está configurado
+  if (!dispatchOptions.handoffEnabled || !dispatchOptions.handoffChipId) {
+    return { executed: false, reason: "handoff_not_enabled" };
+  }
+
+  const targetHandoffChipId = normalizeString(dispatchOptions.handoffChipId);
+  if (!targetHandoffChipId) {
+    return { executed: false, reason: "missing_handoff_chip_id" };
+  }
+
+  // 2. Checar idempotência: verificar se progress.handoffCompleted já é true para este lead
+  if (progress.handoffCompleted === true || progress.handoff_completed === true) {
+    return { executed: false, reason: "handoff_already_completed", handoffCompleted: true };
+  }
+
+  // Obter dados do lead para substituição de placeholders
+  const leadDataForPlaceholders = {
+    ...(leadImportItem?.normalized_data || {}),
+    ...(lead || {}),
+    telefone: phone,
+    phone,
+    nome: normalizeString(progress.leadName) || normalizeString(lead?.nome) || normalizeString(leadImportItem?.nome) || "cliente",
+  };
+
+  const chipAName =
+    chipA.name ||
+    dispatchSettings.selectedEvolutionInstanceName ||
+    dispatchSettings.instanceName ||
+    "Evolution";
+  const chipAWebhookUrl = chipA.dispatch_webhook_url || dispatchSettings.webhookUrl || null;
+  const chipAWebhookToken = chipA.dispatch_webhook_token || dispatchSettings.webhookToken || null;
+
+  // Buscar a instância correspondente a handoffChipId via getLeadClientEvolutionInstances(clientId)
+  const instances = await getLeadClientEvolutionInstances(clientId).catch(() => []);
+  const targetLower = targetHandoffChipId.toLowerCase();
+  const chipB = (instances || []).find((i) => {
+    const slug = extractEvolutionInstanceSlug(i.dispatch_webhook_url);
+    return (
+      String(i.id).toLowerCase() === targetLower ||
+      String(i.name || "").toLowerCase() === targetLower ||
+      (slug && slug.toLowerCase() === targetLower)
+    );
+  });
+
+  if (!chipB) {
+    console.warn("[campaign-handoff] Chip B (handoffChipId) não encontrado entre as instâncias do tenant", {
+      clientId,
+      campaignId: campaign.id,
+      phone: maskPhoneForLog(phone),
+      handoffChipId: targetHandoffChipId,
+    });
+    if (leadImportItemId) {
+      await updateLeadImportItemCampaignProgress({
+        clientId,
+        leadImportItemId,
+        campaignId: campaign.id,
+        progressPatch: {
+          handoffFailed: true,
+          handoffError: "Instância de destino do handoff não encontrada",
+          handoffAttemptedAt: new Date().toISOString(),
+          handoffTargetChipId: targetHandoffChipId,
+        },
+      });
+    }
+    return { executed: false, reason: "chip_b_not_found" };
+  }
+
+  // Validar a saúde da instância do Chip B (checkEvolutionInstanceHealth)
+  try {
+    if (chipB.dispatch_webhook_url) {
+      await checkEvolutionInstanceHealth({
+        webhookUrl: chipB.dispatch_webhook_url,
+        webhookToken: chipB.dispatch_webhook_token,
+        context: {
+          clientId,
+          campaignId: campaign.id,
+          campaignName: campaign.name,
+          mode: "campaign_handoff_opener",
+        },
+      });
+    }
+  } catch (healthErr) {
+    console.warn("[campaign-handoff] Chip B desconectado ou com falha de health check:", healthErr?.message || healthErr);
+    if (leadImportItemId) {
+      await updateLeadImportItemCampaignProgress({
+        clientId,
+        leadImportItemId,
+        campaignId: campaign.id,
+        progressPatch: {
+          handoffFailed: true,
+          handoffError: `Chip B desconectado: ${healthErr?.message || healthErr}`,
+          handoffAttemptedAt: new Date().toISOString(),
+          handoffTargetChipId: targetHandoffChipId,
+        },
+      });
+    }
+    return { executed: false, reason: "chip_b_disconnected", error: healthErr?.message || String(healthErr) };
+  }
+
+  // Passo 1 do Handoff (Chip A - Disparo):
+  // Se houver handoffBridgingText, enviar pelo webhook do Chip A (chip receptor original)
+  // e registrar em lead_messages com senderType: 'bot', instanceName: chipA.name, meta: { is_handoff_bridge: true }
+  let bridgingSent = false;
+  const rawBridging = dispatchOptions.handoffBridgingText;
+  if (rawBridging && typeof rawBridging === "string" && rawBridging.trim()) {
+    const bridgingText = applyMessagePlaceholders(rawBridging, leadDataForPlaceholders, phone);
+    if (chipAWebhookUrl) {
+      const bridgePayload = {
+        source: "vexocrm",
+        provider: "evolution",
+        type: "text",
+        number: phone,
+        text: bridgingText,
+        txt: bridgingText,
+        message: bridgingText,
+        title: bridgingText,
+        description: bridgingText,
+        options: { delay: 1000, presence: "composing" },
+        campaign: { id: campaign.id, name: campaign.name, mode: "campaign_handoff_bridge" },
+        client: { id: clientId },
+      };
+      await postEvolutionPayload(chipAWebhookUrl, chipAWebhookToken, bridgePayload);
+      bridgingSent = true;
+    }
+
+    await appendLeadMessage({
+      clientId,
+      campaignId: campaign.id,
+      leadId: lead?.id || null,
+      phone,
+      senderType: "bot",
+      direction: "outbound",
+      messageText: bridgingText,
+      deliveredAt: new Date().toISOString(),
+      messageTimestamp: new Date().toISOString(),
+      instanceName: chipAName,
+      meta: {
+        is_handoff_bridge: true,
+        transferred_to_chip: chipB.name,
+        transferred_to_chip_id: chipB.id,
+        source_campaign_id: campaign.id,
+      },
+    });
+  }
+
+  // Delay Humanizado: Aguardar setTimeout de 4000ms (4 segundos)
+  const defaultDelay = process.env.NODE_ENV === "test" ? 10 : 4000;
+  const waitMs = typeof delayMs === "number" ? delayMs : defaultDelay;
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+
+  // Passo 2 do Handoff (Chip B - Fechador):
+  // Formatar o handoffOpenerText substituindo as variáveis do lead (applyMessagePlaceholders)
+  const rawOpener =
+    dispatchOptions.handoffOpenerText ||
+    "Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha. Como posso te ajudar?";
+  const openerText = applyMessagePlaceholders(rawOpener, leadDataForPlaceholders, phone);
+
+  // Disparar o payload pelo webhook do Chip B usando postEvolutionPayload
+  if (chipB.dispatch_webhook_url) {
+    const openerPayload = {
+      source: "vexocrm",
+      provider: "evolution",
+      type: "text",
+      number: phone,
+      text: openerText,
+      txt: openerText,
+      message: openerText,
+      title: openerText,
+      description: openerText,
+      options: { delay: 1500, presence: "composing" },
+      campaign: { id: campaign.id, name: campaign.name, mode: "campaign_handoff_opener" },
+      client: { id: clientId },
+    };
+    await postEvolutionPayload(chipB.dispatch_webhook_url, chipB.dispatch_webhook_token, openerPayload);
+  }
+
+  // Registrar no banco em lead_messages
+  await appendLeadMessage({
+    clientId,
+    campaignId: campaign.id,
+    leadId: lead?.id || null,
+    phone,
+    direction: "outbound",
+    senderType: "bot",
+    instanceName: chipB.name,
+    messageText: openerText,
+    deliveredAt: new Date().toISOString(),
+    messageTimestamp: new Date().toISOString(),
+    meta: {
+      is_handoff_opener: true,
+      source_campaign_id: campaign.id,
+      transferred_from_chip: chipAName,
+      transferred_to_chip: chipB.name,
+    },
+  });
+
+  // Atualização de Progresso
+  const handoffAt = new Date().toISOString();
+  if (leadImportItemId) {
+    await updateLeadImportItemCampaignProgress({
+      clientId,
+      leadImportItemId,
+      campaignId: campaign.id,
+      progressPatch: {
+        handoffCompleted: true,
+        handoffAt,
+        handoffTargetChipId: targetHandoffChipId,
+        handoffTargetChipName: chipB.name,
+      },
+    });
+  }
+
+  // Atualizar na tabela leads o campo assigned_chip: chipB.name e lead_temperature: 'quente'
+  try {
+    const phoneVariants = Array.from(buildPhoneLookupVariants(phone) || [phone]);
+    const leadTable = leadsTableName(clientId);
+    let { error: leadUpdateError } = await supabase
+      .from(leadTable)
+      .update({
+        assigned_chip: chipB.name,
+        lead_temperature: "QUENTE",
+      })
+      .eq("client_id", clientId)
+      .in("telefone", phoneVariants);
+
+    if (leadUpdateError) {
+      if (String(leadUpdateError.message).includes("assigned_chip") || leadUpdateError.code === "42703") {
+        await supabase
+          .from(leadTable)
+          .update({
+            lead_temperature: "QUENTE",
+          })
+          .eq("client_id", clientId)
+          .in("telefone", phoneVariants);
+      }
+    }
+  } catch (leadErr) {
+    console.warn("[campaign-handoff] Falha ao atualizar lead com assigned_chip:", leadErr?.message || leadErr);
+  }
+
+  return {
+    executed: true,
+    handoffCompleted: true,
+    transferredFrom: chipAName,
+    transferredTo: chipB.name,
+    targetChipId: chipB.id,
+    bridgingSent,
+    openerSent: true,
+  };
+}
+
 export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch, replyPayload = {} }) {
   if (!supabase || !clientId || !phone || !campaignMatch?.id) {
     return { continued: false, reason: "missing_context" };
@@ -1947,6 +2229,18 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       statusConversa: "finalizado",
       ultimaInteracaoUsuario: repliedAt,
     });
+    const handoff = await executeCampaignChipHandoff({
+      clientId,
+      campaign,
+      lead,
+      phone,
+      repliedAt,
+      chipA: { name: dispatchSettings.selectedEvolutionInstanceName || dispatchSettings.instanceName },
+      dispatchSettings,
+      progress,
+      leadImportItemId: leadImportItem?.id || null,
+      leadImportItem,
+    });
     const campaignFinalization = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
     return {
       continued: false,
@@ -1956,6 +2250,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       campaignName: campaign.name,
       sentStepIndex: null,
       remainingSteps: 0,
+      handoff,
       summary: { successCount: 0, failureCount: 0, successPhones: [], failures: [], warnings: [], completedCampaign: true },
     };
   }
@@ -2214,7 +2509,21 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   }
 
   let n8nQualification = { called: false, skipped: true, reason: hasMoreStepsAhead ? "has_more_steps" : "lead_not_finalized" };
+  let handoff = { executed: false, skipped: true, reason: hasMoreStepsAhead ? "has_more_steps" : "lead_not_finalized" };
   if (finalizedCurrentLead) {
+    handoff = await executeCampaignChipHandoff({
+      clientId,
+      campaign,
+      lead,
+      phone,
+      repliedAt,
+      chipA: { name: dispatchSettings.selectedEvolutionInstanceName || dispatchSettings.instanceName },
+      dispatchSettings,
+      progress,
+      leadImportItemId: leadImportItem?.id || null,
+      leadImportItem,
+    });
+
     n8nQualification = await callCampaignQualificationWebhook({
       clientId,
       campaign,
@@ -2277,6 +2586,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     remainingSteps: Math.max(steps.length - (actuallySentStepIndex + 1), 0),
     nextLeadStart,
     n8nQualification,
+    handoff,
     summary,
   };
 }

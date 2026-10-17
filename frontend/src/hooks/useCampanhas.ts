@@ -175,6 +175,10 @@ export interface CampaignDispatchOptions {
   dailyQuotaPerChip?: number;
   maxRepetitionsPerTemplate?: number;
   replyAgent?: "passos" | "campanha" | "atendimento";
+  handoffEnabled?: boolean;
+  handoffChipId?: string | null;
+  handoffBridgingText?: string;
+  handoffOpenerText?: string;
 }
 
 export type SegmentationOperator = "equals" | "contains" | "gt" | "lt" | "before" | "after" | "between";

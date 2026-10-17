@@ -139,6 +139,7 @@ export function registerChatbotRoutes(app, deps) {
       try {
         await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS media_url TEXT;");
         await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS content_type TEXT;");
+        await pgDatabasePool.query("ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS assigned_chip TEXT;");
         // Retro-fill idempotente das mensagens de campanha sem media_url
         await pgDatabasePool.query(`
           UPDATE public.lead_messages lm
@@ -713,7 +714,8 @@ export function registerChatbotRoutes(app, deps) {
               COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp,
               campaign_id,
               contact_name,
-              is_group
+              is_group,
+              meta
             FROM public.lead_messages
             WHERE client_id = $1 ${instanceFilter}
           ),
@@ -731,7 +733,8 @@ export function registerChatbotRoutes(app, deps) {
               effective_timestamp,
               campaign_id,
               contact_name,
-              is_group
+              is_group,
+              meta
             FROM pre_canonical
             ORDER BY canonical_phone, effective_timestamp DESC NULLS LAST, id DESC
           )
@@ -749,6 +752,7 @@ export function registerChatbotRoutes(app, deps) {
             m.campaign_id,
             m.contact_name,
             m.is_group,
+            m.meta,
             lm.profile_pic,
             lm.contact_name as profile_name,
             l.nome as lead_name,
@@ -805,12 +809,13 @@ export function registerChatbotRoutes(app, deps) {
             agentMutedAt: row.agent_muted_at ? new Date(row.agent_muted_at).toISOString() : null,
             agentMutedReason: row.agent_muted_reason || null,
             lastMessage: {
-              id: null,
+              id: row.id ? String(row.id) : null,
               body: row.message_text || "",
               fromMe: row.direction === "outbound",
               senderType: row.sender_type || (row.direction === "outbound" ? "agent" : "lead"),
               timestamp: timestampVal,
               type: "chat",
+              meta: row.meta || null,
             },
             leadOrigin: row.lead_origin || null,
             sourceCampaignId: row.source_campaign_id || null,

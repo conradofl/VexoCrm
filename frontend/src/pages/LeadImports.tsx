@@ -207,6 +207,10 @@ const defaultDispatchOptions: CampaignDispatchOptions = {
   maxWaitSeconds: 45,
   dailyQuotaPerChip: 200,
   maxRepetitionsPerTemplate: 5,
+  handoffEnabled: false,
+  handoffChipId: null,
+  handoffBridgingText: "Perfeito, {{nome}}! Vou pedir para o nosso especialista te chamar agora no WhatsApp dele para alinhar todos os detalhes.",
+  handoffOpenerText: "Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha. Como posso te ajudar?",
 };
 
 const darkFieldClass =

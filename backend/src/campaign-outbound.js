@@ -3,7 +3,7 @@ import { isFilterShape, normalizeFilters } from "./segmentation.js";
 import { applyMessagePlaceholders, findUnresolvedPlaceholders } from "./services/messagePlaceholders.js";
 import { validateOutboundMessage } from "./services/jsonExtractor.js";
 
-export { applyMessagePlaceholders, findUnresolvedPlaceholders };
+export { applyMessagePlaceholders, findUnresolvedPlaceholders, postEvolutionPayload };
 
 export const DEFAULT_LEAD_DELAY_SECONDS = 2;
 export const DEFAULT_STEP_DELAY_SECONDS = 5;
@@ -333,6 +333,10 @@ function normalizeDispatchOptions(rawOptions = {}, sequence = []) {
     waitForReply,
     replyTimeoutSeconds,
     replyPollIntervalSeconds,
+    handoffEnabled: normalizeBoolean(rawOptions.handoffEnabled, false),
+    handoffChipId: normalizeString(rawOptions.handoffChipId) || null,
+    handoffBridgingText: typeof rawOptions.handoffBridgingText === "string" ? rawOptions.handoffBridgingText : null,
+    handoffOpenerText: typeof rawOptions.handoffOpenerText === "string" ? rawOptions.handoffOpenerText : null,
   };
 }
 

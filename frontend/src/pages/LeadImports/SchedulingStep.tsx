@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
-import { AlertTriangle, Archive, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Archive, ArrowRightLeft, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -226,6 +226,29 @@ export function SchedulingStep({
   const numLeads = Number(totalLeads) || 0;
   const daysNeeded = numLeads && dailyQuota ? Math.ceil(numLeads / dailyQuota) : 1;
   const isOverDailyQuota = numLeads > dailyQuota;
+
+  const currentChipId = dispatchOptions.evolutionInstanceId || selectedInst?.id || null;
+  const eligibleHandoffChips = useMemo(() => {
+    return evolutionInstanceOptions.filter((inst) => inst.id !== currentChipId);
+  }, [evolutionInstanceOptions, currentChipId]);
+
+  const defaultBridgingText = "Perfeito, {{nome}}! Vou pedir para o nosso especialista te chamar agora no WhatsApp dele para alinhar todos os detalhes.";
+  const defaultOpenerText = "Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha. Como posso te ajudar?";
+
+  const bridgingText = dispatchOptions.handoffBridgingText ?? defaultBridgingText;
+  const openerText = dispatchOptions.handoffOpenerText ?? defaultOpenerText;
+
+  const targetHandoffChip = useMemo(() => {
+    return evolutionInstanceOptions.find((i) => i.id === dispatchOptions.handoffChipId) || null;
+  }, [evolutionInstanceOptions, dispatchOptions.handoffChipId]);
+
+  const renderHandoffPreview = (text: string) => {
+    return (text || "")
+      .replace(/\{\{\s*nome\s*\}\}/gi, "Carlos Silva")
+      .replace(/\{\{\s*primeiro_nome\s*\}\}/gi, "Carlos")
+      .replace(/\{\{\s*telefone\s*\}\}/gi, "11999998888")
+      .replace(/\{\{\s*empresa\s*\}\}/gi, "Acme Corp");
+  };
 
   return (
     <Card className="rounded-2xl border-slate-100 dark:border-white/5 shadow-sm">
@@ -461,6 +484,192 @@ export function SchedulingStep({
               <p className="text-[10px] text-muted-foreground leading-relaxed">
                 💡 <em>A identidade da empresa, o método SPIN e as regras de qualificação/SDR continuam ativos. Escreva aqui apenas as informações e regras específicas desta <strong>OFERTA</strong>.</em>
               </p>
+            </div>
+          )}
+        </div>
+
+        {/* Passagem de Bastão (Transbordo de Chip) - Modelo A */}
+        <div className="rounded-xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50/40 via-purple-50/20 to-slate-50/50 p-4 dark:border-indigo-900/50 dark:bg-slate-900/20 space-y-3.5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                <span className="text-sm">🤝</span>
+                Passagem de Bastão (Transbordo de Chip)
+                <InfoTip text="Dispare com um chip de prospecção (Chip Batedor) e, após o lead responder e avançar a régua, a conversa é transferida ativamente para um chip oficial (Chip Fechador)." />
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                Transfere automaticamente o lead para um Chip Fechador com mensagem de abertura humanizada
+              </p>
+            </div>
+            <Switch
+              data-testid="handoff-switch"
+              checked={Boolean(dispatchOptions.handoffEnabled)}
+              onCheckedChange={(checked) =>
+                setDispatchOptions((curr) => ({
+                  ...curr,
+                  handoffEnabled: checked,
+                  handoffBridgingText: curr.handoffBridgingText ?? defaultBridgingText,
+                  handoffOpenerText: curr.handoffOpenerText ?? defaultOpenerText,
+                }))
+              }
+            />
+          </div>
+
+          {dispatchOptions.handoffEnabled && (
+            <div className="space-y-4 pt-2 animate-fadeIn border-t border-indigo-100/60 dark:border-white/5">
+              {/* Seleção do Chip Fechador */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] uppercase font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                    <ArrowRightLeft className="h-3 w-3 text-indigo-500" />
+                    Chip Fechador / Oficial de Destino (Recebe a conversa)
+                  </label>
+                  {eligibleHandoffChips.length === 0 && (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                      Requer ao menos 2 chips cadastrados
+                    </span>
+                  )}
+                </div>
+
+                <Select
+                  value={dispatchOptions.handoffChipId || ""}
+                  onValueChange={(val) =>
+                    setDispatchOptions((curr) => ({
+                      ...curr,
+                      handoffChipId: val || null,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-10 text-xs rounded-xl bg-white dark:bg-slate-900">
+                    <SelectValue placeholder="Selecione o chip de destino..." />
+                  </SelectTrigger>
+                  <SelectContent className={darkSelectContentClass}>
+                    {eligibleHandoffChips.length === 0 ? (
+                      <SelectItem value="none" disabled className={darkSelectItemClass}>
+                        Nenhum outro chip ativo encontrado
+                      </SelectItem>
+                    ) : (
+                      eligibleHandoffChips.map((inst) => (
+                        <SelectItem key={inst.id} value={inst.id} className={darkSelectItemClass}>
+                          {inst.name} {inst.chipState ? `(${inst.chipState})` : ""}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                {selectedInst && targetHandoffChip && (
+                  <p className="text-[10px] text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1">
+                    🔄 Fluxo ativo: <strong>{selectedInst.name}</strong> (Disparo) ➔ <strong>{targetHandoffChip.name}</strong> (Fechador)
+                  </p>
+                )}
+              </div>
+
+              {/* Mensagem de Aviso do Chip de Disparo */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                    1. Mensagem de Transferência (Chip de Disparo)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-muted-foreground mr-1">Inserir:</span>
+                    {["{{nome}}", "{{primeiro_nome}}"].map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() =>
+                          setDispatchOptions((curr) => ({
+                            ...curr,
+                            handoffBridgingText: (curr.handoffBridgingText ?? defaultBridgingText) + ` ${tag}`,
+                          }))
+                        }
+                        className="px-1.5 py-0.5 text-[9px] font-mono bg-slate-200/80 hover:bg-indigo-100 hover:text-indigo-700 dark:bg-slate-800 dark:hover:bg-indigo-950 rounded transition-colors"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Textarea
+                  value={bridgingText}
+                  onChange={(e) =>
+                    setDispatchOptions((curr) => ({
+                      ...curr,
+                      handoffBridgingText: e.target.value,
+                    }))
+                  }
+                  placeholder="Ex: Perfeito, {{nome}}! Vou pedir para o nosso especialista te chamar agora no WhatsApp dele..."
+                  className="min-h-[70px] text-xs bg-white dark:bg-slate-900 rounded-xl"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Enviada pelo chip inicial após a conclusão das etapas de resposta, preparando o lead para a troca.
+                </p>
+              </div>
+
+              {/* Mensagem de Abertura do Chip Fechador */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                    2. Mensagem de Abertura (Chip Fechador)
+                  </label>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-muted-foreground mr-1">Inserir:</span>
+                    {["{{nome}}", "{{primeiro_nome}}"].map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() =>
+                          setDispatchOptions((curr) => ({
+                            ...curr,
+                            handoffOpenerText: (curr.handoffOpenerText ?? defaultOpenerText) + ` ${tag}`,
+                          }))
+                        }
+                        className="px-1.5 py-0.5 text-[9px] font-mono bg-slate-200/80 hover:bg-indigo-100 hover:text-indigo-700 dark:bg-slate-800 dark:hover:bg-indigo-950 rounded transition-colors"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Textarea
+                  value={openerText}
+                  onChange={(e) =>
+                    setDispatchOptions((curr) => ({
+                      ...curr,
+                      handoffOpenerText: e.target.value,
+                    }))
+                  }
+                  placeholder="Ex: Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha..."
+                  className="min-h-[70px] text-xs bg-white dark:bg-slate-900 rounded-xl"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Enviada pelo novo chip ~4 segundos depois, iniciando o atendimento de forma contextualizada.
+                </p>
+              </div>
+
+              {/* Prévia Humanizada da Passagem de Bastão */}
+              <div className="rounded-xl border border-indigo-100 bg-white/70 dark:border-white/5 dark:bg-black/20 p-3 space-y-2">
+                <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                  👁️ Prévia do Diálogo com Lead Exemplo ("Carlos")
+                </p>
+                <div className="space-y-2">
+                  <div className="p-2.5 rounded-lg bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/70 dark:border-white/5 text-[11px] text-slate-800 dark:text-slate-200">
+                    <span className="font-bold text-[10px] text-slate-500 block mb-0.5">
+                      {selectedInst?.name || "Chip de Disparo (Chip A)"}:
+                    </span>
+                    {renderHandoffPreview(bridgingText)}
+                  </div>
+                  <div className="flex items-center justify-center gap-1.5 text-[10px] font-semibold text-indigo-500 py-0.5">
+                    <Clock3 className="h-3 w-3" />
+                    <span>Espera humanizada de ~4s e transferência de número</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/70 dark:border-indigo-800/40 text-[11px] text-indigo-900 dark:text-indigo-200">
+                    <span className="font-bold text-[10px] text-indigo-600 dark:text-indigo-400 block mb-0.5">
+                      {targetHandoffChip?.name || "Chip Fechador (Chip B)"}:
+                    </span>
+                    {renderHandoffPreview(openerText)}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
