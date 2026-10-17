@@ -2150,6 +2150,84 @@ export async function fetchMediaBase64FromEvolution(instanceName, messagePayload
 }
 
 /**
+ * Envia mensagem de texto através da Evolution API (/message/sendText).
+ * Ativa automaticamente linkPreview e generateHighQualityLinkPreview se a mensagem contiver URL (http:// ou https://).
+ */
+export async function sendTextMessageViaEvolution({
+  instanceName,
+  number,
+  text,
+  webhookToken = null,
+  baseUrl = null,
+  delay = 1200,
+  presence = "composing",
+}) {
+  if (!instanceName || !number || !text) {
+    throw new Error("Parâmetros obrigatórios ausentes (instanceName, number, text)");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+
+  if (!apiKey) {
+    throw new Error("Chave de autenticação da Evolution não configurada");
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const hasUrl = /https?:\/\/[^\s]+/i.test(text);
+  const endpoint = `${effectiveBaseUrl.replace(/\/+$/, "")}/message/sendText/${encodeURIComponent(instanceName)}`;
+
+  const payload = {
+    number,
+    text,
+    txt: text,
+    message: text,
+    linkPreview: hasUrl,
+    generateHighQualityLinkPreview: hasUrl,
+    options: {
+      delay,
+      presence,
+      linkPreview: hasUrl,
+      generateHighQualityLinkPreview: hasUrl,
+    },
+  };
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  const resText = await res.text();
+  if (!res.ok) {
+    throw new Error(`Evolution HTTP ${res.status}: ${resText}`);
+  }
+
+  try {
+    const data = JSON.parse(resText);
+    const waMessageId = data?.key?.id || data?.id || null;
+    return {
+      success: true,
+      waMessageId,
+      raw: data,
+    };
+  } catch {
+    return {
+      success: true,
+      waMessageId: null,
+      raw: resText,
+    };
+  }
+}
+
+/**
  * Envia mensagem com mídia através da Evolution API.
  * Suporta áudio nativo (sendWhatsAppAudio com encoding: true para PTT/waveform)
  * e outros formatos (sendMedia para imagem, vídeo, documento, figurinha).

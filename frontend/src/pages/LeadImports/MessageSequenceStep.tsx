@@ -1,5 +1,5 @@
 import { useRef, type ChangeEvent, type RefObject } from "react";
-import { ArrowDown, ArrowUp, ImagePlus, Info, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ImagePlus, Info, Link2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,17 @@ import type { StepActionButton } from "@/lib/leadImports/spreadsheet";
 
 type SequenceStep = CampaignSequenceStep & { buttons?: StepActionButton[] };
 
-function getStepChromaticStyle(order: number, type: "text" | "image") {
+function getStepChromaticStyle(order: number, type: "text" | "image" | "link") {
+  if (type === "link") {
+    return {
+      container:
+        "border-l-4 border-l-cyan-600 dark:border-l-cyan-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+      badge:
+        "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/80 dark:text-cyan-300 font-semibold text-xs border border-cyan-200 dark:border-cyan-800/70",
+      badgeText: `🔗 PASSO ${order} · LINK / PÁGINA`,
+      marker: "bg-cyan-600 text-white dark:bg-cyan-500",
+    };
+  }
   if (order === 1) {
     return {
       container:
@@ -74,7 +84,7 @@ interface MessageSequenceStepProps {
   updateCampaignStep: (stepId: string, patch: Partial<SequenceStep>) => void;
   moveCampaignStep: (stepId: string, direction: -1 | 1) => void;
   removeCampaignStep: (stepId: string) => void;
-  addCampaignStep: (type: "text" | "image") => void;
+  addCampaignStep: (type: "text" | "image" | "link") => void;
   onSelectImageStep: (stepId: string) => void;
   isGeneratingVariants: boolean;
   onGenerateVariants: (stepId: string, baseText: string) => void;
@@ -209,25 +219,73 @@ export function MessageSequenceStep({
                 </div>
               )}
 
-              {/* Message editor */}
-              <div className="space-y-2">
-                <Textarea
-                  ref={(el) => { textareaRefs.current[step.id] = el; }}
-                  placeholder={step.type === "image" ? "Legenda opcional para a imagem" : "Olá {{nome}}, tudo bem? Escreva a mensagem de envio..."}
-                  className="min-h-[96px] text-xs font-sans"
-                  value={step.text}
-                  onChange={(e) => updateCampaignStep(step.id, { text: e.target.value })}
-                />
+              {/* Link Step editor */}
+              {step.type === "link" ? (
+                <div className="space-y-3 bg-cyan-50/40 dark:bg-cyan-950/20 p-3 rounded-xl border border-cyan-200/70 dark:border-cyan-900/40">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                        <Link2 className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
+                        URL do Link <span className="text-rose-500">*</span>
+                      </label>
+                      <span className="text-[10px] text-muted-foreground">O WhatsApp gera o card com imagem e título</span>
+                    </div>
+                    <Input
+                      value={step.linkUrl || ""}
+                      placeholder="https://seusite.com/proposta ou {{scheduling_link}}"
+                      className="h-8 text-xs font-mono bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                      onChange={(e) => updateCampaignStep(step.id, { linkUrl: e.target.value })}
+                    />
+                    {step.linkUrl && !/^https?:\/\//i.test(step.linkUrl) && !step.linkUrl.includes("{{") && (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                        ⚠️ Dica: Inclua http:// ou https:// para o WhatsApp buscar a prévia OpenGraph automaticamente.
+                      </p>
+                    )}
+                  </div>
 
-                {/* Variables helper */}
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <EmojiPicker onSelect={(emoji) => inserirNoCursor(step.id, step.text, emoji)} />
-                  <span>Variáveis:</span>
-                  <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{nome}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{nome}}"}</button>
-                  <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{telefone}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{telefone}}"}</button>
-                  <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{scheduling_link}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{scheduling_link}}"}</button>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                        Texto / Legenda de Acompanhamento (Opcional)
+                      </label>
+                      <span className="text-[10px] text-muted-foreground">Se vazio, envia apenas o link puro</span>
+                    </div>
+                    <Textarea
+                      ref={(el) => { textareaRefs.current[step.id] = el; }}
+                      placeholder="Olá {{nome}}, segue o link para acessar a apresentação:"
+                      className="min-h-[72px] text-xs font-sans bg-white dark:bg-slate-900"
+                      value={step.text}
+                      onChange={(e) => updateCampaignStep(step.id, { text: e.target.value })}
+                    />
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <EmojiPicker onSelect={(emoji) => inserirNoCursor(step.id, step.text, emoji)} />
+                      <span>Variáveis:</span>
+                      <button type="button" onClick={() => updateCampaignStep(step.id, { text: (step.text || "") + " {{nome}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{nome}}"}</button>
+                      <button type="button" onClick={() => updateCampaignStep(step.id, { text: (step.text || "") + " {{telefone}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{telefone}}"}</button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Message editor */
+                <div className="space-y-2">
+                  <Textarea
+                    ref={(el) => { textareaRefs.current[step.id] = el; }}
+                    placeholder={step.type === "image" ? "Legenda opcional para a imagem" : "Olá {{nome}}, tudo bem? Escreva a mensagem de envio..."}
+                    className="min-h-[96px] text-xs font-sans"
+                    value={step.text}
+                    onChange={(e) => updateCampaignStep(step.id, { text: e.target.value })}
+                  />
+
+                  {/* Variables helper */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <EmojiPicker onSelect={(emoji) => inserirNoCursor(step.id, step.text, emoji)} />
+                    <span>Variáveis:</span>
+                    <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{nome}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{nome}}"}</button>
+                    <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{telefone}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{telefone}}"}</button>
+                    <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{scheduling_link}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{scheduling_link}}"}</button>
+                  </div>
+                </div>
+              )}
 
               {/* Image selector */}
               {step.type === "image" && (
@@ -521,12 +579,21 @@ export function MessageSequenceStep({
           })}
         </div>
 
-        <div className="flex gap-2 pt-2">
+        <div className="flex flex-wrap gap-2 pt-2">
           <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => addCampaignStep("text")}>
             <Plus className="h-3.5 w-3.5" /> Envio de Texto
           </Button>
           <Button type="button" variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => addCampaignStep("image")}>
             <Plus className="h-3.5 w-3.5" /> Envio de Imagem
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1 border-cyan-300 dark:border-cyan-700/80 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/30 font-medium"
+            onClick={() => addCampaignStep("link")}
+          >
+            <Link2 className="h-3.5 w-3.5" /> + Envio de Link
           </Button>
         </div>
       </CardContent>

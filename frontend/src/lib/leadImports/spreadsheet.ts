@@ -657,12 +657,13 @@ export function makeCampaignStepId() {
   return `step-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function createCampaignStep(type: "text" | "image", order: number, patch: Partial<CampaignSequenceStep> = {}): CampaignSequenceStep & { buttons?: StepActionButton[] } {
+export function createCampaignStep(type: "text" | "image" | "link", order: number, patch: Partial<CampaignSequenceStep> = {}): CampaignSequenceStep & { buttons?: StepActionButton[] } {
   return {
     id: patch.id || makeCampaignStepId(),
     type,
     order,
     text: patch.text || "",
+    linkUrl: patch.linkUrl || "",
     textVariants: patch.textVariants || [],
     image: patch.image || null,
     enabled: patch.enabled ?? true,
@@ -680,6 +681,8 @@ export function normalizeCampaignSequence(meta?: Campaign["analytics_meta"]): Ar
       .map((step, idx) => ({
         ...step,
         order: idx + 1,
+        type: step.type === "image" ? "image" : step.type === "link" ? "link" : "text",
+        linkUrl: step.linkUrl || "",
         textVariants: Array.isArray(step.textVariants) ? step.textVariants : [],
         image: step.image || null,
         enabled: step.enabled !== false,

@@ -1073,7 +1073,7 @@ export default function LeadImports({
     );
   }
 
-  function addCampaignStep(type: "text" | "image") {
+  function addCampaignStep(type: "text" | "image" | "link") {
     setCampaignSequence((current) => [
       ...current,
       createCampaignStep(type, current.length + 1),

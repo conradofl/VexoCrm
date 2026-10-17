@@ -218,7 +218,8 @@ function getLegacySequence(rawMeta = {}) {
 }
 
 function normalizeSequenceStep(step, index) {
-  const type = normalizeString(step?.type).toLowerCase() === "image" ? "image" : "text";
+  const rawType = normalizeString(step?.type).toLowerCase();
+  const type = rawType === "image" ? "image" : rawType === "link" ? "link" : "text";
   const rawTrigger = normalizeString(step?.triggerMode).toLowerCase();
   const triggerMode =
     rawTrigger === "after_reply"
@@ -232,6 +233,7 @@ function normalizeSequenceStep(step, index) {
     type,
     order: normalizeNonNegativeInteger(step?.order, index + 1) || index + 1,
     text: normalizeString(step?.text),
+    linkUrl: normalizeString(step?.linkUrl || step?.url),
     textVariants: normalizeTextVariants(step?.textVariants),
     image: normalizeImageAsset(step?.image),
     enabled: step?.enabled === undefined ? true : normalizeBoolean(step.enabled, true),
@@ -357,7 +359,9 @@ export function normalizeCampaignAnalyticsMeta(rawMeta = {}) {
       order: index + 1,
     }));
 
-  const firstTextStep = sequence.find((step) => step.enabled && step.type === "text" && step.text);
+  const firstTextStep = sequence.find(
+    (step) => step.enabled && (step.type === "text" || step.type === "link") && (step.text || step.linkUrl)
+  );
   const firstImageStep = sequence.find((step) => step.enabled && step.type === "image" && step.image);
 
   // Segmentação: shape novo { filters:[...] } é limpo aqui (sem catálogo — a validação
@@ -432,6 +436,14 @@ export function validateCampaignAnalyticsMeta(rawMeta = {}) {
         valid: false,
         analyticsMeta,
         message: `O passo ${step.order} precisa de uma imagem valida para envio.`,
+      };
+    }
+
+    if (step.type === "link" && !step.linkUrl) {
+      return {
+        valid: false,
+        analyticsMeta,
+        message: `O passo ${step.order} precisa de uma URL de link valida para envio.`,
       };
     }
   }
@@ -589,13 +601,29 @@ export function formatStepTextWithButtons(baseText, stepButtons, context = {}, p
 }
 
 function buildTextPayload(phone, step, context = {}) {
-  const textWithButtons = formatStepTextWithButtons(step.text, step.buttons, context, phone);
+  let baseText = step.text || "";
+
+  // Se o passo for do tipo link (ou contiver linkUrl), compõe o texto apropriadamente
+  if (step.type === "link" || step.linkUrl) {
+    const rawLinkUrl = step.linkUrl || step.url || "";
+    const resolvedLinkUrl = applyMessagePlaceholders(rawLinkUrl, context.lead, phone);
+    if (resolvedLinkUrl) {
+      if (!baseText) {
+        baseText = resolvedLinkUrl;
+      } else if (!baseText.includes(resolvedLinkUrl)) {
+        baseText = `${baseText}\n\n${resolvedLinkUrl}`;
+      }
+    }
+  }
+
+  const textWithButtons = formatStepTextWithButtons(baseText, step.buttons, context, phone);
+  const hasUrl = /https?:\/\/[^\s]+/i.test(textWithButtons) || step.type === "link" || Boolean(step.linkUrl);
 
   return {
     source: "vexocrm",
     provider: "evolution",
     type: "text",
-    stepType: "text",
+    stepType: step.type === "link" ? "link" : "text",
     stepId: step.id,
     number: phone,
     txt: textWithButtons,
@@ -603,9 +631,13 @@ function buildTextPayload(phone, step, context = {}) {
     message: textWithButtons,
     title: textWithButtons,
     description: textWithButtons,
+    linkPreview: hasUrl,
+    generateHighQualityLinkPreview: hasUrl,
     options: {
       delay: 2000,
       presence: "composing",
+      linkPreview: hasUrl,
+      generateHighQualityLinkPreview: hasUrl,
     },
     // `buttons` NAO vai mais no payload: sem o sendButtons, a Evolution enviaria
     // por sendText e o campo seria ignorado — mandar sugeriria um recurso que nao

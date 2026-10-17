@@ -54,6 +54,7 @@ import {
   PhoneCall,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { EmojiPicker } from "@/pages/LeadImports/EmojiPicker";
 import { useCampanhas } from "@/hooks/useCampanhas";
 import { useCrmClient } from "@/hooks/useCrmClient";
 import { useAdminUsers } from "@/hooks/useAdminUsers";
@@ -1195,6 +1196,25 @@ export default function WhatsAppInbox({
       e.preventDefault();
       void handleSendMessage();
     }
+  };
+
+  const handleInsertEmoji = (emoji: string) => {
+    const textarea = chatTextareaRef.current;
+    if (!textarea) {
+      setDraft((prev) => prev + emoji);
+      return;
+    }
+
+    const start = textarea.selectionStart ?? draft.length;
+    const end = textarea.selectionEnd ?? draft.length;
+    const nextValue = draft.slice(0, start) + emoji + draft.slice(end);
+    setDraft(nextValue);
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const newCursor = start + emoji.length;
+      textarea.setSelectionRange(newCursor, newCursor);
+    });
   };
 
   const handleCopyPhone = (phoneText: string) => {
@@ -2580,6 +2600,13 @@ export default function WhatsAppInbox({
                 <div className="flex items-center gap-1">
                   {compositionMode === "whatsapp" && (
                     <>
+                      <EmojiPicker
+                        onSelect={handleInsertEmoji}
+                        disabled={!selectedChat}
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-colors"
+                        iconClassName="h-4 w-4"
+                      />
+
                       <Button
                         type="button"
                         variant="ghost"
@@ -2605,24 +2632,6 @@ export default function WhatsAppInbox({
                     Pressione <kbd className="rounded bg-muted px-1 py-0.5 font-mono">Enter</kbd> para enviar
                   </span>
                 </div>
-              </div>
-
-              {/* Barra de Emojis Rápidos Gratuitos */}
-              <div className="flex items-center gap-1 overflow-x-auto py-1 px-1 scrollbar-none">
-                {["😊", "👍", "🙏", "❤️", "👋", "😂", "👏", "🤝", "🎯", "🚀", "💬", "✨", "🏢", "🗳️"].map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={() => {
-                      setDraft((prev) => prev + emoji);
-                      chatTextareaRef.current?.focus();
-                    }}
-                    className="h-6 w-6 flex items-center justify-center text-sm rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    title={`Inserir ${emoji}`}
-                  >
-                    {emoji}
-                  </button>
-                ))}
               </div>
 
               <div className="relative">

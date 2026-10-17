@@ -2359,9 +2359,16 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         const chipName = activeChip?.instanceId || activeChip?.instanceName || instanceName || dispatchSettings?.instanceName || null;
         const mediaUrl = step.mediaUrl || step.media_url || step.image?.url || step.image?.dataUrl || null;
         const isImageStep = step.type === "image" || Boolean(mediaUrl);
-        const contentType = isImageStep ? "image" : (step.contentType || step.content_type || "text");
+        const contentType = isImageStep ? "image" : (step.contentType || step.content_type || (step.type === "link" ? "link" : "text"));
         const stepCaption = step.caption || step.image?.caption || "";
-        const messageText = step.message || step.text || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
+        let linkText = step.message || step.text || "";
+        if (step.type === "link" || step.linkUrl) {
+          const lUrl = step.linkUrl || step.url || "";
+          if (lUrl && !linkText.includes(lUrl)) {
+            linkText = linkText ? `${linkText}\n\n${lUrl}` : lUrl;
+          }
+        }
+        const messageText = linkText || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
 
         await appendLeadMessage({
           clientId,

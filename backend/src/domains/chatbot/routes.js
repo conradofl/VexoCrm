@@ -1697,6 +1697,8 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
 
+      const hasUrl = /https?:\/\/[^\s]+/i.test(body);
+
       // Construct and send message payload to Evolution API
       const payload = {
         source: "vexocrm",
@@ -1705,7 +1707,16 @@ export function registerChatbotRoutes(app, deps) {
         stepType: "text",
         number: cleanPhone,
         text: body,
+        txt: body,
         message: body,
+        linkPreview: hasUrl,
+        generateHighQualityLinkPreview: hasUrl,
+        options: {
+          delay: 1200,
+          presence: "composing",
+          linkPreview: hasUrl,
+          generateHighQualityLinkPreview: hasUrl,
+        },
       };
 
       const headers = { "Content-Type": "application/json" };

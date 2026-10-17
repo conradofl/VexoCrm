@@ -1,4 +1,4 @@
-import { ImagePlus } from "lucide-react";
+import { ExternalLink, ImagePlus, Link2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CampaignSequenceStep } from "@/hooks/useCampanhas";
 import type { StepActionButton } from "@/lib/leadImports/spreadsheet";
@@ -90,6 +90,23 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
                         .replace(/\{\{\s*telefone\s*\}\}/gi, "5511999999999")
                         .replace(/\{\{\s*scheduling_link\s*\}\}/gi, multiAgendaEnabled ? "https://calendly.com/consultor" : "(Link da Agenda)");
 
+                      const isLink = step.type === "link";
+                      const rawLink = step.linkUrl || "";
+                      const resolvedLink = rawLink
+                        .replace(/\{\{\s*nome\s*\}\}/gi, "Maria Silva")
+                        .replace(/\{\{\s*telefone\s*\}\}/gi, "5511999999999")
+                        .replace(/\{\{\s*scheduling_link\s*\}\}/gi, multiAgendaEnabled ? "https://calendly.com/consultor" : "https://suaempresa.com.br/apresentacao");
+
+                      let displayHost = "suaempresa.com.br";
+                      if (resolvedLink) {
+                        try {
+                          const parsed = new URL(resolvedLink.startsWith("http") ? resolvedLink : `https://${resolvedLink}`);
+                          displayHost = parsed.hostname;
+                        } catch {
+                          displayHost = resolvedLink;
+                        }
+                      }
+
                       const botoes = step.type === "text" ? (step.buttons || []) : [];
                       const linhasOpcoes = botoes
                         .filter((b) => b && (b.type === "reply" || (b.type !== "url" && !b.url)))
@@ -122,7 +139,38 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
                               </div>
                             )}
 
-                            <p className="whitespace-pre-wrap leading-relaxed">{textoFinal}</p>
+                            {isLink && (
+                              <div className="rounded-xl overflow-hidden border border-cyan-500/20 bg-slate-950/70 p-2.5 space-y-2 shadow-inner">
+                                <div className="h-24 w-full bg-gradient-to-br from-cyan-950/80 via-slate-800 to-slate-900 rounded-lg flex flex-col items-center justify-center text-cyan-300 gap-1.5 border border-white/5">
+                                  <div className="h-8 w-8 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                                    <Link2 className="h-4 w-4 text-cyan-300" />
+                                  </div>
+                                  <span className="text-[10px] font-semibold tracking-wide text-cyan-200 uppercase">
+                                    {displayHost}
+                                  </span>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-bold text-slate-100 truncate">
+                                    {displayHost.replace(/^www\./, "").toUpperCase()} · Prévia Rich Open Graph
+                                  </p>
+                                  <p className="text-[10px] text-slate-400 line-clamp-2 leading-tight">
+                                    O WhatsApp e a Evolution API carregarão automaticamente a imagem de capa (og:image) e o título oficial desta página.
+                                  </p>
+                                  <div className="flex items-center gap-1 text-[10px] text-cyan-400 font-mono truncate pt-0.5">
+                                    <ExternalLink className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">{resolvedLink || "https://..."}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {step.type !== "link" ? (
+                              <p className="whitespace-pre-wrap leading-relaxed">{textoFinal}</p>
+                            ) : (
+                              step.text ? (
+                                <p className="whitespace-pre-wrap leading-relaxed">{resolvedText}</p>
+                              ) : null
+                            )}
                           </div>
 
                           <div className="flex items-center gap-1.5 pl-2 text-[9px] font-mono">

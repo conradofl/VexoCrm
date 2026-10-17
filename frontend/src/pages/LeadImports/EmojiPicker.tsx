@@ -36,9 +36,10 @@ interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   disabled?: boolean;
   className?: string;
+  iconClassName?: string;
 }
 
-export function EmojiPicker({ onSelect, disabled, className }: EmojiPickerProps) {
+export function EmojiPicker({ onSelect, disabled, className, iconClassName }: EmojiPickerProps) {
   const [aberto, setAberto] = useState(false);
 
   return (
@@ -53,7 +54,7 @@ export function EmojiPicker({ onSelect, disabled, className }: EmojiPickerProps)
           title="Inserir emoji"
           className={cn("h-7 px-2 text-muted-foreground hover:text-foreground", className)}
         >
-          <Smile className="h-3.5 w-3.5" />
+          <Smile className={cn("h-3.5 w-3.5", iconClassName)} />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[268px] p-2 space-y-2">

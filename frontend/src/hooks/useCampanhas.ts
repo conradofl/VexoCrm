@@ -137,9 +137,10 @@ export interface CampaignImageAsset {
 
 export interface CampaignSequenceStep {
   id: string;
-  type: "text" | "image";
+  type: "text" | "image" | "link";
   order: number;
   text: string;
+  linkUrl?: string;
   textVariants?: string[];
   image: CampaignImageAsset | null;
   enabled: boolean;

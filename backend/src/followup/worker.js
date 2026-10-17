@@ -151,6 +151,7 @@ export async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, t
   }
 
   const url = `${resolvedBaseUrl}/message/sendText/${encodeURIComponent(instanceSlug)}`;
+  const hasUrl = /https?:\/\/[^\s]+/i.test(text);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -160,10 +161,13 @@ export async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, t
     body: JSON.stringify({
       number: phone,
       text,
+      linkPreview: hasUrl,
+      generateHighQualityLinkPreview: hasUrl,
       options: {
         delay: 1200,
         presence: "composing",
-        linkPreview: false,
+        linkPreview: hasUrl,
+        generateHighQualityLinkPreview: hasUrl,
       },
     }),
   });
