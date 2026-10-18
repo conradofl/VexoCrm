@@ -118,7 +118,8 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
       expect(screen.getByText(/Números de operação real, não de simulação/i)).toBeInTheDocument();
 
       // Seção 6: Módulos
-      expect(screen.getByText(/Você escolhe por onde começar/i)).toBeInTheDocument();
+      expect(screen.getByText(/O Núcleo vem sempre/i)).toBeInTheDocument();
+      expect(screen.getByText(/Os módulos você escolhe/i)).toBeInTheDocument();
 
       // Seção 7: Implantação
       expect(screen.getByText(/No ar em/i)).toBeInTheDocument();

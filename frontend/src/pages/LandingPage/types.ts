@@ -24,6 +24,15 @@ export interface MethodologyStep {
   description: string;
 }
 
+export interface CoreFoundationItem {
+  id: string;
+  name: string;
+  tagline: string;
+  description: string;
+  icon: LucideIcon;
+  features: string[];
+}
+
 export interface ModuleItem {
   number: string;
   title: string;

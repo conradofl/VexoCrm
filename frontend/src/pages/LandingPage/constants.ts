@@ -10,14 +10,18 @@ import {
   FileSignature,
   FileText,
   Filter,
+  Layers,
   Link2,
+  MessageSquare,
   Radio,
   RefreshCw,
   Send,
+  Smartphone,
   Sparkles,
   Users,
 } from "lucide-react";
 import type {
+  CoreFoundationItem,
   FaqItem,
   MethodologyStep,
   ModuleItem,
@@ -115,56 +119,77 @@ export const FOUR_PILLARS: PillarItem[] = [
 ];
 
 // -------------------------------------------------------------
-// SEÇÃO 6 — OS 8 MÓDULOS DO CATÁLOGO
+// SEÇÃO 6 — O NÚCLEO (VEM EM TODOS OS PLANOS)
+// -------------------------------------------------------------
+export const CORE_FOUNDATION: CoreFoundationItem[] = [
+  {
+    id: "conversas",
+    name: "CONVERSAS",
+    tagline: "Substitui o WhatsApp Web do time inteiro",
+    description:
+      "Todos os WhatsApp da empresa numa tela só. Lembretes, agendamento de mensagem e nota interna. Centraliza o atendimento com visibilidade total da gestão.",
+    icon: MessageSquare,
+    features: [
+      "Todos os WhatsApp da empresa centralizados",
+      "Lembretes e notas internas por lead",
+      "Agendamento de mensagens futuras",
+      "Visibilidade completa de histórico",
+    ],
+  },
+  {
+    id: "banco",
+    name: "BANCO DE DADOS INTELIGENTE",
+    tagline: "Sua base organizada com funil visual",
+    description:
+      "Sua base organizada com funil visual. Transforma conversas e grupos em contatos classificados, e mostra quem está esquecido.",
+    icon: Database,
+    features: [
+      "Base de contatos com funil visual em colunas",
+      "Extração inteligente de conversas e grupos",
+      "Identificação automática de leads parados",
+      "Filtros rápidos por estágio e responsável",
+    ],
+  },
+];
+
+// -------------------------------------------------------------
+// SEÇÃO 6 — OS 5 MÓDULOS DE VERDADE (FUNCIONAM SOZINHOS)
 // -------------------------------------------------------------
 export const CATALOG_MODULES: ModuleItem[] = [
   {
     number: "01",
-    title: "Agente de Atendimento 24/7",
-    description: "Responde, qualifica e marca reunião pelo seu manual comercial",
-    icon: Bot,
-  },
-  {
-    number: "02",
-    title: "Campanhas & Disparo",
-    description: "Envio em lote com rodízio de chips, janela de horário e anti-bloqueio",
+    title: "Campanhas & Disparos",
+    description:
+      "Envio em lote com janela de horário, variações anti-bloqueio, links rastreados e acompanhamento lote a lote.",
     icon: Radio,
   },
   {
+    number: "02",
+    title: "Agente de IA 24/7",
+    description:
+      "Responde, qualifica e marca reunião sozinho — pelo seu manual comercial, não por achismo. Com trava humana: a decisão do vendedor é inviolável.",
+    icon: Bot,
+  },
+  {
     number: "03",
-    title: "Follow-up Automático",
-    description: "Cadências que recuperam quem sumiu",
+    title: "Follow-up & Cadências",
+    description:
+      "Réguas automáticas que recuperam quem sumiu, com passos e intervalos que você define.",
     icon: RefreshCw,
   },
   {
     number: "04",
-    title: "Contratos & Propostas em PDF",
-    description: "Minuta modular gerada na conversa",
+    title: "Contratos & Propostas",
+    description:
+      "Minuta e proposta geradas na conversa, puxando os dados do lead automaticamente. Sem digitar nada duas vezes.",
     icon: FileSignature,
   },
   {
     number: "05",
-    title: "Extração Inteligente de Contatos",
-    description: "Conversas e grupos viram base organizada",
-    icon: Database,
-  },
-  {
-    number: "06",
-    title: "Leads Parados",
-    description: "Encontra quem está esquecido e devolve para a fila",
-    icon: ArchiveRestore,
-  },
-  {
-    number: "07",
-    title: "Links Rastreados",
-    description: "Descobre quem clicou e avisa o vendedor na hora",
-    icon: Activity,
-  },
-  {
-    number: "08",
-    title: "Calendário Comercial",
-    description: "Campanhas, follow-ups e reuniões numa visão só",
-    icon: Calendar,
+    title: "Múltiplos Chips",
+    description:
+      "Vários números com rodízio inteligente, aquecimento e transbordo: o batedor abre, o fechador assume.",
+    icon: Smartphone,
   },
 ];
 
@@ -204,9 +229,9 @@ export const PRICING_PLANS: PlanCardItem[] = [
     ctaAction: "modal",
     highlighted: false,
     features: [
-      "Banco de leads com funil visual",
-      "Conversas do WhatsApp num lugar só",
-      "Campanhas com rodízio de horário e anti-bloqueio",
+      "Núcleo: Conversas + Banco inteligente",
+      "Módulo Campanhas & Disparos incluso",
+      "Janela de horário e variações anti-bloqueio",
       "1 número de WhatsApp · 1 usuário",
       "Até 2.000 contatos · 1.000 mensagens/mês",
       "Academy e documentação",
@@ -225,7 +250,7 @@ export const PRICING_PLANS: PlanCardItem[] = [
     highlighted: false,
     featuresHeader: "Tudo do Disparo, mais:",
     features: [
-      "1 módulo do catálogo, à sua escolha",
+      "Campanhas + 1 módulo à sua escolha",
       "3 usuários",
       "Até 10.000 contatos · 5.000 mensagens/mês",
       "Suporte por e-mail em até 24h",
@@ -244,7 +269,7 @@ export const PRICING_PLANS: PlanCardItem[] = [
     highlighted: true,
     featuresHeader: "Tudo do Essencial, mais:",
     features: [
-      "3 módulos do catálogo",
+      "Campanhas + 3 módulos à sua escolha",
       "3 números com rodízio inteligente entre chips",
       "Transbordo entre chips: o batedor abre, o fechador assume",
       "10 usuários · 50.000 contatos · 25.000 mensagens/mês",
@@ -265,7 +290,7 @@ export const PRICING_PLANS: PlanCardItem[] = [
     highlighted: false,
     featuresHeader: "Tudo do Avançado, mais:",
     features: [
-      "O catálogo completo — os 8 módulos",
+      "Os 5 módulos completos do catálogo",
       "Números, usuários e contatos ilimitados",
       "Várias empresas na mesma conta, com acesso separado por pessoa",
       "Permissões por perfil e por módulo",
@@ -290,6 +315,20 @@ export const PLAN_COMPARISON_TABLE: PlanComparisonRow[] = [
     essencial: "por módulo",
     avancado: "R$ 1.500",
     plus: "a partir de R$ 3.500",
+  },
+  {
+    feature: "Núcleo (Conversas + Banco)",
+    disparo: "✓",
+    essencial: "✓",
+    avancado: "✓",
+    plus: "✓",
+  },
+  {
+    feature: "Módulos do catálogo",
+    disparo: "Campanhas",
+    essencial: "Campanhas + 1",
+    avancado: "Campanhas + 3",
+    plus: "os 5 completos",
   },
   {
     feature: "Números de WhatsApp",
@@ -318,13 +357,6 @@ export const PLAN_COMPARISON_TABLE: PlanComparisonRow[] = [
     essencial: "5.000",
     avancado: "25.000",
     plus: "ilimitado",
-  },
-  {
-    feature: "Módulos do catálogo",
-    disparo: "—",
-    essencial: "1",
-    avancado: "3",
-    plus: "os 8",
   },
   {
     feature: "Agente de IA 24/7",

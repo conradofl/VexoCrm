@@ -28,6 +28,7 @@ export function LeadCaptureModal({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [whatsAppUrl, setWhatsAppUrl] = useState("");
 
   if (!isOpen) return null;
 
@@ -70,13 +71,18 @@ export function LeadCaptureModal({
       `${intentText}`
     );
 
+    const targetUrl = `https://wa.me/${DEMO_PHONE_NUMBER}?text=${message}`;
+    setWhatsAppUrl(targetUrl);
+
     setTimeout(() => {
       setIsSubmitting(false);
       setIsSuccess(true);
-      setTimeout(() => {
-        window.open(`https://wa.me/${DEMO_PHONE_NUMBER}?text=${message}`, "_blank");
-      }, 1200);
-    }, 600);
+      try {
+        window.open(targetUrl, "_blank", "noopener,noreferrer");
+      } catch {
+        // Fallback suave: o botão direto na tela de sucesso garante abertura
+      }
+    }, 400);
   }
 
   const modalTitle =
@@ -113,18 +119,37 @@ export function LeadCaptureModal({
         </button>
 
         {isSuccess ? (
-          <div className="flex flex-col items-center py-8 text-center animate-fade-in-up">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 mb-5 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
+          <div className="flex flex-col items-center py-6 text-center animate-fade-in-up">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 mb-4 shadow-[0_0_30px_rgba(16,185,129,0.3)]">
               <CheckCircle2 className="h-9 w-9" />
             </div>
             <h3 className="text-2xl font-bold text-white">Solicitação Confirmada!</h3>
-            <p className="mt-2 text-sm text-white/70 max-w-sm">
-              Estamos direcionando você para o WhatsApp oficial com seus dados pré-configurados.
+            <p className="mt-2 text-xs sm:text-sm text-white/70 max-w-sm leading-relaxed">
+              Seus dados já foram organizados para iniciar seu atendimento comercial diretamente no WhatsApp oficial.
             </p>
-            <div className="mt-6 flex items-center gap-2 text-xs font-mono text-[#00FF96]">
-              <span className="h-2 w-2 rounded-full bg-[#00FF96] animate-ping" />
-              Conectando com o time Vexo...
-            </div>
+
+            {/* Botão de Conexão Direta ao WhatsApp */}
+            <a
+              href={whatsAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-6 w-full py-3.5 px-6 rounded-2xl bg-gradient-to-r from-[#25D366] via-[#1EBE5D] to-[#128C7E] text-white font-extrabold text-xs sm:text-sm tracking-wide shadow-[0_0_25px_rgba(37,211,102,0.4)] hover:brightness-110 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer no-underline"
+            >
+              <MessageSquare className="h-4 w-4 shrink-0" />
+              <span>Abrir WhatsApp Agora →</span>
+            </a>
+
+            <p className="mt-3 text-[11px] text-white/45 max-w-xs leading-normal">
+              Se a conversa não abriu automaticamente, clique no botão verde acima para iniciar o atendimento.
+            </p>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-4 text-xs text-white/40 hover:text-white/80 transition-colors cursor-pointer"
+            >
+              Fechar janela
+            </button>
           </div>
         ) : (
           <>

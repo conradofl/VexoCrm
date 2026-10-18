@@ -66,4 +66,32 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
       screen.getByText(/Não\. O Vexo OS foi desenvolvido para potencializar seus vendedores/i)
     ).toBeInTheDocument();
   });
+
+  it("submits lead capture form and displays direct WhatsApp connection button", async () => {
+    render(
+      <BrowserRouter>
+        <LandingPage />
+      </BrowserRouter>
+    );
+
+    const demoButton = screen.getByRole("button", { name: /Conhecer Vexo OS/i });
+    fireEvent.click(demoButton);
+
+    const nameInput = screen.getByPlaceholderText(/Seu nome/i);
+    const phoneInput = screen.getByPlaceholderText(/\(00\) 00000-0000/i);
+    const emailInput = screen.getByPlaceholderText(/seu@empresa\.com/i);
+
+    fireEvent.change(nameInput, { target: { value: "Carlos Teste" } });
+    fireEvent.change(phoneInput, { target: { value: "34999999999" } });
+    fireEvent.change(emailInput, { target: { value: "carlos@teste.com" } });
+
+    const submitBtn = screen.getByRole("button", { name: /Avançar para WhatsApp Comercial/i });
+    const form = submitBtn.closest("form")!;
+    fireEvent.submit(form);
+
+    expect(await screen.findByText(/Solicitação Confirmada!/i)).toBeInTheDocument();
+    const whatsappLink = screen.getByRole("link", { name: /Abrir WhatsApp Agora →/i });
+    expect(whatsappLink).toBeInTheDocument();
+    expect(whatsappLink).toHaveAttribute("href", expect.stringContaining("wa.me"));
+  });
 });
