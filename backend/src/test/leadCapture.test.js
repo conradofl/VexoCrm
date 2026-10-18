@@ -21,6 +21,7 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
   beforeEach(() => {
     resetCaptureRateLimit();
     resetLeadCaptureDispatchesTableEnsured();
+    leadUpsertModule.resetLeadsColumnsCache();
     vi.restoreAllMocks();
   });
 
@@ -85,9 +86,10 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
   });
 
   // --------------------------------------------------------------------------
-  // a) Gravação do Lead no Banco com Multi-tenant e tag 'diagnostico-site'
   // --------------------------------------------------------------------------
-  it("a) formulário enviado cria o lead no Banco do tenant com tag 'diagnostico-site'", async () => {
+  // a) saveCaptureLead com email preenchido -> lead gravado, email em dados.email
+  // --------------------------------------------------------------------------
+  it("a) saveCaptureLead com email preenchido -> lead gravado, email em dados.email e NÃO na raiz", async () => {
     const mockPool = {
       query: vi.fn().mockResolvedValue({ rowCount: 1 }),
     };
@@ -118,13 +120,308 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
     expect(calledFields.tags).toContain("diagnostico-site");
     expect(calledFields.lead_origin).toBe("diagnostico-site");
     expect(calledFields.nome).toBe("Conrado Finzi");
-    expect(calledFields.email).toBe("conrado@vexo.com.br");
+    // PROVA DA CORREÇÃO: email NÃO pode ir no nível raiz (evita column "email" does not exist)
+    expect(calledFields.email).toBeUndefined();
+    // email deve ir dentro do JSONB dados
+    expect(calledFields.dados.email).toBe("conrado@vexo.com.br");
 
     // Verifica que gravou notificação in-app no CRM
     expect(mockPool.query).toHaveBeenCalledWith(
       expect.stringContaining("INSERT INTO public.notifications"),
       expect.arrayContaining(["vexo-adm", expect.stringContaining("Conrado Finzi")])
     );
+  });
+
+  // --------------------------------------------------------------------------
+  // b) saveCaptureLead com email null -> lead gravado, sem quebrar
+  // --------------------------------------------------------------------------
+  it("b) saveCaptureLead com email null -> lead gravado com dados.email null, sem quebrar", async () => {
+    const mockPool = {
+      query: vi.fn().mockResolvedValue({ rowCount: 1 }),
+    };
+
+    const upsertSpy = vi.spyOn(leadUpsertModule, "upsertLeadByPhone").mockResolvedValue("inserted");
+
+    const leadData = {
+      clientId: "vexo-adm",
+      phone: "5534991751267",
+      fullName: "Lead Sem Email",
+      email: null,
+      answers: { company: "Empresa Teste" },
+    };
+
+    const result = await saveCaptureLead(mockPool, leadData);
+
+    expect(result.action).toBe("inserted");
+    expect(upsertSpy).toHaveBeenCalledTimes(1);
+
+    const [, , , calledFields] = upsertSpy.mock.calls[0];
+    expect(calledFields.email).toBeUndefined();
+    expect(calledFields.dados.email).toBeNull();
+  });
+
+  // --------------------------------------------------------------------------
+  // c) upsertLeadByPhone com chave inexistente -> não vai pro SQL, warn emitido, retorna normal
+  // --------------------------------------------------------------------------
+  it("c) upsertLeadByPhone com chave inexistente -> não vai pro SQL, warn emitido, retorna normal", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let executedInsertSql = "";
+    let executedParams = [];
+
+    const mockPool = {
+      query: vi.fn(async (sql, params = []) => {
+        if (sql.includes("information_schema.columns")) {
+          return {
+            rows: [
+              { column_name: "id" },
+              { column_name: "client_id" },
+              { column_name: "telefone" },
+              { column_name: "phone" },
+              { column_name: "nome" },
+              { column_name: "tags" },
+              { column_name: "dados" },
+            ],
+          };
+        }
+        if (sql.includes("SELECT") && sql.includes("FROM public.leads")) {
+          return { rows: [] }; // Simula lead novo (vai para INSERT)
+        }
+        if (sql.includes("INSERT INTO public.leads")) {
+          executedInsertSql = sql;
+          executedParams = params;
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    // Chamada passando chave inexistente 'email' e outro campo fantasma
+    const result = await leadUpsertModule.upsertLeadByPhone(
+      mockPool,
+      "vexo-adm",
+      "5534991751267",
+      {
+        nome: "Lead Protegido",
+        tags: ["diagnostico-site"],
+        email: "teste@naoexiste.com", // Chave inexistente na tabela leads
+        campo_inexistente_xyz: "valor_fantasma", // Outra chave inexistente
+        dados: { email: "teste@naoexiste.com" }, // Chave válida (JSONB)
+      }
+    );
+
+    expect(result).toBe("inserted");
+
+    // 1. Chaves inexistentes NÃO podem constar no SQL nem nos parâmetros
+    expect(executedInsertSql).not.toContain('"email"');
+    expect(executedInsertSql).not.toContain('"campo_inexistente_xyz"');
+    expect(executedParams).not.toContain("valor_fantasma");
+
+    // 2. Chaves legítimas DEVEM estar no SQL
+    expect(executedInsertSql).toContain('"nome"');
+    expect(executedInsertSql).toContain('"tags"');
+    expect(executedInsertSql).toContain('"dados"');
+
+    // 3. Deve emitir console.warn com o nome da chave e o chamador fora de leadUpsert.js
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadUpsert] Chave desconhecida descartada da coluna public.leads: "email"')
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadUpsert] Chave desconhecida descartada da coluna public.leads: "campo_inexistente_xyz"')
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // d) boot com banco respondendo -> conjunto vem do information_schema;
+  //    chave presente no banco mas AUSENTE da constante é aceita
+  // --------------------------------------------------------------------------
+  it("d) boot com banco respondendo -> conjunto vem do information_schema; chave presente no banco mas AUSENTE da constante é aceita", async () => {
+    leadUpsertModule.resetLeadsColumnsCache();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let executedInsertSql = "";
+    let executedParams = [];
+
+    // Coluna que comprovadamente NÃO existe na constante de fallback KNOWN_LEADS_COLUMNS
+    const colunaCustomDoBanco = "coluna_nova_criada_por_migration";
+    expect(leadUpsertModule.KNOWN_LEADS_COLUMNS.has(colunaCustomDoBanco)).toBe(false);
+
+    const mockPool = {
+      query: vi.fn(async (sql, params = []) => {
+        if (sql.includes("information_schema.columns")) {
+          return {
+            rows: [
+              { column_name: "id" },
+              { column_name: "client_id" },
+              { column_name: "telefone" },
+              { column_name: "phone" },
+              { column_name: "nome" },
+              { column_name: "tags" },
+              { column_name: "dados" },
+              { column_name: colunaCustomDoBanco },
+            ],
+          };
+        }
+        if (sql.includes("SELECT") && sql.includes("FROM public.leads")) {
+          return { rows: [] }; // Lead novo
+        }
+        if (sql.includes("INSERT INTO public.leads")) {
+          executedInsertSql = sql;
+          executedParams = params;
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const result = await leadUpsertModule.upsertLeadByPhone(
+      mockPool,
+      "vexo-adm",
+      "5534991751267",
+      {
+        nome: "Lead Com Coluna Nova",
+        [colunaCustomDoBanco]: "valor_valido_do_banco",
+      }
+    );
+
+    expect(result).toBe("inserted");
+
+    // 1. A coluna nova do banco DEVE estar presente no SQL e nos parâmetros
+    expect(executedInsertSql).toContain(`"${colunaCustomDoBanco}"`);
+    expect(executedParams).toContain("valor_valido_do_banco");
+
+    // 2. Não deve ter emitido warning de descarte para essa coluna
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining(`[leadUpsert] Chave desconhecida descartada da coluna public.leads: "${colunaCustomDoBanco}"`)
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // e) boot com a query falhando -> usa o fallback e emite o aviso
+  // --------------------------------------------------------------------------
+  it("e) boot com a query falhando -> usa o fallback e emite o aviso", async () => {
+    leadUpsertModule.resetLeadsColumnsCache();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let executedInsertSql = "";
+    let executedParams = [];
+
+    const mockPool = {
+      query: vi.fn(async (sql, params = []) => {
+        if (sql.includes("information_schema.columns")) {
+          throw new Error("connection to database lost");
+        }
+        if (sql.includes("SELECT") && sql.includes("FROM public.leads")) {
+          return { rows: [] }; // Lead novo
+        }
+        if (sql.includes("INSERT INTO public.leads")) {
+          executedInsertSql = sql;
+          executedParams = params;
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const result = await leadUpsertModule.upsertLeadByPhone(
+      mockPool,
+      "vexo-adm",
+      "5534991751267",
+      {
+        nome: "Lead Fallback",
+        tags: ["teste-fallback"],
+        campo_inexistente_total: "rejeitado",
+      }
+    );
+
+    expect(result).toBe("inserted");
+
+    // 1. Deve emitir aviso explícito de fallback no log
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[leadUpsert] falha ao carregar colunas do banco")
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("usando KNOWN_LEADS_COLUMNS como fallback")
+    );
+
+    // 2. Colunas canônicas da constante de fallback funcionam normalmente
+    expect(executedInsertSql).toContain('"nome"');
+    expect(executedInsertSql).toContain('"tags"');
+    expect(executedParams).toContain("Lead Fallback");
+
+    // 3. Campo inexistente fora do fallback é descartado
+    expect(executedInsertSql).not.toContain('"campo_inexistente_total"');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadUpsert] Chave desconhecida descartada da coluna public.leads: "campo_inexistente_total"')
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // f) information_schema falha -> segunda chamada de upsertLeadByPhone NÃO
+  //    executa nova query no information_schema e NÃO emite segundo aviso de fallback
+  // --------------------------------------------------------------------------
+  it("f) information_schema falha -> segunda chamada de upsertLeadByPhone NÃO executa nova query no information_schema e NÃO emite segundo aviso de fallback", async () => {
+    leadUpsertModule.resetLeadsColumnsCache();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let informationSchemaQueryCount = 0;
+
+    const mockPool = {
+      query: vi.fn(async (sql, params = []) => {
+        if (sql.includes("information_schema.columns")) {
+          informationSchemaQueryCount++;
+          throw new Error("banco temporariamente inacessível");
+        }
+        if (sql.includes("SELECT") && sql.includes("FROM public.leads")) {
+          return { rows: [] };
+        }
+        if (sql.includes("INSERT INTO public.leads")) {
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    // 1ª chamada: falha no information_schema, entra em fallback e grava no cache
+    const res1 = await leadUpsertModule.upsertLeadByPhone(
+      mockPool,
+      "vexo-adm",
+      "5534991751267",
+      { nome: "Lead 1" }
+    );
+    expect(res1).toBe("inserted");
+    expect(informationSchemaQueryCount).toBe(1);
+
+    const fallbackWarningsAfterFirst = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("[leadUpsert] falha ao carregar colunas do banco")
+    );
+    expect(fallbackWarningsAfterFirst.length).toBe(1);
+
+    // 2ª chamada: DEVE consumir o cache em memória!
+    // NÃO pode reconsultar information_schema e NÃO pode emitir segundo warning
+    const res2 = await leadUpsertModule.upsertLeadByPhone(
+      mockPool,
+      "vexo-adm",
+      "5534991751268",
+      { nome: "Lead 2" }
+    );
+    expect(res2).toBe("inserted");
+
+    // PROVA: nenhuma query extra ao information_schema (continua 1)
+    expect(informationSchemaQueryCount).toBe(1);
+
+    // PROVA: nenhum aviso extra de fallback (continua 1)
+    const fallbackWarningsAfterSecond = warnSpy.mock.calls.filter((c) =>
+      String(c[0]).includes("[leadUpsert] falha ao carregar colunas do banco")
+    );
+    expect(fallbackWarningsAfterSecond.length).toBe(1);
+  });
+
+  // --------------------------------------------------------------------------
+  // Validação do fallback: assigned_chip incluído
+  // --------------------------------------------------------------------------
+  it("valida que assigned_chip consta na constante de fallback KNOWN_LEADS_COLUMNS", () => {
+    expect(leadUpsertModule.KNOWN_LEADS_COLUMNS.has("assigned_chip")).toBe(true);
   });
 
   // --------------------------------------------------------------------------

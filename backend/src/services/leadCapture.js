@@ -196,13 +196,13 @@ export async function saveCaptureLead(pool, { clientId, phone, fullName, email, 
 
   const fields = {
     nome: fullName,
-    email: email || null,
     tags: ["diagnostico-site"],
     lead_origin: "diagnostico-site",
     lead_source: "organico",
     status: "NOVO",
     dados: {
       ...answers,
+      email: email || null,
       captura_origem: "landing-page-diagnostico",
       submitted_at: new Date().toISOString(),
     },

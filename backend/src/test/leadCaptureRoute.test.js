@@ -170,7 +170,9 @@ describe("Rotas Públicas de Captura de Leads (/api/public/leads/capture e /api/
       expect.objectContaining({
         nome: "Carlos Eduardo",
         tags: ["diagnostico-site"],
-        email: "carlos@solarprime.com.br",
+        dados: expect.objectContaining({
+          email: "carlos@solarprime.com.br",
+        }),
       })
     );
 

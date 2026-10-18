@@ -51,6 +51,199 @@ export function normalizeLeadPhoneKey(phone) {
 }
 
 /**
+ * Whitelist canônica de colunas conhecidas de public.leads no Postgres.
+ * Baseada no schema oficial de backend/src/lead-client-tables.js (tabela base + intelligence + schemaExtraColumns).
+ * Chaves fora desta lista não entram no SQL, prevenindo quebras em produção por coluna inexistente.
+ */
+export const KNOWN_LEADS_COLUMNS = new Set([
+  // Identificadores e Multi-tenant
+  "id",
+  "client_id",
+  "tenant_id",
+  "telefone",
+  "phone",
+  "nome",
+
+  // Qualificação, Estágio e Comercial
+  "stage",
+  "stage_source",
+  "lost_reason",
+  "status",
+  "qualificacao",
+  "status_conversa",
+  "lead_temperature",
+  "temperature",
+  "lead_score",
+  "potential_contract_value",
+  "spin_fase",
+  "tipo_cliente",
+  "faixa_consumo",
+  "conta_energia",
+  "cidade",
+  "estado",
+
+  // Origem e Campanhas
+  "lead_source",
+  "lead_origin",
+  "source_campaign_id",
+  "source_campaign_name",
+  "tags",
+
+  // Atribuição de Usuários/SDR e Chips
+  "assigned_to",
+  "assigned_at",
+  "assigned_chip",
+
+  // Mensagens e Interações
+  "mensagem",
+  "historico",
+  "raw_chat_summary",
+  "first_contact_at",
+  "qualified_at",
+  "closed_at",
+  "last_interaction_at",
+  "last_message_at",
+  "ultima_interacao_bot",
+  "ultima_interacao_usuario",
+  "extracted_from_wa",
+  "bot_ativo",
+  "finalizado",
+  "opt_out",
+
+  // Metadados e JSON
+  "dados",
+  "behavior_meta",
+  "metadata",
+
+  // Âncoras e Datas
+  "data_hora",
+  "data_nascimento",
+  "aniversario_casamento",
+  "epoca_ferias",
+  "data_retorno",
+  "ultima_visita",
+  "perfil_musical",
+
+  // Colunas Nichadas (schemaExtraColumns em lead-client-tables.js)
+  "interesse",
+  "objetivo",
+  "prazo",
+  "melhor_horario",
+  "credito",
+  "parcela",
+  "lance_entrada_fgts",
+  "tipo_instalacao",
+  "conta_luz_faixa",
+
+  // Timestamps
+  "created_at",
+  "updated_at",
+]);
+
+let _cachedLeadsColumns = null;
+let _loadingPromise = null;
+
+/**
+ * Limpa o cache em memória das colunas de public.leads (útil para testes unitários).
+ */
+export function resetLeadsColumnsCache() {
+  _cachedLeadsColumns = null;
+  _loadingPromise = null;
+}
+
+/**
+ * Retorna o cache atual de colunas (ou null se ainda não carregado).
+ * @returns {Set<string>|null}
+ */
+export function getCachedLeadsColumns() {
+  return _cachedLeadsColumns;
+}
+
+/**
+ * Carrega dinamicamente as colunas existentes da tabela public.leads a partir do information_schema.
+ * • Sucesso -> armazena em memória (_cachedLeadsColumns) e retorna o Set.
+ * • Falha ou vazio -> fallback para KNOWN_LEADS_COLUMNS e loga aviso explícito com console.warn.
+ *
+ * @param {import("pg").Pool} pool
+ * @returns {Promise<Set<string>>}
+ */
+export async function loadKnownLeadsColumns(pool) {
+  if (_cachedLeadsColumns) {
+    return _cachedLeadsColumns;
+  }
+
+  if (!pool || typeof pool.query !== "function") {
+    console.warn(
+      "[leadUpsert] Pool não disponível para consultar information_schema; usando KNOWN_LEADS_COLUMNS como fallback."
+    );
+    _cachedLeadsColumns = new Set(KNOWN_LEADS_COLUMNS);
+    return _cachedLeadsColumns;
+  }
+
+  if (_loadingPromise) {
+    return _loadingPromise;
+  }
+
+  _loadingPromise = (async () => {
+    try {
+      const res = await pool.query(
+        `SELECT column_name
+           FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'leads'`
+      );
+
+      if (res && Array.isArray(res.rows) && res.rows.length > 0) {
+        _cachedLeadsColumns = new Set(res.rows.map((r) => r.column_name));
+        return _cachedLeadsColumns;
+      }
+
+      console.warn(
+        "[leadUpsert] information_schema retornou 0 colunas para public.leads; usando KNOWN_LEADS_COLUMNS como fallback."
+      );
+      _cachedLeadsColumns = new Set(KNOWN_LEADS_COLUMNS);
+      return _cachedLeadsColumns;
+    } catch (err) {
+      console.warn(
+        `[leadUpsert] falha ao carregar colunas do banco (${err?.message || err}); usando KNOWN_LEADS_COLUMNS como fallback.`
+      );
+      _cachedLeadsColumns = new Set(KNOWN_LEADS_COLUMNS);
+      return _cachedLeadsColumns;
+    } finally {
+      _loadingPromise = null;
+    }
+  })();
+
+  return _loadingPromise;
+}
+
+/**
+ * Identifica o chamador da função para auditoria em caso de coluna desconhecida descartada.
+ * Procura no stack o primeiro frame FORA de leadUpsert.js em vez de usar índice fixo.
+ * @returns {string}
+ */
+export function getCallerInfo() {
+  try {
+    const err = new Error();
+    const stack = (err.stack || "").split("\n");
+    for (const rawLine of stack) {
+      const line = rawLine.trim();
+      if (
+        !line ||
+        line.startsWith("Error") ||
+        line.includes("leadUpsert.js") ||
+        line.includes("getCallerInfo")
+      ) {
+        continue;
+      }
+      return line.replace(/^at\s+/, "");
+    }
+    return "desconhecido";
+  } catch {
+    return "desconhecido";
+  }
+}
+
+/**
  * Upsert individual de lead por (client_id, telefone) sem depender de constraint única.
  *
  * @param {import("pg").Pool} pool
@@ -69,16 +262,36 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
 
   const preserveExistingName = options.preserveExistingName !== false;
 
-  // Sanitização de campos: 'origem' não é coluna de public.leads (as colunas são lead_source e lead_origin)
-  const sanitizedFields = { ...fields };
-  if (sanitizedFields.origem !== undefined) {
-    if (!sanitizedFields.lead_source) sanitizedFields.lead_source = sanitizedFields.origem;
-    if (!sanitizedFields.lead_origin) sanitizedFields.lead_origin = sanitizedFields.origem;
-    delete sanitizedFields.origem;
-  }
-  if (sanitizedFields.assignedTo !== undefined) {
-    if (!sanitizedFields.assigned_to) sanitizedFields.assigned_to = sanitizedFields.assignedTo;
-    delete sanitizedFields.assignedTo;
+  const validColumns = await loadKnownLeadsColumns(pool);
+
+  // Sanitização e Whitelist: filtra colunas conhecidas e descarta desconhecidas com log
+  const sanitizedFields = {};
+  for (const [key, val] of Object.entries(fields || {})) {
+    if (val === undefined) continue;
+
+    // Aliases conhecidos
+    if (key === "origem") {
+      if (!fields.lead_source) sanitizedFields.lead_source = val;
+      if (!fields.lead_origin) sanitizedFields.lead_origin = val;
+      continue;
+    }
+    if (key === "assignedTo") {
+      if (!fields.assigned_to) sanitizedFields.assigned_to = val;
+      continue;
+    }
+    if (key === "client_id" || key === "id") {
+      continue;
+    }
+
+    if (!validColumns.has(key)) {
+      const caller = getCallerInfo();
+      console.warn(
+        `[leadUpsert] Chave desconhecida descartada da coluna public.leads: "${key}" (chamador: ${caller})`
+      );
+      continue;
+    }
+
+    sanitizedFields[key] = val;
   }
 
   // 1. Busca se o lead já existe por telefone ou phone
@@ -152,7 +365,7 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
     }
 
     const cols = Object.keys(updates).filter(
-      (k) => updates[k] !== undefined && k !== "client_id" && k !== "id"
+      (k) => updates[k] !== undefined && k !== "client_id" && k !== "id" && validColumns.has(k)
     );
 
     if (cols.length > 0) {
@@ -186,7 +399,9 @@ export async function upsertLeadByPhone(pool, clientId, telefone, fields = {}, o
     insertPayload.assigned_at = new Date().toISOString();
   }
 
-  const cols = Object.keys(insertPayload).filter((k) => insertPayload[k] !== undefined);
+  const cols = Object.keys(insertPayload).filter(
+    (k) => insertPayload[k] !== undefined && validColumns.has(k)
+  );
   const insertCols = cols.map((c) => `"${c}"`).join(", ");
   const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
   const values = cols.map((c) => insertPayload[c]);

@@ -96,6 +96,7 @@ import { closeFollowupQueue } from "./followup/queue.js";
 import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
 import { stopDueDispatchScheduler } from "./domains/campaigns/routes.js";
+import { loadKnownLeadsColumns } from "./services/leadUpsert.js";
 // getSegmentationCatalog, normalizeSegmentationCatalog, isFilterShape, normalizeFilters,
 // leadMatchesSegmentation, buildDefaultSegmentationConfig, sanitizeSegmentationConfig ficaram
 // sem consumidor em server.js apos a extracao do grupo D (Onda 3, Run E) -- import de
@@ -815,8 +816,13 @@ function startBackgroundServices() {
   } else {
     console.warn("[workers] REDIS_URL/REDIS_HOST não configurado — workers não iniciados.");
   }
-  // Motor proativo de sugestões DESLIGADO (Decisão do dono: sem interface de moderação no momento)
-  // startAutomationEngine();
+
+  // Pré-carrega no boot as colunas reais de public.leads a partir do information_schema
+  if (pgDatabasePool) {
+    loadKnownLeadsColumns(pgDatabasePool).catch((error) => {
+      console.warn("[server] aviso ao pré-carregar colunas de public.leads no boot:", error?.message || error);
+    });
+  }
 }
 
 // (A) Sobe o HTTP com handler de 'error'. EADDRINUSE → retry curto e limitado (cobre a
