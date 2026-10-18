@@ -17,7 +17,26 @@ function normalizeCorsOrigin(value) {
 }
 
 // Origens do Vexo Scout (extensao) e das redes onde ele roda.
-const SUFIXOS_CONFIAVEIS = ["instagram.com", "linkedin.com", "facebook.com", "tiktok.com"];
+const DOMINIOS_CONFIAVEIS = ["instagram.com", "linkedin.com", "facebook.com", "tiktok.com"];
+
+/**
+ * Valida se a origem pertence estritamente a um dos dominios confiaveis ou
+ * subdominio legitimo deles. Extrai o host via URL parsing para evitar que
+ * dominios maliciosos como instagram.com.atacante.net ou meu-facebook.com.br
+ * casem via includes().
+ */
+export function isTrustedSocialOrigin(origin) {
+  if (typeof origin !== "string" || !origin) return false;
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.toLowerCase();
+    return DOMINIOS_CONFIAVEIS.some(
+      (dominio) => host === dominio || host.endsWith("." + dominio)
+    );
+  } catch {
+    return false;
+  }
+}
 
 let politica = {
   allowAny: false,
@@ -47,12 +66,11 @@ export function configureCorsPolicy({ allowAny, origens }) {
   return politica;
 }
 
-export function isAllowedCorsOrigin(origin, pathname = "") {
-  if (pathname && isPublicApiRoute(pathname)) return true;
-  if (!origin) return false;
+export function isAllowedCorsOrigin(origin) {
+  if (!origin || typeof origin !== "string") return false;
   if (politica.allowAny) return true;
   if (origin.startsWith("chrome-extension://")) return true;
-  if (SUFIXOS_CONFIAVEIS.some((dominio) => origin.includes(dominio))) return true;
+  if (isTrustedSocialOrigin(origin)) return true;
   return politica.origens.includes(normalizeCorsOrigin(origin));
 }
 
@@ -86,7 +104,7 @@ export function createCorsOptionsDelegate({ allowAny, corsOrigins } = {}) {
         }
         if (
           origin.startsWith("chrome-extension://") ||
-          SUFIXOS_CONFIAVEIS.some((dominio) => origin.includes(dominio))
+          isTrustedSocialOrigin(origin)
         ) {
           originCallback(null, true);
           return;
@@ -127,8 +145,9 @@ export function applyCorsHeaders(res, origin) {
     if (origin) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
+      return true;
     }
-    return true;
+    return false;
   }
 
   if (!isAllowedCorsOrigin(origin)) return false;

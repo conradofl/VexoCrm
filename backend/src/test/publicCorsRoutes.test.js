@@ -14,6 +14,9 @@ import {
   createCorsOptionsDelegate,
   isPublicApiRoute,
   configureCorsPolicy,
+  isTrustedSocialOrigin,
+  isAllowedCorsOrigin,
+  applyCorsHeaders,
 } from "../services/corsPolicy.js";
 import { sendError } from "../services/httpInfra.js";
 
@@ -219,3 +222,62 @@ describe("Comportamento HTTP de CORS: Rotas Publicas vs Rotas Autenticadas", () 
     expect(data.error.code).toBe("RATE_LIMIT_EXCEEDED");
   });
 });
+
+describe("Seguranca de Dominios Confiaveis (Scout / Redes Sociais)", () => {
+  // Teste (f) da SPEC: subdomínio legítimo aceito
+  it("f) https://www.instagram.com -> aceito (subdominio legitimo)", () => {
+    expect(isTrustedSocialOrigin("https://www.instagram.com")).toBe(true);
+    expect(isAllowedCorsOrigin("https://www.instagram.com")).toBe(true);
+  });
+
+  // Teste (g) da SPEC: domínio exato aceito
+  it("g) https://instagram.com -> aceito (dominio exato)", () => {
+    expect(isTrustedSocialOrigin("https://instagram.com")).toBe(true);
+    expect(isAllowedCorsOrigin("https://instagram.com")).toBe(true);
+  });
+
+  it("g.2) outros dominios confiaveis: linkedin, facebook, tiktok e subdominios", () => {
+    expect(isTrustedSocialOrigin("https://linkedin.com")).toBe(true);
+    expect(isTrustedSocialOrigin("https://www.linkedin.com")).toBe(true);
+    expect(isTrustedSocialOrigin("https://facebook.com")).toBe(true);
+    expect(isTrustedSocialOrigin("https://web.facebook.com")).toBe(true);
+    expect(isTrustedSocialOrigin("https://tiktok.com")).toBe(true);
+    expect(isTrustedSocialOrigin("https://www.tiktok.com")).toBe(true);
+  });
+
+  // Teste (h) da SPEC: https://instagram.com.atacante.net -> RECUSADO
+  it("h) https://instagram.com.atacante.net -> RECUSADO (nao casa por includes)", () => {
+    expect(isTrustedSocialOrigin("https://instagram.com.atacante.net")).toBe(false);
+    expect(isAllowedCorsOrigin("https://instagram.com.atacante.net")).toBe(false);
+  });
+
+  // Teste (i) da SPEC: https://meu-facebook.com.br -> RECUSADO
+  it("i) https://meu-facebook.com.br -> RECUSADO (nao casa por includes)", () => {
+    expect(isTrustedSocialOrigin("https://meu-facebook.com.br")).toBe(false);
+    expect(isAllowedCorsOrigin("https://meu-facebook.com.br")).toBe(false);
+  });
+
+  // Teste (j) da SPEC: Origin malformado -> RECUSADO sem lançar exceção
+  it("j) Origin malformado ('nao-e-url') -> RECUSADO sem lancar excecao", () => {
+    expect(() => isTrustedSocialOrigin("nao-e-url")).not.toThrow();
+    expect(isTrustedSocialOrigin("nao-e-url")).toBe(false);
+    expect(isAllowedCorsOrigin("nao-e-url")).toBe(false);
+    expect(isAllowedCorsOrigin(null)).toBe(false);
+    expect(isAllowedCorsOrigin("")).toBe(false);
+  });
+
+  it("k) applyCorsHeaders em rota publica com origin vazio retorna false e nao escreve cabecalho", () => {
+    const headers = {};
+    const res = {
+      headersSent: false,
+      req: { path: "/api/public/leads/capture" },
+      setHeader(k, v) { headers[k] = v; },
+      getHeader(k) { return headers[k]; },
+    };
+
+    const resultado = applyCorsHeaders(res, "");
+    expect(resultado).toBe(false);
+    expect(headers["Access-Control-Allow-Origin"]).toBeUndefined();
+  });
+});
+
