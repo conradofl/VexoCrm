@@ -136,43 +136,130 @@ export function validateCapturePayload(body = {}) {
 }
 
 /**
- * Extrai quantidade aproximada de contatos a partir do texto informado.
+ * Normaliza string para comparação de opções do formulário.
+ * @param {string} [str]
+ * @returns {string}
+ */
+export function normalizeOptionString(str) {
+  return String(str || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Tabela canônica de opções e tetos da base de contatos.
+ * O valor usado NUNCA pode passar do teto declarado pelo prospect.
+ */
+export const BASE_SIZE_CEILINGS = {
+  "ate 2.000 contatos": 2000,
+  "2.000 a 10.000 contatos": 10000,
+  "10.000 a 50.000 contatos": 50000,
+  "mais de 50.000 contatos": 50000,
+};
+
+/**
+ * Extrai quantidade de contatos a partir do texto informado, casando a opção completa.
+ * O valor resultante respeita estritamente o teto declarado na opção.
  * @param {string} [baseSize]
  * @returns {number}
  */
 export function parseBaseCount(baseSize) {
   if (!baseSize) return 2000;
-  const str = String(baseSize).toLowerCase();
-  if (str.includes("50.000") || str.includes("50000")) return 50000;
-  if (str.includes("10.000") || str.includes("10000")) return 25000;
-  if (str.includes("2.000") || str.includes("2000")) return 5000;
-  if (str.includes("até 2") || str.includes("ate 2")) return 1500;
+  const norm = normalizeOptionString(baseSize);
 
-  const digits = str.replace(/[^\d]/g, "");
-  const num = parseInt(digits, 10);
-  if (!isNaN(num) && num > 0) return num;
+  // 1. Casamento com a opção completa oficial do formulário
+  if (norm === "ate 2.000 contatos" || norm === "ate 2000 contatos") return 2000;
+  if (norm === "2.000 a 10.000 contatos" || norm === "2000 a 10000 contatos") return 10000;
+  if (norm === "10.000 a 50.000 contatos" || norm === "10000 a 50000 contatos") return 50000;
+  if (norm === "mais de 50.000 contatos" || norm === "mais de 50000 contatos") return 50000;
+
+  // 2. Fallback para faixas genéricas "X a Y": extrai o teto (Y)
+  const rangeMatch = norm.match(/(\d[\d.]*)\s+a\s+(\d[\d.]*)/);
+  if (rangeMatch) {
+    const ceilStr = rangeMatch[2].replace(/\./g, "");
+    const ceilNum = parseInt(ceilStr, 10);
+    if (!isNaN(ceilNum) && ceilNum > 0) return ceilNum;
+  }
+
+  // 3. Fallback para "ate X"
+  const ateMatch = norm.match(/ate\s+(\d[\d.]*)/);
+  if (ateMatch) {
+    const ateNum = parseInt(ateMatch[1].replace(/\./g, ""), 10);
+    if (!isNaN(ateNum) && ateNum > 0) return ateNum;
+  }
+
+  // 4. Fallback para número direto único
+  const cleanDigits = norm.replace(/[^\d]/g, "");
+  const directNum = parseInt(cleanDigits, 10);
+  if (!isNaN(directNum) && directNum > 0) return directNum;
+
   return 2000;
 }
 
 /**
- * Extrai ticket médio aproximado em reais a partir do texto informado.
+ * Tabela canônica de opções e tetos do ticket médio.
+ * O valor usado NUNCA pode passar do teto declarado pelo prospect.
+ */
+export const TICKET_MEDIO_CEILINGS = {
+  "ate r$ 500": 500,
+  "r$ 500 a r$ 2.000": 2000,
+  "r$ 2.000 a r$ 5.000": 5000,
+  "r$ 5.000 a r$ 20.000": 20000,
+  "acima de r$ 20.000": 20000,
+};
+
+/**
+ * Extrai ticket médio em reais a partir do texto informado, casando a opção completa.
+ * O valor resultante respeita estritamente o teto declarado na opção.
  * @param {string} [ticket]
  * @returns {number}
  */
 export function parseTicketMedio(ticket) {
   if (!ticket) return 1500;
-  const str = String(ticket).toLowerCase();
-  if (str.includes("20.000") || str.includes("20000")) return 20000;
-  if (str.includes("5.000") || str.includes("5000")) return 10000;
-  if (str.includes("2.000") || str.includes("2000")) return 3500;
-  if (str.includes("500")) return 1200;
-  if (str.includes("até") || str.includes("ate")) return 400;
+  const norm = normalizeOptionString(ticket);
 
-  const clean = str.replace(/[^\d.,]/g, "").replace(/\./g, "").replace(",", ".");
+  // 1. Casamento com a opção completa oficial do formulário
+  if (norm === "ate r$ 500" || norm === "ate 500") return 500;
+  if (norm === "r$ 500 a r$ 2.000" || norm === "r$ 500 a r$ 2000" || norm === "500 a 2000") return 2000;
+  if (norm === "r$ 2.000 a r$ 5.000" || norm === "r$ 2000 a r$ 5000" || norm === "2000 a 5000") return 5000;
+  if (norm === "r$ 5.000 a r$ 20.000" || norm === "r$ 5000 a r$ 20000" || norm === "5000 a 20000") return 20000;
+  if (norm === "acima de r$ 20.000" || norm === "acima de 20000") return 20000;
+
+  // 2. Fallback para faixas genéricas "X a Y": extrai o teto (Y)
+  const rangeMatch = norm.match(/(\d[\d.]*)\s+a\s+(?:r\$\s*)?(\d[\d.]*)/);
+  if (rangeMatch) {
+    const ceilStr = rangeMatch[2].replace(/\./g, "");
+    const ceilNum = parseFloat(ceilStr);
+    if (!isNaN(ceilNum) && ceilNum > 0) return ceilNum;
+  }
+
+  // 3. Fallback para "ate X"
+  const ateMatch = norm.match(/ate\s+(?:r\$\s*)?(\d[\d.]*)/);
+  if (ateMatch) {
+    const ateNum = parseFloat(ateMatch[1].replace(/\./g, ""));
+    if (!isNaN(ateNum) && ateNum > 0) return ateNum;
+  }
+
+  // 4. Fallback para número direto único
+  const clean = norm.replace(/[^\d.,]/g, "").replace(/\./g, "").replace(",", ".");
   const num = parseFloat(clean);
   if (!isNaN(num) && num > 0) return num;
+
   return 1500;
 }
+
+/**
+ * Tabela canônica de percentual de leads parados.
+ */
+export const STALLED_LEADS_PCT_OPTIONS = {
+  "menos de 30% da base": 0.30,
+  "30% a 50% da base": 0.40,
+  "mais de 50% da base": 0.50,
+  "não sei dizer (a maioria parada)": 0.50,
+};
 
 /**
  * Extrai percentual de leads parados a partir da opção selecionada.
@@ -181,23 +268,32 @@ export function parseTicketMedio(ticket) {
  */
 export function parseStalledPct(stalled) {
   if (!stalled) return 0.40;
-  const str = String(stalled).toLowerCase();
-  if (str.includes("mais de 50") || str.includes("> 50") || str.includes(">50")) return 0.60;
-  if (str.includes("30% a 50") || str.includes("30 a 50")) return 0.40;
-  if (str.includes("menos de 30") || str.includes("< 30") || str.includes("<30")) return 0.20;
-  if (str.includes("não sei") || str.includes("nao sei") || str.includes("maioria")) return 0.50;
+  const norm = normalizeOptionString(stalled);
 
-  const match = str.match(/(\d+)%/);
+  if (norm === "menos de 30% da base" || norm === "menos de 30%") return 0.30;
+  if (norm === "30% a 50% da base" || norm === "30% a 50%") return 0.40;
+  if (norm === "mais de 50% da base" || norm === "mais de 50%") return 0.50;
+  if (norm.includes("nao sei") || norm.includes("maioria")) return 0.50;
+
+  const match = norm.match(/(\d+)%/);
   if (match) {
     const pct = parseInt(match[1], 10);
-    if (!isNaN(pct) && pct > 0) return pct / 100;
+    if (!isNaN(pct) && pct > 0) return Math.min(pct / 100, 1.0);
   }
+
   return 0.40;
 }
 
 /**
- * Calcula o dinheiro parado na base com métricas conservadoras:
+ * Premissas adotadas para cálculo do diagnóstico comercial.
+ */
+export const DIAGNOSTIC_REPLY_RATE_PREMISE = 0.15; // 15% de resposta
+export const DIAGNOSTIC_CLOSE_RATE_PREMISE = 0.05; // 5% de fechamento
+
+/**
+ * Calcula o dinheiro parado na base com premissas transparentes de mercado:
  * 15% taxa de resposta e 5% de fechamento sobre os que responderem.
+ * O valor da base e do ticket NUNCA excede o teto declarado pelo prospect.
  * @param {object} params
  * @param {string} [params.baseSize]
  * @param {string} [params.ticketMedio]
@@ -210,8 +306,10 @@ export function calculateStalledRevenue({ baseSize, ticketMedio, stalledLeadsPct
   const pct = parseStalledPct(stalledLeadsPct);
 
   const leadsParados = Math.round(baseCount * pct);
-  // Conta conservadora: 15% de resposta x 5% de fechamento
-  const receitaPotencial = Math.round(leadsParados * 0.15 * 0.05 * ticketVal);
+  // Conta honesta: 15% de resposta x 5% de fechamento
+  const receitaPotencial = Math.round(
+    leadsParados * DIAGNOSTIC_REPLY_RATE_PREMISE * DIAGNOSTIC_CLOSE_RATE_PREMISE * ticketVal
+  );
 
   return {
     baseCount,
@@ -263,7 +361,7 @@ export function formatVisitorDiagnosticMessage({
     `📊 ${baseText} na base`,
     `⏱️ time responde em ${timeText}`,
     `💰 ticket médio de ${ticketText}`,
-    `Com ${formattedLeads} leads parados nesse ticket, há cerca de R$ ${formattedRevenue} esperando na sua base. É conta conservadora — usei 15% de resposta e 5% de fechamento.`,
+    `Com ${formattedLeads} leads parados nesse ticket, há cerca de R$ ${formattedRevenue} esperando na sua base. Estimando 15% de resposta e 5% de fechamento.`,
     `Te ligo ${callTime} pra te mostrar como destravar isso em 3 dias. Pode ser?`,
   ].join("\n");
 }

@@ -1,39 +1,38 @@
 // backend/src/test/landingPageTelemetryModel.test.js
-// Testes do modelo de dados do Módulo 06: Página de Captação e Telemetria LGPD
+// Testes do modelo de dados e do serviço de produção de telemetria LGPD
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import {
+  validateTelemetryEventIngestion,
+  ingestTelemetryEvent,
+  VALID_TELEMETRY_EVENT_TYPES,
+} from "../services/landingPageTelemetry.js";
+import { registerLeadCaptureRoutes } from "../domains/leads/captureRoutes.js";
 
-/**
- * Validador puro de conformidade LGPD para ingestão de eventos de telemetria.
- * Regra jurídica inegociável: rastreamento comportamental SÓ é permitido com aceite ativo.
- * @param {object} session
- * @param {boolean} session.consent_given
- * @param {object} event
- * @returns {{ allowed: boolean, reason?: string }}
- */
-export function validateTelemetryEventIngestion(session, event) {
-  if (!session || !session.consent_given) {
-    return {
-      allowed: false,
-      reason: "CONSENTIMENTO_LGPD_OBRIGATORIO",
-    };
-  }
-
-  if (!event || !event.event_type) {
-    return {
-      allowed: false,
-      reason: "EVENT_TYPE_OBRIGATORIO",
-    };
-  }
-
-  return { allowed: true };
+function fakeRes() {
+  return {
+    statusCode: 200,
+    body: null,
+    status(s) {
+      this.statusCode = s;
+      return this;
+    },
+    json(b) {
+      this.body = b;
+      return this;
+    },
+  };
 }
 
-describe("Módulo 06 — Modelo de Dados e Conformidade LGPD da Telemetria", () => {
+describe("Módulo 06 — Modelo de Dados e Serviço de Produção de Telemetria LGPD", () => {
   const migrationPath = resolve("supabase/migrations/20261018120000_create_landing_page_module_tables.sql");
   const sql = readFileSync(migrationPath, "utf8");
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
 
   // --------------------------------------------------------------------------
   // Estrutura e DDL Idempotente
@@ -61,7 +60,7 @@ describe("Módulo 06 — Modelo de Dados e Conformidade LGPD da Telemetria", () 
   });
 
   // --------------------------------------------------------------------------
-  // d) Visitante sem aceitar cookies: sem evento individual registrado
+  // d) Visitante sem aceitar cookies: recusa evento individual com consent_given = false
   // --------------------------------------------------------------------------
   it("d) visitante sem aceitar cookies: consent_given é false e bloqueia evento comportamental", () => {
     expect(sql).toContain("consent_given BOOLEAN NOT NULL DEFAULT false");
@@ -79,7 +78,7 @@ describe("Módulo 06 — Modelo de Dados e Conformidade LGPD da Telemetria", () 
     const resultado = validateTelemetryEventIngestion(sessionSemAceite, eventoTentado);
 
     expect(resultado.allowed).toBe(false);
-    expect(resultado.reason).toBe("CONSENTIMENTO_LGPD_OBRIGATORIO");
+    expect(resultado.error).toBe("CONSENTIMENTO_LGPD_OBRIGATORIO");
   });
 
   // --------------------------------------------------------------------------
@@ -106,26 +105,127 @@ describe("Módulo 06 — Modelo de Dados e Conformidade LGPD da Telemetria", () 
   });
 
   // --------------------------------------------------------------------------
-  // MUTAÇÃO: rastrear antes do aceite -> MORRE (d)
+  // Ingestão no serviço de produção (ingestTelemetryEvent)
   // --------------------------------------------------------------------------
-  it("MUTAÇÃO: tentar rastrear sem verificar consentimento ativo morre imediatamente no validador", () => {
-    // Simula implementação mutante que ignora a checagem jurídica de consentimento
-    function validateMutantIngestion(session, event) {
-      // MUTANTE: esqueceu if (!session.consent_given)
-      return { allowed: true };
-    }
+  it("ingestTelemetryEvent recusa no banco evento de sessão sem consentimento", async () => {
+    const mockPool = {
+      query: vi.fn(async (querySql) => {
+        if (querySql.includes("FROM public.landing_page_sessions")) {
+          return {
+            rows: [
+              {
+                id: "sess-uuid-sem-consent",
+                client_id: "vexo-adm",
+                session_token: "tok-sem-aceite",
+                consent_given: false, // NÃO deu consentimento
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
 
-    const sessionSemConsentimento = { consent_given: false };
-    const event = { event_type: "scroll_depth" };
+    const res = await ingestTelemetryEvent(mockPool, {
+      clientId: "vexo-adm",
+      sessionToken: "tok-sem-aceite",
+      event: { event_type: "scroll_depth", metadata: { depth: 50 } },
+    });
 
-    const mutantResult = validateMutantIngestion(sessionSemConsentimento, event);
-    const realResult = validateTelemetryEventIngestion(sessionSemConsentimento, event);
+    expect(res.recorded).toBe(false);
+    expect(res.error).toBe("CONSENTIMENTO_LGPD_OBRIGATORIO");
 
-    // O mutante autorizaria ilegalmente sem consentimento (violando LGPD)
-    expect(mutantResult.allowed).toBe(true);
+    // Verifica que NENHUM INSERT foi feito em landing_page_events
+    const insertCall = mockPool.query.mock.calls.find(([sqlStr]) =>
+      sqlStr.includes("INSERT INTO public.landing_page_events")
+    );
+    expect(insertCall).toBeUndefined();
+  });
 
-    // O código de produção BARRARIA o mutante, garantindo proteção jurídica
-    expect(realResult.allowed).toBe(false);
-    expect(realResult.reason).toBe("CONSENTIMENTO_LGPD_OBRIGATORIO");
+  it("ingestTelemetryEvent autoriza e grava evento no banco quando consentimento é ativo", async () => {
+    let eventInserted = false;
+    const mockPool = {
+      query: vi.fn(async (querySql) => {
+        if (querySql.includes("FROM public.landing_page_sessions")) {
+          return {
+            rows: [
+              {
+                id: "sess-uuid-com-consent",
+                client_id: "vexo-adm",
+                session_token: "tok-com-aceite",
+                consent_given: true, // DEU consentimento ativo
+              },
+            ],
+          };
+        }
+        if (querySql.includes("INSERT INTO public.landing_page_events")) {
+          eventInserted = true;
+          return { rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const res = await ingestTelemetryEvent(mockPool, {
+      clientId: "vexo-adm",
+      sessionToken: "tok-com-aceite",
+      event: {
+        event_type: "section_view",
+        section_name: "planos",
+        time_spent_seconds: 60,
+        metadata: { clicked: "card_avancado" },
+      },
+    });
+
+    expect(res.recorded).toBe(true);
+    expect(eventInserted).toBe(true);
+  });
+
+  // --------------------------------------------------------------------------
+  // Rota HTTP real POST /api/public/landing-pages/telemetry
+  // --------------------------------------------------------------------------
+  it("rota HTTP pública /api/public/landing-pages/telemetry responde 403 quando falta consentimento", async () => {
+    const routes = {};
+    const fakeApp = {
+      post: (p, ...handlers) => {
+        routes[`post ${p}`] = handlers[handlers.length - 1];
+      },
+    };
+
+    const pool = {
+      query: vi.fn(async (querySql) => {
+        if (querySql.includes("FROM public.landing_page_sessions")) {
+          return {
+            rows: [{ id: "sess-1", client_id: "solar-prime", consent_given: false }],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const deps = {
+      pgDatabasePool: pool,
+      sendError: (res, status, code, message) => {
+        res.status(status).json({ error: code, message });
+      },
+    };
+
+    registerLeadCaptureRoutes(fakeApp, deps);
+    const handler = routes["post /api/public/landing-pages/telemetry"];
+    expect(handler).toBeDefined();
+
+    const req = {
+      body: {
+        client_id: "solar-prime",
+        session_token: "tok-anônimo",
+        event: { event_type: "scroll_depth" },
+      },
+    };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe("CONSENTIMENTO_LGPD_OBRIGATORIO");
   });
 });

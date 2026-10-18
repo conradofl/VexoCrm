@@ -1,4 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import {
   checkCaptureRateLimit,
   resetCaptureRateLimit,
@@ -11,6 +17,10 @@ import {
   notifyOwnerOnCapture,
   checkCaptureDispatchQuota,
   resetLeadCaptureDispatchesTableEnsured,
+  parseBaseCount,
+  parseTicketMedio,
+  parseStalledPct,
+  calculateStalledRevenue,
   DAILY_CAPTURE_DISPATCH_LIMIT_PER_TENANT,
   MAX_CAPTURE_DISPATCH_PER_PHONE_24H,
 } from "../services/leadCapture.js";
@@ -440,9 +450,104 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
     expect(msg).toContain("10.000 a 50.000 contatos na base");
     expect(msg).toContain("time responde em 30 minutos");
     expect(msg).toContain("ticket médio de R$ 2.000 a R$ 5.000");
-    expect(msg).toContain("leads parados nesse ticket, há cerca de R$");
-    expect(msg).toContain("esperando na sua base. É conta conservadora — usei 15% de resposta e 5% de fechamento.");
+    expect(msg).toContain("Com 20.000 leads parados nesse ticket, há cerca de R$ 750.000 esperando na sua base. Estimando 15% de resposta e 5% de fechamento.");
+    expect(msg).not.toContain("conservadora");
     expect(msg).toContain("Te ligo amanhã de manhã pra te mostrar como destravar isso em 3 dias. Pode ser?");
+  });
+
+  // --------------------------------------------------------------------------
+  // g) Cálculo honesto respeitando o teto declarado: R$ 60.000 (assertado como número)
+  // --------------------------------------------------------------------------
+  it("g) base '2.000 a 10.000' + ticket 'R$ 500 a R$ 2.000' + '30% a 50%' resulta exatamente em R$ 60.000", () => {
+    const baseSize = "2.000 a 10.000 contatos";
+    const ticketMedio = "R$ 500 a R$ 2.000";
+    const stalledLeadsPct = "30% a 50% da base";
+
+    // 1. Validação unitária das funções de cálculo
+    const baseCount = parseBaseCount(baseSize);
+    const ticketVal = parseTicketMedio(ticketMedio);
+    const pct = parseStalledPct(stalledLeadsPct);
+
+    // O teto declarado da base é 10.000 (NUNCA 25.000)
+    expect(baseCount).toBe(10000);
+    // O teto declarado do ticket é 2.000 (NUNCA 3.500)
+    expect(ticketVal).toBe(2000);
+    // O percentual médio é 40%
+    expect(pct).toBe(0.40);
+
+    const calc = calculateStalledRevenue({ baseSize, ticketMedio, stalledLeadsPct });
+    expect(calc.leadsParados).toBe(4000);
+    // 4000 leads parados * 15% resposta * 5% fechamento * R$ 2.000 ticket = R$ 60.000
+    expect(calc.receitaPotencial).toBe(60000);
+
+    // 2. Validação da mensagem gerada para o WhatsApp: asserta o valor como NÚMERO
+    const msg = formatVisitorDiagnosticMessage({
+      fullName: "Gabriel Medeiros",
+      baseSize,
+      ticketMedio,
+      stalledLeadsPct,
+      responseTime: "30 min a 2 horas",
+    });
+
+    const revenueMatch = msg.match(/há cerca de R\$\s*([\d.]+)/);
+    expect(revenueMatch).not.toBeNull();
+    const extractedRevenue = parseInt(revenueMatch[1].replace(/\./g, ""), 10);
+    expect(extractedRevenue).toBe(60000); // Asserta EXATAMENTE 60000 como número!
+
+    const leadsMatch = msg.match(/Com\s+([\d.]+)\s+leads parados/);
+    expect(leadsMatch).not.toBeNull();
+    const extractedLeads = parseInt(leadsMatch[1].replace(/\./g, ""), 10);
+    expect(extractedLeads).toBe(4000); // Asserta EXATAMENTE 4000 como número!
+
+    expect(msg).toContain("Com 4.000 leads parados nesse ticket, há cerca de R$ 60.000 esperando na sua base. Estimando 15% de resposta e 5% de fechamento.");
+    expect(msg).not.toContain("conservadora");
+    expect(msg).toContain("Te ligo amanhã de manhã pra te mostrar como destravar isso em 3 dias. Pode ser?");
+  });
+
+  // --------------------------------------------------------------------------
+  // h) Para toda opção do formulário real no frontend, o valor usado <= teto declarado
+  // --------------------------------------------------------------------------
+  it("h) varre a lista real de opções do frontend e valida que nenhum valor ultrapassa o teto declarado", () => {
+    const modalPath = resolve(__dirname, "../../../frontend/src/pages/LandingPage/LeadCaptureModal.tsx");
+    const modalContent = readFileSync(modalPath, "utf8");
+
+    // Extrai blocos select reais do arquivo do frontend
+    const baseBlockMatch = modalContent.match(/Tamanho da sua base total de contatos[\s\S]*?<select[^>]*>([\s\S]*?)<\/select>/);
+    expect(baseBlockMatch).not.toBeNull();
+    const baseOptions = [...baseBlockMatch[1].matchAll(/<option[^>]*value=\"([^\"]+)\"/g)].map((m) => m[1]);
+
+    const ticketBlockMatch = modalContent.match(/Ticket M[eé]dio das suas Vendas[\s\S]*?<select[^>]*>([\s\S]*?)<\/select>/);
+    expect(ticketBlockMatch).not.toBeNull();
+    const ticketOptions = [...ticketBlockMatch[1].matchAll(/<option[^>]*value=\"([^\"]+)\"/g)].map((m) => m[1]);
+
+    expect(baseOptions.length).toBeGreaterThanOrEqual(4);
+    expect(ticketOptions.length).toBeGreaterThanOrEqual(5);
+
+    function extractDeclaredCeiling(label) {
+      const rangeMatch = label.match(/\ba\s+(?:R\$\s*)?(\d[\d.]*)/i);
+      if (rangeMatch) return parseInt(rangeMatch[1].replace(/\./g, ""), 10);
+      const ateMatch = label.match(/at[ée]\s+(?:R\$\s*)?(\d[\d.]*)/i);
+      if (ateMatch) return parseInt(ateMatch[1].replace(/\./g, ""), 10);
+      const plusMatch = label.match(/(?:mais de|acima de)\s+(?:R\$\s*)?(\d[\d.]*)/i);
+      if (plusMatch) return parseInt(plusMatch[1].replace(/\./g, ""), 10);
+      throw new Error(`Não foi possível inferir teto de: ${label}`);
+    }
+
+    // Valida cada opção da base do frontend
+    for (const option of baseOptions) {
+      const parsed = parseBaseCount(option);
+      const ceiling = extractDeclaredCeiling(option);
+      expect(parsed).toBeGreaterThan(0);
+      expect(parsed).toBeLessThanOrEqual(ceiling);
+    }
+
+    // Valida cada opção do ticket médio do frontend
+    for (const option of ticketOptions) {
+      const parsed = parseTicketMedio(option);
+      const ceiling = extractDeclaredCeiling(option);
+      expect(parsed).toBeGreaterThan(0);
+      expect(parsed).toBeLessThanOrEqual(ceiling);
+    }
   });
 
   it("dispara a mensagem via Evolution API pelo chip ativo do tenant", async () => {

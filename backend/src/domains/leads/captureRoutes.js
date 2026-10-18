@@ -12,6 +12,7 @@ import {
   saveCaptureLead,
   validateCapturePayload,
 } from "../../services/leadCapture.js";
+import { ingestTelemetryEvent } from "../../services/landingPageTelemetry.js";
 import { maskPhoneForLog } from "../../services/tenant.js";
 
 /**
@@ -170,7 +171,32 @@ export function registerLeadCaptureRoutes(app, deps) {
     }
   };
 
+  // --------------------------------------------------------------------------
+  // Ingestão de Telemetria Comportamental das Páginas de Captação (LGPD-compliant)
+  // --------------------------------------------------------------------------
+  const handleTelemetry = async (req, res) => {
+    const { client_id, session_token, event } = req.body || {};
+    const pool = pgDatabasePool;
+    if (!pool) {
+      return sendError(res, 500, "DATABASE_UNAVAILABLE", "Serviço de banco indisponível.");
+    }
+
+    const result = await ingestTelemetryEvent(pool, {
+      clientId: client_id,
+      sessionToken: session_token,
+      event,
+    });
+
+    if (!result.recorded) {
+      const status = result.error === "CONSENTIMENTO_LGPD_OBRIGATORIO" ? 403 : 400;
+      return sendError(res, status, result.error, result.message || "Evento não autorizado.");
+    }
+
+    return res.status(200).json({ success: true, message: "Evento registrado com sucesso." });
+  };
+
   // Rotas públicas (sem autenticação de usuário da plataforma)
   app.post("/api/public/leads/capture", handleCapture);
   app.post("/api/public/diagnostico", handleCapture);
+  app.post("/api/public/landing-pages/telemetry", handleTelemetry);
 }

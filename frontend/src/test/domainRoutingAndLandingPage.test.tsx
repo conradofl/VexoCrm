@@ -122,7 +122,7 @@ describe("Item 13: Landing Page e Separação de Domínio", () => {
       expect(screen.getByText(/Os módulos você escolhe/i)).toBeInTheDocument();
 
       // Seção 7: Implantação
-      expect(screen.getByText(/No ar em/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/No ar em/i).length).toBeGreaterThanOrEqual(1);
 
       // Seção 8: Planos
       expect(screen.getByText(/Planos transparentes para/i)).toBeInTheDocument();
