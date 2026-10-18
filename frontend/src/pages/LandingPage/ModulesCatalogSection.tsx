@@ -101,9 +101,9 @@ export function ModulesCatalogSection() {
       </div>
 
       {/* ========================================================= */}
-      {/* 2. OS 5 MÓDULOS DE VERDADE                                 */}
+      {/* 2. OS 6 MÓDULOS DE VERDADE                                 */}
       {/* ========================================================= */}
-      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {CATALOG_MODULES.map((mod) => {
           const Icon = mod.icon;
           return (

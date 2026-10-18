@@ -110,6 +110,8 @@ export function registerLeadCaptureRoutes(app, deps) {
         fullName,
         baseSize,
         responseTime,
+        ticketMedio,
+        stalledLeadsPct,
       });
 
       // 6. Dispara UMA mensagem de WhatsApp pelo chip do tenant (em background sem travar o lead)

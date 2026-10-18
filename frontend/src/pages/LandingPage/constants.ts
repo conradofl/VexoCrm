@@ -10,6 +10,7 @@ import {
   FileSignature,
   FileText,
   Filter,
+  Globe,
   Layers,
   Link2,
   MessageSquare,
@@ -153,7 +154,7 @@ export const CORE_FOUNDATION: CoreFoundationItem[] = [
 ];
 
 // -------------------------------------------------------------
-// SEÇÃO 6 — OS 5 MÓDULOS DE VERDADE (FUNCIONAM SOZINHOS)
+// SEÇÃO 6 — OS 6 MÓDULOS DE VERDADE (FUNCIONAM SOZINHOS)
 // -------------------------------------------------------------
 export const CATALOG_MODULES: ModuleItem[] = [
   {
@@ -190,6 +191,13 @@ export const CATALOG_MODULES: ModuleItem[] = [
     description:
       "Vários números com rodízio inteligente, aquecimento e transbordo: o batedor abre, o fechador assume.",
     icon: Smartphone,
+  },
+  {
+    number: "06",
+    title: "Página de Captação",
+    description:
+      "A porta de entrada do seu CRM: modelos prontos conectados direto ao seu funil, com auto-resposta imediata no WhatsApp e leitura da jornada do lead.",
+    icon: Globe,
   },
 ];
 

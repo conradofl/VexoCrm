@@ -7,6 +7,7 @@ import { FAQS } from "./constants";
 import { FreeDiagnosisSection } from "./FreeDiagnosisSection";
 import { ImplementationTimeline } from "./ImplementationTimeline";
 import { LandingFooter } from "./LandingFooter";
+import { LandingCapturePageSection } from "./LandingCapturePageSection";
 import type { LegalDocType } from "./LegalModal";
 import { LiveChatSimulator } from "./LiveChatSimulator";
 import { ModulesCatalogSection } from "./ModulesCatalogSection";
@@ -222,7 +223,12 @@ export function ContentLayer({
       </section>
 
       {/* ========================================================= */}
-      {/* 6. SEÇÃO MÓDULOS (CATÁLOGO DOS 8 MÓDULOS)                 */}
+      {/* 5.1 SEÇÃO ESPECIAL — MÓDULO PÁGINA DE CAPTAÇÃO           */}
+      {/* ========================================================= */}
+      <LandingCapturePageSection onOpenModal={onOpenModal} />
+
+      {/* ========================================================= */}
+      {/* 6. SEÇÃO MÓDULOS (CATÁLOGO DOS 6 MÓDULOS)                 */}
       {/* ========================================================= */}
       <ModulesCatalogSection />
 

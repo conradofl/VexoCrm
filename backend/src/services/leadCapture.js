@@ -136,26 +136,135 @@ export function validateCapturePayload(body = {}) {
 }
 
 /**
+ * Extrai quantidade aproximada de contatos a partir do texto informado.
+ * @param {string} [baseSize]
+ * @returns {number}
+ */
+export function parseBaseCount(baseSize) {
+  if (!baseSize) return 2000;
+  const str = String(baseSize).toLowerCase();
+  if (str.includes("50.000") || str.includes("50000")) return 50000;
+  if (str.includes("10.000") || str.includes("10000")) return 25000;
+  if (str.includes("2.000") || str.includes("2000")) return 5000;
+  if (str.includes("até 2") || str.includes("ate 2")) return 1500;
+
+  const digits = str.replace(/[^\d]/g, "");
+  const num = parseInt(digits, 10);
+  if (!isNaN(num) && num > 0) return num;
+  return 2000;
+}
+
+/**
+ * Extrai ticket médio aproximado em reais a partir do texto informado.
+ * @param {string} [ticket]
+ * @returns {number}
+ */
+export function parseTicketMedio(ticket) {
+  if (!ticket) return 1500;
+  const str = String(ticket).toLowerCase();
+  if (str.includes("20.000") || str.includes("20000")) return 20000;
+  if (str.includes("5.000") || str.includes("5000")) return 10000;
+  if (str.includes("2.000") || str.includes("2000")) return 3500;
+  if (str.includes("500")) return 1200;
+  if (str.includes("até") || str.includes("ate")) return 400;
+
+  const clean = str.replace(/[^\d.,]/g, "").replace(/\./g, "").replace(",", ".");
+  const num = parseFloat(clean);
+  if (!isNaN(num) && num > 0) return num;
+  return 1500;
+}
+
+/**
+ * Extrai percentual de leads parados a partir da opção selecionada.
+ * @param {string} [stalled]
+ * @returns {number}
+ */
+export function parseStalledPct(stalled) {
+  if (!stalled) return 0.40;
+  const str = String(stalled).toLowerCase();
+  if (str.includes("mais de 50") || str.includes("> 50") || str.includes(">50")) return 0.60;
+  if (str.includes("30% a 50") || str.includes("30 a 50")) return 0.40;
+  if (str.includes("menos de 30") || str.includes("< 30") || str.includes("<30")) return 0.20;
+  if (str.includes("não sei") || str.includes("nao sei") || str.includes("maioria")) return 0.50;
+
+  const match = str.match(/(\d+)%/);
+  if (match) {
+    const pct = parseInt(match[1], 10);
+    if (!isNaN(pct) && pct > 0) return pct / 100;
+  }
+  return 0.40;
+}
+
+/**
+ * Calcula o dinheiro parado na base com métricas conservadoras:
+ * 15% taxa de resposta e 5% de fechamento sobre os que responderem.
+ * @param {object} params
+ * @param {string} [params.baseSize]
+ * @param {string} [params.ticketMedio]
+ * @param {string} [params.stalledLeadsPct]
+ * @returns {{ baseCount: number, ticketVal: number, pct: number, leadsParados: number, receitaPotencial: number }}
+ */
+export function calculateStalledRevenue({ baseSize, ticketMedio, stalledLeadsPct }) {
+  const baseCount = parseBaseCount(baseSize);
+  const ticketVal = parseTicketMedio(ticketMedio);
+  const pct = parseStalledPct(stalledLeadsPct);
+
+  const leadsParados = Math.round(baseCount * pct);
+  // Conta conservadora: 15% de resposta x 5% de fechamento
+  const receitaPotencial = Math.round(leadsParados * 0.15 * 0.05 * ticketVal);
+
+  return {
+    baseCount,
+    ticketVal,
+    pct,
+    leadsParados,
+    receitaPotencial,
+  };
+}
+
+/**
  * Monta o texto que o visitante recebe no WhatsApp (conforme especificação oficial).
+ * Entrega o diagnóstico do dinheiro parado no corpo da mensagem sem depender de PDF.
  * @param {object} params
  * @param {string} params.fullName
  * @param {string} [params.baseSize]
  * @param {string} [params.responseTime]
+ * @param {string} [params.ticketMedio]
+ * @param {string} [params.stalledLeadsPct]
+ * @param {string} [params.callTime]
  * @returns {string}
  */
-export function formatVisitorDiagnosticMessage({ fullName, baseSize, responseTime }) {
+export function formatVisitorDiagnosticMessage({
+  fullName,
+  baseSize,
+  responseTime,
+  ticketMedio,
+  stalledLeadsPct,
+  callTime = "amanhã de manhã",
+}) {
   const firstName = String(fullName || "amigo").trim().split(/\s+/)[0];
-  const baseText = baseSize || "vários";
-  const timeText = responseTime || "algum tempo";
+  const rawBase = String(baseSize || "2.000 a 10.000").trim();
+  const baseText = rawBase.toLowerCase().includes("contato") ? rawBase : `${rawBase} contatos`;
+  const timeText = responseTime || "30 min a 2 horas";
+  const ticketText = ticketMedio || "R$ 1.000 a R$ 5.000";
+
+  const { leadsParados, receitaPotencial } = calculateStalledRevenue({
+    baseSize,
+    ticketMedio,
+    stalledLeadsPct,
+  });
+
+  const formattedLeads = leadsParados.toLocaleString("pt-BR");
+  const formattedRevenue = receitaPotencial.toLocaleString("pt-BR");
 
   return [
     `Oi ${firstName}! Aqui é a Vexo 👋`,
-    "",
-    "Recebi seu pedido de diagnóstico. Estou montando com os números que você passou — chega aqui em alguns minutos.",
-    "",
-    `Enquanto isso: você respondeu que tem ${baseText} contatos e que o time responde em ${timeText}. Já te adianto que esse é o ponto onde a maioria das empresas perde venda sem perceber.`,
-    "",
-    "Até já!",
+    "Olhei os números que você passou:",
+    `📊 ${baseText} na base`,
+    `⏱️ time responde em ${timeText}`,
+    `💰 ticket médio de ${ticketText}`,
+    `Com ${formattedLeads} leads parados nesse ticket, há cerca de R$ ${formattedRevenue} esperando na sua base. É conta conservadora — usei 15% de resposta e 5% de fechamento.`,
+    `Te ligo ${callTime} pra te mostrar como destravar isso em 3 dias. Pode ser?`,
   ].join("\n");
 }
 
@@ -412,9 +521,29 @@ export async function dispatchCaptureAutoReply(
     }
   }
 
-  // Fallback padrão para vexo-adm caso ainda não haja chip registrado no banco
+  // Fallback de chip do tenant
   if (!targetInstanceName) {
-    targetInstanceName = clientId === "vexo-adm" ? "vexo-adm-vexo-atende" : `${clientId}-atende`;
+    if (clientId === "vexo-adm") {
+      targetInstanceName = "vexo-adm-vexo-atende";
+    } else {
+      console.warn(
+        `[leadCapture] Tenant "${clientId}" sem chip configurado em lead_client_evolution_instances. Mensagem automática não enviada.`
+      );
+      if (pool) {
+        await pool.query(
+          `UPDATE public.leads
+           SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_reason}', to_jsonb('sem_chip_configurado'::text))
+           WHERE client_id = $1 AND (telefone = $2 OR phone = $2)`,
+          [clientId, phone]
+        ).catch(() => {});
+      }
+      return {
+        sent: false,
+        reason: "SEM_CHIP_CONFIGURADO",
+        error: "Tenant sem chip configurado",
+        instanceUsed: null,
+      };
+    }
   }
 
   try {

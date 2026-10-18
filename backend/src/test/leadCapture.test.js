@@ -425,19 +425,24 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
   });
 
   // --------------------------------------------------------------------------
-  // b) A mensagem personalizada chega no WhatsApp do visitante
+  // b) A mensagem personalizada chega no WhatsApp do visitante com o cálculo do diagnóstico
   // --------------------------------------------------------------------------
-  it("b) formata mensagem de demonstração contendo os dados reais do visitante", () => {
+  it("b) formata mensagem de demonstração contendo os dados reais do visitante e cálculo do dinheiro parado", () => {
     const msg = formatVisitorDiagnosticMessage({
       fullName: "Carlos Eduardo Finzi",
-      baseSize: "10.000 contatos",
+      baseSize: "10.000 a 50.000 contatos",
       responseTime: "30 minutos",
+      ticketMedio: "R$ 2.000 a R$ 5.000",
+      stalledLeadsPct: "30% a 50% da base",
     });
 
     expect(msg).toContain("Oi Carlos! Aqui é a Vexo 👋");
-    expect(msg).toContain("10.000 contatos");
-    expect(msg).toContain("30 minutos");
-    expect(msg).toContain("ponto onde a maioria das empresas perde venda");
+    expect(msg).toContain("10.000 a 50.000 contatos na base");
+    expect(msg).toContain("time responde em 30 minutos");
+    expect(msg).toContain("ticket médio de R$ 2.000 a R$ 5.000");
+    expect(msg).toContain("leads parados nesse ticket, há cerca de R$");
+    expect(msg).toContain("esperando na sua base. É conta conservadora — usei 15% de resposta e 5% de fechamento.");
+    expect(msg).toContain("Te ligo amanhã de manhã pra te mostrar como destravar isso em 3 dias. Pode ser?");
   });
 
   it("dispara a mensagem via Evolution API pelo chip ativo do tenant", async () => {
