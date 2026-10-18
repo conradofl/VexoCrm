@@ -8,37 +8,49 @@ import { upsertLeadByPhone } from "./leadUpsert.js";
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { maskPhoneForLog, normalizeTenantKey } from "./tenant.js";
 
-/** Memória em processo para rate limit de IP (5 envios por hora). */
+/** Memória em processo para rate limit de IP (captura e telemetria). */
 const ipSubmissionWindow = new Map();
-const RATE_LIMIT_MAX_PER_HOUR = 5;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+export const RATE_LIMIT_MAX_PER_HOUR = 5;
+export const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+/** Limite calibrado para telemetria de navegação (60 eventos por IP a cada 10 minutos). */
+export const TELEMETRY_RATE_LIMIT_MAX = 60;
+export const TELEMETRY_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 
 /**
- * Limpa ou consulta o rate limit por IP.
+ * Limpa ou consulta o rate limit por IP, reusando o mecanismo de janela deslizante em memória.
+ * Suporta namespaces para isolar a cota de envio de formulários da cota de telemetria de navegação.
  * @param {string} ip
  * @param {number} [maxAllowed=5]
  * @param {number} [windowMs=3600000]
+ * @param {string} [namespace="capture"]
  * @returns {boolean} true se permitido, false se excedeu
  */
-export function checkCaptureRateLimit(ip, maxAllowed = RATE_LIMIT_MAX_PER_HOUR, windowMs = RATE_LIMIT_WINDOW_MS) {
+export function checkCaptureRateLimit(
+  ip,
+  maxAllowed = RATE_LIMIT_MAX_PER_HOUR,
+  windowMs = RATE_LIMIT_WINDOW_MS,
+  namespace = "capture"
+) {
   const cleanIp = String(ip || "unknown").trim();
+  const key = `${namespace}:${cleanIp}`;
   const now = Date.now();
-  const history = ipSubmissionWindow.get(cleanIp) || [];
-  
+  const history = ipSubmissionWindow.get(key) || [];
+
   // Filtra apenas registros na janela de tempo
   const recent = history.filter((t) => now - t < windowMs);
-  
+
   if (recent.length >= maxAllowed) {
-    ipSubmissionWindow.set(cleanIp, recent);
+    ipSubmissionWindow.set(key, recent);
     return false;
   }
 
   recent.push(now);
-  ipSubmissionWindow.set(cleanIp, recent);
+  ipSubmissionWindow.set(key, recent);
   return true;
 }
 
-/** Limpa o histórico de rate limit (útil para testes unitários). */
+/** Limpa o histórico de rate limit de todos os namespaces (útil para testes unitários). */
 export function resetCaptureRateLimit() {
   ipSubmissionWindow.clear();
 }

@@ -11,6 +11,8 @@ import {
   notifyOwnerOnCapture,
   saveCaptureLead,
   validateCapturePayload,
+  TELEMETRY_RATE_LIMIT_MAX,
+  TELEMETRY_RATE_LIMIT_WINDOW_MS,
 } from "../../services/leadCapture.js";
 import { ingestTelemetryEvent } from "../../services/landingPageTelemetry.js";
 import { maskPhoneForLog } from "../../services/tenant.js";
@@ -175,24 +177,54 @@ export function registerLeadCaptureRoutes(app, deps) {
   // Ingestão de Telemetria Comportamental das Páginas de Captação (LGPD-compliant)
   // --------------------------------------------------------------------------
   const handleTelemetry = async (req, res) => {
+    // 1. Identificação do IP do cliente para Rate Limit
+    const rawIp = req.headers?.["x-forwarded-for"] || req.socket?.remoteAddress || req.ip || "127.0.0.1";
+    const clientIp = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
+
+    // 2. Trava de Rate Limit por IP (reusa o mecanismo da captura, calibrado para telemetria)
+    const isAllowed = checkCaptureRateLimit(
+      clientIp,
+      TELEMETRY_RATE_LIMIT_MAX,
+      TELEMETRY_RATE_LIMIT_WINDOW_MS,
+      "telemetry"
+    );
+    if (!isAllowed) {
+      return sendError(
+        res,
+        429,
+        "RATE_LIMIT_EXCEEDED",
+        "Limite de eventos de telemetria excedido para o seu endereço IP. Por favor, aguarde alguns minutos."
+      );
+    }
+
     const { client_id, session_token, event } = req.body || {};
     const pool = pgDatabasePool;
     if (!pool) {
       return sendError(res, 500, "DATABASE_UNAVAILABLE", "Serviço de banco indisponível.");
     }
 
-    const result = await ingestTelemetryEvent(pool, {
-      clientId: client_id,
-      sessionToken: session_token,
-      event,
-    });
+    try {
+      const result = await ingestTelemetryEvent(pool, {
+        clientId: client_id,
+        sessionToken: session_token,
+        event,
+      });
 
-    if (!result.recorded) {
-      const status = result.error === "CONSENTIMENTO_LGPD_OBRIGATORIO" ? 403 : 400;
-      return sendError(res, status, result.error, result.message || "Evento não autorizado.");
+      if (!result.recorded) {
+        const status = result.error === "CONSENTIMENTO_LGPD_OBRIGATORIO" ? 403 : 400;
+        return sendError(res, status, result.error, result.message || "Evento não autorizado.");
+      }
+
+      return res.status(200).json({ success: true, message: "Evento registrado com sucesso." });
+    } catch (telemetryErr) {
+      console.error("[landingTelemetry] Erro ao processar evento de telemetria:", telemetryErr);
+      return sendError(
+        res,
+        500,
+        "TELEMETRY_INGESTION_FAILED",
+        "Ocorreu um erro interno ao processar o evento de telemetria."
+      );
     }
-
-    return res.status(200).json({ success: true, message: "Evento registrado com sucesso." });
   };
 
   // Rotas públicas (sem autenticação de usuário da plataforma)

@@ -10,6 +10,10 @@ import {
   VALID_TELEMETRY_EVENT_TYPES,
 } from "../services/landingPageTelemetry.js";
 import { registerLeadCaptureRoutes } from "../domains/leads/captureRoutes.js";
+import {
+  resetCaptureRateLimit,
+  TELEMETRY_RATE_LIMIT_MAX,
+} from "../services/leadCapture.js";
 
 function fakeRes() {
   return {
@@ -31,6 +35,7 @@ describe("Módulo 06 — Modelo de Dados e Serviço de Produção de Telemetria 
   const sql = readFileSync(migrationPath, "utf8");
 
   beforeEach(() => {
+    resetCaptureRateLimit();
     vi.restoreAllMocks();
   });
 
@@ -227,5 +232,130 @@ describe("Módulo 06 — Modelo de Dados e Serviço de Produção de Telemetria 
 
     expect(res.statusCode).toBe(403);
     expect(res.body.error).toBe("CONSENTIMENTO_LGPD_OBRIGATORIO");
+  });
+
+  // --------------------------------------------------------------------------
+  // i) Mesma origem excede o teto -> 429 RATE_LIMIT_EXCEEDED, evento não gravado
+  // --------------------------------------------------------------------------
+  it("i) mesma origem excede o teto de telemetria -> 429 RATE_LIMIT_EXCEEDED e evento não gravado", async () => {
+    resetCaptureRateLimit();
+    const routes = {};
+    const fakeApp = {
+      post: (p, ...handlers) => {
+        routes[`post ${p}`] = handlers[handlers.length - 1];
+      },
+    };
+
+    let insertEventCount = 0;
+    const pool = {
+      query: vi.fn(async (querySql) => {
+        if (querySql.includes("FROM public.landing_page_sessions")) {
+          return {
+            rows: [{ id: "sess-1", client_id: "solar-prime", consent_given: true }],
+          };
+        }
+        if (querySql.includes("INSERT INTO public.landing_page_events")) {
+          insertEventCount++;
+          return { rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const deps = {
+      pgDatabasePool: pool,
+      sendError: (res, status, code, message) => {
+        res.status(status).json({ error: code, message });
+      },
+    };
+
+    registerLeadCaptureRoutes(fakeApp, deps);
+    const handler = routes["post /api/public/landing-pages/telemetry"];
+    expect(handler).toBeDefined();
+
+    const clientIp = "187.54.210.88";
+    const reqMaker = () => ({
+      headers: { "x-forwarded-for": clientIp },
+      body: {
+        client_id: "solar-prime",
+        session_token: "tok-com-aceite",
+        event: { event_type: "scroll_depth", metadata: { depth: 50 } },
+      },
+    });
+
+    // Envia até o teto permitido (TELEMETRY_RATE_LIMIT_MAX = 60)
+    for (let i = 0; i < TELEMETRY_RATE_LIMIT_MAX; i++) {
+      const res = fakeRes();
+      await handler(reqMaker(), res);
+      expect(res.statusCode).toBe(200);
+    }
+    expect(insertEventCount).toBe(TELEMETRY_RATE_LIMIT_MAX);
+
+    // 61ª requisição do mesmo IP: DEVE ser bloqueada com 429
+    const blockedRes = fakeRes();
+    await handler(reqMaker(), blockedRes);
+
+    expect(blockedRes.statusCode).toBe(429);
+    expect(blockedRes.body.error).toBe("RATE_LIMIT_EXCEEDED");
+    // O evento excedente NUNCA é inserido no banco (mantém 60)
+    expect(insertEventCount).toBe(TELEMETRY_RATE_LIMIT_MAX);
+  });
+
+  // --------------------------------------------------------------------------
+  // j) ingestTelemetryEvent lança erro de banco -> rota responde 500, log com [landingTelemetry] e processo não fica com promise pendurada
+  // --------------------------------------------------------------------------
+  it("j) ingestTelemetryEvent lança erro de banco -> rota responde 500, log com [landingTelemetry] e processo não pendura", async () => {
+    resetCaptureRateLimit();
+    const routes = {};
+    const fakeApp = {
+      post: (p, ...handlers) => {
+        routes[`post ${p}`] = handlers[handlers.length - 1];
+      },
+    };
+
+    // Pool que simula falha catastrófica de banco de dados
+    const failingPool = {
+      query: vi.fn(async () => {
+        throw new Error("Connection terminated unexpectedly (Postgres crash simulation)");
+      }),
+    };
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const deps = {
+      pgDatabasePool: failingPool,
+      sendError: (res, status, code, message) => {
+        res.status(status).json({ error: code, message });
+      },
+    };
+
+    registerLeadCaptureRoutes(fakeApp, deps);
+    const handler = routes["post /api/public/landing-pages/telemetry"];
+
+    const req = {
+      headers: { "x-forwarded-for": "177.100.50.2" },
+      body: {
+        client_id: "solar-prime",
+        session_token: "tok-com-aceite",
+        event: { event_type: "page_view" },
+      },
+    };
+    const res = fakeRes();
+
+    // Rota resolve normalmente via try/catch sem unhandled promise rejection
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body.error).toBe("TELEMETRY_INGESTION_FAILED");
+
+    // Valida que o erro foi registrado com o prefixo [landingTelemetry] para grep em produção
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    const loggedErrorCall = consoleErrorSpy.mock.calls.find((c) =>
+      String(c[0]).includes("[landingTelemetry]")
+    );
+    expect(loggedErrorCall).toBeDefined();
+    expect(String(loggedErrorCall[0])).toContain("[landingTelemetry] Erro ao processar evento de telemetria:");
+
+    consoleErrorSpy.mockRestore();
   });
 });

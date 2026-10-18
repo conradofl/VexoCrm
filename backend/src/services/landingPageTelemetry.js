@@ -78,10 +78,7 @@ export async function ingestTelemetryEvent(pool, { clientId, sessionToken, event
      WHERE session_token = $1 AND client_id = $2
      LIMIT 1`,
     [sessionToken, clientId]
-  ).catch((err) => {
-    console.warn("[landingPageTelemetry] Erro ao buscar sessão:", err?.message || err);
-    return { rows: [] };
-  });
+  );
 
   const session = rows?.[0];
   if (!session) {
@@ -103,33 +100,28 @@ export async function ingestTelemetryEvent(pool, { clientId, sessionToken, event
   }
 
   // 3. Grava o evento na tabela de telemetria
-  try {
-    await pool.query(
-      `INSERT INTO public.landing_page_events (
-         session_id, client_id, event_type, element_id, section_name, time_spent_seconds, metadata
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        session.id,
-        clientId,
-        event.event_type,
-        event.element_id || null,
-        event.section_name || null,
-        Number(event.time_spent_seconds || 0),
-        JSON.stringify(event.metadata || {}),
-      ]
-    );
+  await pool.query(
+    `INSERT INTO public.landing_page_events (
+       session_id, client_id, event_type, element_id, section_name, time_spent_seconds, metadata
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      session.id,
+      clientId,
+      event.event_type,
+      event.element_id || null,
+      event.section_name || null,
+      Number(event.time_spent_seconds || 0),
+      JSON.stringify(event.metadata || {}),
+    ]
+  );
 
-    // Atualiza timestamp da última atividade da sessão
-    await pool.query(
-      `UPDATE public.landing_page_sessions
-       SET last_activity_at = NOW()
-       WHERE id = $1`,
-      [session.id]
-    ).catch(() => {});
+  // Atualiza timestamp da última atividade da sessão
+  await pool.query(
+    `UPDATE public.landing_page_sessions
+     SET last_activity_at = NOW()
+     WHERE id = $1`,
+    [session.id]
+  ).catch(() => {});
 
-    return { recorded: true };
-  } catch (insertErr) {
-    console.warn("[landingPageTelemetry] Erro ao inserir evento de telemetria:", insertErr?.message || insertErr);
-    return { recorded: false, error: "FALHA_GRAVACAO_EVENTO" };
-  }
+  return { recorded: true };
 }
