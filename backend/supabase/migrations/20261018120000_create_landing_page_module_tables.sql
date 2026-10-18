@@ -13,8 +13,6 @@ CREATE TABLE IF NOT EXISTS public.landing_pages (
   template_id TEXT NOT NULL DEFAULT 'captacao' CHECK (template_id IN ('captacao', 'apresentacao', 'oferta_unica')),
   content JSONB NOT NULL DEFAULT '{}'::jsonb,
   active BOOLEAN NOT NULL DEFAULT true,
-  visits_count INT NOT NULL DEFAULT 0,
-  leads_count INT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
