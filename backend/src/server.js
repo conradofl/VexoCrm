@@ -85,7 +85,7 @@ import {
 
 import { routeDeps } from "./http/routeDeps.js";
 import { registerAllDomainRoutes } from "./domains/registerAllDomainRoutes.js";
-import { configureCorsPolicy } from "./services/corsPolicy.js";
+import { configureCorsPolicy, createCorsOptionsDelegate } from "./services/corsPolicy.js";
 import { registerEventosRoutes } from "./domains/eventos/routes.js";
 import { registerWebhooksRoutes } from "./webhooks/routes.js";
 import { startFollowupWorker, pauseFollowupWorker, stopFollowupWorker } from "./followup/worker.js";
@@ -437,44 +437,14 @@ configureCorsPolicy({
 // internalErrorPayloadDetails: movido para ./services/httpInfra.js (Onda 3, Run A).
 
 app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowAnyCorsOrigin || corsAllowAnyOriginBecauseListEmpty) {
-        callback(null, true);
-        return;
-      }
-      // Permitir requisições da extensão Chrome ou redes suportadas pelo Vexo Scout
-      if (
-        origin.startsWith("chrome-extension://") ||
-        origin.includes("instagram.com") ||
-        origin.includes("linkedin.com") ||
-        origin.includes("facebook.com") ||
-        origin.includes("tiktok.com")
-      ) {
-        callback(null, true);
-        return;
-      }
-      const normalized = normalizeCorsOrigin(origin);
-      if (corsOrigins.includes(normalized)) {
-        callback(null, true);
-        return;
-      }
-      console.warn(
-        "[cors] Blocked browser Origin:",
-        origin,
-        "(normalized:",
-        normalized + ")",
-        "| Ensure this normalized value is covered by CORS_ORIGINS or FRONTEND_ORIGIN in EasyPanel."
-      );
-      // callback(null, false) em vez de throw: lancar aqui derruba a requisicao no
-      // error handler do Express e devolve um 500 opaco, sem cabecalho de CORS —
-      // o navegador mostra so "Failed to fetch" e o operador nunca ve o motivo.
-      // Sem os cabecalhos o navegador bloqueia igual, que e o comportamento
-      // correto, mas a resposta e limpa e o log acima diz o que fazer.
-      callback(null, false);
-    },
-  })
+  cors(
+    createCorsOptionsDelegate({
+      allowAny: allowAnyCorsOrigin || corsAllowAnyOriginBecauseListEmpty,
+      corsOrigins,
+    })
+  )
 );
+// callback(null, false) em vez de throw: tratado em createCorsOptionsDelegate (services/corsPolicy.js)
 
 // Inicialização do pool Postgres/cliente Supabase legado (movida para
 // ./services/database.js). Chamada aqui, na mesma posição relativa do bloco

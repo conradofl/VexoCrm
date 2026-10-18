@@ -25,6 +25,17 @@ let politica = {
 };
 
 /**
+ * Identifica se uma rota HTTP e intencionalmente publica (ex: /api/public/leads/capture,
+ * /api/public/diagnostico, /api/public/landing-pages/telemetry).
+ * Rotas publicas aceitam requisicoes de qualquer origem sem credenciais.
+ */
+export function isPublicApiRoute(pathname) {
+  if (typeof pathname !== "string") return false;
+  const clean = pathname.split("?")[0].trim().toLowerCase();
+  return clean.startsWith("/api/public/");
+}
+
+/**
  * Chamado uma vez no boot, por server.js, com a lista ja resolvida.
  * Mantem o comportamento existente: server.js continua dono do parse do env.
  */
@@ -36,7 +47,8 @@ export function configureCorsPolicy({ allowAny, origens }) {
   return politica;
 }
 
-export function isAllowedCorsOrigin(origin) {
+export function isAllowedCorsOrigin(origin, pathname = "") {
+  if (pathname && isPublicApiRoute(pathname)) return true;
   if (!origin) return false;
   if (politica.allowAny) return true;
   if (origin.startsWith("chrome-extension://")) return true;
@@ -45,16 +57,80 @@ export function isAllowedCorsOrigin(origin) {
 }
 
 /**
+ * Fabrica de delegado do middleware cors().
+ * Rotas publicas (/api/public/*): origin: true, credentials: false.
+ * Demais rotas: lista fechada com origin callback seguro e credentials: true.
+ */
+export function createCorsOptionsDelegate({ allowAny, corsOrigins } = {}) {
+  return function corsOptionsDelegate(req, callback) {
+    const pathname = req.path || req.url || "";
+    if (isPublicApiRoute(pathname)) {
+      callback(null, {
+        origin: true,
+        credentials: false,
+      });
+      return;
+    }
+
+    const isAnyAllowed = allowAny !== undefined ? Boolean(allowAny) : politica.allowAny;
+    const originsList = corsOrigins !== undefined
+      ? corsOrigins.map(normalizeCorsOrigin).filter(Boolean)
+      : politica.origens;
+
+    callback(null, {
+      credentials: true,
+      origin(origin, originCallback) {
+        if (!origin || isAnyAllowed) {
+          originCallback(null, true);
+          return;
+        }
+        if (
+          origin.startsWith("chrome-extension://") ||
+          SUFIXOS_CONFIAVEIS.some((dominio) => origin.includes(dominio))
+        ) {
+          originCallback(null, true);
+          return;
+        }
+        const normalized = normalizeCorsOrigin(origin);
+        if (originsList.includes(normalized)) {
+          originCallback(null, true);
+          return;
+        }
+        console.warn(
+          "[cors] Blocked browser Origin:",
+          origin,
+          "(normalized:",
+          normalized + ")",
+          "| Ensure this normalized value is covered by CORS_ORIGINS or FRONTEND_ORIGIN in EasyPanel."
+        );
+        originCallback(null, false);
+      },
+    });
+  };
+}
+
+/**
  * Garante os cabecalhos de CORS numa resposta. Idempotente: se o middleware
  * cors() ja escreveu, nao mexe.
  *
- * So reflete origem que a politica aprova — origem desconhecida sai sem
- * cabecalho, que e o comportamento correto do CORS.
+ * Em rotas publicas (/api/public/*), reflete a origem informada sem credenciais.
+ * Em rotas normais, so reflete origem que a politica aprova (com credentials: true)
+ * — origem desconhecida sai sem cabecalho, que e o comportamento correto do CORS.
  */
 export function applyCorsHeaders(res, origin) {
   if (!res || typeof res.setHeader !== "function") return false;
   if (res.headersSent) return false;
   if (res.getHeader("Access-Control-Allow-Origin")) return true;
+
+  const pathname = res?.req?.path || res?.req?.url || "";
+  if (isPublicApiRoute(pathname)) {
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
+    return true;
+  }
+
   if (!isAllowedCorsOrigin(origin)) return false;
 
   res.setHeader("Access-Control-Allow-Origin", origin);
