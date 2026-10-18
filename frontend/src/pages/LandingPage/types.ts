@@ -74,7 +74,15 @@ export interface LeadFormData {
   email: string;
   phone: string;
   company: string;
+  segment?: string;
   teamSize?: string;
   baseSize?: string;
+  ticketMedio?: string;
+  stalledLeadsPct?: string;
+  responseTime?: string;
+  followupProcess?: string;
+  mainPain?: string;
+  website_url?: string;
   source?: string;
+  client_id?: string;
 }

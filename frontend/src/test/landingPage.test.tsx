@@ -39,14 +39,14 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
     // Abre o modal
     fireEvent.click(demoButton);
 
-    expect(screen.getByText(/Conhecer o Vexo OS/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Seu nome/i)).toBeInTheDocument();
+    expect(screen.getByText(/Identificação & Contato/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Como podemos te chamar\?/i)).toBeInTheDocument();
 
     // Fecha o modal
     const closeBtn = screen.getByLabelText(/Fechar modal/i);
     fireEvent.click(closeBtn);
 
-    expect(screen.queryByText(/Conhecer o Vexo OS/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Identificação & Contato/i)).not.toBeInTheDocument();
   });
 
   it("toggles the FAQ accordion when clicked", () => {
@@ -67,7 +67,20 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
     ).toBeInTheDocument();
   });
 
-  it("submits lead capture form and displays direct WhatsApp connection button", async () => {
+  it("submits lead capture form through 4 diagnostic steps and displays WhatsApp confirmation", async () => {
+    // Mock global fetch for API submission
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({
+        success: true,
+        message: "Pronto! Te mandamos uma mensagem no WhatsApp (34) *****-1267.",
+        phoneMasked: "(34) *****-1267",
+      }),
+    });
+
     render(
       <BrowserRouter>
         <LandingPage />
@@ -77,21 +90,44 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
     const demoButton = screen.getByRole("button", { name: /Conhecer Vexo OS/i });
     fireEvent.click(demoButton);
 
-    const nameInput = screen.getByPlaceholderText(/Seu nome/i);
+    // PASSO 1
+    const nameInput = screen.getByPlaceholderText(/Como podemos te chamar\?/i);
     const phoneInput = screen.getByPlaceholderText(/\(00\) 00000-0000/i);
     const emailInput = screen.getByPlaceholderText(/seu@empresa\.com/i);
 
     fireEvent.change(nameInput, { target: { value: "Carlos Teste" } });
-    fireEvent.change(phoneInput, { target: { value: "34999999999" } });
-    fireEvent.change(emailInput, { target: { value: "carlos@teste.com" } });
+    fireEvent.change(phoneInput, { target: { value: "34991751267" } });
+    fireEvent.change(emailInput, { target: { value: "carlos@empresa.com" } });
 
-    const submitBtn = screen.getByRole("button", { name: /Avançar para WhatsApp Comercial/i });
-    const form = submitBtn.closest("form")!;
-    fireEvent.submit(form);
+    const step1Form = nameInput.closest("form")!;
+    fireEvent.submit(step1Form);
 
-    expect(await screen.findByText(/Solicitação Confirmada!/i)).toBeInTheDocument();
+    // PASSO 2
+    expect(await screen.findByText(/Sua Empresa & Equipe/i)).toBeInTheDocument();
+    const companyInput = screen.getByPlaceholderText(/Ex: Minha Empresa/i);
+    fireEvent.change(companyInput, { target: { value: "Empresa Teste" } });
+    const step2Form = companyInput.closest("form")!;
+    fireEvent.submit(step2Form);
+
+    // PASSO 3
+    expect(await screen.findByText(/Sua Base & Números/i)).toBeInTheDocument();
+    const step3Form = screen.getByText(/Tamanho da sua base total de contatos/i).closest("form")!;
+    fireEvent.submit(step3Form);
+
+    // PASSO 4
+    expect(await screen.findByText(/Processo & Gargalo/i)).toBeInTheDocument();
+    const step4Form = screen.getByText(/Tempo médio para primeiro atendimento/i).closest("form")!;
+    fireEvent.submit(step4Form);
+
+    // TELA DE CONFIRMAÇÃO
+    expect(await screen.findByText(/Pronto!/i)).toBeInTheDocument();
+    expect(screen.getByText(/Te mandamos uma mensagem no WhatsApp/i)).toBeInTheDocument();
+    expect(screen.getByText(/\(34\) \*\*\*\*\*-1267/i)).toBeInTheDocument();
+
     const whatsappLink = screen.getByRole("link", { name: /Abrir WhatsApp Agora →/i });
     expect(whatsappLink).toBeInTheDocument();
     expect(whatsappLink).toHaveAttribute("href", expect.stringContaining("wa.me"));
+
+    global.fetch = originalFetch;
   });
 });

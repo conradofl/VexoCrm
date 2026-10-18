@@ -101,6 +101,7 @@ import {
 } from "../../services/bancoImport.js";
 import { registerLeadMassDeleteRoutes } from "./massDeleteRoutes.js";
 import { registerLeadOriginFixRoutes } from "./originFixRoutes.js";
+import { registerLeadCaptureRoutes } from "./captureRoutes.js";
 import { cancelFollowupCadenceOnStageChange } from "../../services/followupExitGuard.js";
 import {
   classifyLeadMessages,
@@ -4301,5 +4302,12 @@ export function registerLeadsRoutes(app, deps) {
     resolveAuthorizedClientId,
     sendError,
     originFixRepo: deps.originFixRepo,
+  });
+
+  // Rota pública de captação de leads e diagnóstico comercial (multi-tenant, auto-resposta e alerta)
+  registerLeadCaptureRoutes(app, {
+    ensureDb,
+    pgDatabasePool,
+    sendError,
   });
 }
