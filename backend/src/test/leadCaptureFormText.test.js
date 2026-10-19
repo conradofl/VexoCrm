@@ -170,4 +170,24 @@ describe("Português Simples no Formulário de Diagnóstico (LeadCaptureModal.ts
     expect(extractedRevenue).toBe(60000);
     expect(msg).toContain("Com 4.000 leads parados nesse ticket, há cerca de R$ 60.000 esperando na sua base. Estimando 15% de resposta e 5% de fechamento.");
   });
+
+  // Teste (q) da SPEC (ADENDO passos 1 e 2): nenhum <label> contém "Corporativo" nem "Comercial"
+  it("q) nenhum <label> contém 'Corporativo' nem 'Comercial'", () => {
+    const modalContent = loadModalFile();
+    const labelMatches = [...modalContent.matchAll(/<label[^>]*>([\s\S]*?)<\/label>/g)];
+    expect(labelMatches.length).toBeGreaterThanOrEqual(12);
+
+    for (const match of labelMatches) {
+      const labelText = match[1].trim();
+      expect(
+        /corporativo/i.test(labelText),
+        `Label "${labelText}" não pode conter "Corporativo"`
+      ).toBe(false);
+      expect(
+        /comercial/i.test(labelText),
+        `Label "${labelText}" não pode conter "Comercial"`
+      ).toBe(false);
+    }
+  });
 });
+

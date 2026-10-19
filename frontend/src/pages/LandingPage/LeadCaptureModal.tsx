@@ -291,7 +291,7 @@ export function LeadCaptureModal({
                 <div className="space-y-3 animate-fade-in">
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      1. Nome Completo *
+                      1. Seu nome *
                     </label>
                     <input
                       type="text"
@@ -305,7 +305,7 @@ export function LeadCaptureModal({
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      2. WhatsApp Comercial * (com DDD)
+                      2. Seu WhatsApp * (com DDD)
                     </label>
                     <input
                       type="tel"
@@ -319,7 +319,7 @@ export function LeadCaptureModal({
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      3. E-mail Corporativo *
+                      3. Seu e-mail *
                     </label>
                     <input
                       type="email"
@@ -340,7 +340,7 @@ export function LeadCaptureModal({
                 <div className="space-y-3 animate-fade-in">
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      4. Nome da Empresa *
+                      4. Nome da sua empresa *
                     </label>
                     <input
                       type="text"
