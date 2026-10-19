@@ -703,10 +703,11 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
   });
 
   // --------------------------------------------------------------------------
-  // j) mesmo telefone pela 3ª vez em 24h: salvo, não dispara
+  // j) mesmo telefone pela 6ª vez em 24h: salvo, não dispara (limite por telefone = 5)
   // --------------------------------------------------------------------------
-  it("j) mesmo telefone pela 3ª vez em 24h: salvo, não dispara", async () => {
+  it("j) mesmo telefone pela 6ª vez em 24h: salvo, não dispara (limite por telefone = 5)", async () => {
     resetLeadCaptureDispatchesTableEnsured();
+    expect(MAX_CAPTURE_DISPATCH_PER_PHONE_24H).toBe(5);
 
     const upsertSpy = vi.spyOn(leadUpsertModule, "upsertLeadByPhone").mockResolvedValue("updated");
     const evoSendSpy = vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockResolvedValue({ success: true });
@@ -715,9 +716,9 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
 
     const mockPool = {
       query: vi.fn(async (sql, params) => {
-        // Checagem de telefone em 24h: já teve 2 envios anteriores para este mesmo número!
-        if (sql.includes("COUNT(*)::int") && sql.includes("phone = $2")) {
-          return { rows: [{ count: 2 }] };
+        // Checagem de telefone em 24h: já teve 5 envios anteriores para este mesmo número!
+        if (sql.includes("COUNT(*)::int") && (sql.includes("phone = $2") || sql.includes("phone = $3"))) {
+          return { rows: [{ count: 5 }] };
         }
         // Checagem de teto global do tenant em 24h: apenas 5 envios gerais
         if (sql.includes("COUNT(*)::int") && sql.includes("client_id = $1")) {
@@ -732,7 +733,7 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
       }),
     };
 
-    // 1. Salva o lead pela 3ª vez (atualiza lead existente)
+    // 1. Salva o lead pela 6ª vez (atualiza lead existente)
     const saveResult = await saveCaptureLead(mockPool, {
       clientId: "vexo-adm",
       phone: "5534991751267",
@@ -872,9 +873,9 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
 
     const mockPool = {
       query: vi.fn(async (sql, params) => {
-        if (sql.includes("COUNT(*)::int") && sql.includes("phone = $2")) {
+        if (sql.includes("COUNT(*)::int") && (sql.includes("phone = $2") || sql.includes("phone = $3"))) {
           // Bloqueia por cota de telefone
-          return { rows: [{ count: 2 }] };
+          return { rows: [{ count: 5 }] };
         }
         if (sql.includes("UPDATE public.leads")) {
           updateSqlReceived = sql;
@@ -966,8 +967,8 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
 
     const mockPool = {
       query: vi.fn(async (sql) => {
-        if (sql.includes("COUNT(*)::int") && sql.includes("phone = $2")) {
-          return { rows: [{ count: 2 }] };
+        if (sql.includes("COUNT(*)::int") && (sql.includes("phone = $2") || sql.includes("phone = $3"))) {
+          return { rows: [{ count: 5 }] };
         }
         return { rows: [], rowCount: 1 };
       }),

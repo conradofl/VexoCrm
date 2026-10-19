@@ -449,7 +449,7 @@ export async function saveCaptureLead(pool, { clientId, phone, fullName, email, 
 
 /** Constantes de segurança e proteção do chip WhatsApp. */
 export const DAILY_CAPTURE_DISPATCH_LIMIT_PER_TENANT = 50;
-export const MAX_CAPTURE_DISPATCH_PER_PHONE_24H = 2;
+export const MAX_CAPTURE_DISPATCH_PER_PHONE_24H = 5;
 
 export const CREATE_LEAD_CAPTURE_DISPATCHES_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS public.lead_capture_dispatches (
