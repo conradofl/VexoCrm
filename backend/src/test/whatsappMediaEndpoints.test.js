@@ -8,6 +8,7 @@ import { resolveMessageContent, transcribeAudio, AUDIO_TRANSCRIPTION_TIMEOUT_MS 
 describe("WhatsApp Media Endpoints (GET /api/whatsapp/media/:waMessageId e POST /api/whatsapp/messages/media)", () => {
   let routes = {};
   let mockDbRows = [];
+  let mockCampaigns = [];
   let dbQueries = [];
 
   const mockPgPool = {
@@ -20,6 +21,11 @@ describe("WhatsApp Media Endpoints (GET /api/whatsapp/media/:waMessageId e POST 
           (r) => r.client_id === clientId && (r.wa_message_id === waId || String(r.id) === waId)
         );
         return { rows: filtered };
+      }
+      if (text.includes("FROM public.campaigns")) {
+        const campaignId = params[0];
+        const camp = mockCampaigns.find((c) => c.id === campaignId);
+        return { rows: camp ? [camp] : [] };
       }
       return { rows: [] };
     }),
@@ -85,6 +91,7 @@ describe("WhatsApp Media Endpoints (GET /api/whatsapp/media/:waMessageId e POST 
   beforeEach(() => {
     routes = {};
     mockDbRows = [];
+    mockCampaigns = [];
     dbQueries = [];
     vi.clearAllMocks();
     registerChatbotRoutes(app, deps);
@@ -544,5 +551,67 @@ describe("WhatsApp Media Endpoints (GET /api/whatsapp/media/:waMessageId e POST 
       global.fetch = originalFetch;
       process.env.GROQ_API_KEY = oldGroqKey;
     }
+  });
+
+  it("12. GET /api/whatsapp/media resgata imagem da campanha vinculada quando R2 e Evolution não têm buffer", async () => {
+    const handler = routes["GET /api/whatsapp/media/:waMessageId"];
+    expect(handler).toBeDefined();
+
+    const sampleBase64 = Buffer.from("imagem-campanha-bytes-alta-resolucao").toString("base64");
+    const dataUrl = `data:image/png;base64,${sampleBase64}`;
+
+    mockCampaigns = [
+      {
+        id: "camp-rescue-1",
+        analytics_meta: {
+          sequence: [
+            {
+              id: "step-img",
+              type: "image",
+              image: { dataUrl },
+            },
+          ],
+        },
+      },
+    ];
+
+    mockDbRows = [
+      {
+        id: 777,
+        client_id: "tenant-sonhare",
+        phone: "5534999990000",
+        wa_message_id: "WA-CAMP-IMG-RESCUE",
+        message_text: "[imagem]",
+        media_path: null,
+        campaign_id: "camp-rescue-1",
+        created_at: new Date(Date.now() - 30 * 86400 * 1000).toISOString(), // > 20 dias (expiraria sem o resgate)
+      },
+    ];
+
+    const req = {
+      params: { waMessageId: "WA-CAMP-IMG-RESCUE" },
+      query: { clientId: "tenant-sonhare", format: "json" },
+      headers: {},
+    };
+
+    let responseJson = null;
+    const res = {
+      json: (data) => {
+        responseJson = data;
+        return res;
+      },
+      setHeader: () => {},
+      send: () => {},
+    };
+
+    await handler(req, res);
+
+    expect(responseJson).toBeDefined();
+    expect(responseJson.item).toBeDefined();
+    expect(responseJson.item.mediaType).toBe("image");
+    expect(responseJson.item.mimeType).toBe("image/png");
+    expect(responseJson.item.source).toBe("campaign_cache");
+    expect(responseJson.item.expired).toBe(false);
+    expect(responseJson.item.dataUrl).toBe(dataUrl);
   });
 });

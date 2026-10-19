@@ -24,6 +24,19 @@ function formatSeconds(secs: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+export function isDirectlyRenderableMediaUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  // URLs do domínio mmg.whatsapp.net são criptografadas pelo Baileys/WhatsApp e não abrem no browser
+  if (url.includes("whatsapp.net")) return false;
+  return (
+    url.startsWith("data:image/") ||
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("/api/") ||
+    url.startsWith("blob:")
+  );
+}
+
 function AudioPlayer({
   src,
   transcription,
@@ -256,6 +269,7 @@ function ImageWithDescription({
   fileName?: string | null;
 }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [hasImgError, setHasImgError] = useState(false);
   const downloadName = fileName || "imagem.jpg";
 
   useEffect(() => {
@@ -282,6 +296,49 @@ function ImageWithDescription({
     }
   };
 
+  if (hasImgError) {
+    return (
+      <div className="space-y-1.5">
+        <div
+          className={cn(
+            "flex flex-col items-center justify-center gap-2 p-4 rounded-lg border text-center max-w-sm",
+            fromMe
+              ? "bg-emerald-950/20 border-emerald-500/25 text-emerald-100"
+              : "bg-muted/40 border-border/60 text-muted-foreground"
+          )}
+        >
+          <ImageOff className="h-7 w-7 opacity-70" />
+          <span className="text-xs font-medium">Imagem não carregada</span>
+          {src && (
+            <a
+              href={src}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleOpenInNewTab}
+              className={cn(
+                "inline-flex items-center gap-1 text-[11px] font-medium transition-opacity underline opacity-85 hover:opacity-100",
+                fromMe ? "text-emerald-100" : "text-primary"
+              )}
+            >
+              <ExternalLink className="h-3 w-3" />
+              <span>Abrir link original</span>
+            </a>
+          )}
+        </div>
+        {description && (
+          <p
+            className={cn(
+              "text-[11px] italic leading-snug select-text",
+              fromMe ? "text-emerald-100/90" : "text-slate-500 dark:text-slate-400"
+            )}
+          >
+            {description}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       <div className="relative group overflow-hidden rounded-lg cursor-pointer">
@@ -289,6 +346,7 @@ function ImageWithDescription({
           src={src}
           alt={alt}
           onClick={() => setLightboxOpen(true)}
+          onError={() => setHasImgError(true)}
           className="max-h-64 max-w-full rounded-lg object-cover transition-transform duration-200 group-hover:scale-[1.02]"
           loading="lazy"
         />
@@ -383,6 +441,7 @@ function ImageWithDescription({
           <img
             src={src}
             alt={alt}
+            onError={() => setHasImgError(true)}
             onClick={(e) => e.stopPropagation()}
             className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
           />
@@ -414,23 +473,27 @@ export function MediaMessage({
   contentType,
 }: MediaMessageProps) {
   // Chamada incondicional do hook para respeitar as Regras dos Hooks do React.
-  // Se mediaUrl já estiver preenchida (ex: imagem de campanha), desabilita a requisição externa.
-  const shouldFetchMedia = Boolean(hasMedia && !mediaUrl);
+  // Se mediaUrl já estiver preenchida com URL diretamente renderizável, desabilita a requisição externa.
+  // URLs do WhatsApp (ex: mmg.whatsapp.net) são criptografadas e DEVEM ser buscadas via backend.
+  const hasDirectUrl = isDirectlyRenderableMediaUrl(mediaUrl);
+  const shouldFetchMedia = Boolean(hasMedia && !hasDirectUrl);
   const { data: media, isLoading, error } = useMediaMessage(messageId, shouldFetchMedia, clientId);
 
-  // Se a mensagem já possui mediaUrl (ex: imagem de campanha enviada com media_url), exibe diretamente
-  if (mediaUrl) {
+  // Se a mensagem já possui mediaUrl diretamente renderizável (ex: imagem de campanha enviada com media_url ou data:image), exibe diretamente
+  if (isDirectlyRenderableMediaUrl(mediaUrl)) {
     const isImage =
       contentType === "image" ||
       !contentType ||
       contentType.startsWith("image/") ||
-      mediaUrl.startsWith("data:image/") ||
-      mediaUrl.startsWith("http");
+      mediaUrl!.startsWith("data:image/") ||
+      mediaUrl!.startsWith("http") ||
+      mediaUrl!.startsWith("/api/") ||
+      mediaUrl!.startsWith("blob:");
     if (isImage) {
       return (
         <div className={className}>
           <ImageWithDescription
-            src={mediaUrl}
+            src={mediaUrl!}
             alt="Imagem da Campanha"
             description={null}
             fromMe={fromMe}

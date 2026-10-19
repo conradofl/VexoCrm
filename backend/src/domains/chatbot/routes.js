@@ -1810,7 +1810,7 @@ export function registerChatbotRoutes(app, deps) {
           `SELECT
              id, client_id, phone, instance_name, message_text, media_path, direction,
              sender_type, meta, created_at, message_timestamp, delivered_at,
-             wa_message_id,
+             wa_message_id, campaign_id,
              COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp
            FROM public.lead_messages
            WHERE client_id = $1 AND (wa_message_id = $2 OR id = $3)
@@ -1823,7 +1823,7 @@ export function registerChatbotRoutes(app, deps) {
           `SELECT
              id, client_id, phone, instance_name, message_text, media_path, direction,
              sender_type, meta, created_at, message_timestamp, delivered_at,
-             wa_message_id,
+             wa_message_id, campaign_id,
              COALESCE(message_timestamp, delivered_at, created_at) as effective_timestamp
            FROM public.lead_messages
            WHERE client_id = $1 AND wa_message_id = $2
@@ -1908,6 +1908,32 @@ export function registerChatbotRoutes(app, deps) {
               }).catch(() => {});
             }
           }
+        }
+      }
+
+      // 2.5 Resgate da imagem da campanha vinculada caso não encontrada no R2 nem na Evolution
+      const linkedCampaignId = row.campaign_id || row.meta?.campaign_id;
+      if (!buffer && linkedCampaignId && pgDatabasePool) {
+        try {
+          const campRes = await pgDatabasePool.query(
+            `SELECT analytics_meta FROM public.campaigns WHERE id = $1 LIMIT 1`,
+            [linkedCampaignId]
+          );
+          const sequence = campRes.rows[0]?.analytics_meta?.sequence;
+          if (Array.isArray(sequence)) {
+            const imageStep = sequence.find((s) => s.type === "image" || s.image?.dataUrl || s.mediaUrl);
+            const rawDataUrl = imageStep?.image?.dataUrl || imageStep?.mediaUrl || imageStep?.media_url;
+            if (rawDataUrl && rawDataUrl.startsWith("data:image/")) {
+              const parts = rawDataUrl.split(",");
+              const mimeMatch = parts[0].match(/:(.*?);/);
+              contentType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+              buffer = Buffer.from(parts[1], "base64");
+              mediaType = "image";
+              source = "campaign_cache";
+            }
+          }
+        } catch (campErr) {
+          console.warn("[media] Falha ao recuperar imagem da campanha vinculada:", campErr?.message);
         }
       }
 
