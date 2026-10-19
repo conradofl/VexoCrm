@@ -166,8 +166,8 @@ export function LeadCaptureModal({
   const stepTitles = [
     { title: "Identificação & Contato", subtitle: "Onde vamos te enviar o diagnóstico" },
     { title: "Sua Empresa & Equipe", subtitle: "Estrutura do seu time comercial" },
-    { title: "Sua Base & Números", subtitle: "Volume de contatos e ticket de venda" },
-    { title: "Processo & Gargalo", subtitle: "Como o seu time atende e recupera leads" },
+    { title: "Seus contatos e suas vendas", subtitle: "Quantas pessoas você tem e quanto vende" },
+    { title: "Como você atende hoje", subtitle: "O que acontece depois que alguém te chama" },
   ];
 
   return (
@@ -354,36 +354,36 @@ export function LeadCaptureModal({
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      5. Segmento de Atuação
+                      5. O que sua empresa faz?
                     </label>
                     <select
                       value={formData.segment}
                       onChange={(e) => setFormData((prev) => ({ ...prev, segment: e.target.value }))}
                       className="w-full rounded-xl border border-white/10 bg-[#140F30] px-3.5 py-2.5 text-xs text-white focus:border-[#9600FF] focus:outline-none transition-all"
                     >
-                      <option value="Serviços B2B / Consultoria">Serviços B2B / Consultoria</option>
+                      <option value="Serviços B2B / Consultoria">Presto serviço para outras empresas</option>
                       <option value="Saúde / Clínicas / Estética">Saúde / Clínicas / Estética</option>
                       <option value="Imobiliária / Construção Civil">Imobiliária / Construção Civil</option>
-                      <option value="Energia Solar / Engenharia">Energia Solar / Engenharia</option>
-                      <option value="Tecnologia / SaaS">Tecnologia / SaaS</option>
+                      <option value="Energia Solar / Engenharia">Energia solar ou engenharia</option>
+                      <option value="Tecnologia / SaaS">Tecnologia ou sistema por assinatura</option>
                       <option value="Varejo / E-commerce / Franquias">Varejo / E-commerce / Franquias</option>
-                      <option value="Outro Segmento">Outro Segmento</option>
+                      <option value="Outro Segmento">Outra coisa</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      6. Quantas pessoas vendem na empresa?
+                      6. Quantas pessoas vendem na sua empresa?
                     </label>
                     <select
                       value={formData.teamSize}
                       onChange={(e) => setFormData((prev) => ({ ...prev, teamSize: e.target.value }))}
                       className="w-full rounded-xl border border-white/10 bg-[#140F30] px-3.5 py-2.5 text-xs text-white focus:border-[#9600FF] focus:outline-none transition-all"
                     >
-                      <option value="Apenas eu (vendedor único)">Apenas eu (vendedor único)</option>
+                      <option value="Apenas eu (vendedor único)">Só eu mesmo</option>
                       <option value="2 a 5 vendedores">2 a 5 vendedores</option>
                       <option value="6 a 15 vendedores">6 a 15 vendedores</option>
-                      <option value="Mais de 15 pessoas vendendo">Mais de 15 pessoas vendendo</option>
+                      <option value="Mais de 15 pessoas vendendo">Mais de 15 pessoas</option>
                     </select>
                   </div>
                 </div>
@@ -396,7 +396,7 @@ export function LeadCaptureModal({
                 <div className="space-y-3 animate-fade-in">
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      7. Tamanho da sua base total de contatos
+                      7. Quantos contatos você tem guardados? (celular, planilha e sistema, tudo junto)
                     </label>
                     <select
                       value={formData.baseSize}
@@ -412,7 +412,7 @@ export function LeadCaptureModal({
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      8. Ticket Médio das suas Vendas
+                      8. Quanto rende uma venda sua, na média?
                     </label>
                     <select
                       value={formData.ticketMedio}
@@ -429,17 +429,17 @@ export function LeadCaptureModal({
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      9. Estimativa de leads esquecidos / parados (&gt; 90 dias)
+                      9. Quantos desses contatos você não conversa há mais de 3 meses?
                     </label>
                     <select
                       value={formData.stalledLeadsPct}
                       onChange={(e) => setFormData((prev) => ({ ...prev, stalledLeadsPct: e.target.value }))}
                       className="w-full rounded-xl border border-white/10 bg-[#140F30] px-3.5 py-2.5 text-xs text-white focus:border-[#9600FF] focus:outline-none transition-all"
                     >
-                      <option value="Menos de 30% da base">Menos de 30% da base</option>
-                      <option value="30% a 50% da base">30% a 50% da base</option>
-                      <option value="Mais de 50% da base">Mais de 50% da base</option>
-                      <option value="Não sei dizer (a maioria parada)">Não sei dizer (a grande maioria está parada)</option>
+                      <option value="Menos de 30% da base">Menos de 30% deles</option>
+                      <option value="30% a 50% da base">Perto da metade</option>
+                      <option value="Mais de 50% da base">Mais da metade</option>
+                      <option value="Não sei dizer (a maioria parada)">Não sei dizer, mas acho que é a maioria</option>
                     </select>
                   </div>
                 </div>
@@ -452,7 +452,7 @@ export function LeadCaptureModal({
                 <div className="space-y-3 animate-fade-in">
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      10. Tempo médio para primeiro atendimento
+                      10. Quando alguém te chama, em quanto tempo você responde?
                     </label>
                     <select
                       value={formData.responseTime}
@@ -468,33 +468,33 @@ export function LeadCaptureModal({
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      11. Como você faz o Follow-up hoje?
+                      11. Quando a pessoa não responde, como você lembra de chamar de novo?
                     </label>
                     <select
                       value={formData.followupProcess}
                       onChange={(e) => setFormData((prev) => ({ ...prev, followupProcess: e.target.value }))}
                       className="w-full rounded-xl border border-white/10 bg-[#140F30] px-3.5 py-2.5 text-xs text-white focus:border-[#9600FF] focus:outline-none transition-all"
                     >
-                      <option value="Manual (planilha ou lembrete do vendedor)">Manual (depende da memória do vendedor)</option>
-                      <option value="CRM tradicional (mas o time não alimenta)">CRM tradicional (mas o time esquece de atualizar)</option>
-                      <option value="Automação básica que não converte">Automação básica (robô mecânico que espanta lead)</option>
-                      <option value="Não temos processo de follow-up">Não temos processo fixo de acompanhamento</option>
+                      <option value="Manual (planilha ou lembrete do vendedor)">De cabeça, ou anotado em caderno ou planilha</option>
+                      <option value="CRM tradicional (mas o time não alimenta)">Tenho um sistema, mas ninguém lembra de preencher</option>
+                      <option value="Automação básica que não converte">Tenho um robô, mas ele afasta as pessoas</option>
+                      <option value="Não temos processo de follow-up">Não tenho um jeito certo de fazer isso</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-white/75 mb-1">
-                      12. Qual seu maior gargalo comercial hoje?
+                      12. O que mais te faz perder venda hoje?
                     </label>
                     <select
                       value={formData.mainPain}
                       onChange={(e) => setFormData((prev) => ({ ...prev, mainPain: e.target.value }))}
                       className="w-full rounded-xl border border-white/10 bg-[#140F30] px-3.5 py-2.5 text-xs text-white focus:border-[#9600FF] focus:outline-none transition-all"
                     >
-                      <option value="Leads esfriam antes do primeiro contato">Leads esfriam antes do primeiro contato</option>
-                      <option value="Vendedores esquecem o follow-up">Vendedores esquecem de cobrar o próximo passo</option>
-                      <option value="Base antiga está parada sem reativação">Base antiga está morta sem reativação contínua</option>
-                      <option value="Demora para emitir proposta e contrato">Demora para emitir proposta e assinar contrato</option>
+                      <option value="Leads esfriam antes do primeiro contato">Demoro pra responder e a pessoa perde o interesse</option>
+                      <option value="Vendedores esquecem o follow-up">A gente esquece de voltar a falar com quem não respondeu</option>
+                      <option value="Base antiga está parada sem reativação">Tenho muito contato antigo parado, sem ninguém chamar</option>
+                      <option value="Demora para emitir proposta e contrato">Demoro pra mandar a proposta e fechar o negócio</option>
                     </select>
                   </div>
                 </div>

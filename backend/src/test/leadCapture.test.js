@@ -459,7 +459,12 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
   // g) Cálculo honesto respeitando o teto declarado: R$ 60.000 (assertado como número)
   // --------------------------------------------------------------------------
   it("g) base '2.000 a 10.000' + ticket 'R$ 500 a R$ 2.000' + '30% a 50%' resulta exatamente em R$ 60.000", () => {
-    const baseSize = "2.000 a 10.000 contatos";
+    const modalPath = resolve(__dirname, "../../../frontend/src/pages/LandingPage/LeadCaptureModal.tsx");
+    const modalContent = readFileSync(modalPath, "utf8");
+    const baseMatch = modalContent.match(/<option[^>]*value=\"(2\.000 a 10\.000 contatos)\"/);
+    expect(baseMatch, "Opção '2.000 a 10.000 contatos' deve existir no formulário real do frontend").not.toBeNull();
+
+    const baseSize = baseMatch[1];
     const ticketMedio = "R$ 500 a R$ 2.000";
     const stalledLeadsPct = "30% a 50% da base";
 
@@ -512,11 +517,11 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
     const modalContent = readFileSync(modalPath, "utf8");
 
     // Extrai blocos select reais do arquivo do frontend
-    const baseBlockMatch = modalContent.match(/Tamanho da sua base total de contatos[\s\S]*?<select[^>]*>([\s\S]*?)<\/select>/);
+    const baseBlockMatch = modalContent.match(/(?:Tamanho da sua base total de contatos|Quantos contatos você tem guardados)[\s\S]*?<select[^>]*>([\s\S]*?)<\/select>/);
     expect(baseBlockMatch).not.toBeNull();
     const baseOptions = [...baseBlockMatch[1].matchAll(/<option[^>]*value=\"([^\"]+)\"/g)].map((m) => m[1]);
 
-    const ticketBlockMatch = modalContent.match(/Ticket M[eé]dio das suas Vendas[\s\S]*?<select[^>]*>([\s\S]*?)<\/select>/);
+    const ticketBlockMatch = modalContent.match(/(?:Ticket M[eé]dio das suas Vendas|Quanto rende uma venda sua)[\s\S]*?<select[^>]*>([\s\S]*?)<\/select>/);
     expect(ticketBlockMatch).not.toBeNull();
     const ticketOptions = [...ticketBlockMatch[1].matchAll(/<option[^>]*value=\"([^\"]+)\"/g)].map((m) => m[1]);
 

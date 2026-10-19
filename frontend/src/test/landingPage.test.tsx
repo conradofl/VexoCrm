@@ -110,13 +110,13 @@ describe("LandingPage Modular (Reverse-Engineered Architecture)", () => {
     fireEvent.submit(step2Form);
 
     // PASSO 3
-    expect(await screen.findByText(/Sua Base & Números/i)).toBeInTheDocument();
-    const step3Form = screen.getByText(/Tamanho da sua base total de contatos/i).closest("form")!;
+    expect(await screen.findByText(/(?:Sua Base & Números|Seus contatos e suas vendas)/i)).toBeInTheDocument();
+    const step3Form = screen.getByText(/(?:Tamanho da sua base total de contatos|Quantos contatos você tem guardados)/i).closest("form")!;
     fireEvent.submit(step3Form);
 
     // PASSO 4
-    expect(await screen.findByText(/Processo & Gargalo/i)).toBeInTheDocument();
-    const step4Form = screen.getByText(/Tempo médio para primeiro atendimento/i).closest("form")!;
+    expect(await screen.findByText(/(?:Processo & Gargalo|Como você atende hoje)/i)).toBeInTheDocument();
+    const step4Form = screen.getByText(/(?:Tempo médio para primeiro atendimento|Quando alguém te chama, em quanto tempo você responde)/i).closest("form")!;
     fireEvent.submit(step4Form);
 
     // TELA DE CONFIRMAÇÃO
