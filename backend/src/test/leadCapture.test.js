@@ -857,4 +857,136 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
     expect(dispatchResult.reason).toBe("teto_diario_tenant_atingido");
     expect(evoSendSpy).not.toHaveBeenCalled();
   });
+
+  // --------------------------------------------------------------------------
+  // l) BLOQUEIO A: normaliza telefone com a mesma função do upsert e avisa se rowCount === 0
+  // --------------------------------------------------------------------------
+  it("l) BLOQUEIO A: dispatchCaptureAutoReply normaliza telefone antes do UPDATE e emite warn se rowCount for 0", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    let updateSqlReceived = null;
+    let updateParamsReceived = null;
+
+    const mockPool = {
+      query: vi.fn(async (sql, params) => {
+        if (sql.includes("COUNT(*)::int") && sql.includes("phone = $2")) {
+          // Bloqueia por cota de telefone
+          return { rows: [{ count: 2 }] };
+        }
+        if (sql.includes("UPDATE public.leads")) {
+          updateSqlReceived = sql;
+          updateParamsReceived = params;
+          // Simula que nenhum lead casou (rowCount = 0) para testar o aviso explícito
+          return { rowCount: 0 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    // Telefone cru formatado pelo usuário (com +, parênteses, espaço e hífen)
+    const rawPhone = "+55 (34) 99781-7660";
+    const expectedNormalized = "5534997817660";
+
+    const res = await dispatchCaptureAutoReply(mockPool, {
+      clientId: "vexo-adm",
+      phone: rawPhone,
+      messageText: "Oi!",
+    });
+
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toBe("limite_telefone_24h");
+
+    // 1. O UPDATE precisa ter sido chamado com o telefone NORMALIZADO, não o cru
+    expect(updateSqlReceived).toContain("UPDATE public.leads");
+    expect(updateParamsReceived).toEqual([
+      "limite_telefone_24h",
+      "vexo-adm",
+      expectedNormalized,
+      `+${expectedNormalized}`,
+    ]);
+
+    // 2. Com rowCount = 0, NÃO engole silenciosamente: emite console.warn
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `[leadCapture] Nenhum lead encontrado para registrar whatsapp_dispatch_blocked_reason="limite_telefone_24h" (telefone: ${expectedNormalized}, tenant: vexo-adm)`
+      )
+    );
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("l2) BLOQUEIO A: dispatchCaptureAutoReply normaliza telefone ao registrar sem_chip_configurado", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let updateParamsReceived = null;
+    const mockPool = {
+      query: vi.fn(async (sql, params) => {
+        if (sql.includes("COUNT(*)::int")) return { rows: [{ count: 0 }] };
+        if (sql.includes("lead_client_evolution_instances")) return { rows: [] };
+        if (sql.includes("UPDATE public.leads")) {
+          updateParamsReceived = params;
+          return { rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const rawPhone = "(11) 98765-4321";
+    const expectedNormalized = "11987654321";
+
+    const res = await dispatchCaptureAutoReply(mockPool, {
+      clientId: "tenant-sem-chip",
+      phone: rawPhone,
+      messageText: "Oi!",
+    });
+
+    expect(res.sent).toBe(false);
+    expect(res.reason).toBe("SEM_CHIP_CONFIGURADO");
+    expect(updateParamsReceived).toEqual([
+      "tenant-sem-chip",
+      expectedNormalized,
+      `+${expectedNormalized}`,
+    ]);
+
+    warnSpy.mockRestore();
+  });
+
+  // --------------------------------------------------------------------------
+  // m) BLOQUEIO B: bloqueio de cota loga com console.error, prefixo [leadCapture], motivo e telefone mascarado
+  // --------------------------------------------------------------------------
+  it("m) BLOQUEIO B: bloqueio de cota é registrado em console.error com prefixo [leadCapture], motivo e telefone mascarado", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const mockPool = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("COUNT(*)::int") && sql.includes("phone = $2")) {
+          return { rows: [{ count: 2 }] };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const phone = "5534997817660";
+    await dispatchCaptureAutoReply(mockPool, {
+      clientId: "vexo-adm",
+      phone,
+      messageText: "Oi!",
+    });
+
+    // Deve ter chamado console.error (NÃO apenas warn)
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /\[leadCapture\] Disparo de WhatsApp BLOQUEADO para \*{4,9}7660 no tenant "vexo-adm": .*\(limite_telefone_24h\)/
+      )
+    );
+
+    errorSpy.mockRestore();
+  });
 });

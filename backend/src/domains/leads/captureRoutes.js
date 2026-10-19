@@ -128,7 +128,7 @@ export function registerLeadCaptureRoutes(app, deps) {
           if (dispRes.sent) {
             console.log(`[leadCapture] Auto-resposta enviada com sucesso para ${maskPhoneForLog(phone)} via ${dispRes.instanceUsed}`);
           } else if (dispRes.blocked) {
-            console.warn(`[leadCapture] Auto-resposta bloqueada por segurança (${dispRes.reason}) para ${maskPhoneForLog(phone)}: ${dispRes.message || ""}`);
+            console.error(`[leadCapture] Auto-resposta bloqueada por segurança (${dispRes.reason}) para ${maskPhoneForLog(phone)}: ${dispRes.message || ""}`);
           } else {
             console.warn(`[leadCapture] Auto-resposta não pôde ser enviada para ${maskPhoneForLog(phone)}: ${dispRes.error}`);
           }

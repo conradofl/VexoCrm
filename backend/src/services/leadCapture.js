@@ -4,7 +4,7 @@
 // notifica o dono/SDR do tenant e aplica trava de honeypot + rate limit por IP.
 
 import { toCanonicalPhone } from "./canonicalPhone.js";
-import { upsertLeadByPhone } from "./leadUpsert.js";
+import { upsertLeadByPhone, normalizeLeadPhoneKey } from "./leadUpsert.js";
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { maskPhoneForLog, normalizeTenantKey } from "./tenant.js";
 
@@ -516,6 +516,8 @@ export async function checkCaptureDispatchQuota(
 ) {
   if (!pool) return { allowed: true };
 
+  const cleanPhone = normalizeLeadPhoneKey(phone) || String(phone || "").trim();
+
   await ensureLeadCaptureDispatchesTable(pool);
 
   // 1. Verifica telefone nas últimas 24h
@@ -523,8 +525,8 @@ export async function checkCaptureDispatchQuota(
     const { rows: phoneRows } = await pool.query(
       `SELECT COUNT(*)::int AS count
        FROM public.lead_capture_dispatches
-       WHERE client_id = $1 AND phone = $2 AND created_at >= now() - INTERVAL '24 hours'`,
-      [clientId, phone]
+       WHERE client_id = $1 AND (phone = $2 OR phone = $3) AND created_at >= now() - INTERVAL '24 hours'`,
+      [clientId, cleanPhone, `+${cleanPhone}`]
     );
     const phoneCount = Number(phoneRows?.[0]?.count || 0);
     if (phoneCount >= phoneLimit) {
@@ -576,28 +578,42 @@ export async function dispatchCaptureAutoReply(
   pool,
   { clientId, phone, messageText, instanceName = null, dailyLimit, phoneLimit }
 ) {
+  const cleanPhone = normalizeLeadPhoneKey(phone) || String(phone || "").trim();
+
   // 1. Trava de segurança no BANCO (proteção do chip contra spam / relé público)
   if (pool) {
     const quotaCheck = await checkCaptureDispatchQuota(pool, {
       clientId,
-      phone,
+      phone: cleanPhone,
       dailyLimit,
       phoneLimit,
     });
 
     if (!quotaCheck.allowed) {
       const blockedReason = quotaCheck.reason || "cota_excedida";
-      console.warn(
-        `[leadCapture] Disparo de WhatsApp BLOQUEADO para ${maskPhoneForLog(phone)} no tenant "${clientId}": ${quotaCheck.message} (${blockedReason})`
+      console.error(
+        `[leadCapture] Disparo de WhatsApp BLOQUEADO para ${maskPhoneForLog(cleanPhone)} no tenant "${clientId}": ${quotaCheck.message} (${blockedReason})`
       );
 
       // Registra no lead que o disparo foi contido para proteção do chip (o lead continua salvo!)
-      await pool.query(
-        `UPDATE public.leads
-         SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_blocked_reason}', to_jsonb($1::text))
-         WHERE client_id = $2 AND (telefone = $3 OR phone = $3)`,
-        [blockedReason, clientId, phone]
-      ).catch(() => {});
+      try {
+        const updateRes = await pool.query(
+          `UPDATE public.leads
+           SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_blocked_reason}', to_jsonb($1::text))
+           WHERE client_id = $2 AND (telefone = $3 OR phone = $3 OR telefone = $4 OR phone = $4)`,
+          [blockedReason, clientId, cleanPhone, `+${cleanPhone}`]
+        );
+        if (updateRes && updateRes.rowCount === 0) {
+          console.warn(
+            `[leadCapture] Nenhum lead encontrado para registrar whatsapp_dispatch_blocked_reason="${blockedReason}" (telefone: ${cleanPhone}, tenant: ${clientId})`
+          );
+        }
+      } catch (updateErr) {
+        console.warn(
+          `[leadCapture] Falha ao registrar whatsapp_dispatch_blocked_reason no lead:`,
+          updateErr?.message || updateErr
+        );
+      }
 
       return {
         sent: false,
@@ -640,12 +656,24 @@ export async function dispatchCaptureAutoReply(
         `[leadCapture] Tenant "${clientId}" sem chip configurado em lead_client_evolution_instances. Mensagem automática não enviada.`
       );
       if (pool) {
-        await pool.query(
-          `UPDATE public.leads
-           SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_reason}', to_jsonb('sem_chip_configurado'::text))
-           WHERE client_id = $1 AND (telefone = $2 OR phone = $2)`,
-          [clientId, phone]
-        ).catch(() => {});
+        try {
+          const updateRes = await pool.query(
+            `UPDATE public.leads
+             SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_reason}', to_jsonb('sem_chip_configurado'::text))
+             WHERE client_id = $1 AND (telefone = $2 OR phone = $2 OR telefone = $3 OR phone = $3)`,
+            [clientId, cleanPhone, `+${cleanPhone}`]
+          );
+          if (updateRes && updateRes.rowCount === 0) {
+            console.warn(
+              `[leadCapture] Nenhum lead encontrado para registrar whatsapp_dispatch_reason="sem_chip_configurado" (telefone: ${cleanPhone}, tenant: ${clientId})`
+            );
+          }
+        } catch (updateErr) {
+          console.warn(
+            `[leadCapture] Falha ao registrar whatsapp_dispatch_reason no lead:`,
+            updateErr?.message || updateErr
+          );
+        }
       }
       return {
         sent: false,
@@ -659,7 +687,7 @@ export async function dispatchCaptureAutoReply(
   try {
     const result = await sendTextMessageViaEvolution({
       instanceName: targetInstanceName,
-      number: phone,
+      number: cleanPhone,
       text: messageText,
       webhookToken: targetToken,
     });
@@ -669,7 +697,7 @@ export async function dispatchCaptureAutoReply(
       await pool.query(
         `INSERT INTO public.lead_capture_dispatches (client_id, phone, status, instance_name)
          VALUES ($1, $2, 'sent', $3)`,
-        [clientId, phone, targetInstanceName]
+        [clientId, cleanPhone, targetInstanceName]
       ).catch((err) => {
         console.warn("[leadCapture] Aviso ao registrar disparo em lead_capture_dispatches:", err?.message || err);
       });
@@ -677,16 +705,29 @@ export async function dispatchCaptureAutoReply(
 
     return { sent: true, instanceUsed: targetInstanceName, raw: result };
   } catch (sendErr) {
-    console.warn(`[leadCapture] Falha no disparo automático WhatsApp para ${maskPhoneForLog(phone)}:`, sendErr?.message || sendErr);
+    console.warn(`[leadCapture] Falha no disparo automático WhatsApp para ${maskPhoneForLog(cleanPhone)}:`, sendErr?.message || sendErr);
     
     // Registra a falha no lead para que a equipe saiba e tente recontato
     if (pool) {
-      await pool.query(
-        `UPDATE public.leads
-         SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_error}', to_jsonb($1::text))
-         WHERE client_id = $2 AND (telefone = $3 OR phone = $3)`,
-        [sendErr?.message || "Falha de envio", clientId, phone]
-      ).catch(() => {});
+      try {
+        const updateRes = await pool.query(
+          `UPDATE public.leads
+           SET dados = jsonb_set(COALESCE(dados, '{}'::jsonb), '{whatsapp_dispatch_error}', to_jsonb($1::text))
+           WHERE client_id = $2 AND (telefone = $3 OR phone = $3 OR telefone = $4 OR phone = $4)`,
+          [sendErr?.message || "Falha de envio", clientId, cleanPhone, `+${cleanPhone}`]
+        );
+        if (updateRes && updateRes.rowCount === 0) {
+          console.warn(
+            `[leadCapture] Nenhum lead encontrado para registrar whatsapp_dispatch_error (telefone: ${cleanPhone}, tenant: ${clientId}):`,
+            sendErr?.message || sendErr
+          );
+        }
+      } catch (updateErr) {
+        console.warn(
+          `[leadCapture] Falha ao registrar whatsapp_dispatch_error no lead:`,
+          updateErr?.message || updateErr
+        );
+      }
     }
 
     return { sent: false, error: sendErr?.message || "Falha no envio da mensagem", instanceUsed: targetInstanceName };
