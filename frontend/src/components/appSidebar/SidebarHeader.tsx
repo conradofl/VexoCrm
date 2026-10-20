@@ -36,9 +36,11 @@ function SidebarHeader({
         >
           {logo ? (
             <img src={logo} alt="Logo" className="h-full w-full rounded-xl object-cover" />
+          ) : !title || title === "Vexo OS" ? (
+            <img src="/images/vexo-symbol.png" alt="Vexo" className="h-full w-full rounded-xl object-contain p-0.5 bg-white" />
           ) : (
             <span className="text-base font-black text-white">
-              {(title || "Vexo OS")[0]?.toUpperCase()}
+              {title[0]?.toUpperCase()}
             </span>
           )}
         </div>

@@ -95,13 +95,25 @@ export function LandingNavbar({
           className="flex items-center gap-2.5 sm:gap-3 group focus:outline-none shrink-0"
           title="Vexo OS - Voltar ao topo"
         >
-          <div className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#A020F0] via-[#7B1FA2] to-[#4B00FF] text-white font-extrabold text-sm sm:text-lg shadow-[0_0_20px_rgba(160,32,240,0.55)] border border-white/20 transition-all duration-300 group-hover:scale-105 group-hover:shadow-[0_0_28px_rgba(180,60,255,0.85)]">
-            V
+          <div className="flex h-9 w-9 sm:h-11 sm:w-11 items-center justify-center rounded-2xl bg-white p-1 shadow-[0_0_20px_rgba(160,32,240,0.55)] border border-white/30 transition-all duration-300 group-hover:scale-105 group-hover:shadow-[0_0_28px_rgba(180,60,255,0.85)]">
+            <img
+              src="/images/vexo-symbol.png"
+              alt="Símbolo Vexo"
+              className="h-full w-full object-contain rounded-full"
+            />
           </div>
           <div className="flex flex-col">
-            <span className="font-extrabold tracking-[0.22em] text-xs sm:text-sm text-white uppercase drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-              VEXO OS
-            </span>
+            <div className="flex items-center gap-1.5">
+              <img
+                src="/images/vexo-logo.png"
+                alt="VEXO"
+                className="h-4 sm:h-[18px] w-auto object-contain drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]"
+              />
+              <span className="font-extrabold tracking-[0.22em] text-xs sm:text-sm text-white uppercase drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                OS
+              </span>
+              <span className="sr-only">VEXO OS</span>
+            </div>
             <span className="text-[9px] sm:text-[10px] tracking-wider text-[#D7B4FF] uppercase font-mono hidden sm:block">
               Sales Intelligence
             </span>

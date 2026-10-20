@@ -16,12 +16,24 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
         {/* Coluna 1: Marca & Posicionamento */}
         <div className="space-y-4">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-[#9600FF] to-[#4B00FF] text-white font-extrabold text-sm shadow-[0_0_12px_rgba(150,0,255,0.4)] border border-white/20">
-              V
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white p-0.5 shadow-[0_0_12px_rgba(150,0,255,0.4)] border border-white/20">
+              <img
+                src="/images/vexo-symbol.png"
+                alt="Símbolo Vexo"
+                className="h-full w-full object-contain rounded-full"
+              />
             </div>
-            <span className="font-extrabold uppercase tracking-widest text-white text-sm">
-              VEXO OS
-            </span>
+            <div className="flex items-center gap-1.5">
+              <img
+                src="/images/vexo-logo.png"
+                alt="VEXO"
+                className="h-3.5 sm:h-4 w-auto object-contain"
+              />
+              <span className="font-extrabold uppercase tracking-widest text-white text-sm">
+                OS
+              </span>
+              <span className="sr-only">VEXO OS</span>
+            </div>
           </div>
           <p className="text-xs font-light text-white/70 leading-relaxed max-w-[240px]">
             Inteligência comercial para quem decide vendas.
