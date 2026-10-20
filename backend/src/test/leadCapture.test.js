@@ -990,4 +990,388 @@ describe("Serviço de Captura de Leads e Diagnóstico Comercial", () => {
 
     errorSpy.mockRestore();
   });
+
+
+
+  // --------------------------------------------------------------------------
+  // y) instância com name "Vexo atende" e webhook terminando em "vexo-adm-vexo-atende"
+  // -> o envio usa "vexo-adm-vexo-atende", NUNCA "Vexo atende"
+  // --------------------------------------------------------------------------
+  it("y) instância com name 'Vexo atende' e webhook terminando em 'vexo-adm-vexo-atende' -> envio usa 'vexo-adm-vexo-atende', NUNCA 'Vexo atende'", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    const mockPool = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-vexo-1",
+                name: "Vexo atende",
+                dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/vexo-adm-vexo-atende",
+                dispatch_webhook_token: "token-37chars-123456789012345678901234",
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const evoSendSpy = vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockResolvedValue({
+      success: true,
+      waMessageId: "WA_Y_12345",
+    });
+
+    const res = await dispatchCaptureAutoReply(mockPool, {
+      clientId: "vexo-adm",
+      phone: "5534991751267",
+      messageText: "Oi Carlos!",
+    });
+
+    expect(res.sent).toBe(true);
+    expect(res.instanceUsed).toBe("vexo-adm-vexo-atende");
+    expect(res.instanceUsed).not.toBe("Vexo atende");
+
+    // Verifica que o envio usou "vexo-adm-vexo-atende" e NUNCA "Vexo atende"
+    expect(evoSendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "vexo-adm-vexo-atende",
+        webhookToken: "token-37chars-123456789012345678901234",
+      })
+    );
+    expect(evoSendSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "Vexo atende",
+      })
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // z) dispatch_webhook_url nula ou malformada -> devolve null, cai no fallback,
+  // console.error emitido, lead continua salvo
+  // --------------------------------------------------------------------------
+  it("z) dispatch_webhook_url nula ou malformada -> devolve null, cai no fallback, console.error emitido, lead continua salvo", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockResolvedValue({
+      success: true,
+    });
+
+    // 1. Caso vexo-adm com URL nula: cai no fallback vexo-adm-vexo-atende e emite console.error
+    const poolVexoNull = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-1",
+                name: "Vexo atende",
+                dispatch_webhook_url: null,
+                dispatch_webhook_token: "token-123",
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const resVexo = await dispatchCaptureAutoReply(poolVexoNull, {
+      clientId: "vexo-adm",
+      phone: "5534991751267",
+      messageText: "Oi!",
+    });
+
+    expect(resVexo.sent).toBe(true);
+    expect(resVexo.instanceUsed).toBe("vexo-adm-vexo-atende");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadCapture] Nome técnico da instância Evolution não encontrado para tenant "vexo-adm"')
+    );
+
+    // 2. Caso tenant genérico com URL malformada: cai em SEM_CHIP_CONFIGURADO, loga console.error e atualiza lead
+    let leadUpdatedSql = null;
+    const poolTenantMalformed = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-2",
+                name: "Meu WhatsApp",
+                dispatch_webhook_url: "url-invalida",
+                dispatch_webhook_token: "token-abc",
+              },
+            ],
+          };
+        }
+        if (sql.includes("UPDATE public.leads")) {
+          leadUpdatedSql = sql;
+          return { rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const resOther = await dispatchCaptureAutoReply(poolTenantMalformed, {
+      clientId: "outro-tenant",
+      phone: "5534991751267",
+      messageText: "Oi!",
+    });
+
+    expect(resOther.sent).toBe(false);
+    expect(resOther.reason).toBe("SEM_CHIP_CONFIGURADO");
+    expect(leadUpdatedSql).toContain("UPDATE public.leads");
+    expect(leadUpdatedSql).toContain("sem_chip_configurado");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadCapture] Nome técnico da instância Evolution não encontrado para tenant "outro-tenant"')
+    );
+
+    errorSpy.mockRestore();
+  });
+
+  // --------------------------------------------------------------------------
+  // aa) envio bem-sucedido -> grava uma linha em lead_capture_dispatches
+  // --------------------------------------------------------------------------
+  it("aa) envio bem-sucedido -> grava uma linha em lead_capture_dispatches", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    let insertedDispatch = null;
+    const mockPool = {
+      query: vi.fn(async (sql, params) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-1",
+                name: "Vexo atende",
+                dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/vexo-adm-vexo-atende",
+                dispatch_webhook_token: "token-xyz",
+              },
+            ],
+          };
+        }
+        if (sql.includes("INSERT INTO public.lead_capture_dispatches")) {
+          insertedDispatch = { sql, params };
+          return { rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockResolvedValue({
+      success: true,
+      waMessageId: "WA_AA_999",
+    });
+
+    const res = await dispatchCaptureAutoReply(mockPool, {
+      clientId: "vexo-adm",
+      phone: "5534991751267",
+      messageText: "Oi Carlos!",
+    });
+
+    expect(res.sent).toBe(true);
+    expect(insertedDispatch).not.toBeNull();
+    expect(insertedDispatch.sql).toContain("INSERT INTO public.lead_capture_dispatches");
+    expect(insertedDispatch.params).toEqual([
+      "vexo-adm",
+      "5534991751267",
+      "vexo-adm-vexo-atende",
+    ]);
+  });
+
+  // --------------------------------------------------------------------------
+  // BLOCO 3: Falha no envio registra console.error com [leadCapture], telefone
+  // mascarado, instância REAL e erro Evolution HTTP
+  // --------------------------------------------------------------------------
+  it("BLOCO 3: falha no envio registra console.error com [leadCapture], telefone mascarado, instância REAL e erro Evolution HTTP", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mockPool = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-1",
+                name: "Vexo atende",
+                dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/vexo-adm-vexo-atende",
+                dispatch_webhook_token: "token-xyz",
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockRejectedValue(
+      new Error("Evolution HTTP 404: Instance not found")
+    );
+
+    const res = await dispatchCaptureAutoReply(mockPool, {
+      clientId: "vexo-adm",
+      phone: "5534991751267",
+      messageText: "Oi Carlos!",
+    });
+
+    expect(res.sent).toBe(false);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /\[leadCapture\] Falha no disparo automático WhatsApp para \*{4,9}1267 via instância "vexo-adm-vexo-atende": Evolution HTTP 404: Instance not found/
+      )
+    );
+
+    errorSpy.mockRestore();
+  });
+
+  // --------------------------------------------------------------------------
+  // notifyOwnerOnCapture extrai instância técnica da Evolution e remove literal fixo
+  // --------------------------------------------------------------------------
+  it("notifyOwnerOnCapture extrai instância técnica da Evolution e não usa literal fixo", async () => {
+    const evoSendSpy = vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockResolvedValue({ success: true });
+
+    const mockPool = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_n8n_settings")) {
+          return { rows: [{ sdr_whatsapp_number: "5534999991111" }] };
+        }
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-sdr",
+                name: "WhatsApp Atendimento",
+                dispatch_webhook_url: "https://evo.host/message/sendText/cliente-instance-slug",
+                dispatch_webhook_token: "token-sdr",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+
+    const res = await notifyOwnerOnCapture(mockPool, {
+      clientId: "cliente-xyz",
+      alertText: "Alerta de lead",
+    });
+
+    expect(res.alerted).toBe(true);
+    expect(evoSendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "cliente-instance-slug",
+        number: "5534999991111",
+        webhookToken: "token-sdr",
+      })
+    );
+    expect(evoSendSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "vexo-adm-vexo-atende",
+      })
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // bb) dispatch_webhook_url que NÃO contém "/message/" (ex.: "https://host/instance/connect/xyz")
+  // -> resolve null e cai no fallback, NUNCA devolve "xyz"
+  // --------------------------------------------------------------------------
+  it("bb) dispatch_webhook_url que NÃO contém '/message/' -> resolve null e cai no fallback, NUNCA devolve 'xyz'", async () => {
+    resetLeadCaptureDispatchesTableEnsured();
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const evoSendSpy = vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockResolvedValue({
+      success: true,
+    });
+
+    // 1. Para vexo-adm: URL sem /message/ dá null no parse -> cai no fallback vexo-adm-vexo-atende e NUNCA usa "xyz"
+    const mockPoolVexo = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-non-message",
+                name: "Vexo atende",
+                dispatch_webhook_url: "https://host.com/instance/connect/xyz",
+                dispatch_webhook_token: "token-123",
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const resVexo = await dispatchCaptureAutoReply(mockPoolVexo, {
+      clientId: "vexo-adm",
+      phone: "5534991751267",
+      messageText: "Oi!",
+    });
+
+    expect(resVexo.sent).toBe(true);
+    expect(resVexo.instanceUsed).toBe("vexo-adm-vexo-atende");
+    expect(resVexo.instanceUsed).not.toBe("xyz");
+    expect(resVexo.instanceUsed).not.toBe("Vexo atende");
+
+    expect(evoSendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "vexo-adm-vexo-atende",
+      })
+    );
+    expect(evoSendSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "xyz",
+      })
+    );
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadCapture] Nome técnico da instância Evolution não encontrado para tenant "vexo-adm"')
+    );
+
+    // 2. Para outro tenant: URL sem /message/ dá null no parse -> SEM_CHIP_CONFIGURADO, NUNCA usa "xyz"
+    let leadUpdatedSql = null;
+    const mockPoolOther = {
+      query: vi.fn(async (sql) => {
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                id: "chip-other",
+                name: "Atendimento Agência",
+                dispatch_webhook_url: "https://host.com/instance/connect/xyz",
+                dispatch_webhook_token: "token-456",
+              },
+            ],
+          };
+        }
+        if (sql.includes("UPDATE public.leads")) {
+          leadUpdatedSql = sql;
+          return { rowCount: 1 };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+    };
+
+    const resOther = await dispatchCaptureAutoReply(mockPoolOther, {
+      clientId: "agencia-digital",
+      phone: "5534991751267",
+      messageText: "Oi!",
+    });
+
+    expect(resOther.sent).toBe(false);
+    expect(resOther.reason).toBe("SEM_CHIP_CONFIGURADO");
+    expect(resOther.instanceUsed).toBe(null);
+    expect(resOther.instanceUsed).not.toBe("xyz");
+    expect(leadUpdatedSql).toContain("UPDATE public.leads");
+    expect(leadUpdatedSql).toContain("sem_chip_configurado");
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[leadCapture] Nome técnico da instância Evolution não encontrado para tenant "agencia-digital"')
+    );
+
+    errorSpy.mockRestore();
+  });
 });

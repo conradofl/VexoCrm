@@ -141,7 +141,15 @@ describe("Rotas Públicas de Captura de Leads (/api/public/leads/capture e /api/
 
     pool.query.mockImplementation(async (sql) => {
       if (sql.includes("FROM public.lead_client_evolution_instances")) {
-        return { rows: [{ name: "solar-prime-atende", dispatch_webhook_token: "tok-solar" }] };
+        return {
+          rows: [
+            {
+              name: "Solar Prime WhatsApp",
+              dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/solar-prime-atende",
+              dispatch_webhook_token: "tok-solar",
+            },
+          ],
+        };
       }
       return { rows: [], rowCount: 1 };
     });
@@ -251,12 +259,24 @@ describe("Rotas Públicas de Captura de Leads (/api/public/leads/capture e /api/
           const tenant = params[0];
           if (tenant === "tenant-alfa") {
             return {
-              rows: [{ name: "chip-tenant-alfa-oficial", dispatch_webhook_token: "token-alfa-123" }],
+              rows: [
+                {
+                  name: "Alfa WhatsApp (34) 9999-0000",
+                  dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/chip-tenant-alfa-oficial",
+                  dispatch_webhook_token: "token-alfa-123",
+                },
+              ],
             };
           }
           if (tenant === "tenant-beta") {
             return {
-              rows: [{ name: "chip-tenant-beta-oficial", dispatch_webhook_token: "token-beta-456" }],
+              rows: [
+                {
+                  name: "Beta WhatsApp (34) 8888-0000",
+                  dispatch_webhook_url: "https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendText/chip-tenant-beta-oficial",
+                  dispatch_webhook_token: "token-beta-456",
+                },
+              ],
             };
           }
         }

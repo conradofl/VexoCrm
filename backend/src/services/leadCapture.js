@@ -5,7 +5,10 @@
 
 import { toCanonicalPhone } from "./canonicalPhone.js";
 import { upsertLeadByPhone, normalizeLeadPhoneKey } from "./leadUpsert.js";
-import { sendTextMessageViaEvolution } from "./evolution.js";
+import {
+  parseEvolutionWebhookEndpoint,
+  sendTextMessageViaEvolution,
+} from "./evolution.js";
 import { maskPhoneForLog, normalizeTenantKey } from "./tenant.js";
 
 /** Memória em processo para rate limit de IP (captura e telemetria). */
@@ -631,15 +634,15 @@ export async function dispatchCaptureAutoReply(
   if (!targetInstanceName && pool) {
     try {
       const { rows } = await pool.query(
-        `SELECT name, dispatch_webhook_token
+        `SELECT id, name, dispatch_webhook_url, dispatch_webhook_token
          FROM public.lead_client_evolution_instances
          WHERE client_id = $1 AND active = true
          ORDER BY is_default DESC, created_at ASC
          LIMIT 1`,
         [clientId]
       );
-      if (rows?.[0]?.name) {
-        targetInstanceName = rows[0].name;
+      if (rows?.[0]) {
+        targetInstanceName = parseEvolutionWebhookEndpoint(rows[0].dispatch_webhook_url)?.instance || null;
         targetToken = rows[0].dispatch_webhook_token;
       }
     } catch (err) {
@@ -647,8 +650,11 @@ export async function dispatchCaptureAutoReply(
     }
   }
 
-  // Fallback de chip do tenant
+  // Fallback de chip do tenant quando a instância técnica não for encontrada
   if (!targetInstanceName) {
+    console.error(
+      `[leadCapture] Nome técnico da instância Evolution não encontrado para tenant "${clientId}". URL ausente ou malformada em lead_client_evolution_instances.`
+    );
     if (clientId === "vexo-adm") {
       targetInstanceName = "vexo-adm-vexo-atende";
     } else {
@@ -705,7 +711,9 @@ export async function dispatchCaptureAutoReply(
 
     return { sent: true, instanceUsed: targetInstanceName, raw: result };
   } catch (sendErr) {
-    console.warn(`[leadCapture] Falha no disparo automático WhatsApp para ${maskPhoneForLog(cleanPhone)}:`, sendErr?.message || sendErr);
+    console.error(
+      `[leadCapture] Falha no disparo automático WhatsApp para ${maskPhoneForLog(cleanPhone)} via instância "${targetInstanceName}": ${sendErr?.message || sendErr}`
+    );
     
     // Registra a falha no lead para que a equipe saiba e tente recontato
     if (pool) {
@@ -784,13 +792,57 @@ export async function notifyOwnerOnCapture(pool, { clientId, alertText, chipInst
       return { alerted: false, reason: "SEM_DESTINO", phoneCount: 0 };
     }
 
+    // 2. Descobre a instância técnica da Evolution para o disparo do alerta
+    let targetInstance = null;
+    let targetToken = null;
+
+    if (chipInstance) {
+      targetInstance = typeof chipInstance === "object"
+        ? (parseEvolutionWebhookEndpoint(chipInstance.dispatch_webhook_url)?.instance || null)
+        : (parseEvolutionWebhookEndpoint(chipInstance)?.instance || chipInstance);
+    }
+
+    if (!targetInstance && pool) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT id, name, dispatch_webhook_url, dispatch_webhook_token
+           FROM public.lead_client_evolution_instances
+           WHERE client_id = $1 AND active = true
+           ORDER BY is_default DESC, created_at ASC
+           LIMIT 1`,
+          [clientId]
+        );
+        if (rows?.[0]) {
+          targetInstance = parseEvolutionWebhookEndpoint(rows[0].dispatch_webhook_url)?.instance || null;
+          targetToken = rows[0].dispatch_webhook_token;
+        }
+      } catch (err) {
+        console.warn("[leadCapture] Erro ao consultar chip do tenant para alerta ao dono:", err?.message || err);
+      }
+    }
+
+    if (!targetInstance) {
+      console.error(
+        `[leadCapture] Nome técnico da instância Evolution não encontrado para alerta ao dono (tenant "${clientId}"). URL ausente ou malformada em lead_client_evolution_instances.`
+      );
+      if (clientId === "vexo-adm") {
+        targetInstance = "vexo-adm-vexo-atende";
+      } else {
+        console.warn(
+          `[leadCapture] Tenant "${clientId}" sem chip configurado para alertar dono. Alerta não enviado.`
+        );
+        return { alerted: false, reason: "SEM_CHIP_CONFIGURADO", phoneCount: 0 };
+      }
+    }
+
     // Dispara alerta para cada SDR / dono
     let sentCount = 0;
     for (const phone of validPhones) {
       await sendTextMessageViaEvolution({
-        instanceName: chipInstance || "vexo-adm-vexo-atende",
+        instanceName: targetInstance,
         number: phone,
         text: alertText,
+        webhookToken: targetToken,
       }).catch((e) => {
         console.warn(`[leadCapture] Aviso ao alertar dono/SDR ${maskPhoneForLog(phone)}:`, e?.message);
       });
