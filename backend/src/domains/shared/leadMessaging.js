@@ -234,7 +234,7 @@ export function createLeadMessaging({
           ON CONFLICT (wa_message_id) DO UPDATE SET
             media_url = COALESCE(EXCLUDED.media_url, public.lead_messages.media_url),
             content_type = COALESCE(EXCLUDED.content_type, public.lead_messages.content_type),
-            meta = public.lead_messages.meta || EXCLUDED.meta;`,
+            meta = EXCLUDED.meta || public.lead_messages.meta;`,
           [
             clientId,
             resolvedLeadId,
