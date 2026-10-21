@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel Executivo GoClaw · Geração Digital & Vexo OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #090d16;
+      --bg-secondary: #0f172a;
+      --bg-card: rgba(15, 23, 42, 0.75);
+      --bg-card-hover: rgba(30, 41, 59, 0.85);
+      --border-color: rgba(148, 163, 184, 0.12);
+      --border-focus: rgba(56, 189, 248, 0.5);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.25);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --gold: #fbbf24;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      min-height: 100vh;
+      line-height: 1.5;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(99, 102, 241, 0.08) 0%, transparent 45%);
+      background-attachment: fixed;
+      padding-bottom: 80px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+
+    /* Container */
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 32px;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .brand-badge {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      color: white;
+      box-shadow: 0 0 24px var(--primary-glow);
+    }
+
+    .brand-text h1 {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(to right, #f8fafc, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-text p {
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-pulse {
+      width: 6px;
+      height: 6px;
+      background: #34d399;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+    }
+
+    /* Countdown Banner */
+    .countdown-card {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.8));
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 20px;
+      padding: 24px 32px;
+      margin-bottom: 32px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 24px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.5);
+    }
+
+    .countdown-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #38bdf8, #818cf8, #34d399);
+    }
+
+    .countdown-info h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .countdown-info p {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 580px;
+    }
+
+    .countdown-timer {
+      display: flex;
+      gap: 12px;
+    }
+
+    .timer-unit {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 14px;
+      padding: 12px 18px;
+      text-align: center;
+      min-width: 74px;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .timer-number {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 26px;
+      font-weight: 700;
+      color: #38bdf8;
+      line-height: 1;
+    }
+
+    .timer-label {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      font-weight: 600;
+      margin-top: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    /* Navigation Tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 12px;
+      margin-bottom: 28px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover {
+      background: rgba(30, 41, 59, 0.5);
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      background: rgba(56, 189, 248, 0.12);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: #38bdf8;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.1);
+    }
+
+    /* Tab Content Areas */
+    .tab-panel {
+      display: none;
+      animation: fadeIn 0.25s ease-in-out;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cards & Layout */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 24px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      position: relative;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+      border-color: rgba(148, 163, 184, 0.25);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 18px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-blue { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+    .badge-amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-emerald { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-purple { background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+
+    /* Timeline / Cronograma */
+    .timeline-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      transition: all 0.2s ease;
+    }
+
+    .timeline-item:hover {
+      background: rgba(30, 41, 59, 0.4);
+      border-color: rgba(148, 163, 184, 0.3);
+    }
+
+    .timeline-item.completed {
+      border-color: rgba(16, 185, 129, 0.3);
+      background: rgba(16, 185, 129, 0.04);
+    }
+
+    .timeline-checkbox {
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border: 2px solid rgba(148, 163, 184, 0.4);
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.7);
+      transition: all 0.2s ease;
+    }
+
+    .timeline-checkbox:checked {
+      background: #10b981;
+      border-color: #10b981;
+    }
+
+    .timeline-checkbox:checked::after {
+      content: "✓";
+      color: white;
+      font-weight: 800;
+      font-size: 14px;
+    }
+
+    .timeline-details h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 2px;
+    }
+
+    .timeline-item.completed .timeline-details h4 {
+      text-decoration: line-through;
+      color: var(--text-dim);
+    }
+
+    .timeline-details p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .timeline-meta {
+      text-align: right;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .timeline-date {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      color: #e2e8f0;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    /* Formulário do Caio */
+    .form-section {
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 20px;
+    }
+
+    .form-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #38bdf8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .question-block {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .question-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    .question-input {
+      width: 100%;
+      background: rgba(9, 13, 22, 0.7);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 8px;
+      color: #f8fafc;
+      font-family: inherit;
+      font-size: 13px;
+      padding: 10px 12px;
+      resize: vertical;
+      min-height: 60px;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+
+    .question-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-glow);
+    }
+
+    /* Actions Bar */
+    .action-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: 1px solid transparent;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: #0284c7;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #0369a1;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.8);
+      color: #e2e8f0;
+      border-color: rgba(148, 163, 184, 0.2);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(51, 65, 85, 0.9);
+      border-color: rgba(148, 163, 184, 0.4);
+    }
+
+    .btn-success {
+      background: #10b981;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #059669;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.35);
+    }
+
+    /* Code & Prompt Container */
+    .prompt-viewer {
+      background: #070a12;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 14px;
+      padding: 20px;
+      position: relative;
+    }
+
+    .prompt-content {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      max-height: 520px;
+      overflow-y: auto;
+      padding-right: 12px;
+    }
+
+    .copy-toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #10b981;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      z-index: 100;
+      animation: slideUp 0.3s ease;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* Agent Architecture Cards */
+    .agent-card {
+      border-left: 4px solid var(--primary);
+      position: relative;
+    }
+
+    .agent-card.maestro { border-left-color: #38bdf8; }
+    .agent-card.raquel { border-left-color: #f59e0b; }
+    .agent-card.demandas { border-left-color: #10b981; }
+
+    .feature-tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .feature-tag {
+      font-size: 11px;
+      background: rgba(148, 163, 184, 0.08);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Footer Note */
+    .footer-note {
+      text-align: center;
+      margin-top: 48px;
+      font-size: 12px;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border-color);
+      padding-top: 24px;
+    }
+
+    @media (max-width: 768px) {
+      .countdown-card {
+        grid-template-columns: 1fr;
+      }
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+      .countdown-timer {
+        justify-content: space-between;
+      }
+      .timer-unit {
+        min-width: unset;
+        flex: 1;
+        padding: 10px 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <div class="brand-group">
+      <div class="brand-badge">GD</div>
+      <div class="brand-text">
+        <h1>Painel de Reestruturação Operacional</h1>
+        <p>Geração Digital + Vexo OS · Automação com Agentes GoClaw</p>
+      </div>
+    </div>
+    <div>
+      <span class="status-tag">
+        <span class="status-pulse"></span>
+        Meta: 26 de Outubro (Go-Live)
+      </span>
+    </div>
+  </header>
+
+  <!-- Countdown Banner -->
+  <div class="countdown-card">
+    <div class="countdown-info">
+      <h2>🚀 Contagem Regressiva para a Nova Operação</h2>
+      <p>Data limite inegociável para a substituição dos processos manuais da antiga gestora por agentes autônomos no GoClaw.</p>
+    </div>
+    <div class="countdown-timer">
+      <div class="timer-unit">
+        <div class="timer-number" id="cd-days">00</div>
+        <div class="timer-label">Dias</div>
+      </div>
+      <div class="timer-unit">
+        <div class="timer-number" id="cd-hours">00</div>
+        <div class="timer-label">Horas</div>
+      </div>
+      <div class="timer-unit">
+        <div class="timer-number" id="cd-mins">00</div>
+        <div class="timer-label">Min</div>
+      </div>
+      <div class="timer-unit">
+        <div class="timer-number" id="cd-secs">00</div>
+        <div class="timer-label">Seg</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs Navigation -->
+  <nav class="tabs-nav">
+    <button class="tab-btn active" onclick="switchTab('cronograma')">
+      📅 Cronograma de Guerra (20 a 26/10)
+    </button>
+    <button class="tab-btn" onclick="switchTab('formulario')">
+      📋 Raio-X do Caio (Formulário)
+    </button>
+    <button class="tab-btn" onclick="switchTab('arquitetura')">
+      🤖 Arquitetura dos Agentes (GoClaw)
+    </button>
+    <button class="tab-btn" onclick="switchTab('prompt')">
+      ⚡ Prompt Mestre do COO
+    </button>
+    <button class="tab-btn" onclick="switchTab('daily')">
+      🚨 Roteiro de Daily (09h e 18h)
+    </button>
+  </nav>
+
+  <!-- TAB 1: Cronograma de Guerra -->
+  <div id="tab-cronograma" class="tab-panel active">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Checklist de Execução Diária</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+            Marque as etapas concluídas. O progresso é salvo automaticamente no seu navegador.
+          </p>
+        </div>
+        <span class="card-badge badge-blue" id="progress-badge">0 de 7 concluídos</span>
+      </div>
+
+      <div class="timeline-list" id="timeline-list"></div>
+    </div>
+  </div>
+
+  <!-- TAB 2: Formulário do Caio -->
+  <div id="tab-formulario" class="tab-panel">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Levantamento Estratégico de Operações</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+            Preencha aqui ou copie o questionário estruturado para enviar direto no WhatsApp do Caio.
+          </p>
+        </div>
+        <div class="action-bar" style="margin-bottom: 0;">
+          <button class="btn btn-success" onclick="enviarRespostasWhatsApp()">
+            📲 Enviar Respostas para o WhatsApp do Conrado
+          </button>
+          <button class="btn btn-primary" onclick="copiarPerguntasCaio()">
+            📋 Copiar Todas as Perguntas
+          </button>
+          <button class="btn btn-secondary" onclick="exportarRespostas()">
+            💾 Exportar Respostas (Markdown)
+          </button>
+        </div>
+      </div>
+
+      <div id="form-container">
+        <!-- Bloco 1 -->
+        <div class="form-section">
+          <div class="section-title">Bloco 1: O "Vácuo" da Raquel (Entrada de Cliente & Briefing)</div>
+          
+          <div class="question-block">
+            <label class="question-label">1. Quais eram as primeiras coisas que a Raquel fazia ao abrir o computador de manhã?</label>
+            <textarea class="question-input" data-id="q1" placeholder="Ex: Olhava o grupo do WhatsApp de clientes, cobrava designers no Trello, mandava bom dia..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">2. Como era feito o briefing de novos clientes? (Canal, perguntas, onde ficava salvo)</label>
+            <textarea class="question-input" data-id="q2" placeholder="Ex: Enviava um formulário no Typeform, depois marcava uma call de 30 min, salvava no Drive..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">3. O que acontecia nas primeiras 48 horas após um cliente fechar contrato?</label>
+            <textarea class="question-input" data-id="q3" placeholder="Ex: Criava grupo no WhatsApp, pedia logins do Meta Ads, cobrava identidade visual..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">4. O que ela cobrava do time interno e o que ela cobrava dos clientes?</label>
+            <textarea class="question-input" data-id="q4" placeholder="Ex: Do time cobrava prazos de criativos; do cliente cobrava aprovação de copy e acessos..."></textarea>
+          </div>
+        </div>
+
+        <!-- Bloco 2 -->
+        <div class="form-section">
+          <div class="section-title">Bloco 2: Negócio, Produtos & Organograma Atual</div>
+          
+          <div class="question-block">
+            <label class="question-label">5. O que a Geração Digital entrega hoje de concreto e como o Vexo se conecta nisso?</label>
+            <textarea class="question-input" data-id="q5" placeholder="Ex: Gestão de tráfego, automações de WhatsApp via Vexo, landing pages..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">6. Quem são as pessoas do time hoje, o cargo e a entrega semanal inegociável de cada uma?</label>
+            <textarea class="question-input" data-id="q6" placeholder="Ex: Fulano (Tráfego - subir campanhas), Ciclano (Design - 10 criativos/semana)..."></textarea>
+          </div>
+        </div>
+
+        <!-- Bloco 3 -->
+        <div class="form-section">
+          <div class="section-title">Bloco 3: Gargalos, Tarefas Repetitivas & Clientes</div>
+          
+          <div class="question-block">
+            <label class="question-label">7. Em qual etapa os projetos mais atrasam hoje? Onde a operação trava?</label>
+            <textarea class="question-input" data-id="q7" placeholder="Ex: Cliente demora 1 semana para aprovar criativo; copywriter não entrega no prazo..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">8. Quais tarefas manuais repetitivas diárias consomem tempo que uma IA faria em segundos?</label>
+            <textarea class="question-input" data-id="q8" placeholder="Ex: Lembrar cliente de mandar material, resumir reuniões, cobrar pagamento..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">9. Quais são as perguntas ou dúvidas que os clientes mais repetem no WhatsApp?</label>
+            <textarea class="question-input" data-id="q9" placeholder="Ex: Quando minha campanha começa a rodar? Onde vejo os relatórios? Cadê meu lead?"></textarea>
+          </div>
+        </div>
+
+        <!-- Bloco 4 -->
+        <div class="form-section">
+          <div class="section-title">Bloco 4: Ferramentas & Finanças</div>
+          
+          <div class="question-block">
+            <label class="question-label">10. Qual a lista exata de ferramentas e plataformas que vocês usam hoje?</label>
+            <textarea class="question-input" data-id="q10" placeholder="Ex: Trello, Google Drive, WhatsApp Evolution, Notion, Asaas..."></textarea>
+          </div>
+
+          <div class="question-block">
+            <label class="question-label">11. O que você (Caio) mais odeia fazer no operacional hoje e quer delegar para o agente?</label>
+            <textarea class="question-input" data-id="q11" placeholder="Ex: Ficar cobrando funcionário no privado, organizar briefing incompleto..."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: Arquitetura GoClaw -->
+  <div id="tab-arquitetura" class="tab-panel">
+    <div class="grid-3">
+      <div class="card agent-card maestro">
+        <div class="card-header">
+          <h3 class="card-title">1. COO de IA (Maestro)</h3>
+          <span class="card-badge badge-blue">Supervisão</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+          O general da operação. Fala direto com Conrado e Caio via Telegram ou WhatsApp. Firme, sem rodeios e cobrador de prazos.
+        </p>
+        <div style="font-size: 12px; line-height: 1.6; color: #cbd5e1;">
+          <strong>Rotinas Chave:</strong>
+          <ul style="margin-left: 18px; margin-top: 4px;">
+            <li>Check-in matinal às 09h (3 prioridades do dia)</li>
+            <li>Check-out às 18h (cobrança do que foi entregue)</li>
+            <li>Delegação automática para subagentes</li>
+          </ul>
+        </div>
+        <div class="feature-tag-list">
+          <span class="feature-tag">Memória 3-Tier</span>
+          <span class="feature-tag">Scheduler Go</span>
+          <span class="feature-tag">Canais Privados</span>
+        </div>
+      </div>
+
+      <div class="card agent-card raquel">
+        <div class="card-header">
+          <h3 class="card-title">2. A "Raquel Digital"</h3>
+          <span class="card-badge badge-amber">Execução</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+          Substituição direta da antiga gestora. Assume o onboarding e o fluxo dos clientes nas primeiras 48 horas.
+        </p>
+        <div style="font-size: 12px; line-height: 1.6; color: #cbd5e1;">
+          <strong>Rotinas Chave:</strong>
+          <ul style="margin-left: 18px; margin-top: 4px;">
+            <li>Envio de formulário de briefing guiado</li>
+            <li>Cobrança de acessos (Meta, Google, Drive)</li>
+            <li>Síntese do cliente em 1 página estruturada</li>
+          </ul>
+        </div>
+        <div class="feature-tag-list">
+          <span class="feature-tag">Onboarding 48h</span>
+          <span class="feature-tag">Extração de Briefing</span>
+          <span class="feature-tag">Google Drive Tools</span>
+        </div>
+      </div>
+
+      <div class="card agent-card demandas">
+        <div class="card-header">
+          <h3 class="card-title">3. Gestor de Demandas</h3>
+          <span class="card-badge badge-emerald">Controle</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+          Garante que nenhuma tarefa fique sem dono nem ultrapasse o prazo fatal. Cobra o time interno antes do cliente reclamar.
+        </p>
+        <div style="font-size: 12px; line-height: 1.6; color: #cbd5e1;">
+          <strong>Rotinas Chave:</strong>
+          <ul style="margin-left: 18px; margin-top: 4px;">
+            <li>Monitoramento de prazos (Trello/Notion)</li>
+            <li>Alerta de gargalos com 24h de antecedência</li>
+            <li>FAQ e respostas rápidas para clientes</li>
+          </ul>
+        </div>
+        <div class="feature-tag-list">
+          <span class="feature-tag">Zero Atrasos</span>
+          <span class="feature-tag">Cron Lane</span>
+          <span class="feature-tag">Notificações Push</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: Prompt Mestre -->
+  <div id="tab-prompt" class="tab-panel">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Instruções do Sistema (System Prompt) para o GoClaw</h3>
+          <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+            Este prompt configura a personalidade firme, o raciocínio operacional e as regras de cobrança do Agente Maestro.
+          </p>
+        </div>
+        <button class="btn btn-primary" onclick="copiarPromptMestre()">
+          ⚡ Copiar Prompt Completo
+        </button>
+      </div>
+
+      <div class="prompt-viewer">
+        <pre class="prompt-content" id="prompt-text">Você é o COO (Chief Operating Officer) e Diretor de Operações de IA da GERAÇÃO DIGITAL e da VEXO.
+Você trabalha diretamente com os sócios (Conrado e Caio). Seu papel não é ser assistente bonzinho, não é passar a mão na cabeça e nem comemorar planos no papel.
+Seu trabalho é fazer essa empresa rodar com disciplina militar, processos claros, previsibilidade de receita e execução implacável.
+
+=== PERFIL E POSTURA ===
+1. FIRME, RESPONSÁVEL E REALISTA: Trate os sócios e o time como adultos em um negócio de alta performance. Zero bajulação. Sem "ótima ideia", "parabéns pelo ponto" ou adjetivos vazios. Vá direto ao fato.
+2. COBRE RESULTADOS E PRAZOS: Se uma tarefa foi combinada para ontem e não foi feita, aponte o erro, mostre o impacto e exija uma nova data de entrega.
+3. SEMPRE BASEADO EM FATOS: Você não inventa números, não cria ilusões de faturamento e não recomenda ferramentas mágicas sem utilidade prática.
+4. LEALDADE TOTAL AO SUCESSO DO NEGÓCIO: Diga o que precisa ser dito, mesmo que doa ouvir. Onde a operação for amadora ou desorganizada, diga explicitamente: "Isso está amador e custando dinheiro; vamos arrumar assim: [solução]".
+
+=== SUAS RESPONSABILIDADES DIÁRIAS ===
+1. GESTÃO DE PROCESSOS E JORNADA DO CLIENTE:
+   - Garantir que nenhum cliente fique sem onboarding imediato nas primeiras 24 horas.
+   - Gerar briefings claros a partir das respostas dos clientes.
+   - Padronizar entregáveis repetitivos para execução via automação ou time operacional.
+2. DELEGAÇÃO E ORGANOGRAMA:
+   - Ter clareza absoluta de quem faz o quê no time (Geração Digital e Vexo).
+   - Não permitir sobreposição de funções nem tarefas sem dono ("tarefa de todo mundo é tarefa de ninguém").
+3. SUPERVISÃO E COBRANÇA (ROTINA DE OPERAÇÃO):
+   - Check-in Matinal (09h00): Definir com os sócios as 3 prioridades inegociáveis do dia.
+   - Check-out Vespertino (18h00): Cobrar o que foi entregue, listar o que ficou travado e definir a correção para o dia seguinte.
+
+=== REGRAS DE INTERAÇÃO (COMO VOCÊ TRABALHA) ===
+- Se receber um problema confuso: Faça 1 ou 2 perguntas cirúrgicas para entender a causa real antes de opinar.
+- Se receber uma demanda de briefing ou cliente novo: Estruture a entrega em:
+  1. O que o cliente quer (Objetivo real de negócio)
+  2. Entregáveis necessários e quem é o responsável interno
+  3. Prazo fatal de entrega
+  4. Riscos de atraso e como neutralizar
+- Se for solicitado a opinar sobre equipe ou contratações: Analise carga de trabalho real, números de entrega e produtividade antes de sugerir aumentar custo de folha.
+
+=== PRIMEIRA MISSÃO (FASE DE SETUP - ATÉ 26 DE OUTUBRO) ===
+Seu objetivo nesta primeira interação é consolidar o Raio-X do Caio e do Conrado:
+1. Colete ou leia o documento de respostas do Caio sobre a saída da Raquel e a rotina da Geração Digital + Vexo.
+2. Devolva uma Síntese Operacional com:
+   - Gargalos imediatos da semana
+   - Fluxo de Onboarding desenhado passo a passo (substituindo 100% o trabalho manual da antiga gestora)
+   - Organograma enxuto de responsabilidades
+   - As 3 automações que devem ser ligadas primeiro para estarmos operando na segunda-feira (26/10).
+
+Quando você estiver pronto, abra a conversa com:
+"COO de Operações ativo para Geração Digital & Vexo. Sem floreios. Suba as informações do Caio ou me diga o que está travado agora para montarmos o plano de ataque para segunda-feira."</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: Daily Routine -->
+  <div id="tab-daily" class="tab-panel">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">☀️ Check-in Matinal (09h00)</h3>
+          <span class="card-badge badge-blue">Abertura do Dia</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+          Mensagem que o Agente Maestro enviará para Conrado & Caio todos os dias para balizar a operação:
+        </p>
+
+        <div style="background: rgba(9, 13, 22, 0.7); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; color: #e2e8f0;">
+          <strong>[DAILY GERAÇÃO DIGITAL & VEXO · 09:00]</strong><br><br>
+          Bom dia, time. Direto ao ponto:<br>
+          1. Quais são as <strong>3 entregas inegociáveis</strong> que precisam estar prontas até as 18h hoje?<br>
+          2. Algum cliente está esperando resposta ou material com prazo estourado?<br>
+          3. O que está travando o time que precisa de decisão minha ou dos sócios agora?<br><br>
+          <em>(Respondam em tópicos para eu travar a pauta do dia.)</em>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">🌙 Check-out Vespertino (18h00)</h3>
+          <span class="card-badge badge-amber">Fechamento & Cobrança</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+          Auditoria de entregas para não deixar tarefa atrasada sem explicação:
+        </p>
+
+        <div style="background: rgba(9, 13, 22, 0.7); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.6; color: #e2e8f0;">
+          <strong>[FECHAMENTO DO DIA · 18:00]</strong><br><br>
+          Prestação de contas do dia:<br>
+          1. As 3 prioridades acordadas às 09h foram 100% entregues? (Sim / Não / Parcial)<br>
+          2. Se algo não foi entregue: quem travou e qual o novo prazo fatal?<br>
+          3. Quais clientes novos entraram hoje que precisam de onboarding amanhã?<br><br>
+          <em>(Sem desculpas: o que não rodou hoje vai encabeçar a fila de amanhã.)</em>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    Painel de Gestão Operacional · Projeto Paralelo GoClaw · Salvo localmente para Conrado & Caio
+  </div>
+
+</div>
+
+<div id="toast" class="copy-toast">
+  <span>✓</span>
+  <span id="toast-msg">Copiado com sucesso!</span>
+</div>
+
+<script>
+  const targetDate = new Date('2026-10-26T09:00:00-03:00').getTime();
+
+  function updateCountdown() {
+    const now = new Date().getTime();
+    const distance = targetDate - now;
+
+    if (distance <= 0) {
+      document.getElementById('cd-days').innerText = '00';
+      document.getElementById('cd-hours').innerText = '00';
+      document.getElementById('cd-mins').innerText = '00';
+      document.getElementById('cd-secs').innerText = '00';
+      return;
+    }
+
+    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+    document.getElementById('cd-days').innerText = String(days).padStart(2, '0');
+    document.getElementById('cd-hours').innerText = String(hours).padStart(2, '0');
+    document.getElementById('cd-mins').innerText = String(minutes).padStart(2, '0');
+    document.getElementById('cd-secs').innerText = String(seconds).padStart(2, '0');
+  }
+
+  setInterval(updateCountdown, 1000);
+  updateCountdown();
+
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+    event.currentTarget.classList.add('active');
+    document.getElementById('tab-' + tabId).classList.add('active');
+  }
+
+  const timelineSteps = [
+    { id: 'step1', date: '20/10 (Ter)', title: 'Disparo do Raio-X Operacional', desc: 'Conrado envia o questionário de 11 perguntas estratégicas para o Caio preencher.', resp: 'Conrado' },
+    { id: 'step2', date: '21/10 (Qua)', title: 'Consolidação das Respostas do Caio', desc: 'Recebimento das dores, rotinas da Raquel e produtos da Geração Digital + Vexo.', resp: 'Caio & Conrado' },
+    { id: 'step3', date: '22/10 (Qui)', title: 'Instalação do GoClaw & Configuração de Canal', desc: 'Subir o binário do GoClaw e conectar canal de comunicação (Telegram/WhatsApp).', resp: 'Conrado / Dev' },
+    { id: 'step4', date: '23/10 (Sex)', title: 'Injeção de Memória & Primeiro Teste do COO', desc: 'Carregar as respostas do Caio como documento permanente e rodar primeira entrevista.', resp: 'Sócios + IA' },
+    { id: 'step5', date: '24/10 (Sáb)', title: 'Fluxo Automatizado de Onboarding (Raquel Digital)', desc: 'Testar coleta automática de briefing de cliente novo e envio de pasta no Drive.', resp: 'Técnico' },
+    { id: 'step6', date: '25/10 (Dom)', title: 'Simulação Geral da Rotina de Segunda-Feira', desc: 'Testar o Check-in matinal das 09h e a distribuição de tarefas sem erro humano.', resp: 'Sócios' },
+    { id: 'step7', date: '26/10 (Seg)', title: 'GO-LIVE OFICIAL: Abertura da Nova Gestão', desc: 'Transição 100% concluída. O agente assume a cobrança diária da empresa.', resp: 'Toda a Empresa' }
+  ];
+
+  function renderTimeline() {
+    const container = document.getElementById('timeline-list');
+    const saved = JSON.parse(localStorage.getItem('goclaw_timeline_state') || '{}');
+    let completedCount = 0;
+
+    container.innerHTML = timelineSteps.map(step => {
+      const isDone = !!saved[step.id];
+      if (isDone) completedCount++;
+
+      return `
+        <div class="timeline-item ${isDone ? 'completed' : ''}" id="item-${step.id}">
+          <input type="checkbox" class="timeline-checkbox" id="${step.id}" ${isDone ? 'checked' : ''} onchange="toggleStep('${step.id}')">
+          <div class="timeline-details">
+            <h4>${step.title}</h4>
+            <p>${step.desc}</p>
+          </div>
+          <div class="timeline-meta">
+            <span class="timeline-date">${step.date}</span>
+            <span>Resp: ${step.resp}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    document.getElementById('progress-badge').innerText = `${completedCount} de ${timelineSteps.length} concluídos`;
+  }
+
+  function toggleStep(id) {
+    const saved = JSON.parse(localStorage.getItem('goclaw_timeline_state') || '{}');
+    saved[id] = !saved[id];
+    localStorage.setItem('goclaw_timeline_state', JSON.stringify(saved));
+    renderTimeline();
+  }
+
+  renderTimeline();
+
+  const formInputs = document.querySelectorAll('.question-input');
+  const savedForm = JSON.parse(localStorage.getItem('goclaw_caio_form') || '{}');
+
+  formInputs.forEach(input => {
+    const id = input.getAttribute('data-id');
+    if (savedForm[id]) input.value = savedForm[id];
+
+    input.addEventListener('input', () => {
+      savedForm[id] = input.value;
+      localStorage.setItem('goclaw_caio_form', JSON.stringify(savedForm));
+    });
+  });
+
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    document.getElementById('toast-msg').innerText = msg;
+    toast.style.display = 'flex';
+    setTimeout(() => {
+      toast.style.display = 'none';
+    }, 2800);
+  }
+
+  function copiarPromptMestre() {
+    const text = document.getElementById('prompt-text').innerText;
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Prompt do COO copiado com sucesso!');
+    });
+  }
+
+  function copiarPerguntasCaio() {
+    const perguntas = `📋 *RAIO-X OPERACIONAL: GERAÇÃO DIGITAL & VEXO*
+(Fala Caio! Seguem as perguntas para mapearmos tudo o que a Raquel fazia e como vamos automatizar as cobranças e o onboarding dos clientes no novo sistema. Seja 100% sincero!)
+
+*Bloco 1: O "Vácuo" da Raquel (Operação Diária)*
+1. O que a Raquel fazia logo cedo ao abrir o computador?
+2. Como era feito o briefing de clientes novos? (Canal, perguntas, onde salvava)
+3. O que acontecia nas primeiras 48h após um cliente fechar contrato?
+4. O que ela cobrava do time interno e o que ela cobrava dos clientes?
+
+*Bloco 2: Negócio & Organograma*
+5. O que a Geração Digital entrega hoje e como o Vexo se conecta nisso?
+6. Quem são as pessoas do time hoje, o cargo e a entrega semanal inegociável de cada uma?
+
+*Bloco 3: Gargalos & Clientes*
+7. Onde a operação mais trava hoje? O que mais atrasa entrega?
+8. Quais tarefas repetitivas diárias você sente que uma IA faria em segundos?
+9. Quais são as perguntas/dúvidas que os clientes mais repetem no WhatsApp?
+
+*Bloco 4: Ferramentas & Dores*
+10. Qual a lista exata de ferramentas e plataformas usadas hoje?
+11. O que você mais odeia fazer no operacional hoje e quer delegar para a IA assumir?`;
+
+    navigator.clipboard.writeText(perguntas).then(() => {
+      showToast('Questionário formatado copiado! Pode colar no WhatsApp do Caio.');
+    });
+  }
+
+  function exportarRespostas() {
+    let md = `# Respostas do Raio-X Operacional · Geração Digital & Vexo\n\n`;
+    document.querySelectorAll('.question-block').forEach(q => {
+      const label = q.querySelector('.question-label').innerText;
+      const val = q.querySelector('.question-input').value.trim() || '*(Não respondido ainda)*';
+      md += `### ${label}\n${val}\n\n`;
+    });
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'raio_x_operacional_caio.md';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Arquivo Markdown baixado com sucesso!');
+  }
+
+  function enviarRespostasWhatsApp() {
+    let msg = "*RESPOSTAS DO RAIO-X OPERACIONAL (CAIO)*\n\n";
+    document.querySelectorAll('.question-block').forEach((q, i) => {
+      const label = q.querySelector('.question-label').innerText;
+      const val = q.querySelector('.question-input').value.trim() || '*(Não respondido)*';
+      msg += `*${label}*\n${val}\n\n`;
+    });
+    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+  }
+</script>
+
+</body>
+</html>
