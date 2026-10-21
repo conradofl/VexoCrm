@@ -19,6 +19,7 @@ import { normalizeString } from "../textNormalize.js";
 export const EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS = { cold: 50, warm: 500 };
 
 let _evolutionDailyUsageSchemaEnsured = false;
+let _ensurePromise = null;
 let _customPool = null;
 
 export function setChipQuotaDbPool(pool) {
@@ -30,6 +31,7 @@ const ENSURE_RETRY_BACKOFF_MS = 60_000;
 
 export function resetChipQuotaStateForTest() {
   _evolutionDailyUsageSchemaEnsured = false;
+  _ensurePromise = null;
   _ensureRetryAfter = 0;
   _customPool = null;
 }
@@ -78,18 +80,37 @@ export async function ensureEvolutionInstanceDailyUsageTable(pool = null) {
   const db = getDb(pool);
   if (!db) return false;
   if (_evolutionDailyUsageSchemaEnsured) return true;
-  await db.query(CREATE_USAGE_TABLE_SQL);
-  // sem .catch: se a conversão falhar, o erro aparece — engoli-lo deixou a tabela em UUID por meses em alguns bancos
-  await db.query(CONVERGE_USAGE_INSTANCE_ID_SQL);
-  _evolutionDailyUsageSchemaEnsured = true;
-  return true;
+  if (Date.now() < _ensureRetryAfter) return false;
+
+  if (_ensurePromise) {
+    return _ensurePromise;
+  }
+
+  _ensurePromise = (async () => {
+    try {
+      await db.query(CREATE_USAGE_TABLE_SQL);
+      // sem .catch: se a conversão falhar, o erro aparece — engoli-lo deixou a tabela em UUID por meses em alguns bancos
+      await db.query(CONVERGE_USAGE_INSTANCE_ID_SQL);
+      _evolutionDailyUsageSchemaEnsured = true;
+      return true;
+    } catch (err) {
+      _ensureRetryAfter = Date.now() + ENSURE_RETRY_BACKOFF_MS;
+      throw err;
+    } finally {
+      _ensurePromise = null;
+    }
+  })();
+
+  return _ensurePromise;
 }
+
+export const ensureEvolutionInstanceDailyUsableTable = ensureEvolutionInstanceDailyUsageTable;
 
 // Quem LÊ ou ESCREVE a cota não pode depender de a conversão de schema ter dado certo: ela é DDL (precisa de permissão
 // e de lock) e pode falhar (foi o que aconteceu: FK). Tenta garantir a tabela, registra a falha e SEGUE — as consultas
 // abaixo funcionam com a coluna em uuid ou em text. Depois de uma falha só tenta de novo após o backoff, para não
 // disparar DDL com lock exclusivo a cada mensagem.
-async function ensureTolerant(db) {
+export async function ensureTolerant(db) {
   if (_evolutionDailyUsageSchemaEnsured) return true;
   if (Date.now() < _ensureRetryAfter) return false;
   try {
