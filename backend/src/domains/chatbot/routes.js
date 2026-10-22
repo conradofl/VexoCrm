@@ -2731,11 +2731,12 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     const rawInstanceName = body.instance || body.instanceName || req.query.instanceName || req.query.instance || null;
-    const { canonicalName: resolvedInstanceName } = await resolveInstanceIdentifier({
+    const { canonicalName, chip: matchedChip } = await resolveInstanceIdentifier({
       clientId,
       identifier: rawInstanceName,
       pool: pgDatabasePool,
     });
+    const resolvedInstanceName = matchedChip ? canonicalName : null;
     const instanceName = resolvedInstanceName || rawInstanceName;
 
     const fromMe = isFromMe(body);
@@ -3294,14 +3295,22 @@ export function registerChatbotRoutes(app, deps) {
             return;
           }
 
-          // Enviar resposta via Evolution
-          // Resolve pelo chip que RECEBEU a mensagem; sem identificar, cai no default
-          // do tenant. Antes usava so o default (resolveDispatchWebhookSettings), que
-          // ignora de qual numero veio a conversa — a IA gerava a resposta e o envio
-          // abortava, com lead real em silencio.
-          const dispatchSettings = await resolveInboundDispatchSettings({ clientId, instanceName });
+          // Bloco 3: Nunca responder por chip diferente do que recebeu.
+          // Quando resolvedInstanceName existir, é ele e ponto.
+          // Quando NÃO existir: NÃO responder e registrar erro com o identificador recebido.
+          const targetInstance = resolvedInstanceName;
+          if (!targetInstance) {
+            console.error("[chatbot] resposta NAO enviada: instancia_nao_reconhecida", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              identificadorRecebido: rawInstanceName || null,
+              motivo: "instancia_nao_reconhecida",
+            });
+            return;
+          }
+
+          const dispatchSettings = await resolveInboundDispatchSettings({ clientId, instanceName: targetInstance });
           const { webhookUrl: evolutionUrl, webhookToken: evolutionToken } = dispatchSettings;
-          const targetInstance = resolvedInstanceName || dispatchSettings.instanceName || instanceName || null;
 
           if (!evolutionUrl) {
             // Nunca falhar em silencio: o log diz QUAIS fontes foram consultadas e o
