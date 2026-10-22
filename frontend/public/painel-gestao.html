@@ -742,10 +742,10 @@
       <div id="form-container">
         <!-- Bloco 1 -->
         <div class="form-section">
-          <div class="section-title">Bloco 1: O "Vácuo" da Raquel (Entrada de Cliente & Briefing)</div>
+          <div class="section-title">Bloco 1: Gestão Operacional & Onboarding (Entrada de Cliente & Briefing)</div>
           
           <div class="question-block">
-            <label class="question-label">1. Quais eram as primeiras coisas que a Raquel fazia ao abrir o computador de manhã?</label>
+            <label class="question-label">1. Quais eram as primeiras coisas que a gestão anterior fazia ao abrir o computador de manhã?</label>
             <textarea class="question-input" data-id="q1" placeholder="Ex: Olhava o grupo do WhatsApp de clientes, cobrava designers no Trello, mandava bom dia..."></textarea>
           </div>
 
@@ -760,7 +760,7 @@
           </div>
 
           <div class="question-block">
-            <label class="question-label">4. O que ela cobrava do time interno e o que ela cobrava dos clientes?</label>
+            <label class="question-label">4. O que a gestão anterior cobrava do time interno e o que cobrava dos clientes?</label>
             <textarea class="question-input" data-id="q4" placeholder="Ex: Do time cobrava prazos de criativos; do cliente cobrava aprovação de copy e acessos..."></textarea>
           </div>
         </div>
@@ -815,6 +815,15 @@
           </div>
         </div>
       </div>
+
+      <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap;">
+        <button class="btn btn-secondary" onclick="exportarRespostas()">
+          💾 Exportar Respostas (Markdown)
+        </button>
+        <button class="btn btn-success" onclick="enviarRespostasWhatsApp()">
+          📲 Enviar Respostas para o WhatsApp do Conrado
+        </button>
+      </div>
     </div>
   </div>
 
@@ -846,11 +855,11 @@
 
       <div class="card agent-card raquel">
         <div class="card-header">
-          <h3 class="card-title">2. A "Raquel Digital"</h3>
+          <h3 class="card-title">2. Gestor Digital</h3>
           <span class="card-badge badge-amber">Execução</span>
         </div>
         <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-          Substituição direta da antiga gestora. Assume o onboarding e o fluxo dos clientes nas primeiras 48 horas.
+          Gestão autônoma de operações. Assume o onboarding e o fluxo dos clientes nas primeiras 48 horas.
         </p>
         <div style="font-size: 12px; line-height: 1.6; color: #cbd5e1;">
           <strong>Rotinas Chave:</strong>
@@ -887,6 +896,21 @@
           <span class="feature-tag">Zero Atrasos</span>
           <span class="feature-tag">Cron Lane</span>
           <span class="feature-tag">Notificações Push</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Estrutura Técnica do GoClaw -->
+    <div class="card" style="margin-top: 24px;">
+      <h3 class="card-title" style="margin-bottom: 12px;">Por que o GoClaw é a escolha certa para este projeto paralelo?</h3>
+      <div class="grid-2" style="font-size: 13px; color: var(--text-muted); line-height: 1.6;">
+        <div>
+          <strong style="color: #f8fafc; display: block; margin-bottom: 4px;">1. Binário Único em Go (Ultra Leve & Rápido)</strong>
+          Não depende de Node.js pesado (<code>node_modules</code>) nem ambientes Python frágeis. Roda com baixíssimo consumo de memória e latência mínima.
+        </div>
+        <div>
+          <strong style="color: #f8fafc; display: block; margin-bottom: 4px;">2. Concorrência Nativa com Lanes</strong>
+          Permite que o COO converse com você no Telegram enquanto um subagente coleta briefing de um cliente no WhatsApp simultaneamente sem travar.
         </div>
       </div>
     </div>
@@ -941,7 +965,7 @@ Seu trabalho é fazer essa empresa rodar com disciplina militar, processos claro
 
 === PRIMEIRA MISSÃO (FASE DE SETUP - ATÉ 26 DE OUTUBRO) ===
 Seu objetivo nesta primeira interação é consolidar o Raio-X do Caio e do Conrado:
-1. Colete ou leia o documento de respostas do Caio sobre a saída da Raquel e a rotina da Geração Digital + Vexo.
+1. Colete ou leia o documento de respostas do Caio sobre a saída da gestora anterior e a rotina da Geração Digital + Vexo.
 2. Devolva uma Síntese Operacional com:
    - Gargalos imediatos da semana
    - Fluxo de Onboarding desenhado passo a passo (substituindo 100% o trabalho manual da antiga gestora)
@@ -1047,10 +1071,10 @@ Quando você estiver pronto, abra a conversa com:
 
   const timelineSteps = [
     { id: 'step1', date: '20/10 (Ter)', title: 'Disparo do Raio-X Operacional', desc: 'Conrado envia o questionário de 11 perguntas estratégicas para o Caio preencher.', resp: 'Conrado' },
-    { id: 'step2', date: '21/10 (Qua)', title: 'Consolidação das Respostas do Caio', desc: 'Recebimento das dores, rotinas da Raquel e produtos da Geração Digital + Vexo.', resp: 'Caio & Conrado' },
+    { id: 'step2', date: '21/10 (Qua)', title: 'Consolidação das Respostas do Caio', desc: 'Recebimento das dores, rotinas da operação anterior e produtos da Geração Digital + Vexo.', resp: 'Caio & Conrado' },
     { id: 'step3', date: '22/10 (Qui)', title: 'Instalação do GoClaw & Configuração de Canal', desc: 'Subir o binário do GoClaw e conectar canal de comunicação (Telegram/WhatsApp).', resp: 'Conrado / Dev' },
     { id: 'step4', date: '23/10 (Sex)', title: 'Injeção de Memória & Primeiro Teste do COO', desc: 'Carregar as respostas do Caio como documento permanente e rodar primeira entrevista.', resp: 'Sócios + IA' },
-    { id: 'step5', date: '24/10 (Sáb)', title: 'Fluxo Automatizado de Onboarding (Raquel Digital)', desc: 'Testar coleta automática de briefing de cliente novo e envio de pasta no Drive.', resp: 'Técnico' },
+    { id: 'step5', date: '24/10 (Sáb)', title: 'Fluxo Automatizado de Onboarding (Gestor Digital)', desc: 'Testar coleta automática de briefing de cliente novo e envio de pasta no Drive.', resp: 'Técnico' },
     { id: 'step6', date: '25/10 (Dom)', title: 'Simulação Geral da Rotina de Segunda-Feira', desc: 'Testar o Check-in matinal das 09h e a distribuição de tarefas sem erro humano.', resp: 'Sócios' },
     { id: 'step7', date: '26/10 (Seg)', title: 'GO-LIVE OFICIAL: Abertura da Nova Gestão', desc: 'Transição 100% concluída. O agente assume a cobrança diária da empresa.', resp: 'Toda a Empresa' }
   ];
@@ -1122,13 +1146,13 @@ Quando você estiver pronto, abra a conversa com:
 
   function copiarPerguntasCaio() {
     const perguntas = `📋 *RAIO-X OPERACIONAL: GERAÇÃO DIGITAL & VEXO*
-(Fala Caio! Seguem as perguntas para mapearmos tudo o que a Raquel fazia e como vamos automatizar as cobranças e o onboarding dos clientes no novo sistema. Seja 100% sincero!)
+(Fala Caio! Seguem as perguntas para mapearmos tudo o que a gestão anterior fazia e como vamos automatizar as cobranças e o onboarding dos clientes no novo sistema. Seja 100% sincero!)
 
-*Bloco 1: O "Vácuo" da Raquel (Operação Diária)*
-1. O que a Raquel fazia logo cedo ao abrir o computador?
+*Bloco 1: Gestão Operacional & Onboarding (Operação Diária)*
+1. Quais eram as primeiras coisas que a gestão anterior fazia logo cedo ao abrir o computador?
 2. Como era feito o briefing de clientes novos? (Canal, perguntas, onde salvava)
 3. O que acontecia nas primeiras 48h após um cliente fechar contrato?
-4. O que ela cobrava do time interno e o que ela cobrava dos clientes?
+4. O que a gestão anterior cobrava do time interno e o que cobrava dos clientes?
 
 *Bloco 2: Negócio & Organograma*
 5. O que a Geração Digital entrega hoje e como o Vexo se conecta nisso?
@@ -1167,14 +1191,19 @@ Quando você estiver pronto, abra a conversa com:
   }
 
   function enviarRespostasWhatsApp() {
-    let msg = "*RESPOSTAS DO RAIO-X OPERACIONAL (CAIO)*\n\n";
+    let msg = "📋 *RESPOSTAS DO RAIO-X OPERACIONAL (CAIO)*\n";
+    msg += "_Geração Digital & Vexo OS_\n\n";
+    let preenchidas = 0;
     document.querySelectorAll('.question-block').forEach((q, i) => {
       const label = q.querySelector('.question-label').innerText;
-      const val = q.querySelector('.question-input').value.trim() || '*(Não respondido)*';
-      msg += `*${label}*\n${val}\n\n`;
+      const val = q.querySelector('.question-input').value.trim();
+      if (val) preenchidas++;
+      msg += `*${label}*\n${val || '*(Não respondido)*'}\n\n`;
     });
-    const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+    const conradoPhone = '5534991751267';
+    const url = `https://wa.me/${conradoPhone}?text=${encodeURIComponent(msg)}`;
     window.open(url, '_blank');
+    showToast('Abrindo WhatsApp do Conrado...');
   }
 </script>
 
