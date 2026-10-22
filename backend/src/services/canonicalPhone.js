@@ -64,6 +64,27 @@ export function toCanonicalPhone(raw) {
 }
 
 /**
+ * Normaliza um telefone ou JID do WhatsApp para o formato canônico brasileiro.
+ * Remove o sufixo de JID de telefone individual (@s.whatsapp.net, @c.us) ANTES de
+ * canonicalizar para garantir que tanto o JID quanto o telefone cru convirjam
+ * para a mesma chave canônica.
+ *
+ * JIDs de grupos (@g.us) e identificadores @lid NÃO são telefones:
+ * são preservados sem passar pela canonicalização de dígitos.
+ */
+export function toCanonicalPhoneFromJid(raw) {
+  if (raw === null || raw === undefined) return "";
+  const s = String(raw).trim();
+  if (!s) return "";
+  const lower = s.toLowerCase();
+  if (lower.includes("@g.us") || lower.includes("@lid")) {
+    return s;
+  }
+  const stripped = s.replace(/@(s\.whatsapp\.net|c\.us)$/i, "");
+  return toCanonicalPhone(stripped) || stripped;
+}
+
+/**
  * Espelha em JavaScript o padrão `col = $x OR SQL_CANONICAL_PHONE(col) =
  * SQL_CANONICAL_PHONE($x)` já usado em domains/chatbot/routes.js:955 e em
  * buildMessageEffectivenessSql (campaigns/routes.js) pro EXISTS de

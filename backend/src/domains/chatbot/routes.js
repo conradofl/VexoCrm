@@ -3301,6 +3301,7 @@ export function registerChatbotRoutes(app, deps) {
           // abortava, com lead real em silencio.
           const dispatchSettings = await resolveInboundDispatchSettings({ clientId, instanceName });
           const { webhookUrl: evolutionUrl, webhookToken: evolutionToken } = dispatchSettings;
+          const targetInstance = resolvedInstanceName || dispatchSettings.instanceName || instanceName || null;
 
           if (!evolutionUrl) {
             // Nunca falhar em silencio: o log diz QUAIS fontes foram consultadas e o
@@ -3355,7 +3356,6 @@ export function registerChatbotRoutes(app, deps) {
 
             if (speech?.base64) {
               try {
-                const targetInstance = resolvedInstanceName || dispatchSettings.instanceName || instanceName;
                 const evoBaseUrl = normalizeHttpUrl(process.env.EVOLUTION_API_URL) || (evolutionUrl ? new URL(evolutionUrl).origin : null);
                 const voiceRes = await sendMediaMessageViaEvolution({
                   instanceName: targetInstance,
@@ -3439,7 +3439,7 @@ export function registerChatbotRoutes(app, deps) {
               isVoice: sentViaVoice,
               voiceId: sentViaVoice ? voiceId : null,
             },
-            instanceName,
+            instanceName: targetInstance,
             waMessageId: outboundWaId,
             messageTimestamp: new Date().toISOString(),
           });
@@ -3622,7 +3622,9 @@ export function registerChatbotRoutes(app, deps) {
         } catch (err) {
           console.error("[chatbot-webhook] processBatch error:", err.message);
         }
-      });
+      },
+      resolvedInstanceName || "sem-instancia"
+    );
     });
   /**
    * POST /api/chatbot-test — endpoint síncrono para simulador de conversa no painel

@@ -21,6 +21,7 @@ import { maskPhoneForLog } from "./services/tenant.js";
 import { resolveEvolutionInstanceOwner, fetchMediaBase64FromEvolution } from "./services/evolution.js";
 import { saveMediaBuffer } from "./services/storage.js";
 import { findRagContextForQuestion, buildRagContextBlock, DEFAULT_RAG_TRANSFER_MESSAGE } from "./rag/chatSearch.js";
+import { toCanonicalPhoneFromJid } from "./services/canonicalPhone.js";
 
 /**
  * Chatbot AI Engine
@@ -29,8 +30,9 @@ import { findRagContextForQuestion, buildRagContextBlock, DEFAULT_RAG_TRANSFER_M
  */
 
 // ─── Buffer in-memory ──────────────────────────────────────────────────────
-// Map: `${clientId}:${phone}` → { messages: [], timer, token }
+// Map: `${clientId}:${instanceKey}:${canonicalPhone}` → { messages: [], timer, token }
 const messageBuffers = new Map();
+export { messageBuffers as _messageBuffersForTest };
 const BUFFER_DELAY_MS = 3000;
 
 // ─── Configuração de Provedores e Modelos de LLM ────────────────────────────
@@ -465,9 +467,24 @@ export async function isFirstCampaignReply({ itemId, campaignId, supabase }) {
  * Adiciona mensagem ao buffer e agenda processamento após BUFFER_DELAY_MS.
  * Se chegar nova mensagem antes do timer, o timer anterior é cancelado.
  * Retorna uma Promise que resolve quando o buffer for processado (ou null se descartado).
+ *
+ * Chave de buffer isolada por chip e telefone canônico:
+ * `${clientId}:${instancia}:${telefoneCanonico}`
+ * - O telefone é canonicalizado via toCanonicalPhoneFromJid (remove @s.whatsapp.net/@c.us
+ *   e normaliza formato brasileiro; @g.us e @lid são preservados).
+ * - A instância é o nome técnico resolvido (canonicalName) ou marcador explícito "sem-instancia".
  */
-export function bufferMessage(clientId, phone, messageData, onProcess) {
-  const key = `${clientId}:${phone}`;
+export function bufferMessage(clientId, phone, messageData, onProcess, instanceName = null) {
+  const canonicalPhone = toCanonicalPhoneFromJid(phone);
+  const rawInstance = (
+    instanceName ||
+    messageData?.instanceName ||
+    messageData?.instance ||
+    ""
+  );
+  const normalizedInstance = typeof rawInstance === "string" ? rawInstance.trim() : "";
+  const instanceKey = normalizedInstance || "sem-instancia";
+  const key = `${clientId}:${instanceKey}:${canonicalPhone}`;
   const existing = messageBuffers.get(key) || { messages: [], timer: null, token: 0 };
 
   if (existing.timer) clearTimeout(existing.timer);
