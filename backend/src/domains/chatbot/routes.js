@@ -2782,6 +2782,8 @@ export function registerChatbotRoutes(app, deps) {
           messageType: messageData.type || null,
           transcribed: messageData.transcribed === true,
           described: messageData.described === true,
+          // imagem do lead que o robô não viu (leitura desligada ou provedor falhou) — para quem atende saber
+          imageUnseen: messageData.imageUnseen === true,
           fromMe,
         },
         instanceName,

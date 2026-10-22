@@ -671,7 +671,26 @@ export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
 
 export const IMAGE_DESCRIPTION_TIMEOUT_MS = Number(process.env.IMAGE_DESCRIPTION_TIMEOUT_MS || 10000);
 
+// Leitura de imagem pelo agente DESLIGADA por padrão desde 22/10/2026: a conta Groq não tem mais nenhum modelo que
+// aceite imagem (/models devolve só texto, voz, moderação e transcrição), e describeImage falhava em silêncio — o lead
+// mandava foto e o robô respondia como se nada tivesse chegado. Mesmo desenho do VOICE_REPLY_AVAILABLE (EdgeTTS, 12/10):
+// uma chave, o caminho inteiro de pé. Religar = IMAGE_UNDERSTANDING_ENABLED=true, quando houver provedor de visão.
+// (Exibir a imagem nas Conversas NÃO depende disto: aquele caminho só baixa da Evolution e mostra.)
+export const IMAGE_UNDERSTANDING_AVAILABLE = String(process.env.IMAGE_UNDERSTANDING_ENABLED || "").trim().toLowerCase() === "true";
+
+// Marcador gravado no lugar da descrição quando o robô não viu a imagem: fica no histórico para quem atende saber,
+// e nunca vai para a IA como se fosse texto digitado pelo lead.
+export const IMAGE_UNSEEN_MARKER = "[imagem não visualizada]";
+
+// ⚠️ PROVISÓRIO — o texto definitivo é decisão do dono. Resposta quando o lead manda SÓ imagem e o robô não a viu.
+export const IMAGE_UNSEEN_REPLY = "Recebi sua imagem, mas ainda não consigo visualizar por aqui — me conta em palavras o que é?";
+
+// Quando a imagem veio junto com texto (legenda ou outra mensagem), a IA responde ao texto e é avisada disto.
+const IMAGE_UNSEEN_HINT_FOR_LLM =
+  "[O lead também enviou uma imagem que você NÃO consegue visualizar. Não descreva nem suponha o conteúdo dela; se for relevante, peça para ele contar em palavras.]";
+
 export async function describeImage(base64Data, mimetype = "image/jpeg", caption = "") {
+  if (!IMAGE_UNDERSTANDING_AVAILABLE) return null;
   if (!groqKey()) return null;
 
   const startMs = Date.now();
@@ -873,7 +892,7 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
 
   if (type === "image") {
     const effectiveMime = mimetype || "image/jpeg";
-    if (mediaBase64 && !isGroup && !fromMe) {
+    if (mediaBase64 && !isGroup && !fromMe && IMAGE_UNDERSTANDING_AVAILABLE) {
       const description = await describeImage(mediaBase64, effectiveMime, caption);
       if (description) {
         return {
@@ -890,15 +909,20 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
         };
       }
     }
-    const text = caption || "[Imagem]";
+    // Não descrita (leitura desligada ou provedor falhou). Imagem recebida do lead fica marcada: o robô sabe que não
+    // viu e quem atende também. Imagem de grupo ou enviada pelo próprio chip segue como antes.
+    const imageUnseen = !isGroup && !fromMe;
+    const text = caption || (imageUnseen ? IMAGE_UNSEEN_MARKER : "[Imagem]");
     return {
       type,
       text,
+      caption: caption || null,
       contentType: "image",
       content_type: "image",
       mediaUrl,
       media_url: mediaUrl,
       described: false,
+      imageUnseen,
       waMessageId,
       messageTimestamp,
       mediaPath,
@@ -1845,12 +1869,19 @@ export async function processBatch({
       if (m.type === "audio" && (m.transcribed === false || m.transcriptionFailed === true || m.text === "[áudio]")) {
         return false;
       }
+      // Imagem que o robô não viu: o marcador não é texto do lead (a legenda, se houver, segue como texto)
+      if (m.type === "image" && m.imageUnseen === true && m.text === IMAGE_UNSEEN_MARKER) {
+        return false;
+      }
       return true;
     })
     .map((m) => (typeof m.text === "string" ? m.text.trim() : ""))
     .filter(Boolean);
 
-  const combinedText = validTexts.join("\n").trim();
+  const unseenImages = (messages || []).filter((m) => m?.type === "image" && m.imageUnseen === true);
+  const textoDoLead = validTexts.join("\n").trim();
+  // Imagem não vista junto com texto: a IA responde ao texto sabendo que houve uma imagem que ela não enxerga.
+  const combinedText = textoDoLead && unseenImages.length > 0 ? `${textoDoLead}\n${IMAGE_UNSEEN_HINT_FOR_LLM}` : textoDoLead;
   const hasFailedAudioOnly = (messages || []).some((m) => m.type === "audio" && (m.transcribed === false || m.transcriptionFailed === true || m.text === "[áudio]")) && !combinedText;
 
   // Se o lead enviou apenas áudio que não pôde ser transcrito (falha de download ou áudio inaudível):
@@ -1938,6 +1969,55 @@ export async function processBatch({
       classificacao: existing?.status || null,
       finalizado: false,
       audioTranscriptionFailed: true,
+    };
+  }
+
+  // Lead mandou SÓ imagem e o robô não a viu (leitura desligada ou provedor falhou): reconhece e pede o texto, em vez
+  // de responder como se nada tivesse chegado. Mesmo desenho do áudio: avisa uma vez por conversa; da segunda em
+  // diante só registra no histórico, para não parecer robô quebrado nem queimar cota do chip.
+  if (!combinedText && unseenImages.length > 0) {
+    const dadosAntigos = existing?.dados || {};
+    const storedHistorico = parseStoredHistorico(existing?.historico) || parseStoredHistorico(existing?.dados?.historico);
+    const history = buildHistory(storedHistorico);
+    const jaAvisado = Boolean(dadosAntigos.image_unseen_warned_at);
+    const agora = new Date().toISOString();
+    const resposta = jaAvisado ? null : IMAGE_UNSEEN_REPLY;
+    console.warn(
+      jaAvisado
+        ? "[chatbot-ai] Imagem recebida e não visualizada; lead já foi avisado nesta conversa — só registra."
+        : "[chatbot-ai] Imagem recebida e não visualizada. Respondendo com o aviso e pedindo o texto.",
+      { clientId, phone: maskPhoneForLog(phone), leituraDeImagemLigada: IMAGE_UNDERSTANDING_AVAILABLE }
+    );
+    const dadosNovos = {
+      ...dadosAntigos,
+      image_unseen_count: (Number(dadosAntigos.image_unseen_count) || 0) + unseenImages.length,
+      image_unseen_last_at: agora,
+      ...(jaAvisado ? {} : { image_unseen_warned_at: agora }),
+    };
+    if (existing?.id && !isSimulation && !noPersist) {
+      const newHistory = resposta
+        ? appendToHistory(history, IMAGE_UNSEEN_MARKER, resposta)
+        : [...history, { role: "user", content: IMAGE_UNSEEN_MARKER }];
+      await supabase
+        .from(leadsTable)
+        .update({
+          historico: serializeHistorico(newHistory),
+          dados: dadosNovos,
+          status_conversa: "em_atendimento",
+          updated_at: agora,
+        })
+        .eq("id", existing.id)
+        .eq("client_id", clientId);
+    }
+    return {
+      mensagem: resposta,
+      status_conversa: "em_atendimento",
+      dados: dadosNovos,
+      lead_source: existing?.lead_source || null,
+      classificacao: existing?.status || null,
+      finalizado: false,
+      imageUnseen: true,
+      ...(jaAvisado ? { silencedRepeatedImageWarning: true } : {}),
     };
   }
 
