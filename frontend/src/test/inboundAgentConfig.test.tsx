@@ -377,3 +377,135 @@ describe("InboundAgentConfig — Escopo de Atendimento", () => {
     });
   });
 });
+
+describe("InboundAgentConfig — Seletor de Número atendido (Urgente 1)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    updateMutateAsync.mockClear();
+    archiveMutate.mockClear();
+    currentMockClients = [
+      {
+        id: "sonhare",
+        n8n_settings: {
+          chatbot_enabled: true,
+          chatbot_inbound_scope: "all",
+          evolution_instances: [
+            {
+              id: "73c13e19-a9aa-44d3-b321-256c3f44a3e2",
+              name: "Chip Eleição 4343",
+              dispatch_webhook_url: "https://evo.example.com/message/sendText/bia-do-spazio-4343-eleicao",
+              active: true,
+            },
+          ],
+        },
+      },
+    ];
+  });
+
+  it("a) chip salvo por id -> rótulo mostra o NOME do chip, nunca o id", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Bia do Spazio",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["73c13e19-a9aa-44d3-b321-256c3f44a3e2"],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Chip Eleição 4343").length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByText("73c13e19-a9aa-44d3-b321-256c3f44a3e2")).toBeNull();
+  });
+
+  it("b) chip salvo em formato antigo (id ou display name) -> normaliza para slug técnico e ao salvar grava slug", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Bia do Spazio",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["73c13e19-a9aa-44d3-b321-256c3f44a3e2"],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "agente-1",
+          evolution_instances: ["bia-do-spazio-4343-eleicao"],
+        })
+      );
+    });
+  });
+
+  it("c) marcar e desmarcar o mesmo chip -> array volta ao tamanho original, nunca acumula duas entradas", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Bia do Spazio",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["bia-do-spazio-4343-eleicao"],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Chip Eleição 4343").length).toBeGreaterThanOrEqual(1);
+    });
+
+    const buttons = screen.getAllByRole("button", { name: /Chip Eleição 4343/i });
+    const triggerBtn = buttons.find((b) => b.getAttribute("aria-haspopup") === "dialog") || buttons[1] || buttons[0];
+    fireEvent.click(triggerBtn);
+
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "agente-1",
+          evolution_instances: ["bia-do-spazio-4343-eleicao"],
+        })
+      );
+    });
+  });
+
+  it("d) chip salvo que não existe mais na lista -> rótulo diz 'chip removido ou desconectado'", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Bia do Spazio",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["chip-inexistente-ou-deletado-uuid"],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("chip removido ou desconectado").length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByText("chip-inexistente-ou-deletado-uuid")).toBeNull();
+  });
+});

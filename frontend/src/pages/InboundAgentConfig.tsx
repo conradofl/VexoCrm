@@ -82,6 +82,14 @@ function instanceNameFromChip(chip: { name?: string; dispatch_webhook_url?: stri
   const last = url.split("/").filter(Boolean).pop();
   return (last && !last.includes("?") ? last : chip?.name) || "";
 }
+// Resolve qualquer formato (UUID, slug da URL ou nome amigável) para o slug técnico da Evolution
+function resolveTechnicalSlug(val: string, chips: any[]): string {
+  if (!val) return "";
+  const found = chips.find(
+    (c) => c.id === val || instanceNameFromChip(c) === val || c.name === val
+  );
+  return found ? instanceNameFromChip(found) : val;
+}
 // Números (chips) gravados numa linha de agente — mesma regra de fallback
 // usada em todo lugar que lê evolution_instances: lista nova, com a coluna
 // antiga como reserva pra linhas de antes da migration.
@@ -93,7 +101,7 @@ function instancesOfCompany(c: any): string[] {
 // reconhece na lista de chips — resolve pro nome de exibição quando achar.
 function chipDisplayName(value: string, chips: any[]): string {
   const found = chips.find((c) => instanceNameFromChip(c) === value || c.name === value || c.id === value);
-  return found?.name || value;
+  return found?.name || "chip removido ou desconectado";
 }
 
 // "Uma tela, um agente, de cima para baixo" — modelo pronto não guarda texto
@@ -282,14 +290,36 @@ export default function InboundAgentConfig() {
       setSdrTransferEnabled(activeCompany.sdr_transfer_enabled ?? false);
       setSpinFields(activeCompany.inbound_spin_fields ?? []);
       setInboundWebhookUrl(activeCompany.inbound_webhook_url ?? "");
-      const lista = !isPlaceholder && Array.isArray(activeCompany.evolution_instances) && activeCompany.evolution_instances.length > 0
+      const rawLista = !isPlaceholder && Array.isArray(activeCompany.evolution_instances) && activeCompany.evolution_instances.length > 0
         ? activeCompany.evolution_instances
         : (!isPlaceholder && activeCompany.evolution_instance ? [activeCompany.evolution_instance] : []);
-      setNumerosVinculados(lista);
+      const converted = chips.length > 0
+        ? Array.from(new Set(rawLista.map((v: string) => resolveTechnicalSlug(v, chips)).filter(Boolean)))
+        : rawLista;
+      setNumerosVinculados(converted);
       setInboundRole(activeCompany.inbound_role === "qualificador" ? "qualificador" : "atendimento");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id]);
+
+  // Ao carregar os chips do tenant, normaliza valores antigos salvos (UUID ou display name)
+  // para o slug técnico e remove duplicatas no estado local.
+  useEffect(() => {
+    if (chips.length > 0) {
+      setNumerosVinculados((atual) => {
+        const converted = Array.from(
+          new Set(atual.map((v) => resolveTechnicalSlug(v, chips)).filter(Boolean))
+        );
+        if (
+          converted.length !== atual.length ||
+          converted.some((v, idx) => v !== atual[idx])
+        ) {
+          return converted;
+        }
+        return atual;
+      });
+    }
+  }, [chips]);
 
   // Ligar/desligar grava na hora. Antes era estado local ate clicar em Salvar,
   // entao sair da tela desfazia — parecia que o agente "desligava sozinho".
@@ -520,7 +550,7 @@ export default function InboundAgentConfig() {
             const chipLabel = hasChip
               ? (Array.isArray(c.evolution_instances) && c.evolution_instances.length > 1
                   ? `${c.evolution_instances.length} números`
-                  : c.evolution_instance || c.evolution_instances?.[0])
+                  : chipDisplayName(c.evolution_instance || c.evolution_instances?.[0], chips))
               : "sem chip";
             return (
               <div
@@ -674,7 +704,7 @@ export default function InboundAgentConfig() {
                           {numerosVinculados.length === 0
                             ? "Nenhum número — escolha um chip"
                             : numerosVinculados.length === 1
-                              ? (chips.find((c) => instanceNameFromChip(c) === numerosVinculados[0] || c.name === numerosVinculados[0] || c.id === numerosVinculados[0])?.name || numerosVinculados[0])
+                              ? (chips.find((c) => instanceNameFromChip(c) === numerosVinculados[0] || c.name === numerosVinculados[0] || c.id === numerosVinculados[0])?.name || "chip removido ou desconectado")
                               : `${numerosVinculados.length} números vinculados`}
                         </span>
                         <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
@@ -688,27 +718,20 @@ export default function InboundAgentConfig() {
                           </p>
                         )}
                         {chips.map((chip) => {
-                          const inst = instanceNameFromChip(chip) || chip.name || chip.id || "";
-                          const marcado = numerosVinculados.some(
-                            (v) => v === inst || v === chip.name || v === chip.id
-                          );
+                          const slug = instanceNameFromChip(chip);
+                          const marcado = numerosVinculados.includes(slug);
                           const toggleItem = () => {
                             setNumerosVinculados((atual) => {
-                              const jaMarcado = atual.some(
-                                (v) => v === inst || v === chip.name || v === chip.id
-                              );
-                              if (jaMarcado) {
-                                return atual.filter(
-                                  (v) => v !== inst && v !== chip.name && v !== chip.id
-                                );
+                              if (atual.includes(slug)) {
+                                return atual.filter((v) => v !== slug);
                               }
-                              return [...atual, inst];
+                              return [...atual, slug];
                             });
                           };
 
                           return (
                             <div
-                              key={chip.id || chip.name || inst}
+                              key={chip.id || slug || chip.name}
                               onClick={toggleItem}
                               className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-accent select-none"
                             >
