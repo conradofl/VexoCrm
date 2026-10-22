@@ -31,7 +31,7 @@ export function normalizeSpinFields(rawSpinFields) {
 }
 
 const INBOUND_AGENT_COLUMNS =
-  "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, agent_kind";
+  "id, evolution_instance, evolution_instances, inbound_role, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, agent_kind, inbound_extraction_prompt, inbound_extraction_enabled";
 
 // Um agente pode atender VÁRIOS números (evolution_instances). A coluna antiga
 // entra como fallback para linhas anteriores à migration.
@@ -61,6 +61,8 @@ function buildInboundAgentConfig(row) {
     webhookUrl: normalize(row.inbound_webhook_url) || null,
     sdrPhone: normalize(row.sdr_whatsapp_number) || null,
     sdrTransferEnabled: row.sdr_transfer_enabled === true,
+    extractionPrompt: normalize(row.inbound_extraction_prompt) || null,
+    extractionEnabled: row.inbound_extraction_enabled !== false,
     // "Um agente, um dono para cada texto", Commit 2: uma vez consolidado, o
     // agente ignora template e prompt padrão do tenant — processBatch lê isto
     // pra nem buscar os dois.

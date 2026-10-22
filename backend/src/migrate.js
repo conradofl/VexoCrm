@@ -421,6 +421,10 @@ async function isAlreadyApplied(pool, filename) {
     "20261017100000_add_assigned_chip_to_leads.sql": `SELECT (
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='leads' AND column_name='assigned_chip')
     ) AS ok`,
+    "20261021230000_add_followup_companies_extraction_fields.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='inbound_extraction_prompt')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='inbound_extraction_enabled')
+    ) AS ok`,
   };
 
   const query = checks[filename];

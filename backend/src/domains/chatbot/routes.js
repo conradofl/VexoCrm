@@ -3579,6 +3579,7 @@ export function registerChatbotRoutes(app, deps) {
                   history: aiResponse._history || [],
                   collectedData: aiResponse._dados || aiResponse.dados || {},
                   classificacao: aiResponse.classificacao,
+                  agentConfig: inboundConfig,
                 });
 
                 if (!aiBriefing) {

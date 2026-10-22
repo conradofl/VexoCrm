@@ -245,9 +245,9 @@ export default function InboundAgentConfig() {
   // Números atendidos por ESTE agente. Um agente qualificador pode cobrir os
   // celulares de vários consultores sem duplicar prompt, modelo e SPIN.
   const [numerosVinculados, setNumerosVinculados] = useState<string[]>([]);
-  // Funcao do agente. Qualificador atende quem foi disparado; atendimento
-  // atende quem procurou a empresa. Muda o rotulo e o agrupamento na tela.
   const [inboundRole, setInboundRole] = useState<"atendimento" | "qualificador">("atendimento");
+  const [inboundExtractionEnabled, setInboundExtractionEnabled] = useState(true);
+  const [inboundExtractionPrompt, setInboundExtractionPrompt] = useState("");
 
   // Escopo de inbound e Frase de Recontato configurados no tenant (lead_client_n8n_settings)
   const [chatbotInboundScope, setChatbotInboundScope] = useState<"leads_only" | "all">("all");
@@ -298,6 +298,8 @@ export default function InboundAgentConfig() {
         : rawLista;
       setNumerosVinculados(converted);
       setInboundRole(activeCompany.inbound_role === "qualificador" ? "qualificador" : "atendimento");
+      setInboundExtractionPrompt(activeCompany.inbound_extraction_prompt ?? "");
+      setInboundExtractionEnabled(activeCompany.inbound_extraction_enabled ?? true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id]);
@@ -365,6 +367,8 @@ export default function InboundAgentConfig() {
       inbound_webhook_url: inboundWebhookUrl,
       sdr_whatsapp_number: sdrPhone,
       sdr_transfer_enabled: sdrTransferEnabled,
+      inbound_extraction_prompt: inboundExtractionPrompt,
+      inbound_extraction_enabled: inboundExtractionEnabled,
       evolution_instances: numerosVinculados,
       inbound_role: inboundRole,
       agent_kind: agentKind,
@@ -988,6 +992,43 @@ export default function InboundAgentConfig() {
                         Preenchido, <strong>substitui</strong> a lista do tenant para este número de
                         WhatsApp — só ele recebe. Em branco, vale a lista acima.
                       </p>
+                    </div>
+
+                    {/* Extração de briefing com IA para o closer */}
+                    <div className="rounded-lg border border-slate-200 p-4 dark:border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <Label className="text-sm font-semibold">Extrair qualificação para o closer</Label>
+                          <p className="text-xs text-slate-500">
+                            Ao qualificar, o agente monta um resumo e manda para os números configurados acima.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={inboundExtractionEnabled}
+                          onCheckedChange={setInboundExtractionEnabled}
+                          aria-label="Extrair qualificação para o closer"
+                        />
+                      </div>
+
+                      {inboundExtractionEnabled ? (
+                        <div className="space-y-1.5 pt-2">
+                          <Label className="text-xs font-medium">Prompt de extração do agente (opcional)</Label>
+                          <Textarea
+                            rows={4}
+                            placeholder="Deixe em branco para usar o prompt padrão da empresa (Padrões da Empresa > Extrato SDR)..."
+                            value={inboundExtractionPrompt}
+                            onChange={(e) => setInboundExtractionPrompt(e.target.value)}
+                            className="font-mono text-xs"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            Instruções específicas para este agente montar o card do closer. Se em branco, usa o Extrato SDR de Padrões da Empresa.
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic pt-1">
+                          Extração desligada: nenhum card é gerado ao qualificar o lead.
+                        </p>
+                      )}
                     </div>
 
                     <p className="text-xs text-slate-500">

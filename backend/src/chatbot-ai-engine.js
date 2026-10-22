@@ -1248,8 +1248,28 @@ function buildFieldContext(template) {
  * Recebe o histórico da conversa e os dados coletados, retorna texto formatado.
  * Se não houver prompt extrato no banco, retorna null (caller usa fallback determinístico).
  */
-export async function extractBriefingWithAI({ supabase, clientId, phone, history, collectedData, classificacao, llmModel = defaultGroqModel() }) {
-  const extractPrompt = await fetchDynamicPrompt(supabase, clientId, "extrato");
+export async function extractBriefingWithAI({
+  supabase,
+  clientId,
+  phone,
+  history,
+  collectedData,
+  classificacao,
+  llmModel = defaultGroqModel(),
+  agentConfig = null,
+  customPrompt = null,
+  extractionEnabled = true,
+}) {
+  // Se a extração estiver desligada pelo agente (ou parâmetro), não chama a IA
+  if (extractionEnabled === false || agentConfig?.extractionEnabled === false) {
+    return null;
+  }
+
+  // Prioridade: prompt customizado do agente -> prompt "extrato" configurado no tenant
+  const extractPrompt =
+    customPrompt ||
+    agentConfig?.extractionPrompt ||
+    (await fetchDynamicPrompt(supabase, clientId, "extrato"));
   if (!extractPrompt) return null;
 
   const dadosJson = JSON.stringify(collectedData || {}, null, 2);

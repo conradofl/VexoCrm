@@ -317,7 +317,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
 
       let sbQuery = supabase
         .from("followup_companies")
-        .select("id, name, evolution_instance, evolution_instances, inbound_role, agent_kind, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, created_at, tenant_id, engine_scan_interval_hours, never_contacted_delay_hours, no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at")
+        .select("id, name, evolution_instance, evolution_instances, inbound_role, agent_kind, webhook_url, panel_access, inbound_enabled, inbound_model, inbound_prompt, inbound_spin_fields, inbound_webhook_url, sdr_whatsapp_number, sdr_transfer_enabled, instructions_consolidated_at, created_at, tenant_id, engine_scan_interval_hours, never_contacted_delay_hours, no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at, inbound_extraction_prompt, inbound_extraction_enabled")
         .is("archived_at", null)
         .order("name", { ascending: true });
 
@@ -389,6 +389,8 @@ function normalizeInstanceList(list, fallback) {
       inbound_webhook_url,
       sdr_whatsapp_number,
       sdr_transfer_enabled,
+      inbound_extraction_prompt,
+      inbound_extraction_enabled,
       tenant_id,
       agent_kind,
       engine_scan_interval_hours,
@@ -432,6 +434,8 @@ function normalizeInstanceList(list, fallback) {
           inbound_webhook_url: str(inbound_webhook_url),
           sdr_whatsapp_number: str(sdr_whatsapp_number),
           sdr_transfer_enabled: Boolean(sdr_transfer_enabled),
+          inbound_extraction_prompt: str(inbound_extraction_prompt),
+          inbound_extraction_enabled: inbound_extraction_enabled !== false,
           engine_scan_interval_hours: typeof engine_scan_interval_hours === "number" ? engine_scan_interval_hours : 6,
           never_contacted_delay_hours: typeof never_contacted_delay_hours === "number" ? never_contacted_delay_hours : 2,
           no_reply_delay_hours: typeof no_reply_delay_hours === "number" ? no_reply_delay_hours : 48,
@@ -504,6 +508,8 @@ function normalizeInstanceList(list, fallback) {
       if ("inbound_webhook_url" in req.body) patch.inbound_webhook_url = str(inbound_webhook_url);
       if ("sdr_whatsapp_number" in req.body) patch.sdr_whatsapp_number = str(sdr_whatsapp_number);
       if ("sdr_transfer_enabled" in req.body) patch.sdr_transfer_enabled = Boolean(sdr_transfer_enabled);
+      if ("inbound_extraction_prompt" in req.body) patch.inbound_extraction_prompt = str(inbound_extraction_prompt);
+      if ("inbound_extraction_enabled" in req.body) patch.inbound_extraction_enabled = Boolean(inbound_extraction_enabled);
       if ("livpub_aniversario_prompt" in req.body) patch.livpub_aniversario_prompt = str(livpub_aniversario_prompt);
       if ("livpub_inativo_prompt" in req.body) patch.livpub_inativo_prompt = str(livpub_inativo_prompt);
       if ("engine_scan_interval_hours" in req.body) patch.engine_scan_interval_hours = Number(engine_scan_interval_hours);

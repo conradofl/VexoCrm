@@ -509,3 +509,99 @@ describe("InboundAgentConfig — Seletor de Número atendido (Urgente 1)", () =>
     expect(screen.queryByText("chip-inexistente-ou-deletado-uuid")).toBeNull();
   });
 });
+
+describe("InboundAgentConfig — Extração para o closer no Passo 5 (Urgente 2)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    updateMutateAsync.mockClear();
+    archiveMutate.mockClear();
+    currentMockClients = [
+      {
+        id: "sonhare",
+        n8n_settings: {
+          chatbot_enabled: true,
+          chatbot_inbound_scope: "all",
+          evolution_instances: [
+            { id: "chip-1", name: "Chip Atendimento", dispatch_webhook_url: "https://evo/atend", active: true },
+          ],
+        },
+      },
+    ];
+  });
+
+  it("exibe o seletor de extração ligado por padrão e permite editar o prompt customizado de extração", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Agente Closer Test",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["atend"],
+        sdr_transfer_enabled: true,
+        inbound_extraction_enabled: true,
+        inbound_extraction_prompt: "Prompt inicial do closer",
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    expect(screen.getByText("Extrair qualificação para o closer")).toBeTruthy();
+    expect(
+      screen.getByText("Ao qualificar, o agente monta um resumo e manda para os números configurados acima.")
+    ).toBeTruthy();
+
+    const textarea = screen.getByPlaceholderText(/Deixe em branco para usar o prompt padrão da empresa/i);
+    expect((textarea as HTMLTextAreaElement).value).toBe("Prompt inicial do closer");
+
+    fireEvent.change(textarea, { target: { value: "Novo prompt exclusivo do closer" } });
+
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "agente-1",
+          inbound_extraction_enabled: true,
+          inbound_extraction_prompt: "Novo prompt exclusivo do closer",
+        })
+      );
+    });
+  });
+
+  it("desligar o seletor desativa o campo de prompt e salva inbound_extraction_enabled: false", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Agente Sem Extracao",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["atend"],
+        sdr_transfer_enabled: true,
+        inbound_extraction_enabled: true,
+        inbound_extraction_prompt: "",
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    const extractionSwitch = screen.getByRole("switch", { name: /Extrair qualificação para o closer/i });
+    expect(extractionSwitch).toBeChecked();
+
+    fireEvent.click(extractionSwitch);
+
+    expect(screen.getByText(/Extração desligada: nenhum card é gerado ao qualificar o lead/i)).toBeTruthy();
+
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "agente-1",
+          inbound_extraction_enabled: false,
+        })
+      );
+    });
+  });
+});
