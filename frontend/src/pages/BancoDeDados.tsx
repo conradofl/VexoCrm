@@ -178,6 +178,8 @@ import { resolveRowPhones, summarizePhonePreview, type PhonePreviewSummary } fro
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { LeadCustomFieldsSection } from "@/components/leads/LeadCustomFieldsSection";
+import { ImportCountsSummary } from "@/components/leads/ImportCountsSummary";
+import { countImportRows, formatImportResultMessage, type ImportCounts } from "@/lib/leadImports/importCounts";
 
 export function toggleStageFilter(current: string[], stageToToggle: string): string[] {
   if (stageToToggle === "all") {
@@ -674,6 +676,7 @@ export default function BancoDeDados() {
     incompleteCount: number;
     completedList: Array<{ original: string; result: string }>;
     incompleteList: Array<{ original: string; reason: string }>;
+    counts?: ImportCounts;
   }>({
     total: 0,
     valid: 0,
@@ -1161,6 +1164,8 @@ export default function BancoDeDados() {
       incompleteCount,
       completedList,
       incompleteList,
+      // o mesmo telefone final que vai para a importação: contatos diferentes x repetidos dentro do arquivo
+      counts: countImportRows(normalizedRows.map((r) => (r.telefone as string | null | undefined) ?? null)),
     });
   };
 
@@ -1246,6 +1251,8 @@ export default function BancoDeDados() {
       incompleteCount,
       completedList,
       incompleteList,
+      // o mesmo telefone final que vai para a importação: contatos diferentes x repetidos dentro do arquivo
+      counts: countImportRows(normalizedRows.map((r) => (r.telefone as string | null | undefined) ?? null)),
     });
   };
 
@@ -1379,7 +1386,7 @@ export default function BancoDeDados() {
           ? "Vendas fechadas importadas com sucesso como Compradores! 🏆"
           : "Planilha higienizada e importada com sucesso! 🎉",
         {
-          description: `${result.totals.uniquePhones.toLocaleString("pt-BR")} leads com telefone válido de ${result.totals.total.toLocaleString("pt-BR")} linhas${importTags.length ? `, com a tag "${importTagInput}"` : ""}.`,
+          description: `${formatImportResultMessage(result.totals)}${importTags.length ? ` Tag: "${importTagInput}".` : ""}`,
         }
       );
 
@@ -4810,6 +4817,7 @@ export default function BancoDeDados() {
                       </p>
                     </div>
                   )}
+                  {importAuditStats.counts && <ImportCountsSummary counts={importAuditStats.counts} />}
                   <div className="space-y-1">
                     {importAuditStats.completedCount > 0 ? (
                       <p className="font-medium text-emerald-600 dark:text-emerald-400">
@@ -4817,7 +4825,7 @@ export default function BancoDeDados() {
                       </p>
                     ) : (
                       <p className="font-medium text-emerald-600 dark:text-emerald-400">
-                        ✓ {importAuditStats.valid} contatos válidos no padrão +55...
+                        ✓ Telefones no padrão +55.
                       </p>
                     )}
                     {importAuditStats.incompleteCount > 0 && (
