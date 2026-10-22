@@ -468,5 +468,36 @@ describe("Banco de Dados — lista paginada no servidor (base de 25.000)", () =>
       // a coluna "Telefone 2" foi sugerida como adicional (e o usuário pode mudar)
       expect(await screen.findByTestId("extra-phone-hint-Telefone 2")).toBeInTheDocument();
     });
+
+    it("[TESTE OBRIGATÓRIO] repetidos DENTRO da planilha: a pré-análise separa linhas, contatos diferentes, repetidos e sem telefone", async () => {
+      // 22/10/2026: 351 linhas, 274 distintos — a tela dizia "351 contatos válidos" e o dono achou que perdeu 77.
+      renderWithProviders(<BancoDeDados />);
+      await screen.findByText("Lead P1 L1");
+      fireEvent.click(await screen.findByTestId("btn-import-spreadsheet"));
+      const csv = [
+        "Nome,Telefone",
+        "Ana,(34) 99810-0001",
+        "Bia,(34) 99810-0002",
+        "Caio,(34) 99810-0003",
+        "Davi,(34) 99810-0004",
+        "Eva,(34) 99810-0005",
+        "Fabi,(34) 99810-0006",
+        "Gil,(34) 99810-0007",
+        "Ana de novo,34998100001", // mesmo telefone, escrito de outro jeito
+        "Bia de novo,+55 34 99810-0002",
+        "Caio de novo,(34) 99810-0003",
+      ].join("\n");
+      const file = new File([csv], "EXTRACAO.csv", { type: "text/csv" });
+      const input = document.querySelector('input[type="file"][accept*="csv"]') as HTMLInputElement;
+      fireEvent.change(input, { target: { files: [file] } });
+      const resumo = await screen.findByTestId("import-counts-summary", undefined, { timeout: 8000 });
+      expect(resumo).toBeInTheDocument();
+      expect(screen.getByTestId("import-counts-rows")).toHaveTextContent(/^10 linhas na planilha$/);
+      expect(screen.getByTestId("import-counts-distinct")).toHaveTextContent(/^7 contatos diferentes$/);
+      expect(screen.getByTestId("import-counts-repeated")).toHaveTextContent(/^3 repetidos dentro da própria planilha/);
+      expect(screen.getByTestId("import-counts-without-phone")).toHaveTextContent(/^0 sem telefone válido$/);
+      // a frase antiga, que somava as linhas como se fossem contatos, não aparece mais
+      expect(screen.queryByText(/contatos válidos no padrão \+55/)).not.toBeInTheDocument();
+    });
   });
 });
