@@ -1,0 +1,16 @@
+[Unit]
+Description=GoClaw Agent Daemon (Geração Digital & Vexo OS)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/vexo-crm/goclaw
+ExecStart=/var/www/vexo-crm/goclaw/goclaw
+Restart=always
+RestartSec=5
+EnvironmentFile=/var/www/vexo-crm/goclaw/.env
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

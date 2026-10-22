@@ -1,20 +1,66 @@
 {
   "users": [
     {
-      "name": "Conrado",
-      "role": "owner",
+      "name": "Conrado Finzi",
+      "role": "owner_cto",
+      "trello": "@conrado",
+      "slack_channel": "#01-ops-geral",
       "identities": [
         { "provider": "telegram", "id": "conrado" },
         { "provider": "whatsapp", "id": "5534991751267@s.whatsapp.net" }
       ]
     },
     {
-      "name": "Caio",
-      "role": "owner",
+      "name": "Caio Almeida",
+      "role": "owner_commercial",
+      "trello": "@caio",
+      "slack_channel": "#01-ops-comercial",
       "identities": [
         { "provider": "telegram", "id": "caio" },
         { "provider": "whatsapp", "id": "caio@s.whatsapp.net" }
       ]
+    },
+    {
+      "name": "Duda Eduarda",
+      "role": "process_manager",
+      "trello": "@mariaeduarda33081262",
+      "slack_channel": "#01-ops-geral",
+      "responsibility": "Supervisão de fluxos, cronogramas e entregas de clientes"
+    },
+    {
+      "name": "Arthur Henrique",
+      "role": "traffic_performance",
+      "trello": "@arthurhenrique250",
+      "slack_channel": "#01-ops-trafego",
+      "responsibility": "Gestão de campanhas Meta, Google e TikTok Ads"
+    },
+    {
+      "name": "Santana",
+      "role": "graphic_design",
+      "trello": "@felipesantanamoraes",
+      "slack_channel": "#01-ops-criativos",
+      "responsibility": "Identidade visual, carrosséis, artes e fechamento"
+    },
+    {
+      "name": "Eflen",
+      "role": "video_editor",
+      "trello": "@eflenhenrique1",
+      "slack_channel": "#01-ops-criativos",
+      "responsibility": "Edição de Reels, motion, legendas e criativos de tráfego"
+    },
+    {
+      "name": "Carlos Rafael",
+      "role": "audiovisual_field",
+      "trello": "@carlosrafael",
+      "slack_channel": "#01-ops-criativos",
+      "responsibility": "Captação externa, gravações de clientes e entrega de brutos"
+    },
+    {
+      "name": "Gabriel",
+      "role": "tech_support",
+      "trello": "@gabriel",
+      "slack_channel": "#01-ops-geral",
+      "responsibility": "Suporte a automações, CRMs e correções técnicas"
     }
   ]
 }
