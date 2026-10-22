@@ -6113,6 +6113,12 @@ export function registerCampaignsRoutes(app, deps) {
       new Date().toISOString();
 
     const rawMessageId = resolveMessageId(body) || null;
+    const inboundInstance =
+      body.instance ||
+      body.instanceName ||
+      body.instance_name ||
+      req.params?.instanceName ||
+      null;
 
     if (!clientId) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId");
@@ -6149,7 +6155,7 @@ export function registerCampaignsRoutes(app, deps) {
           campaignMatch: activeWaitCampaign,
           replyPayload: {
             ...body,
-            instance: body.instance || body.instanceName || body.instance_name || req.params?.instanceName || null,
+            instance: inboundInstance,
             message: replyText,
           },
         });
@@ -6180,6 +6186,7 @@ export function registerCampaignsRoutes(app, deps) {
               body: JSON.stringify({
                 clientId,
                 phone,
+                instance: inboundInstance,
                 message: replyText,
                 waMessageId: rawMessageId,
                 isInternalForward: true,
@@ -6194,6 +6201,7 @@ export function registerCampaignsRoutes(app, deps) {
               body: JSON.stringify({
                 clientId,
                 phone,
+                instance: inboundInstance,
                 message: replyText,
                 waMessageId: rawMessageId,
                 isInternalForward: true,
@@ -6271,6 +6279,7 @@ export function registerCampaignsRoutes(app, deps) {
           body: JSON.stringify({
             clientId,
             phone,
+            instance: inboundInstance,
             message: replyText,
             waMessageId: rawMessageId,
             isInternalForward: true,
