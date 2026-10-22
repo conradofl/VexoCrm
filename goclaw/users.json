@@ -1,0 +1,20 @@
+{
+  "users": [
+    {
+      "name": "Conrado",
+      "role": "owner",
+      "identities": [
+        { "provider": "telegram", "id": "conrado" },
+        { "provider": "whatsapp", "id": "5534991751267@s.whatsapp.net" }
+      ]
+    },
+    {
+      "name": "Caio",
+      "role": "owner",
+      "identities": [
+        { "provider": "telegram", "id": "caio" },
+        { "provider": "whatsapp", "id": "caio@s.whatsapp.net" }
+      ]
+    }
+  ]
+}

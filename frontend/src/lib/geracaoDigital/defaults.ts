@@ -39,9 +39,10 @@ export const DEFAULT_BRIEFING_FIELDS: BriefingField[] = [
     { id: "site", label: "Site", placeholder: "Domínio ativo (ex: www.empresa.com.br)", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "dominios_dns", label: "Domínios DNS", placeholder: "Servidor de hospedagem DNS (ex: Cloudflare, Registro.br)", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "whatsapp", label: "WhatsApp Business", placeholder: "Número comercial completo com DDD", status: "pending", value: "", confidence: 0, type: "text" },
-    { id: "concorrentes", label: "Principais concorrentes diretos", placeholder: "Quais empresas competem diretamente com o seu negócio?", status: "pending", value: "", confidence: 0, type: "text" },
+    { id: "concorrentes", label: "Principais concorrentes diretos", placeholder: "Quais empresas competem diretamente com o seu negócio?", status: "pending", value: "", confidence: 0, type: "textarea" },
     { id: "inspiracao", label: "Perfis de inspiração", placeholder: "Quais marcas inspiram sua estética?", status: "pending", value: "", confidence: 0, type: "text" },
-    { id: "servicos", label: "Produtos, serviços e diferencial", placeholder: "Core business, produtos vendidos e o que diferencia a empresa do concorrente", status: "pending", value: "", confidence: 0, type: "textarea" },
+    { id: "servicos", label: "Produtos, Serviços Comercializados e Diferenciais", placeholder: "Liste os principais produtos/serviços vendidos, tickets médios e o diferencial competitivo da empresa.", status: "pending", value: "", confidence: 0, type: "textarea" },
+    { id: "como_vende", label: "Como você vende hoje? (Processo Comercial e Funil Atual)", placeholder: "Como os clientes chegam até você? Balcão, indicação, WhatsApp manual, equipe de vendas?", status: "pending", value: "", confidence: 0, type: "textarea" },
     // --- Sobre o negócio / produto -------------------------------------------
     { id: "ticket_margem", label: "Ticket médio e margem", placeholder: "Ex: ticket médio de R$ 800 com margem de 40%", status: "pending", value: "", confidence: 0, type: "text" },
     { id: "ja_rodou_trafego", label: "Já rodou tráfego pago antes?", placeholder: "Histórico de investimento em mídia", status: "pending", value: "", confidence: 0, type: "radio", options: ["Sim", "Não", "Não sei"] },
@@ -92,9 +93,10 @@ export const DEFAULT_BRIEFING_FIELDS: BriefingField[] = [
     },
     // --- Público-alvo (complementa os subcampos de Público Alvo) --------------
     { id: "dores_publico", label: "Dores e necessidades do público", placeholder: "Que problema o cliente quer resolver ao procurar este negócio?", status: "pending", value: "", confidence: 0, type: "textarea" },
-    { id: "base_existente", label: "Público já existente", placeholder: "Tem base de clientes, lista de e-mail ou seguidores para usar em remarketing?", status: "pending", value: "", confidence: 0, type: "textarea" },
+    { id: "base_existente", label: "Banco de Dados e Base de Contatos Atual", placeholder: "Possui lista de clientes, contatos no WhatsApp, planilhas ou base para aquecimento e campanhas na Vexo?", status: "pending", value: "", confidence: 0, type: "textarea" },
+    { id: "mitos_perguntas_recorrentes", label: "Mitos, Objeções e Perguntas Mais Frequentes dos Clientes", placeholder: "O que os clientes sempre perguntam antes de comprar? Quais mitos e preconceitos existem sobre seu produto/serviço?", status: "pending", value: "", confidence: 0, type: "textarea" },
     { id: "bloqueado", label: "Quais assuntos você não abordaria nos seus perfis?", placeholder: "Temas proibidos nos perfis (política, concorrência, termos sensíveis)", status: "pending", value: "", confidence: 0, type: "textarea" },
-    { id: "temas", label: "Quais temas você acredita que tenha mais a ver com a sua empresa?", placeholder: "Assuntos ideais para engajar seu público", status: "pending", value: "", confidence: 0, type: "textarea" }
+    { id: "temas", label: "Quais temas para conteúdo você acha interessante abordar?", placeholder: "Assuntos, bastidores, histórias ou temas que conectam com o seu público-alvo", status: "pending", value: "", confidence: 0, type: "textarea" }
 ];
 
 // Estrutura organizacional padrão exibida no organograma (Slide 3).

@@ -1,0 +1,62 @@
+{
+  "llm": {
+    "providers": {
+      "anthropic": {
+        "driver": "anthropic",
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "promptCaching": true
+      },
+      "openai": {
+        "driver": "openai",
+        "apiKey": "${OPENAI_API_KEY}"
+      }
+    },
+    "agent": {
+      "models": [
+        "anthropic/claude-3-5-sonnet-20241022",
+        "openai/gpt-4o"
+      ]
+    },
+    "subagent": {
+      "models": [
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3-5-haiku-20241022"
+      ]
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}"
+    },
+    "whatsapp": {
+      "enabled": true
+    },
+    "http": {
+      "enabled": true,
+      "listen": ":1337"
+    }
+  },
+  "session": {
+    "store": "sqlite",
+    "storePath": "./data/goclaw_sessions.db",
+    "inherit": false
+  },
+  "lanes": {
+    "maestro": {
+      "name": "COO Maestro",
+      "model": "anthropic/claude-3-5-sonnet-20241022",
+      "promptFile": "prompts/maestro_coo.md"
+    },
+    "onboarding": {
+      "name": "Gestor Digital Onboarding",
+      "model": "openai/gpt-4o",
+      "promptFile": "prompts/gestor_digital_onboarding.md"
+    },
+    "demandas_cron": {
+      "name": "Auditor de Demandas & Prazos",
+      "model": "openai/gpt-4o",
+      "promptFile": "prompts/gestor_demandas_auditor.md"
+    }
+  }
+}

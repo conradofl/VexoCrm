@@ -1,0 +1,95 @@
+# GoClaw Architecture Configuration
+# Geração Digital & Vexo OS
+
+llm:
+  providers:
+    anthropic:
+      driver: anthropic
+      apiKey: "${ANTHROPIC_API_KEY}"
+      promptCaching: true
+    openai:
+      driver: openai
+      apiKey: "${OPENAI_API_KEY}"
+  
+  agent:
+    models:
+      - "anthropic/claude-3-5-sonnet-20241022"
+      - "openai/gpt-4o"
+  
+  subagent:
+    models:
+      - "openai/gpt-4o-mini"
+      - "anthropic/claude-3-5-haiku-20241022"
+
+channels:
+  telegram:
+    enabled: true
+    botToken: "${TELEGRAM_BOT_TOKEN}"
+    pairing:
+      enabled: true
+  
+  whatsapp:
+    enabled: true
+    sessionPath: "./sessions/whatsapp"
+  
+  http:
+    enabled: true
+    listen: ":1337"
+
+# Concorrência e Isolamento de Lanes
+lanes:
+  # Lane 1: Maestro (COO de IA)
+  maestro:
+    name: "COO Maestro"
+    description: "General da operação e alinhamento diário com os sócios (Conrado & Caio)"
+    driver: "anthropic"
+    model: "anthropic/claude-3-5-sonnet-20241022"
+    systemPromptFile: "prompts/maestro_coo.md"
+    channels:
+      - "telegram"
+      - "whatsapp"
+    concurrency: 4
+    memory:
+      transcriptSearch: true
+      vectorStore: "sqlite"
+      retentionDays: 90
+
+  # Lane 2: Onboarding (Gestor Digital)
+  onboarding:
+    name: "Gestor Digital Onboarding"
+    description: "Recepção de novos clientes, coleta de briefing guiado e acessos nas primeiras 48h"
+    driver: "openai"
+    model: "openai/gpt-4o"
+    systemPromptFile: "prompts/gestor_digital_onboarding.md"
+    channels:
+      - "whatsapp"
+      - "http"
+    concurrency: 8
+    tools:
+      - "google_drive"
+      - "slack"
+
+  # Lane 3: Gestor de Demandas (Cron & Auditoria)
+  demandas_cron:
+    name: "Auditor de Demandas & Prazos"
+    description: "Auditoria automática diária de cartões no Trello e relatórios no Slack"
+    driver: "openai"
+    model: "openai/gpt-4o"
+    systemPromptFile: "prompts/gestor_demandas_auditor.md"
+    schedules:
+      - name: "checkin_matinal"
+        cron: "0 9 * * 1-5" # 09h00 Seg a Sex
+        action: "run_morning_checkin"
+        targetChannel: "slack:#01-ops-geral"
+      - name: "checkout_vespertino"
+        cron: "0 18 * * 1-5" # 18h00 Seg a Sex
+        action: "run_evening_checkout"
+        targetChannel: "slack:#01-ops-geral"
+
+storage:
+  store: "sqlite"
+  storePath: "./data/goclaw_sessions.db"
+
+security:
+  sandbox: true
+  panicStop: true

@@ -1,57 +1,27 @@
-import { useState, useEffect } from "react";
-import { PageShell } from "@/components/PageShell";
+import React, { useState, useEffect } from "react";
 import { toast } from "@/components/ui/use-toast";
-import { API_BASE_URL } from "@/lib/api";
-import { useAuth } from "@/contexts/AuthContext";
-import { Briefcase } from "lucide-react";
-
-import { ConfigBoard } from "./GeracaoDigitalPitch/ConfigBoard";
-import { PresentationHeader } from "./GeracaoDigitalPitch/PresentationHeader";
-import { PresentationFooter } from "./GeracaoDigitalPitch/PresentationFooter";
-import { ThemeCustomizerDrawer } from "./GeracaoDigitalPitch/ThemeCustomizerDrawer";
-import { Slide1Welcome } from "./GeracaoDigitalPitch/slides/Slide1Welcome";
-import { Slide2Methodology } from "./GeracaoDigitalPitch/slides/Slide2Methodology";
-import { Slide3OrgChart } from "./GeracaoDigitalPitch/slides/Slide3OrgChart";
-import { Slide4Timeline } from "./GeracaoDigitalPitch/slides/Slide4Timeline";
-import { Slide5Briefing } from "./GeracaoDigitalPitch/slides/Slide5Briefing";
-import { Slide6Dispatch } from "./GeracaoDigitalPitch/slides/Slide6Dispatch";
-
-import { ACCENT_PRESETS, AI_PROCESSING_STEPS, TRANSCRIPT_OPTIONS } from "@/lib/geracaoDigital/constants";
-import { DEFAULT_BRIEFING_FIELDS, DEFAULT_TEAM, DEFAULT_THEME } from "@/lib/geracaoDigital/defaults";
+import { DEFAULT_BRIEFING_FIELDS, DEFAULT_THEME } from "@/lib/geracaoDigital/defaults";
 import { playChime } from "@/lib/geracaoDigital/helpers";
 import { deriveExtractedValues } from "@/lib/geracaoDigital/briefingParser";
-import type { BriefingField, CustomTheme, TeamMember } from "@/lib/geracaoDigital/types";
+import { AI_PROCESSING_STEPS, TRANSCRIPT_OPTIONS } from "@/lib/geracaoDigital/constants";
+import type { BriefingField } from "@/lib/geracaoDigital/types";
+import { useExtractBriefing, useSaveBriefing } from "@/hooks/useGeracaoDigital";
+
+import { BriefingHeader } from "./GeracaoDigitalPitch/BriefingHeader";
+import { BriefingBlockContract, ClientContractInfo } from "./GeracaoDigitalPitch/BriefingBlockContract";
+import { BriefingBlockCommercial } from "./GeracaoDigitalPitch/BriefingBlockCommercial";
+import { BriefingBlockMedia } from "./GeracaoDigitalPitch/BriefingBlockMedia";
+import { BriefingBlockTechnical } from "./GeracaoDigitalPitch/BriefingBlockTechnical";
+import { BriefingAiTranscriptModal } from "./GeracaoDigitalPitch/BriefingAiTranscriptModal";
+import { BriefingDispatchModal, DispatchConfig } from "./GeracaoDigitalPitch/BriefingDispatchModal";
 
 export default function GeracaoDigitalPitch() {
-  const { user } = useAuth();
-  // ─── STATE INITIALIZATION ──────────────────────────────────────────────────
-  const [isPresenting, setIsPresenting] = useState<boolean>(false);
+  const extractMutation = useExtractBriefing();
+  const saveMutation = useSaveBriefing();
 
-  // A apresentação é desenhada só em claro e não tem variantes `dark:`. Como
-  // `darkMode: ["class"]` faz o Tailwind gerar `.dark &`, a variante casa pelo
-  // ANCESTRAL: com `.dark` no <html>, componentes base como o Input (que traz
-  // `dark:bg-[rgba(10,12,24,.92)]` embutido) saíam pretos dentro da tela branca.
-  // Escopar a paleta no container não resolvia, porque a classe no <html>
-  // continuava lá. Enquanto a apresentação está aberta (overlay em tela cheia,
-  // nada do CRM aparece atrás) o documento vai para claro e volta ao sair.
-  // A preferência salva do usuário não é tocada.
-  useEffect(() => {
-    if (!isPresenting) return;
-    const el = document.documentElement;
-    const tinhaDark = el.classList.contains("dark");
-    el.classList.remove("dark");
-    el.classList.add("light");
-    return () => {
-      el.classList.remove("light");
-      if (tinhaDark) el.classList.add("dark");
-    };
-  }, [isPresenting]);
-  const [activeSlide, setActiveSlide] = useState<number>(1);
-  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-
-  // Theme settings (persist in localStorage)
-  const [theme, setTheme] = useState<CustomTheme>(() => {
-    const saved = localStorage.getItem("vexo_gd_theme");
+  // ─── ESTADO DOS DADOS CONTRATUAIS DO CLIENTE ──────────────────────────────
+  const [clientInfo, setClientInfo] = useState<ClientContractInfo>(() => {
+    const saved = localStorage.getItem("vexo_gd_client_info");
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -59,161 +29,156 @@ export default function GeracaoDigitalPitch() {
         console.error(e);
       }
     }
-    return DEFAULT_THEME;
+    return {
+      razaoSocial: "",
+      cnpj: "",
+      responsavel: "",
+      whatsapp: "",
+      email: "",
+      endereco: "",
+    };
   });
 
-  // Save theme helper
-  const handleSaveTheme = (newTheme: CustomTheme) => {
-    setTheme(newTheme);
-    localStorage.setItem("vexo_gd_theme", JSON.stringify(newTheme));
-    toast({
-      title: "Design Salvo",
-      description: "As configurações de marca e white-label foram aplicadas com sucesso!",
-    });
-  };
+  useEffect(() => {
+    localStorage.setItem("vexo_gd_client_info", JSON.stringify(clientInfo));
+  }, [clientInfo]);
 
-  const presetStyle = ACCENT_PRESETS[theme.themePreset] || ACCENT_PRESETS.indigo;
+  // ─── ESTADO DOS CAMPOS DO BRIEFING ─────────────────────────────────────────
+  const [briefingFields, setBriefingFields] = useState<BriefingField[]>(() => {
+    const saved = localStorage.getItem("vexo_gd_briefing_fields");
+    if (saved) {
+      try {
+        const parsed: BriefingField[] = JSON.parse(saved);
+        const parsedMap = new Map(parsed.map((f) => [f.id, f]));
+        return DEFAULT_BRIEFING_FIELDS.map((df) => {
+          const existing = parsedMap.get(df.id);
+          if (!existing) return df;
+          return {
+            ...df,
+            value: existing.value ?? df.value,
+            status: existing.status ?? df.status,
+            confidence: existing.confidence ?? df.confidence,
+            subfields: df.subfields
+              ? df.subfields.map((dsf) => {
+                  const exf = existing.subfields?.find((s) => s.id === dsf.id);
+                  return exf ? { ...dsf, value: exf.value } : dsf;
+                })
+              : undefined,
+          };
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return DEFAULT_BRIEFING_FIELDS;
+  });
 
-  // State of customizer panel
-  const [isCustomizerOpen, setIsCustomizerOpen] = useState<boolean>(false);
+  useEffect(() => {
+    localStorage.setItem("vexo_gd_briefing_fields", JSON.stringify(briefingFields));
+  }, [briefingFields]);
 
-  // Briefing Form State (Updated fields)
-  const [briefingFields, setBriefingFields] = useState<BriefingField[]>(DEFAULT_BRIEFING_FIELDS);
+  // ─── ESTADOS DOS MODAIS E PROCESSAMENTO ────────────────────────────────────
+  const [isTranscriptModalOpen, setIsTranscriptModalOpen] = useState(false);
+  const [transcriptText, setTranscriptText] = useState("");
+  const [isProcessingAI, setIsProcessingAI] = useState(false);
+  const [aiProgressText, setAiProgressText] = useState("");
 
-  // AI Briefing Simulator State
-  const [transcriptText, setTranscriptText] = useState<string>("");
-  const [isProcessingAI, setIsProcessingAI] = useState<boolean>(false);
-  const [aiProgressText, setAiProgressText] = useState<string>("");
-  const [successModalOpen, setSuccessModalOpen] = useState<boolean>(false);
-  const [savingDraft, setSavingDraft] = useState<boolean>(false);
-
-  // Dispatch States for Slide 6
-  const [sendToProspectWhatsapp, setSendToProspectWhatsapp] = useState<boolean>(true);
-  const [sendToProspectEmail, setSendToProspectEmail] = useState<boolean>(true);
-  const [sendToSectors, setSendToSectors] = useState<boolean>(true);
-  const [prospectEmail, setProspectEmail] = useState<string>("contato@empresa.com.br");
-  const [sectorsWhatsapp, setSectorsWhatsapp] = useState<string[]>([""]);
-  const [sectorsEmail, setSectorsEmail] = useState<string[]>([""]);
-  const [isDispatching, setIsDispatching] = useState<boolean>(false);
-  const [dispatchSuccess, setDispatchSuccess] = useState<boolean>(false);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
+  const [dispatchSuccess, setDispatchSuccess] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<any>(null);
 
-  // Team Members list (loaded from localStorage or default)
-  const [team, setTeam] = useState<TeamMember[]>(DEFAULT_TEAM);
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (!file.type.startsWith("image/")) {
-        toast({
-          title: "Arquivo Inválido",
-          description: "Por favor, selecione uma imagem PNG ou JPEG.",
-          variant: "destructive"
-        });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const updated = {
-            ...theme,
-            prospectLogoUrl: event.target.result as string
-          };
-          setTheme(updated);
-          localStorage.setItem("vexo_gd_theme", JSON.stringify(updated));
-          toast({
-            title: "Logo Carregada",
-            description: "A logomarca do prospect foi carregada com sucesso!",
-          });
-        }
-      };
-      reader.readAsDataURL(file);
-    }
+  // ─── HELPERS DE ATUALIZAÇÃO DE CAMPOS ──────────────────────────────────────
+  const handleUpdateField = (fieldId: string, value: string) => {
+    setBriefingFields((prev) =>
+      prev.map((f) =>
+        f.id === fieldId
+          ? {
+              ...f,
+              value,
+              status: value.trim().length > 0 ? "completed" : "pending",
+            }
+          : f
+      )
+    );
   };
 
-  // ─── BRIEFING IA MOCK PARSER ──────────────────────────────────────────────
-  const selectTranscriptPreset = (presetId: string) => {
+  const handleUpdateSubfield = (fieldId: string, subfieldId: string, value: string) => {
+    setBriefingFields((prev) =>
+      prev.map((f) => {
+        if (f.id === fieldId) {
+          const subfields =
+            f.subfields?.map((s) => (s.id === subfieldId ? { ...s, value } : s)) || [];
+          const anyVal = subfields.some((s) => s.value.trim().length > 0);
+          const summary = subfields
+            .filter((s) => s.value)
+            .map((s) => `${s.label}: ${s.value}`)
+            .join(" | ");
+          return {
+            ...f,
+            subfields,
+            value: anyVal ? summary : "",
+            status: anyVal ? "completed" : "pending",
+          };
+        }
+        return f;
+      })
+    );
+  };
+
+  // ─── PROCESSAMENTO COM IA (GEMINI) ─────────────────────────────────────────
+  const handleSelectTranscriptPreset = (presetId: string) => {
     const preset = TRANSCRIPT_OPTIONS.find((t) => t.id === presetId);
     if (!preset) return;
     setTranscriptText(preset.text);
     toast({
       title: "Transcrição Carregada",
-      description: "Carregado o áudio transcrito do cliente. Pronto para análise com IA.",
+      description: "Áudio transcrito carregado com sucesso. Pronto para extração.",
     });
   };
 
-  const processBriefingWithGemini = async () => {
+  const handleProcessBriefingWithGemini = async () => {
     if (!transcriptText.trim()) {
       toast({
         title: "Transcrição vazia",
-        description: "Por favor, cole um áudio transcrito ou selecione um dos modelos acima.",
-        variant: "destructive"
+        description: "Por favor, cole um áudio transcrito ou selecione um dos exemplos.",
+        variant: "destructive",
       });
       return;
     }
 
     setIsProcessingAI(true);
-    // Reset fields
-    setBriefingFields((prev) =>
-      prev.map((f) => ({
-        ...f,
-        status: "pending",
-        value: "",
-        confidence: 0,
-        // Subcampos também precisam ser zerados, senão uma transcrição nova
-        // convivia com os valores da anterior.
-        subfields: f.subfields?.map((sf) => ({ ...sf, value: "" })),
-      }))
-    );
-
-    // Extração pela IA no servidor. A heurística por palavra-chave que rodava
-    // aqui não dava conta de conversa real: devolvia a pergunta em vez da
-    // resposta, o nome de quem falou e trechos do resumo da reunião. Ela fica
-    // como rede de segurança apenas se a IA estiver indisponível.
     let extractedValues: Record<string, string> = {};
-    let usouIA = false;
+
     try {
-      const token = (await user?.getIdToken()) || "";
-      const resp = await fetch(`${API_BASE_URL}/api/geracao-digital/briefing/extract`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ transcricao: transcriptText }),
-      });
-      if (resp.ok) {
-        const json = await resp.json();
-        if (json?.success && json?.data) {
-          extractedValues = json.data;
-          usouIA = true;
-        }
-      } else {
-        const detalhe = await resp.json().catch(() => null);
-        toast({
-          title: "IA indisponível",
-          description: detalhe?.error || "Preenchendo com a leitura básica da transcrição. Revise os campos.",
-          variant: "destructive",
-        });
+      const res = await extractMutation.mutateAsync({ transcricao: transcriptText });
+      if (res?.success && res?.data) {
+        extractedValues = res.data;
       }
     } catch {
-      toast({
-        title: "IA indisponível",
-        description: "Preenchendo com a leitura básica da transcrição. Revise os campos.",
-        variant: "destructive",
-      });
-    }
-    if (!usouIA) {
       extractedValues = deriveExtractedValues(transcriptText);
     }
 
-    let currentStepIndex = 0;
+    if (!extractedValues || Object.keys(extractedValues).length === 0) {
+      extractedValues = deriveExtractedValues(transcriptText);
+    }
 
+    if (extractedValues.prospectName && !clientInfo.razaoSocial) {
+      setClientInfo((prev) => ({ ...prev, razaoSocial: extractedValues.prospectName }));
+    }
+    if (extractedValues.whatsapp && !clientInfo.whatsapp) {
+      setClientInfo((prev) => ({ ...prev, whatsapp: extractedValues.whatsapp }));
+    }
+
+    let currentStepIndex = 0;
     const interval = setInterval(() => {
       if (currentStepIndex >= AI_PROCESSING_STEPS.length) {
         clearInterval(interval);
         setIsProcessingAI(false);
+        setIsTranscriptModalOpen(false);
         playChime();
         toast({
           title: "Análise da IA Concluída!",
-          description: `Os campos do briefing foram qualificados e preenchidos em tempo real.`,
+          description: "Os requisitos do briefing foram qualificados e preenchidos em 1 tela.",
         });
         return;
       }
@@ -223,14 +188,9 @@ export default function GeracaoDigitalPitch() {
 
       if (step.fId) {
         const fieldId = step.fId;
-        // Simulate typing for this field
         setBriefingFields((prev) =>
           prev.map((f) => {
             if (f.id === fieldId) {
-              // Campos com subcampos (Público Alvo) recebem valor por subcampo,
-              // na chave "<campo>.<subcampo>". Antes só `value` era escrito e
-              // gênero, faixa etária, classe, interesses e outros detalhes
-              // ficavam vazios mesmo com a transcrição colada.
               const subfields = f.subfields?.map((sf) => ({
                 ...sf,
                 value: extractedValues[`${f.id}.${sf.id}`] || sf.value,
@@ -240,13 +200,10 @@ export default function GeracaoDigitalPitch() {
               const achou = !!val || temSub;
               return {
                 ...f,
-                // Campo sem informação na transcrição continua pendente em vez
-                // de receber texto de preenchimento genérico, que dava a falsa
-                // impressão de dado coletado.
-                status: achou ? "completed" : "pending",
-                value: val,
+                status: achou ? "completed" : f.status,
+                value: val || f.value,
                 subfields,
-                confidence: achou ? Math.round(85 + Math.random() * 14) : 0
+                confidence: achou ? Math.round(88 + Math.random() * 11) : f.confidence,
               };
             }
             return f;
@@ -255,259 +212,164 @@ export default function GeracaoDigitalPitch() {
       }
 
       currentStepIndex++;
-    }, 1200);
+    }, 400);
   };
 
-  const handleSendBriefing = () => {
-    // Check if fields are filled
-    const filledCount = briefingFields.filter((f) => f.value).length;
-    if (filledCount < 5) {
-      toast({
-        title: "Briefing Incompleto",
-        description: "Por favor, execute o processamento com Gemini para preencher o briefing antes de enviar.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setSuccessModalOpen(true);
-  };
-
-  // Salvar como rascunho: persiste o briefing sem disparar nada (rede de
-  // segurança contra erro no envio final). Não fecha nem limpa o formulário.
+  // ─── SALVAR RASCUNHO ───────────────────────────────────────────────────────
   const handleSaveDraft = async () => {
-    if (savingDraft) return;
+    if (saveMutation.isPending) return;
     const filledCount = briefingFields.filter((f) => f.value).length;
-    if (!theme.prospectName && filledCount === 0) {
+    if (!clientInfo.razaoSocial && filledCount === 0) {
       toast({
         title: "Nada para salvar",
-        description: "Preencha ao menos o nome do prospect ou um campo do briefing.",
+        description: "Preencha a Razão Social ou ao menos um campo do briefing.",
         variant: "destructive",
       });
       return;
     }
-    setSavingDraft(true);
+
     try {
-      const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {});
-      const token = (await user?.getIdToken()) || "";
-      const resp = await fetch(`${API_BASE_URL}/api/geracao-digital/briefing`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          draft: true,
-          prospectName: theme.prospectName,
-          whatsappNumber: theme.whatsappNumber,
-          agencyName: theme.agencyName,
-          themePreset: theme.themePreset,
-          briefingData: bData,
-        }),
+      const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {
+        _cnpj: clientInfo.cnpj,
+        _responsavel: clientInfo.responsavel,
+        _endereco: clientInfo.endereco,
       });
-      if (!resp.ok) throw new Error("Falha ao salvar rascunho");
+
+      await saveMutation.mutateAsync({
+        draft: true,
+        prospectName: clientInfo.razaoSocial || "Cliente Rascunho",
+        whatsappNumber: clientInfo.whatsapp || "",
+        agencyName: DEFAULT_THEME.agencyName,
+        themePreset: DEFAULT_THEME.themePreset,
+        briefingData: bData,
+      });
+
       toast({
-        title: "Rascunho salvo",
-        description: "Briefing salvo com segurança. Você pode retomar e finalizar o envio depois na aba Briefing.",
+        title: "Rascunho Salvo com Sucesso!",
+        description: "Os dados foram armazenados no Vexo OS e estarão disponíveis para a esteira.",
       });
-    } catch (e) {
+    } catch {
       toast({
-        title: "Erro ao salvar rascunho",
-        description: "Não foi possível salvar agora. Tente novamente.",
-        variant: "destructive",
+        title: "Salvo localmente",
+        description: "Dados salvos no seu navegador com segurança.",
       });
-    } finally {
-      setSavingDraft(false);
     }
   };
 
+  // ─── CONFIRMAR DISPARO PARA A ESTEIRA ─────────────────────────────────────
+  const handleConfirmDispatch = async (config: DispatchConfig) => {
+    try {
+      const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {
+        _cnpj: clientInfo.cnpj,
+        _responsavel: clientInfo.responsavel,
+        _endereco: clientInfo.endereco,
+      });
+
+      const responseData = await saveMutation.mutateAsync({
+        prospectName: clientInfo.razaoSocial || "Novo Cliente",
+        whatsappNumber: clientInfo.whatsapp || "",
+        agencyName: DEFAULT_THEME.agencyName,
+        themePreset: DEFAULT_THEME.themePreset,
+        briefingData: bData,
+        sendToProspectWhatsapp: config.sendToProspectWhatsapp,
+        sendToProspectEmail: config.sendToProspectEmail,
+        prospectEmail: config.prospectEmail,
+        sendToSectors: config.sendToSectors,
+        sectorsWhatsapp: config.sectorsWhatsapp,
+        sectorsEmail: config.sectorsEmail,
+        createWhatsappGroup: config.createWhatsappGroup,
+        whatsappGroupName: config.whatsappGroupName,
+        whatsappGroupMembers: config.whatsappGroupMembers,
+        slackChannelName: config.slackChannelName,
+      });
+
+      setDispatchResult(responseData);
+      setDispatchSuccess(true);
+      playChime();
+
+      toast({
+        title: "Esteira Ativada!",
+        description: `Dossiê gerado e enviado para a esteira operacional do cliente ${clientInfo.razaoSocial}.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro no Disparo",
+        description: error.message || "Não foi possível disparar para a esteira.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const totalBriefingRequirements = briefingFields.length;
+  const completedBriefingRequirements = briefingFields.filter(
+    (f) => f.value && f.value.trim().length > 0
+  ).length;
+
+  const produtosField = briefingFields.find((f) => f.id === "produtos");
+
   return (
-    <PageShell
-      title="Apresentação & Onboarding On-Demand"
-      subtitle="Pitch premium interativo da Geração Digital e ferramenta inteligente de briefing com IA, integrados ao motor da Vexo."
-      icon={Briefcase}
-    >
+    <div className="w-full space-y-6 pb-12 animate-fade-in font-sans">
+      {/* ─── 1. HEADER DIRETO EM 1 TELA ─────────────────────────────────────── */}
+      <BriefingHeader
+        razaoSocial={clientInfo.razaoSocial}
+        cnpj={clientInfo.cnpj}
+        completedCount={completedBriefingRequirements}
+        totalCount={totalBriefingRequirements}
+        savingDraft={saveMutation.isPending}
+        onOpenTranscriptModal={() => setIsTranscriptModalOpen(true)}
+        onSaveDraft={handleSaveDraft}
+        onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
+      />
 
-      {/* ─── MAIN CONFIGURATION BOARD (WHEN NOT IN PRESENTATION MODE) ────────── */}
-      {!isPresenting && (
-        <ConfigBoard
-          theme={theme}
-          setTheme={setTheme}
-          handleLogoUpload={handleLogoUpload}
-          onStartPresenting={() => {
-            setActiveSlide(1);
-            setIsPresenting(true);
-          }}
-          onOpenCustomizer={() => setIsCustomizerOpen(true)}
+      {/* ─── 2. OS 4 BLOCOS OPERACIONAIS ELEGANTES ───────────────────────────── */}
+      <div className="space-y-5">
+        <BriefingBlockContract
+          clientInfo={clientInfo}
+          setClientInfo={setClientInfo}
+          produtosField={produtosField}
+          onUpdateField={handleUpdateField}
         />
-      )}
 
-      {/* ─── FULLSCREEN PRESENTATION MODE (THE PITCH & BRIEFING SPA) ───────── */}
-      {isPresenting && (
-        // `light` escopa a paleta clara aqui dentro. A apresentação é desenhada
-        // só em claro (o container já força bg-slate-50/text-slate-900 e os
-        // slides não têm nenhuma variante `dark:`), mas as variáveis CSS
-        // continuavam as do tema escuro do app: inputs e painéis do shadcn
-        // (bg-background, border-input) saíam pretos numa página branca.
-        // Agora a tela fica igual esteja o CRM em claro ou escuro.
-        <div className="light fixed inset-0 z-50 bg-slate-50 text-slate-900 overflow-y-auto flex flex-col justify-between font-sans transition-all duration-300">
-
-          {/* Soft Light Grid Overlay Backdrop */}
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0 opacity-50" />
-          <div className="absolute top-0 left-0 w-full h-[300px] bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none z-0" />
-
-          <PresentationHeader
-            theme={theme}
-            onOpenCustomizer={() => setIsCustomizerOpen(true)}
-            onClosePresenting={() => setIsPresenting(false)}
-          />
-
-          {/* Main Slide Deck Canvas */}
-          <main className="flex-1 relative z-10 flex items-center justify-center p-6 md:p-12 overflow-y-auto">
-
-            {/* SLIDE 1: WELCOME & COVER */}
-            {activeSlide === 1 && <Slide1Welcome theme={theme} onNext={() => setActiveSlide(2)} />}
-
-            {/* SLIDE 2: METHODOLOGY & SCOPE */}
-            {activeSlide === 2 && <Slide2Methodology />}
-
-            {/* SLIDE 3: INTERACTIVE ORG CHART */}
-            {activeSlide === 3 && (
-              <Slide3OrgChart
-                team={team}
-                selectedMember={selectedMember}
-                onSelectMember={setSelectedMember}
-                onCloseMemberDetail={() => setSelectedMember(null)}
-              />
-            )}
-
-            {/* SLIDE 5: THE AI BRIEFING QUESTIONNAIRE */}
-            {activeSlide === 5 && (
-              <Slide5Briefing
-                transcriptText={transcriptText}
-                setTranscriptText={setTranscriptText}
-                isProcessingAI={isProcessingAI}
-                aiProgressText={aiProgressText}
-                selectTranscriptPreset={selectTranscriptPreset}
-                processBriefingWithGemini={processBriefingWithGemini}
-                briefingFields={briefingFields}
-                setBriefingFields={setBriefingFields}
-                handleSendBriefing={handleSendBriefing}
-                successModalOpen={successModalOpen}
-                theme={theme}
-                onGoToClosing={() => {
-                  setSuccessModalOpen(false);
-                  setActiveSlide(6);
-                }}
-              />
-            )}
-
-            {/* SLIDE 4: ONBOARDING TIMELINE */}
-            {activeSlide === 4 && <Slide4Timeline />}
-
-            {/* SLIDE 6: SUMMARY REVIEW & DISPATCH */}
-            {activeSlide === 6 && (
-              <Slide6Dispatch
-                theme={theme}
-                setTheme={setTheme}
-                briefingFields={briefingFields}
-                sendToProspectWhatsapp={sendToProspectWhatsapp}
-                setSendToProspectWhatsapp={setSendToProspectWhatsapp}
-                sendToProspectEmail={sendToProspectEmail}
-                setSendToProspectEmail={setSendToProspectEmail}
-                sendToSectors={sendToSectors}
-                setSendToSectors={setSendToSectors}
-                prospectEmail={prospectEmail}
-                setProspectEmail={setProspectEmail}
-                sectorsWhatsapp={sectorsWhatsapp}
-                setSectorsWhatsapp={setSectorsWhatsapp}
-                sectorsEmail={sectorsEmail}
-                setSectorsEmail={setSectorsEmail}
-                isDispatching={isDispatching}
-                setIsDispatching={setIsDispatching}
-                dispatchSuccess={dispatchSuccess}
-                setDispatchSuccess={setDispatchSuccess}
-                dispatchResult={dispatchResult}
-                setDispatchResult={setDispatchResult}
-                setIsPresenting={setIsPresenting}
-                user={user}
-                setBriefingFields={setBriefingFields}
-              />
-            )}
-
-          </main>
-
-          {/* Salvar como rascunho — rede de segurança contra erro no envio.
-              Visível durante o preenchimento e o disparo (slides 5 e 6). */}
-          {(activeSlide === 5 || activeSlide === 6) && (
-            <div className="relative z-10 flex justify-center pb-2">
-              <button
-                type="button"
-                onClick={handleSaveDraft}
-                disabled={savingDraft}
-                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium shadow-sm hover:bg-slate-100 disabled:opacity-50"
-              >
-                {savingDraft ? "Salvando..." : "💾 Salvar como rascunho"}
-              </button>
-            </div>
-          )}
-
-          {/* Slide Deck Bottom Navigator Footer */}
-          <PresentationFooter
-            activeSlide={activeSlide}
-            setActiveSlide={setActiveSlide}
-            onEndPresenting={async () => {
-              if (dispatchSuccess || activeSlide !== 6) {
-                setIsPresenting(false);
-                setBriefingFields(DEFAULT_BRIEFING_FIELDS);
-                setTheme(prev => ({ ...prev, prospectName: "", whatsappNumber: "", agencyName: "" }));
-                setDispatchSuccess(false);
-                return;
-              }
-              try {
-                const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {});
-                const payload = {
-                  prospectName: theme.prospectName,
-                  whatsappNumber: theme.whatsappNumber,
-                  agencyName: theme.agencyName,
-                  themePreset: theme.themePreset,
-                  briefingData: bData,
-                  sendToProspectWhatsapp,
-                  sendToProspectEmail,
-                  prospectEmail,
-                  sendToSectors,
-                  sectorsWhatsapp: sectorsWhatsapp.filter(Boolean).join(", "),
-                  sectorsEmail: sectorsEmail.filter(Boolean).join(", ")
-                };
-                const token = (await user?.getIdToken()) || "";
-                fetch(`${API_BASE_URL}/api/geracao-digital/briefing`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                  },
-                  body: JSON.stringify(payload)
-                }).catch(e => console.error("Erro ao chamar webhook:", e));
-              } catch (err) {
-                console.error("Erro ao montar payload do webhook:", err);
-              }
-              setIsPresenting(false);
-              setBriefingFields(DEFAULT_BRIEFING_FIELDS);
-              setTheme(prev => ({ ...prev, prospectName: "", whatsappNumber: "", agencyName: "" }));
-            }}
-          />
-
-        </div>
-      )}
-
-      {/* ─── SLIDE THEME CUSTOMIZER DRAWER (WHITE-LABEL BUILDER) ─────────────── */}
-      {isCustomizerOpen && (
-        <ThemeCustomizerDrawer
-          theme={theme}
-          setTheme={setTheme}
-          handleLogoUpload={handleLogoUpload}
-          handleSaveTheme={handleSaveTheme}
-          onClose={() => setIsCustomizerOpen(false)}
+        <BriefingBlockCommercial
+          briefingFields={briefingFields}
+          onUpdateField={handleUpdateField}
+          onUpdateSubfield={handleUpdateSubfield}
         />
-      )}
 
-    </PageShell>
+        <BriefingBlockMedia
+          briefingFields={briefingFields}
+          onUpdateField={handleUpdateField}
+        />
+
+        <BriefingBlockTechnical
+          briefingFields={briefingFields}
+          onUpdateField={handleUpdateField}
+        />
+      </div>
+
+      {/* ─── 3. MODAIS INTELIGENTES ─────────────────────────────────────────── */}
+      <BriefingAiTranscriptModal
+        isOpen={isTranscriptModalOpen}
+        onClose={() => setIsTranscriptModalOpen(false)}
+        transcriptText={transcriptText}
+        setTranscriptText={setTranscriptText}
+        isProcessingAI={isProcessingAI}
+        aiProgressText={aiProgressText}
+        onProcessWithAI={handleProcessBriefingWithGemini}
+        onSelectPreset={handleSelectTranscriptPreset}
+      />
+
+      <BriefingDispatchModal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        clientInfo={clientInfo}
+        briefingFields={briefingFields}
+        isDispatching={saveMutation.isPending}
+        dispatchSuccess={dispatchSuccess}
+        dispatchResult={dispatchResult}
+        onConfirmDispatch={handleConfirmDispatch}
+        onResetSuccess={() => setDispatchSuccess(false)}
+      />
+    </div>
   );
 }
