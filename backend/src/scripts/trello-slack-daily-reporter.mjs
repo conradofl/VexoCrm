@@ -7,23 +7,27 @@
  * e despachar o resumo matinal (09h00) ou vespertino (18h00) no canal #01-ops-geral do Slack.
  * 
  * Uso:
- *   node backend/scripts/trello-slack-daily-reporter.mjs --mode=morning
- *   node backend/scripts/trello-slack-daily-reporter.mjs --mode=evening
- *   node backend/scripts/trello-slack-daily-reporter.mjs --mode=morning --dry-run
+ *   node backend/src/scripts/trello-slack-daily-reporter.mjs --mode=morning
+ *   node backend/src/scripts/trello-slack-daily-reporter.mjs --mode=evening
+ *   node backend/src/scripts/trello-slack-daily-reporter.mjs --mode=morning --dry-run
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runTrelloDailyAudit } from "../src/services/trelloSlackReporter.js";
+import { runTrelloDailyAudit } from "../services/trelloSlackReporter.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Carrega .env do backend
 function loadEnvFallback() {
-  const envPath = path.resolve(__dirname, "../.env");
-  if (!fs.existsSync(envPath)) return;
+  const envCandidates = [
+    path.resolve(__dirname, "../../.env"),
+    path.resolve(__dirname, "../.env"),
+  ];
+  const envPath = envCandidates.find((p) => fs.existsSync(p));
+  if (!envPath) return;
 
   try {
     const raw = fs.readFileSync(envPath, "utf-8");
