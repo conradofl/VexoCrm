@@ -1,6 +1,9 @@
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
-# Instala certificados, ferramentas de download e a biblioteca libgomp1
+# Evita perguntas interativas durante a instalação
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Instala certificados, curl, tar e libgomp1 no Ubuntu 24.04 (GLIBC 2.39 nativa)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
