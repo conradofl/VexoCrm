@@ -54,3 +54,64 @@ node backend/src/scripts/trello-slack-daily-reporter.mjs --evening
 # Simulação / Teste sem envio real (Dry-run)
 node backend/src/scripts/trello-slack-daily-reporter.mjs --morning --dry-run
 ```
+
+---
+
+## 👥 Gestão de Usuários, Senhas e Roles
+
+A gestão de acessos e permissões do GoClaw é dividida em dois arquivos:
+- `goclaw/users.json`: Mapeamento de usuários, nomes de exibição, papéis (`role`) e hashes de senha HTTP (`http_password_hash`).
+- `goclaw/goclaw.json` (e `goclaw.yaml`): Bloco `roles` com as permissões de ferramentas, skills, memória, transcrições e comandos.
+
+### 🔐 Geração Segura de Senhas (Argon2id)
+
+Para gerar hashes de senha compatíveis com o validador interno do GoClaw (`user.VerifyPassword` / `user.parseArgon2Hash`):
+
+```bash
+# Modo 1: Interativo (digitação no terminal com máscara de asteriscos)
+node goclaw/scripts/gerar-hash.mjs
+
+# Modo 2: Via pipe seguro (sem gravar no histórico do shell)
+read -s SENHA && echo -n "$SENHA" | node goclaw/scripts/gerar-hash.mjs
+```
+
+O hash gerado segue a especificação exata do GoClaw:
+- **Variante**: `Argon2id` (v=19)
+- **Memória**: `m=65536` (64 MB)
+- **Tempo / Iterações**: `t=1`
+- **Paralelismo**: `p=4`
+- **Formato**: `$argon2id$v=19$m=65536,t=1,p=4$<salt>$<hash>`
+
+Copie a saída gerada e cole no campo `"http_password_hash"` do usuário em `goclaw/users.json`.
+
+---
+
+## ⚠️ AVISO CRÍTICO: Bug de Validação na Tela Web de Users
+
+> **NÃO utilize a interface web do GoClaw para criar ou editar usuários.**
+
+**Causa Raiz Identificada no Binário (`goclaw_0.1.21`):**
+1. **Divergência de Regex**:
+   - No frontend web (HTML/JS embutido no binário), o campo username tem `pattern="[a-z0-9_-]+"` e sugere que hífens (`-`) são válidos.
+   - No backend Go (`internal/user.ValidateUsername`), a regex compilada é estritamente:
+     ```go
+     ^[a-z][a-z0-9_]{0,31}$
+     ```
+   - O backend **rejeita** qualquer username que contenha hífen ou que não se inicie com letra minúscula `[a-z]`.
+2. **Falha de Persistência**:
+   - A tela web de Users apresenta falhas silenciosas na persistência para o `users.json` e não propaga alterações de senhas/roles de forma íntegra.
+
+**Regra Operacional**:
+Qualquer alteração de usuários e permissões DEVE ser feita diretamente nos arquivos de configuração versionados (`goclaw/users.json` e `goclaw/goclaw.json`), seguido de restart do contêiner ou binário.
+
+---
+
+## 🛡️ Configuração do Papel `colaborador`
+
+No `goclaw/goclaw.json` (e `goclaw.yaml`), o papel `colaborador` limita os acessos operacionais da equipe PJ:
+- **Ferramentas (`tools`)**: `message`, `web_search`, `web_fetch`, `memory_graph`, `document_extract`.
+- **Skills (`skills`)**: `[]` (vazio, sem acesso a skills internas).
+- **Acesso à Memória (`memory`)**: `"none"` (isolamento de memória global).
+- **Acesso a Transcrições (`transcripts`)**: `"own"` (enxerga apenas o histórico das próprias conversas).
+- **Slash Commands (`commands`)**: `false` (comandos administrativos desativados).
+

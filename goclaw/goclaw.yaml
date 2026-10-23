@@ -98,3 +98,17 @@ storage:
 security:
   sandbox: true
   panicStop: true
+
+roles:
+  colaborador:
+    tools:
+      - "message"
+      - "web_search"
+      - "web_fetch"
+      - "memory_graph"
+      - "document_extract"
+    skills: []
+    memory: "none"
+    transcripts: "own"
+    commands: false
+

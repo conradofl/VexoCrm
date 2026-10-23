@@ -68,5 +68,20 @@
       "model": "gemini/gemini-3-flash-preview",
       "promptFile": "prompts/gestor_demandas_auditor.md"
     }
+  },
+  "roles": {
+    "colaborador": {
+      "tools": [
+        "message",
+        "web_search",
+        "web_fetch",
+        "memory_graph",
+        "document_extract"
+      ],
+      "skills": [],
+      "memory": "none",
+      "transcripts": "own",
+      "commands": false
+    }
   }
 }
