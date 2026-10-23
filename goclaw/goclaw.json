@@ -5,7 +5,8 @@
         "driver": "openai",
         "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "apiKey": "${GEMINI_API_KEY}",
-        "thinkingLevel": "off"
+        "thinkingLevel": "off",
+        "contextWindow": 1000000
       },
       "groq": {
         "driver": "openai",

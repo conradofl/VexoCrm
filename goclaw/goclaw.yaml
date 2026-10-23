@@ -8,6 +8,7 @@ llm:
       baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
       apiKey: "${GEMINI_API_KEY}"
       thinkingLevel: "off"
+      contextWindow: 1000000
     groq:
       driver: openai
       baseURL: "https://api.groq.com/openai/v1"
