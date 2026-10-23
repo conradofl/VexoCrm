@@ -131,6 +131,43 @@ export async function getSegmentationCatalogForClient(clientId) {
   return getSegmentationCatalog(data?.segmentation_config);
 }
 
+// Campanha de público do Banco de Dados (analytics_meta.audienceCriteria é objeto). A tela grava esse público como
+// uma planilha própria (sourceType "banco") e põe o id dela em import_id; sem esse id, a origem cai em NULL, que
+// buildDispatchLeads lê como "todas as planilhas" (o filtro de import_id abaixo só entra quando há valor). Foi assim que
+// a campanha 0d3e7b15, de 2 leads, montou lote de 504 (21/10/2026). A tela manda audienceCriteria: null quando não é
+// Banco, então a chave existir não basta: precisa ser objeto.
+export function hasBancoAudienceCriteria(campaign) {
+  const criteria = campaign?.analytics_meta?.audienceCriteria;
+  return Boolean(criteria) && typeof criteria === "object" && !Array.isArray(criteria);
+}
+
+// Origem dos leads de uma campanha. Uma campanha pode apontar para varias
+// planilhas importadas: a lista fica em analytics_meta.importIds (jsonb), e a
+// coluna import_id guarda a primeira, para nao quebrar quem le so a coluna.
+export function resolveCampaignImportSelection(campaign) {
+  if (campaign?.analytics_meta?.importSource === "__crm__") return "__crm__";
+  const many = campaign?.analytics_meta?.importIds;
+  if (Array.isArray(many) && many.length > 0) return many;
+  return campaign?.import_id || null;
+}
+
+// Origem de uma campanha para os caminhos que MONTAM OU RODAM LOTE.
+// Diferente de resolveCampaignImportSelection, aqui campanha de público do Banco sem origem NAO vira "todas as
+// planilhas": ela e um erro. Em buildDispatchLeads o filtro de import_id so e aplicado quando ha valor, entao null/[]/""
+// devolvem a base inteira do tenant. Foi assim que uma campanha de 2 leads montou lote de 504 (0d3e7b15, 21/10/2026).
+//
+// Divida conhecida: NULL ainda significa "todas" para campanha que nao e do Banco — a tela grava NULL quando o dono
+// escolhe "Todas as planilhas" (padrao do seletor). So campanhas novas gravam importSource "__all__"; a trava final
+// (NULL = erro sempre) espera o historico estar preenchido.
+export function resolveCampaignImportSelectionStrict(campaign) {
+  const selection = resolveCampaignImportSelection(campaign);
+  if (selection === "__crm__" || selection === "__all__") return selection;
+  if (Array.isArray(selection) && selection.length > 0) return selection;
+  if (typeof selection === "string" && selection.trim() !== "") return selection;
+  if (hasBancoAudienceCriteria(campaign)) return null; // ausencia: quem chamou precisa recusar
+  return "__all__";
+}
+
 export async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null }) {
   if (!supabase) return [];
 
@@ -854,6 +891,13 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
   const steps = analyticsMeta.sequence.filter((step) => step.enabled);
   if (analyticsMeta.dispatchOptions?.waitForReply !== true || steps.length === 0) {
     return { started: false, reason: "campaign_not_wait_for_reply" };
+  }
+
+  // Sem origem, buildDispatchLeads devolveria a base inteira de planilhas. Mesma regra dos outros pontos de lote
+  // (__crm__ e "todas" passam), para nao virar recusa silenciosa de campanha de CRM com espera-resposta.
+  if (!resolveCampaignImportSelectionStrict(campaign)) {
+    console.error("[campaigns] proximo da fila recusado: campanha_sem_origem", { campaignId: campaign.id, clientId });
+    return { started: false, reason: "campaign_without_source" };
   }
 
   const allLeads = await buildDispatchLeads({
