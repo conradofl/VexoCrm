@@ -263,6 +263,8 @@ export interface CreateCampaignPayload {
   importId?: string | null;
   /** Varias planilhas de uma vez. Quando vem preenchido, prevalece sobre importId. */
   importIds?: string[];
+  /** "Todas as planilhas" escolhido de propósito (importId fica null). */
+  importSource?: "__all__";
   limitPerRun?: number;
   scheduledFor?: string | null;
   mode?: "disparo" | "agente";
@@ -298,6 +300,7 @@ export interface UpdateCampaignPayload {
   status?: CampaignStatus;
   importId?: string | null;
   importIds?: string[];
+  importSource?: "__all__";
   limitPerRun?: number;
   scheduledFor?: string | null;
   startsAt?: string | null;

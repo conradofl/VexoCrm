@@ -43,6 +43,7 @@ import { markCampaignLeadWaitingReply } from "../../campaign/dispatch.js";
 import {
   extractCampaignProgress,
   findLeadsAlreadyReachedInCycle,
+  hasBancoAudienceCriteria,
   isLeadBlockedByActiveCycleProgress,
 } from "../../campaign/dispatch.js";
 import {
@@ -371,6 +372,31 @@ function resolveCampaignImportSelection(campaign) {
   const many = campaign?.analytics_meta?.importIds;
   if (Array.isArray(many) && many.length > 0) return many;
   return campaign?.import_id || null;
+}
+
+// Origem de uma campanha para os caminhos que MONTAM OU RODAM LOTE.
+// Diferente de resolveCampaignImportSelection, aqui campanha de público do Banco sem origem NAO vira "todas as
+// planilhas": ela e um erro. Em dispatch.js o filtro de import_id so e aplicado quando ha valor, entao null/[]/""
+// devolvem a base inteira do tenant. Foi assim que uma campanha de 2 leads montou lote de 504 (0d3e7b15, 21/10/2026).
+//
+// Divida conhecida: NULL ainda significa "todas" para campanha que nao e do Banco — a tela grava NULL quando o dono
+// escolhe "Todas as planilhas" (padrao do seletor). So campanhas novas gravam importSource "__all__"; a trava final
+// (NULL = erro sempre) espera o historico estar preenchido.
+function resolveCampaignImportSelectionStrict(campaign) {
+  const selection = resolveCampaignImportSelection(campaign);
+  if (selection === "__crm__" || selection === "__all__") return selection;
+  if (Array.isArray(selection) && selection.length > 0) return selection;
+  if (typeof selection === "string" && selection.trim() !== "") return selection;
+  if (hasBancoAudienceCriteria(campaign)) return null; // ausencia: quem chamou precisa recusar
+  return "__all__";
+}
+
+const CAMPAIGN_WITHOUT_SOURCE_MESSAGE =
+  "Esta campanha não tem planilha de origem definida. Escolha a origem antes de disparar.";
+
+function refuseCampaignWithoutSource(res, sendError, context) {
+  console.error("[campaigns] lote recusado: campanha_sem_origem", context);
+  return sendError(res, 422, "CAMPAIGN_WITHOUT_SOURCE", CAMPAIGN_WITHOUT_SOURCE_MESSAGE);
 }
 
 /**
@@ -1291,8 +1317,12 @@ export function registerCampaignsRoutes(app, deps) {
       sendError,
     });
     if (!clientId) return;
-    const reqImportId = normalizeString(req.body?.importId) || null;
-    const isCrmSource = reqImportId === "__crm__";
+    const rawReqImportId = normalizeString(req.body?.importId) || null;
+    const isCrmSource = rawReqImportId === "__crm__";
+    // "Todas as planilhas" escolhido de proposito: a coluna import_id fica NULL (como sempre) e a intencao vai
+    // escrita em analytics_meta.importSource = "__all__" (ver resolveCampaignImportSelectionStrict).
+    const isAllSource = rawReqImportId === "__all__" || normalizeString(req.body?.importSource) === "__all__";
+    const reqImportId = rawReqImportId === "__all__" ? null : rawReqImportId;
     // importIds (varias planilhas). A coluna import_id recebe a primeira; a
     // lista completa vai para analytics_meta.importIds mais abaixo.
     const reqImportIds = Array.isArray(req.body?.importIds)
@@ -1314,6 +1344,14 @@ export function registerCampaignsRoutes(app, deps) {
       analyticsMeta.importSource = "__crm__";
     } else if (reqImportIds.length > 0) {
       analyticsMeta.importIds = reqImportIds;
+    }
+    if (!isCrmSource) {
+      if (isAllSource && !importId) analyticsMeta.importSource = "__all__";
+      else if (analyticsMeta.importSource === "__all__") delete analyticsMeta.importSource;
+    }
+    // Campanha de publico do Banco sem origem nao nasce: cada lote dela sairia com a base inteira de planilhas.
+    if (!resolveCampaignImportSelectionStrict({ import_id: importId, analytics_meta: analyticsMeta })) {
+      return refuseCampaignWithoutSource(res, sendError, { campaignId: null, clientId, dispatchId: null });
     }
     const campaignMessage = normalizeString(analyticsMeta.message);
     const scheduledDate = scheduledFor ? new Date(scheduledFor) : null;
@@ -1496,6 +1534,7 @@ export function registerCampaignsRoutes(app, deps) {
     }
 
     let isCrmSourceUpdate = false;
+    let isAllSourceUpdate = normalizeString(req.body?.importSource) === "__all__";
     let updatedImportIds = null;
     if ("importIds" in req.body) {
       updatedImportIds = Array.isArray(req.body?.importIds)
@@ -1504,11 +1543,16 @@ export function registerCampaignsRoutes(app, deps) {
       updates.import_id = updatedImportIds[0] || null;
     }
     if ("importId" in req.body) {
-      const reqImportId = normalizeString(req.body?.importId) || null;
+      const rawReqImportId = normalizeString(req.body?.importId) || null;
+      if (rawReqImportId === "__all__") isAllSourceUpdate = true;
+      const reqImportId = rawReqImportId === "__all__" ? null : rawReqImportId;
       if (reqImportId === "__crm__") {
         updates.import_id = null;
         isCrmSourceUpdate = true;
-      } else if (updatedImportIds === null) {
+      } else if (updatedImportIds === null || updatedImportIds.length === 0) {
+        // importIds vazio nao apaga a origem unica: a tela manda importIds: [] com importId = planilha do Banco ao
+        // editar campanha de publico do Banco, e ate aqui isso zerava import_id (mesma regra da criacao:
+        // importIds[0] || importId).
         updates.import_id = reqImportId;
       }
     }
@@ -1620,19 +1664,32 @@ export function registerCampaignsRoutes(app, deps) {
         recurrenceWarnings = recurrence.warnings;
       }
 
-      if (isCrmSourceUpdate || updatedImportIds !== null || ("importId" in req.body && updates.import_id !== null)) {
+      if (isCrmSourceUpdate || isAllSourceUpdate || updatedImportIds !== null || ("importId" in req.body && updates.import_id !== null)) {
          const currentMeta = updates.analytics_meta || current.analytics_meta || {};
          if (isCrmSourceUpdate) {
             currentMeta.importSource = "__crm__";
             delete currentMeta.importIds;
          } else {
-            delete currentMeta.importSource;
+            if (isAllSourceUpdate && !updates.import_id && !(updatedImportIds?.length > 0)) currentMeta.importSource = "__all__";
+            else delete currentMeta.importSource;
             if (updatedImportIds !== null) {
               if (updatedImportIds.length > 0) currentMeta.importIds = updatedImportIds;
               else delete currentMeta.importIds;
             }
          }
          updates.analytics_meta = currentMeta;
+      }
+
+      // Edicao que deixaria campanha de publico do Banco sem origem e recusada (so quando o pedido mexe na origem ou
+      // no conteudo: arquivar ou reagendar campanha antiga continua possivel).
+      if (sourceChanged || updates.analytics_meta) {
+        const effectiveCampaign = {
+          import_id: "import_id" in updates ? updates.import_id : current.import_id ?? null,
+          analytics_meta: updates.analytics_meta || current.analytics_meta || {},
+        };
+        if (!resolveCampaignImportSelectionStrict(effectiveCampaign)) {
+          return refuseCampaignWithoutSource(res, sendError, { campaignId: id, clientId: authorizedClientId, dispatchId: null });
+        }
       }
 
       let { data, error } = await supabase
@@ -3138,6 +3195,15 @@ export function registerCampaignsRoutes(app, deps) {
     const { webhookUrl, webhookToken } = dispatchSettings;
     if (!webhookUrl) {
       throw new Error("Configure uma URL ativa de disparo Evolution para esta empresa");
+    }
+
+    // Sem origem, nenhum envio sai: buildDispatchLeads devolveria a base inteira (ver resolveCampaignImportSelectionStrict).
+    if (!resolveCampaignImportSelectionStrict(campaign)) {
+      console.error("[campaigns] lote recusado: campanha_sem_origem", { campaignId: campaign.id, clientId, dispatchId });
+      const semOrigem = new Error(CAMPAIGN_WITHOUT_SOURCE_MESSAGE);
+      semOrigem.code = "CAMPAIGN_WITHOUT_SOURCE";
+      semOrigem.userMessage = CAMPAIGN_WITHOUT_SOURCE_MESSAGE;
+      throw semOrigem;
     }
 
     // Defeito A: garante o schema de claim (idempotência por disparo) antes de montar a fila.
@@ -5295,6 +5361,9 @@ export function registerCampaignsRoutes(app, deps) {
         .eq("id", dispatch.campaign_id)
         .single();
       if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
+      if (!resolveCampaignImportSelectionStrict(campaign)) {
+        return refuseCampaignWithoutSource(res, sendError, { campaignId: campaign.id, clientId: authorizedClientId, dispatchId });
+      }
 
       // 1. Calcula quantos leads pendentes restam (ocorrencia recorrente: publico inteiro, sem limite — igual ao envio)
       const occurrence = pgDatabasePool
@@ -5763,13 +5832,18 @@ export function registerCampaignsRoutes(app, deps) {
       // Verifica que a campanha pertence ao cliente autorizado
       const { data: campaign, error: campaignErr } = await supabase
         .from("campaigns")
-        .select("id, client_id, analytics_meta, campaign_prompt_id")
+        // import_id: sem ele, resolveCampaignImportSelection caia em NULL para campanha de UMA planilha e o
+        // target_count saia contado sobre a base inteira (o 504 do lote 3edb7b73).
+        .select("id, client_id, import_id, analytics_meta, campaign_prompt_id")
         .eq("id", campaignId)
         .single();
       if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
+      if (!resolveCampaignImportSelectionStrict(campaign)) {
+        return refuseCampaignWithoutSource(res, sendError, { campaignId: campaign.id, clientId: authorizedClientId, dispatchId: null });
+      }
       if (!(await validateCampaignDispatchEvolutionInstance(authorizedClientId, requestedEvolutionInstanceId, res))) return;
 
       const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
@@ -6014,6 +6088,9 @@ export function registerCampaignsRoutes(app, deps) {
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, campaign.client_id);
       if (!authorizedClientId) return;
+      if (!resolveCampaignImportSelectionStrict(campaign)) {
+        return refuseCampaignWithoutSource(res, sendError, { campaignId: campaign.id, clientId: authorizedClientId, dispatchId });
+      }
 
       // Claim atomico tambem no gatilho manual: `.neq("status","running")` impede que
       // dois cliques no botao — ou um clique concorrente com o ciclo do scheduler —

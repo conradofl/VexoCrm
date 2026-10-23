@@ -131,6 +131,16 @@ export async function getSegmentationCatalogForClient(clientId) {
   return getSegmentationCatalog(data?.segmentation_config);
 }
 
+// Campanha de público do Banco de Dados (analytics_meta.audienceCriteria é objeto). A tela grava esse público como
+// uma planilha própria (sourceType "banco") e põe o id dela em import_id; sem esse id, a origem cai em NULL, que
+// buildDispatchLeads lê como "todas as planilhas" (o filtro de import_id abaixo só entra quando há valor). Foi assim que
+// a campanha 0d3e7b15, de 2 leads, montou lote de 504 (21/10/2026). A tela manda audienceCriteria: null quando não é
+// Banco, então a chave existir não basta: precisa ser objeto.
+export function hasBancoAudienceCriteria(campaign) {
+  const criteria = campaign?.analytics_meta?.audienceCriteria;
+  return Boolean(criteria) && typeof criteria === "object" && !Array.isArray(criteria);
+}
+
 export async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null }) {
   if (!supabase) return [];
 
@@ -854,6 +864,12 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
   const steps = analyticsMeta.sequence.filter((step) => step.enabled);
   if (analyticsMeta.dispatchOptions?.waitForReply !== true || steps.length === 0) {
     return { started: false, reason: "campaign_not_wait_for_reply" };
+  }
+
+  // Sem origem, buildDispatchLeads devolveria a base inteira de planilhas (ver hasBancoAudienceCriteria).
+  if (!campaign.import_id && hasBancoAudienceCriteria(campaign)) {
+    console.error("[campaigns] proximo da fila recusado: campanha_sem_origem", { campaignId: campaign.id, clientId });
+    return { started: false, reason: "campaign_without_source" };
   }
 
   const allLeads = await buildDispatchLeads({

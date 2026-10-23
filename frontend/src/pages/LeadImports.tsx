@@ -1616,6 +1616,11 @@ export default function LeadImports({
         clientId: activeClientId,
         importId: finalImportId === ALL_IMPORTS_VALUE ? null : finalImportId,
         importIds: (selectedFile || bancoAudience) ? [] : selectedImportIds,
+        // "Todas as planilhas" escolhido de propósito vai escrito: importId NULL sozinho não distingue intenção de
+        // origem perdida. Campo à parte para o backend antigo ignorar sem quebrar.
+        ...(!selectedFile && !bancoAudience && finalImportId === ALL_IMPORTS_VALUE && selectedImportIds.length === 0
+          ? { importSource: "__all__" as const }
+          : {}),
         limitPerRun: limitForCampaign,
         mode: campaignMode,
         campaignPromptId,
