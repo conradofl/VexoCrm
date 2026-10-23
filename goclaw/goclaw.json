@@ -5,23 +5,16 @@
         "driver": "openai",
         "baseURL": "https://api.groq.com/openai/v1",
         "apiKey": "${GROQ_API_KEY}"
-      },
-      "gemini": {
-        "driver": "openai",
-        "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "apiKey": "${GEMINI_API_KEY}"
       }
     },
     "agent": {
       "models": [
-        "llama-3.3-70b-versatile",
-        "gemini-1.5-flash"
+        "groq/llama-3.3-70b-versatile"
       ]
     },
     "subagent": {
       "models": [
-        "llama-3.1-8b-instant",
-        "gemini-1.5-flash"
+        "groq/llama-3.1-8b-instant"
       ]
     }
   },
@@ -45,17 +38,17 @@
   "lanes": {
     "maestro": {
       "name": "COO Maestro",
-      "model": "llama-3.3-70b-versatile",
+      "model": "groq/llama-3.3-70b-versatile",
       "promptFile": "prompts/maestro_coo.md"
     },
     "onboarding": {
       "name": "Gestor Digital Onboarding",
-      "model": "llama-3.3-70b-versatile",
+      "model": "groq/llama-3.3-70b-versatile",
       "promptFile": "prompts/gestor_digital_onboarding.md"
     },
     "demandas_cron": {
       "name": "Auditor de Demandas & Prazos",
-      "model": "llama-3.3-70b-versatile",
+      "model": "groq/llama-3.3-70b-versatile",
       "promptFile": "prompts/gestor_demandas_auditor.md"
     }
   }

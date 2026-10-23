@@ -1,34 +1,34 @@
 {
   "conrado": {
     "name": "Conrado Finzi",
-    "role": "admin"
+    "role": "owner"
   },
   "caio": {
     "name": "Caio Almeida",
-    "role": "admin"
+    "role": "owner"
   },
   "duda": {
     "name": "Duda Eduarda",
-    "role": "user"
+    "role": "owner"
   },
   "arthur": {
     "name": "Arthur Henrique",
-    "role": "user"
+    "role": "owner"
   },
   "santana": {
     "name": "Santana",
-    "role": "user"
+    "role": "owner"
   },
   "eflen": {
     "name": "Eflen",
-    "role": "user"
+    "role": "owner"
   },
   "carlos": {
     "name": "Carlos Rafael",
-    "role": "user"
+    "role": "owner"
   },
   "gabriel": {
     "name": "Gabriel",
-    "role": "user"
+    "role": "owner"
   }
 }
