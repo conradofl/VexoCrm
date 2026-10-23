@@ -52,6 +52,7 @@ import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigi
 import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPresentation";
 import GeracaoDigitalImplementationBriefing from "./pages/GeracaoDigitalImplementationBriefing";
 import ComercialVexo from "./pages/ComercialVexo";
+import ClientPortal from "./pages/ClientPortal";
 
 const queryClient = new QueryClient();
 
@@ -467,6 +468,7 @@ const App = () => (
                }
              />
              <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
+             <Route path="/portal/:slug" element={<ClientPortal />} />
              {/* Preview temporário da Apresentação Comercial (teste de layout/copy). */}
              <Route path="/apresentacao-preview" element={<PresentationPreview />} />
              <Route path="*" element={<NotFound />} />
