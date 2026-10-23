@@ -1,10 +1,11 @@
 FROM debian:bookworm-slim
 
-# Instala certificados e ferramentas de download
+# Instala certificados, ferramentas de download e a biblioteca libgomp1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     tar \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Baixa e instala o binário oficial do GoClaw para Linux x86_64
