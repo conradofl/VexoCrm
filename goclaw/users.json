@@ -1,11 +1,13 @@
 {
   "conrado": {
     "name": "Conrado Finzi",
-    "role": "owner"
+    "role": "owner",
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$nEU2eFdf2kJ/2QH9nCD+lQ$qHBNbecl/iPI5SqsUz2blQPgl+jt5LDk8m5vZIAdja8"
   },
   "caio": {
     "name": "Caio Almeida",
-    "role": "owner"
+    "role": "owner",
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$nEU2eFdf2kJ/2QH9nCD+lQ$qHBNbecl/iPI5SqsUz2blQPgl+jt5LDk8m5vZIAdja8"
   },
   "duda": {
     "name": "Duda Eduarda",
