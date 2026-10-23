@@ -3,23 +3,24 @@
 
 llm:
   providers:
-    anthropic:
-      driver: anthropic
-      apiKey: "${ANTHROPIC_API_KEY}"
-      promptCaching: true
-    openai:
+    groq:
       driver: openai
-      apiKey: "${OPENAI_API_KEY}"
+      baseURL: "https://api.groq.com/openai/v1"
+      apiKey: "${GROQ_API_KEY}"
+    gemini:
+      driver: openai
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      apiKey: "${GEMINI_API_KEY}"
   
   agent:
     models:
-      - "anthropic/claude-3-5-sonnet-20241022"
-      - "openai/gpt-4o"
+      - "llama-3.3-70b-versatile"
+      - "gemini-1.5-flash"
   
   subagent:
     models:
-      - "openai/gpt-4o-mini"
-      - "anthropic/claude-3-5-haiku-20241022"
+      - "llama-3.1-8b-instant"
+      - "gemini-1.5-flash"
 
 channels:
   telegram:
@@ -42,8 +43,8 @@ lanes:
   maestro:
     name: "COO Maestro"
     description: "General da operação e alinhamento diário com os sócios (Conrado & Caio)"
-    driver: "anthropic"
-    model: "anthropic/claude-3-5-sonnet-20241022"
+    driver: "openai"
+    model: "llama-3.3-70b-versatile"
     systemPromptFile: "prompts/maestro_coo.md"
     channels:
       - "telegram"
@@ -59,7 +60,7 @@ lanes:
     name: "Gestor Digital Onboarding"
     description: "Recepção de novos clientes, coleta de briefing guiado e acessos nas primeiras 48h"
     driver: "openai"
-    model: "openai/gpt-4o"
+    model: "llama-3.3-70b-versatile"
     systemPromptFile: "prompts/gestor_digital_onboarding.md"
     channels:
       - "whatsapp"
@@ -74,7 +75,7 @@ lanes:
     name: "Auditor de Demandas & Prazos"
     description: "Auditoria automática diária de cartões no Trello e relatórios no Slack"
     driver: "openai"
-    model: "openai/gpt-4o"
+    model: "llama-3.3-70b-versatile"
     systemPromptFile: "prompts/gestor_demandas_auditor.md"
     schedules:
       - name: "checkin_matinal"

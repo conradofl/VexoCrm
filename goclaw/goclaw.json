@@ -1,26 +1,27 @@
 {
   "llm": {
     "providers": {
-      "anthropic": {
-        "driver": "anthropic",
-        "apiKey": "${ANTHROPIC_API_KEY}",
-        "promptCaching": true
-      },
-      "openai": {
+      "groq": {
         "driver": "openai",
-        "apiKey": "${OPENAI_API_KEY}"
+        "baseURL": "https://api.groq.com/openai/v1",
+        "apiKey": "${GROQ_API_KEY}"
+      },
+      "gemini": {
+        "driver": "openai",
+        "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "apiKey": "${GEMINI_API_KEY}"
       }
     },
     "agent": {
       "models": [
-        "anthropic/claude-3-5-sonnet-20241022",
-        "openai/gpt-4o"
+        "llama-3.3-70b-versatile",
+        "gemini-1.5-flash"
       ]
     },
     "subagent": {
       "models": [
-        "openai/gpt-4o-mini",
-        "anthropic/claude-3-5-haiku-20241022"
+        "llama-3.1-8b-instant",
+        "gemini-1.5-flash"
       ]
     }
   },
@@ -45,17 +46,17 @@
   "lanes": {
     "maestro": {
       "name": "COO Maestro",
-      "model": "anthropic/claude-3-5-sonnet-20241022",
+      "model": "llama-3.3-70b-versatile",
       "promptFile": "prompts/maestro_coo.md"
     },
     "onboarding": {
       "name": "Gestor Digital Onboarding",
-      "model": "openai/gpt-4o",
+      "model": "llama-3.3-70b-versatile",
       "promptFile": "prompts/gestor_digital_onboarding.md"
     },
     "demandas_cron": {
       "name": "Auditor de Demandas & Prazos",
-      "model": "openai/gpt-4o",
+      "model": "llama-3.3-70b-versatile",
       "promptFile": "prompts/gestor_demandas_auditor.md"
     }
   }
