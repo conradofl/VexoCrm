@@ -5,8 +5,7 @@
         "driver": "openai",
         "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "apiKey": "${GEMINI_API_KEY}",
-        "thinkingLevel": "off",
-        "contextWindow": 1000000
+        "thinkingLevel": "off"
       },
       "groq": {
         "driver": "openai",
@@ -17,25 +16,22 @@
     },
     "agent": {
       "models": [
-        "gemini/gemini-3.5-flash",
+        "gemini/gemini-3-flash-preview",
         "groq/openai/gpt-oss-120b",
         "gemini/gemini-flash-latest"
-      ],
-      "maxInputTokens": 900000
+      ]
     },
     "subagent": {
       "models": [
-        "gemini/gemini-3.5-flash",
+        "gemini/gemini-3.1-flash-lite-preview",
         "groq/openai/gpt-oss-20b"
-      ],
-      "maxInputTokens": 900000
+      ]
     },
     "summarization": {
       "models": [
-        "gemini/gemini-3.5-flash",
+        "gemini/gemini-3.1-flash-lite-preview",
         "groq/openai/gpt-oss-20b"
-      ],
-      "maxInputTokens": 900000
+      ]
     }
   },
   "thinking": false,
@@ -59,17 +55,17 @@
   "lanes": {
     "maestro": {
       "name": "COO Maestro",
-      "model": "gemini/gemini-3.5-flash",
+      "model": "gemini/gemini-3-flash-preview",
       "promptFile": "prompts/maestro_coo.md"
     },
     "onboarding": {
       "name": "Gestor Digital Onboarding",
-      "model": "gemini/gemini-3.5-flash",
+      "model": "gemini/gemini-3-flash-preview",
       "promptFile": "prompts/gestor_digital_onboarding.md"
     },
     "demandas_cron": {
       "name": "Auditor de Demandas & Prazos",
-      "model": "gemini/gemini-3.5-flash",
+      "model": "gemini/gemini-3-flash-preview",
       "promptFile": "prompts/gestor_demandas_auditor.md"
     }
   }
