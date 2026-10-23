@@ -2,43 +2,52 @@
   "conrado": {
     "name": "Conrado Finzi",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off",
     "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$nEU2eFdf2kJ/2QH9nCD+lQ$qHBNbecl/iPI5SqsUz2blQPgl+jt5LDk8m5vZIAdja8"
   },
   "caio": {
     "name": "Caio Almeida",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off",
     "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$nEU2eFdf2kJ/2QH9nCD+lQ$qHBNbecl/iPI5SqsUz2blQPgl+jt5LDk8m5vZIAdja8"
   },
   "duda": {
     "name": "Duda Eduarda",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off"
   },
   "arthur": {
     "name": "Arthur Henrique",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off"
   },
   "santana": {
     "name": "Santana",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off"
   },
   "eflen": {
     "name": "Eflen",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off"
   },
   "carlos": {
     "name": "Carlos Rafael",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off"
   },
   "gabriel": {
     "name": "Gabriel",
     "role": "owner",
+    "thinking": false,
     "thinking_level": "off"
   }
 }
+

@@ -6,31 +6,29 @@ llm:
     groq:
       driver: openai
       baseURL: "https://api.groq.com/openai/v1"
-      apiKey: "${GROQ_API_KEY}"
+      apiKey: "${GROQ_API_KEY=}"
       thinkingLevel: "off"
     gemini:
       driver: openai
       baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
-      apiKey: "${GEMINI_API_KEY}"
+      apiKey: "${GEMINI_API_KEY=}"
+      thinkingLevel: "off"
   
   agent:
     models:
       - "groq/openai/gpt-oss-120b"
+      - "groq/qwen/qwen3.8-27b"
       - "groq/openai/gpt-oss-20b"
-      - "groq/qwen/qwen3.6-27b"
-      - "groq/compound"
-      - "gemini/gemini-2.0-flash"
   
   subagent:
     models:
       - "groq/openai/gpt-oss-20b"
-      - "groq/compound-mini"
-      - "gemini/gemini-1.5-flash"
 
   summarization:
     models:
       - "groq/openai/gpt-oss-20b"
-      - "gemini/gemini-1.5-flash"
+
+thinking: false
 
 channels:
   telegram:
