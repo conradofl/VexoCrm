@@ -1889,6 +1889,8 @@ export async function executeCampaignChipHandoff({
       instanceName: chipAName,
       meta: {
         is_handoff_bridge: true,
+        // lote que iniciou a conversa (progresso do lead) — com vários lotes da mesma campanha, diz de qual veio
+        dispatchId: progress?.dispatchId || null,
         transferred_to_chip: chipB.name,
         transferred_to_chip_id: chipB.id,
         source_campaign_id: campaign.id,
@@ -1943,6 +1945,7 @@ export async function executeCampaignChipHandoff({
     messageTimestamp: new Date().toISOString(),
     meta: {
       is_handoff_opener: true,
+      dispatchId: progress?.dispatchId || null,
       source_campaign_id: campaign.id,
       transferred_from_chip: chipAName,
       transferred_to_chip: chipB.name,
@@ -2387,6 +2390,8 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
           instanceName: chipName,
           meta: {
             source: "campaign_reply_progression",
+            // lote que iniciou esta conversa (gravado no progresso desde 40b3c6b)
+            dispatchId: progress?.dispatchId || null,
             stepId: step.id,
             stepType: step.type,
             stepOrder: step.order ?? originalStepIndex + 1,

@@ -76,6 +76,8 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { API_BASE_URL } from "@/lib/api";
+import { pendingDispatchesForUpdate, planAfterCampaignSave } from "@/lib/campaignSaveActions";
+import { PendingDispatchesUpdateDialog } from "@/components/campaigns/PendingDispatchesUpdateDialog";
 import {
   campaignLocalDateTimeToUtcIso,
   campaignUtcIsoToLocalDateTime,
@@ -265,6 +267,9 @@ export default function LeadImports({
   // Mesma regra do servidor (isManagerOrAdmin) para excluir leads em massa.
   const canMassDelete = canMassDeleteLeads({ isAdminUser, approvalLevel, canAccessUsersPage: canAccessInternalPage("usuarios") });
   const [isMassDeleteOpen, setIsMassDeleteOpen] = useState(false);
+  // Editou campanha com lotes não disparados: "atualizar ou manter" (padrão atualizar).
+  const [pendingDispatchUpdate, setPendingDispatchUpdate] = useState<{ dispatchIds: string[]; steps: unknown[] } | null>(null);
+  const [isUpdatingPendingDispatches, setIsUpdatingPendingDispatches] = useState(false);
   const crmClient = useOptionalCrmClient();
   const selectedClientId = crmClient?.selectedClientId;
   const activeClientId = fixedClientId || selectedClientId || "";
@@ -1698,6 +1703,44 @@ export default function LeadImports({
         return;
       }
 
+      // Salvar não dispara (ver lib/campaignSaveActions.ts): edição nunca cria lote; rascunho novo também não.
+      const isEdit = Boolean(editingCampaignId) && savedCampaign.id === editingCampaignId;
+      const plano = planAfterCampaignSave({ isEdit, isRecurring: false, trigger: newTriggerType });
+      if (!plano.createDispatch) {
+        if (isEdit) {
+          // Lotes ainda não disparados guardam a versão anterior das mensagens: o dono decide atualizar ou manter.
+          let pendentes: CampaignDispatch[] = [];
+          try {
+            const tokenLotes = await getIdToken();
+            const resLotes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
+              headers: { Authorization: `Bearer ${tokenLotes}` },
+            });
+            if (resLotes.ok) {
+              const dados = await resLotes.json();
+              pendentes = pendingDispatchesForUpdate((dados?.dispatches || []) as CampaignDispatch[]);
+            }
+          } catch (err) {
+            console.warn("[LeadImports] não foi possível listar os lotes pendentes da campanha:", err);
+          }
+          if (pendentes.length > 0) {
+            setPendingDispatchUpdate({ dispatchIds: pendentes.map((d) => d.id), steps: campaignSequence });
+          }
+          toast({
+            title: "Campanha atualizada",
+            description: "Salvar não dispara: nenhum envio novo foi criado.",
+          });
+        } else {
+          toast({
+            title: "Campanha salva como rascunho",
+            description: "Nenhum envio foi criado. Para enviar, escolha Disparar Agora ou Agendado.",
+          });
+        }
+        resetFormAfterSave();
+        await Promise.allSettled([refetchCampaigns(), refetchDispatches(), refetchImports(), refetchPending()]);
+        setActiveTab("agendamentos");
+        return;
+      }
+
       setSubmittingStatus("Registrando lote na fila de envios...");
 
       // 2. Register Dispatch Batch Execution
@@ -2585,6 +2628,42 @@ export default function LeadImports({
           isProcessing={duplicateWarningState.isProcessing}
         />
       )}
+
+      <PendingDispatchesUpdateDialog
+        open={Boolean(pendingDispatchUpdate)}
+        count={pendingDispatchUpdate?.dispatchIds.length ?? 0}
+        isUpdating={isUpdatingPendingDispatches}
+        onKeep={() => {
+          setPendingDispatchUpdate(null);
+          toast({ title: "Lotes mantidos", description: "Os lotes pendentes seguem com a versão anterior das mensagens." });
+        }}
+        onUpdate={async () => {
+          if (!pendingDispatchUpdate) return;
+          setIsUpdatingPendingDispatches(true);
+          let atualizados = 0;
+          try {
+            const token = await getIdToken();
+            for (const id of pendingDispatchUpdate.dispatchIds) {
+              const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${id}`, {
+                method: "PATCH",
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ steps: pendingDispatchUpdate.steps }),
+              });
+              if (res.ok) atualizados += 1;
+            }
+          } finally {
+            setIsUpdatingPendingDispatches(false);
+            setPendingDispatchUpdate(null);
+          }
+          const total = pendingDispatchUpdate.dispatchIds.length;
+          toast({
+            title: atualizados === total ? "Lotes atualizados" : "Atualização parcial",
+            description: `${atualizados} de ${total} lote(s) pendente(s) agora saem com esta versão.`,
+            ...(atualizados === total ? {} : { variant: "destructive" as const }),
+          });
+          void refetchDispatches();
+        }}
+      />
 
       {isMagicCreatorOpen && (
         <MagicCreatorModal

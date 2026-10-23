@@ -104,6 +104,9 @@ export function createLeadMessaging({
       }
     }
 
+    // Lote (campaign_dispatches.id) a que a resposta foi atribuída — vai para meta.dispatchId, como no envio.
+    let attributedDispatchId = null;
+
     // Atribuição de CAMPANHA por disparo: para inbound ainda sem campanha, casa pelo
     // disparo (campaign_dispatch_runs status='sent') mais recente daquele telefone,
     // dentro da janela. Preenche SÓ campaign_id — NÃO lead_id (runRow.lead_id é
@@ -126,6 +129,7 @@ export function createLeadMessaging({
           .maybeSingle();
         if (!runError && runRow) {
           resolvedCampaignId = resolvedCampaignId || runRow.campaign_id || null;
+          attributedDispatchId = runRow.dispatch_id || null;
         }
       } catch (error) {
         console.warn("[lead-messages] dispatch attribution lookup failed:", error?.message || error);
@@ -160,6 +164,7 @@ export function createLeadMessaging({
       delivered_at: deliveredAt || new Date().toISOString(),
       message_timestamp: messageTimestamp || deliveredAt || new Date().toISOString(),
       meta: {
+        ...(attributedDispatchId ? { dispatchId: attributedDispatchId } : {}),
         ...(meta && typeof meta === "object" ? meta : {}),
         ...(resolvedMediaUrl ? { mediaUrl: resolvedMediaUrl, media_url: resolvedMediaUrl } : {}),
         ...(resolvedContentType ? { contentType: resolvedContentType, content_type: resolvedContentType } : {}),
