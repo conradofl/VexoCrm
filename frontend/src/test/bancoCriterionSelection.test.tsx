@@ -433,8 +433,10 @@ describe("Bloco 1 — Seleção por Critério", () => {
       );
     });
 
-    // O badge de seleção por critério não deve mais existir
-    expect(screen.queryByTestId("selection-summary-badge")).toBeNull();
+    // O badge de seleção por critério não deve mais existir (o toast sai antes do re-render: espera a tela)
+    await waitFor(() => {
+      expect(screen.queryByTestId("selection-summary-badge")).toBeNull();
+    });
   });
 
   it("[REGRA 1.4] handoff repassa critério leve (< 1 KB) e exceções sem serializar array de 77.551 IDs", async () => {
