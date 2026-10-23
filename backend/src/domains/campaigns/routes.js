@@ -43,8 +43,9 @@ import { markCampaignLeadWaitingReply } from "../../campaign/dispatch.js";
 import {
   extractCampaignProgress,
   findLeadsAlreadyReachedInCycle,
-  hasBancoAudienceCriteria,
   isLeadBlockedByActiveCycleProgress,
+  resolveCampaignImportSelection,
+  resolveCampaignImportSelectionStrict,
 } from "../../campaign/dispatch.js";
 import {
   generateCampaignCopySuggestion,
@@ -362,33 +363,6 @@ export function stopDueDispatchScheduler() {
 export function importItemIdOf(lead) {
   if (!lead?.id || !lead.import_id || lead.import_id === "__crm__") return null;
   return lead.id;
-}
-
-// Origem dos leads de uma campanha. Uma campanha pode apontar para varias
-// planilhas importadas: a lista fica em analytics_meta.importIds (jsonb), e a
-// coluna import_id guarda a primeira, para nao quebrar quem le so a coluna.
-function resolveCampaignImportSelection(campaign) {
-  if (campaign?.analytics_meta?.importSource === "__crm__") return "__crm__";
-  const many = campaign?.analytics_meta?.importIds;
-  if (Array.isArray(many) && many.length > 0) return many;
-  return campaign?.import_id || null;
-}
-
-// Origem de uma campanha para os caminhos que MONTAM OU RODAM LOTE.
-// Diferente de resolveCampaignImportSelection, aqui campanha de público do Banco sem origem NAO vira "todas as
-// planilhas": ela e um erro. Em dispatch.js o filtro de import_id so e aplicado quando ha valor, entao null/[]/""
-// devolvem a base inteira do tenant. Foi assim que uma campanha de 2 leads montou lote de 504 (0d3e7b15, 21/10/2026).
-//
-// Divida conhecida: NULL ainda significa "todas" para campanha que nao e do Banco — a tela grava NULL quando o dono
-// escolhe "Todas as planilhas" (padrao do seletor). So campanhas novas gravam importSource "__all__"; a trava final
-// (NULL = erro sempre) espera o historico estar preenchido.
-function resolveCampaignImportSelectionStrict(campaign) {
-  const selection = resolveCampaignImportSelection(campaign);
-  if (selection === "__crm__" || selection === "__all__") return selection;
-  if (Array.isArray(selection) && selection.length > 0) return selection;
-  if (typeof selection === "string" && selection.trim() !== "") return selection;
-  if (hasBancoAudienceCriteria(campaign)) return null; // ausencia: quem chamou precisa recusar
-  return "__all__";
 }
 
 const CAMPAIGN_WITHOUT_SOURCE_MESSAGE =

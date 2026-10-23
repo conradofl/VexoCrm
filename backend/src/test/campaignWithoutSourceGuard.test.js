@@ -12,7 +12,8 @@
 // - criar campanha do Banco sem origem: 422 e nada gravado em campaigns
 // - editar campanha do Banco com importIds: [] mantém o import_id (era assim que a origem se perdia)
 // - editar deixando campanha do Banco sem origem: 422
-// - próximo da fila (startNextCampaignLeadInQueue) não começa em campanha do Banco sem origem
+// - próximo da fila (startNextCampaignLeadInQueue) não começa em campanha do Banco sem origem, e campanha __crm__ com
+//   público continua (mesma regra dos outros pontos)
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerCampaignsRoutes } from "../domains/campaigns/routes.js";
@@ -156,6 +157,7 @@ describe("Bloco 2 — origens legítimas continuam montando lote", () => {
     ["'todas as planilhas' legado (NULL, sem público do Banco; a tela manda audienceCriteria: null)", { import_id: null, analytics_meta: { importIds: [], audienceCriteria: null, sequence: STEPS } }, null],
     ["'todas as planilhas' explícito (importSource __all__)", { import_id: null, analytics_meta: { importSource: "__all__", sequence: STEPS } }, null],
     ["__crm__", { import_id: null, analytics_meta: { importSource: "__crm__", sequence: STEPS } }, "__crm__"],
+    ["__crm__ com público (audienceCriteria objeto)", { import_id: null, analytics_meta: { importSource: "__crm__", audienceCriteria: AUDIENCE, sequence: STEPS } }, "__crm__"],
     ["público do Banco com a planilha própria em import_id", { import_id: "imp-banco", analytics_meta: { importIds: [], audienceCriteria: AUDIENCE, sequence: STEPS } }, "imp-banco"],
   ];
 
@@ -243,6 +245,22 @@ describe("Bloco 2 — próximo da fila na resposta", () => {
       campaign.analytics_meta.dispatchOptions = { waitForReply: true };
       const result = await startNextCampaignLeadInQueue({ campaign, clientId: TENANT });
       expect(result).toEqual({ started: false, reason: "campaign_without_source" });
+    } finally {
+      _setPgDatabasePoolForTesting(null);
+    }
+  });
+
+  it("campanha __crm__ com público (audienceCriteria objeto) continua na fila", async () => {
+    const pool = createPool({});
+    _setPgDatabasePoolForTesting(pool);
+    try {
+      const campaign = bancoSemOrigem();
+      campaign.analytics_meta.importSource = "__crm__";
+      campaign.analytics_meta.dispatchOptions = { waitForReply: true };
+      const result = await startNextCampaignLeadInQueue({ campaign, clientId: TENANT });
+      expect(result.reason).not.toBe("campaign_without_source");
+      // passou da trava: chegou a montar a fila
+      expect(pool.queries.length).toBeGreaterThan(0);
     } finally {
       _setPgDatabasePoolForTesting(null);
     }
