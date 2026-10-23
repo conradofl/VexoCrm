@@ -1,8 +1,21 @@
-FROM ghcr.io/roelfdiedericks/goclaw:latest
+FROM debian:bookworm-slim
+
+# Instala certificados e ferramentas de download
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# Baixa e instala o binário oficial do GoClaw para Linux x86_64
+RUN curl -fsSL https://git.goclaw.org/roelfdiedericks/goclaw/releases/download/v0.1.21/goclaw_0.1.21_linux_amd64.tar.gz -o /tmp/goclaw.tar.gz \
+    && tar -xzf /tmp/goclaw.tar.gz -C /usr/local/bin/ \
+    && chmod +x /usr/local/bin/goclaw \
+    && rm /tmp/goclaw.tar.gz
 
 WORKDIR /root/.goclaw
 
-# Copia configurações, mapeamento de colaboradores e prompts
+# Copia configurações, mapeamento dos 8 colaboradores e prompts
 COPY goclaw.json users.json /root/.goclaw/
 COPY prompts/ /root/.goclaw/prompts/
 
