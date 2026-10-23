@@ -217,6 +217,21 @@ describe("Bloco 2 — o problema não nasce na criação nem na edição", () =>
     expect(update.params).toContain("imp-banco");
   });
 
+  it("campanha JÁ quebrada (0d3e7b15: Banco, import_id NULL) sai do 422 pelo Salvar que manda a origem", async () => {
+    // O que a tela manda ao salvar: o público do Banco registrado como planilha nova (imp-novo) em importId,
+    // importIds: [] (ver campaignBancoSemOrigemSave.test.tsx). O conserto não pode ficar trancado no próprio bug.
+    const atual = { ...bancoSemOrigem(), status: "active", is_recurring: false };
+    const { routes, pool } = await setup({ campaigns: [atual] });
+    const out = await call(routes["PATCH /api/campaigns/:id"], {
+      params: { id: "camp-banco" },
+      body: { name: "Bia do Spazio", importId: "imp-novo", importIds: [], analyticsMeta: atual.analytics_meta },
+    });
+    expect(out.body?.error?.code).not.toBe("CAMPAIGN_WITHOUT_SOURCE");
+    const update = updateDeCampanha(pool);
+    expect(update).toBeDefined();
+    expect(update.params).toContain("imp-novo");
+  });
+
   it("editar deixando campanha do Banco sem origem: 422 e nada atualizado", async () => {
     const atual = { ...bancoSemOrigem(), import_id: "imp-banco", status: "active", is_recurring: false };
     const { routes, pool } = await setup({ campaigns: [atual] });
