@@ -7,7 +7,7 @@
 // (b) salvar com data passada é recusado e o formulário NÃO é limpo
 // (c) salvar com data futura passa
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -191,6 +191,10 @@ function makeScheduledCampaign(): { campaign: Campaign; dispatch: CampaignDispat
 }
 
 describe("BLOCO 3 — Agendamento na edição e trava de data vencida", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
@@ -291,7 +295,12 @@ describe("BLOCO 3 — Agendamento na edição e trava de data vencida", () => {
       expect(screen.getByDisplayValue("Black Friday Antecipada")).toBeInTheDocument();
     });
 
-    // Simula usuário escolhendo exatamente o minuto corrente
+    // Simula usuário escolhendo exatamente o minuto corrente. Relógio fixo no segundo 5 do minuto (só o Date; timers
+    // reais): sem isso, com a máquina lenta, o minuto virava entre escolher e salvar e o teste falhava sem bug.
+    const base = new Date();
+    base.setSeconds(5, 0);
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(base);
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
     const currentMinuteLocal = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
