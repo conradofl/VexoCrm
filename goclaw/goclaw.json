@@ -23,7 +23,7 @@
       "enabled": false
     },
     "whatsapp": {
-      "enabled": true
+      "enabled": false
     },
     "http": {
       "enabled": true,

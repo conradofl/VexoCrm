@@ -21,8 +21,7 @@ channels:
     enabled: false
   
   whatsapp:
-    enabled: true
-    sessionPath: "./sessions/whatsapp"
+    enabled: false
   
   http:
     enabled: true
@@ -38,7 +37,7 @@ lanes:
     model: "groq/llama-3.3-70b-versatile"
     systemPromptFile: "prompts/maestro_coo.md"
     channels:
-      - "whatsapp"
+      - "http"
     concurrency: 4
     memory:
       transcriptSearch: true
@@ -53,7 +52,6 @@ lanes:
     model: "groq/llama-3.3-70b-versatile"
     systemPromptFile: "prompts/gestor_digital_onboarding.md"
     channels:
-      - "whatsapp"
       - "http"
     concurrency: 8
     tools:
