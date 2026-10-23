@@ -4,7 +4,8 @@
       "groq": {
         "driver": "openai",
         "baseURL": "https://api.groq.com/openai/v1",
-        "apiKey": "${GROQ_API_KEY}"
+        "apiKey": "${GROQ_API_KEY}",
+        "thinkingLevel": "off"
       }
     },
     "agent": {
