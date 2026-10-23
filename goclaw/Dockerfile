@@ -25,4 +25,4 @@ COPY prompts/ /root/.goclaw/prompts/
 
 EXPOSE 1337
 
-CMD ["goclaw"]
+CMD ["goclaw", "gateway", "run"]
