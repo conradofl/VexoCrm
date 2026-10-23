@@ -6,7 +6,6 @@
       "trello": "@conrado",
       "slack_channel": "#01-ops-geral",
       "identities": [
-        { "provider": "telegram", "id": "conrado" },
         { "provider": "whatsapp", "id": "5534991751267@s.whatsapp.net" }
       ]
     },
@@ -16,7 +15,6 @@
       "trello": "@caio",
       "slack_channel": "#01-ops-comercial",
       "identities": [
-        { "provider": "telegram", "id": "caio" },
         { "provider": "whatsapp", "id": "caio@s.whatsapp.net" }
       ]
     },

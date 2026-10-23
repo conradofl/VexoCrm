@@ -27,8 +27,7 @@
   },
   "channels": {
     "telegram": {
-      "enabled": true,
-      "botToken": "${TELEGRAM_BOT_TOKEN}"
+      "enabled": false
     },
     "whatsapp": {
       "enabled": true

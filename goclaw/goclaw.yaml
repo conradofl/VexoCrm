@@ -24,10 +24,7 @@ llm:
 
 channels:
   telegram:
-    enabled: true
-    botToken: "${TELEGRAM_BOT_TOKEN}"
-    pairing:
-      enabled: true
+    enabled: false
   
   whatsapp:
     enabled: true
@@ -47,7 +44,6 @@ lanes:
     model: "llama-3.3-70b-versatile"
     systemPromptFile: "prompts/maestro_coo.md"
     channels:
-      - "telegram"
       - "whatsapp"
     concurrency: 4
     memory:
