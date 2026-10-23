@@ -3,6 +3,11 @@
 
 llm:
   providers:
+    gemini:
+      driver: openai
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      apiKey: "${GEMINI_API_KEY}"
+      thinkingLevel: "off"
     groq:
       driver: openai
       baseURL: "https://api.groq.com/openai/v1"
@@ -11,16 +16,18 @@ llm:
   
   agent:
     models:
+      - "gemini/gemini-3.5-flash"
       - "groq/openai/gpt-oss-120b"
-      - "groq/qwen/qwen3.8-27b"
-      - "groq/openai/gpt-oss-20b"
+      - "gemini/gemini-flash-latest"
   
   subagent:
     models:
+      - "gemini/gemini-3.5-flash"
       - "groq/openai/gpt-oss-20b"
 
   summarization:
     models:
+      - "gemini/gemini-3.5-flash"
       - "groq/openai/gpt-oss-20b"
 
 thinking: false
@@ -43,7 +50,7 @@ lanes:
     name: "COO Maestro"
     description: "General da operação e alinhamento diário com os sócios (Conrado & Caio)"
     driver: "openai"
-    model: "groq/openai/gpt-oss-120b"
+    model: "gemini/gemini-3.5-flash"
     systemPromptFile: "prompts/maestro_coo.md"
     channels:
       - "http"
@@ -58,7 +65,7 @@ lanes:
     name: "Gestor Digital Onboarding"
     description: "Recepção de novos clientes, coleta de briefing guiado e acessos nas primeiras 48h"
     driver: "openai"
-    model: "groq/openai/gpt-oss-120b"
+    model: "gemini/gemini-3.5-flash"
     systemPromptFile: "prompts/gestor_digital_onboarding.md"
     channels:
       - "http"
@@ -72,7 +79,7 @@ lanes:
     name: "Auditor de Demandas & Prazos"
     description: "Auditoria automática diária de cartões no Trello e relatórios no Slack"
     driver: "openai"
-    model: "groq/openai/gpt-oss-120b"
+    model: "gemini/gemini-3.5-flash"
     systemPromptFile: "prompts/gestor_demandas_auditor.md"
     schedules:
       - name: "checkin_matinal"
