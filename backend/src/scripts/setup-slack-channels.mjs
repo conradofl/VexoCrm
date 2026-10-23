@@ -7,9 +7,9 @@
  * na reestruturação operacional da Geração Digital & Vexo OS.
  * 
  * Uso:
- *   SLACK_BOT_TOKEN="xoxb-seu-token" node backend/scripts/setup-slack-channels.mjs
+ *   SLACK_BOT_TOKEN="xoxb-seu-token" node backend/src/scripts/setup-slack-channels.mjs
  *   ou simplesmente:
- *   node backend/scripts/setup-slack-channels.mjs (lê SLACK_BOT_TOKEN do backend/.env)
+ *   node backend/src/scripts/setup-slack-channels.mjs (lê SLACK_BOT_TOKEN do backend/.env)
  */
 
 import fs from "node:fs";
@@ -22,8 +22,12 @@ const __dirname = path.dirname(__filename);
 // Carrega .env do backend caso SLACK_BOT_TOKEN não esteja no ambiente
 function loadEnvFallback() {
   if (process.env.SLACK_BOT_TOKEN) return;
-  const envPath = path.resolve(__dirname, "../.env");
-  if (!fs.existsSync(envPath)) return;
+  const envCandidates = [
+    path.resolve(__dirname, "../../.env"),
+    path.resolve(__dirname, "../.env"),
+  ];
+  const envPath = envCandidates.find((p) => fs.existsSync(p));
+  if (!envPath) return;
 
   try {
     const raw = fs.readFileSync(envPath, "utf-8");
@@ -136,7 +140,7 @@ async function run() {
   if (!SLACK_BOT_TOKEN) {
     console.error("❌ ERRO FATAL: SLACK_BOT_TOKEN não informado.");
     console.error("Defina a variável no ambiente ou no arquivo backend/.env:");
-    console.error("  SLACK_BOT_TOKEN=\"xoxb-...\" node backend/scripts/setup-slack-channels.mjs\n");
+    console.error("  SLACK_BOT_TOKEN=\"xoxb-...\" node backend/src/scripts/setup-slack-channels.mjs\n");
     process.exit(1);
   }
 

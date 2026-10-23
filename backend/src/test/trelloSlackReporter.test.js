@@ -1,10 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   categorizeTrelloCards,
   formatDailyReport,
   fetchTrelloBoardData,
   runTrelloDailyAudit,
 } from "../services/trelloSlackReporter.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const execFileAsync = promisify(execFile);
 
 describe("Trello Slack Daily Reporter Service", () => {
   const baseLists = [
@@ -116,5 +125,35 @@ describe("Trello Slack Daily Reporter Service", () => {
     expect(auditRes.success).toBe(true);
     expect(auditRes.dryRun).toBe(true);
     expect(auditRes.reportText).toContain("CHECK-IN MATINAL");
+  });
+
+  it("deve executar o script CLI com --dry-run e gerar saída válida no stdout", async () => {
+    const scriptPath = path.resolve(__dirname, "../scripts/trello-slack-daily-reporter.mjs");
+    expect(fs.existsSync(scriptPath)).toBe(true);
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      scriptPath,
+      "--mode=morning",
+      "--dry-run",
+    ]);
+
+    expect(stdout).toContain("AUDITORIA OPERACIONAL TRELLO ↔ SLACK (MORNING)");
+    expect(stdout).toContain("Execução em modo Dry Run finalizada com sucesso!");
+    expect(stdout).toContain("CHECK-IN MATINAL OPERACIONAL (09h00)");
+  });
+
+  it("deve executar o script CLI com --evening --dry-run e gerar saída válida no stdout", async () => {
+    const scriptPath = path.resolve(__dirname, "../scripts/trello-slack-daily-reporter.mjs");
+    expect(fs.existsSync(scriptPath)).toBe(true);
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      scriptPath,
+      "--evening",
+      "--dry-run",
+    ]);
+
+    expect(stdout).toContain("AUDITORIA OPERACIONAL TRELLO ↔ SLACK (EVENING)");
+    expect(stdout).toContain("Execução em modo Dry Run finalizada com sucesso!");
+    expect(stdout).toContain("CHECK-OUT VESPERTINO OPERACIONAL (18h00)");
   });
 });
