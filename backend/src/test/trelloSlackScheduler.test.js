@@ -12,6 +12,7 @@ import {
   startTrelloSlackScheduler,
   stopTrelloSlackScheduler,
   resetSchedulerMemoryForTest,
+  setDefaultAuditRunsStoreForTest,
 } from "../services/trelloSlackScheduler.js";
 
 describe("Trello Slack Scheduler - Agendador e Trava de Concorrência", () => {
@@ -290,16 +291,10 @@ describe("Trello Slack Scheduler - Agendador e Trava de Concorrência", () => {
         enabled: true,
       });
 
-      // Dispara simultaneamente pelas duas instâncias de contêineres
+      // Dispara simultaneamente pelas duas instâncias de contêineres sem passar qualquer flag
       const [resInstanciaA, resInstanciaB] = await Promise.all([
-        instanceA.tick({
-          now: slotTime,
-          enforceLock: true,
-        }),
-        instanceB.tick({
-          now: slotTime,
-          enforceLock: true,
-        }),
+        instanceA.tick({ now: slotTime }),
+        instanceB.tick({ now: slotTime }),
       ]);
 
       // Exatamente 1 executou, a outra foi ignorada pela trava
@@ -351,6 +346,50 @@ describe("Trello Slack Scheduler - Agendador e Trava de Concorrência", () => {
       expect(mockAuditRunner).toHaveBeenCalledTimes(1);
     });
 
+    it("o caminho de produção usado pelo server.js aplica a trava de concorrência sem receber nenhuma bandeira", async () => {
+      const sharedStore = createInMemoryAuditRunsStore();
+      setDefaultAuditRunsStoreForTest(sharedStore);
+
+      const mockAuditRunner = vi.fn().mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return {
+          success: true,
+          dryRun: false,
+          summary: { totalOpen: 5 },
+        };
+      });
+
+      const slotTime = new Date("2026-10-26T12:00:00Z"); // 09h00 SP
+
+      // Ponto de entrada padrão tickTrelloSlackScheduler (sem nenhuma flag de lock, como no server.js)
+      // Simula uma segunda instância em paralelo tentando executar o mesmo slot no mesmo store compartilhado
+      const externalNode = createTrelloSlackScheduler({
+        store: sharedStore,
+        auditRunner: mockAuditRunner,
+        enabled: true,
+      });
+
+      const [resServerJs, resExternalNode] = await Promise.all([
+        tickTrelloSlackScheduler({
+          now: slotTime,
+          auditRunner: mockAuditRunner,
+          enabled: true,
+        }),
+        externalNode.tick({
+          now: slotTime,
+        }),
+      ]);
+
+      const executadas = [resServerJs, resExternalNode].filter((r) => r.ran === true);
+      const ignoradas = [resServerJs, resExternalNode].filter((r) => r.ran === false);
+
+      expect(executadas.length).toBe(1);
+      expect(ignoradas.length).toBe(1);
+      expect(executadas[0].success).toBe(true);
+      expect(ignoradas[0].reason).toMatch(/SLOT_ALREADY_CLAIMED|CONCURRENT_LOCK_HELD/);
+      expect(mockAuditRunner).toHaveBeenCalledTimes(1);
+    });
+
     it("se a execução falhar (ex: queda da Groq ou Slack), deve registrar o erro com status 'failed'", async () => {
       const store = createInMemoryAuditRunsStore();
       const mockFailingAuditRunner = vi.fn().mockRejectedValue(new Error("Groq API 503 Service Unavailable"));
@@ -373,72 +412,6 @@ describe("Trello Slack Scheduler - Agendador e Trava de Concorrência", () => {
       expect(runs[0].status).toBe("failed");
       expect(runs[0].sent).toBe(false);
       expect(runs[0].error.message).toContain("Groq API 503");
-    });
-  });
-
-  describe("5. Mutação Obrigatória: Prova de que o Teste de Concorrência Falha Sem a Trava", () => {
-    it("sem a trava de concorrência (mutante), duas instâncias executariam 2 vezes (violando a regra)", async () => {
-      const sharedStore = createInMemoryAuditRunsStore();
-      const mockAuditRunner = vi.fn().mockImplementation(async () => {
-        await new Promise((r) => setTimeout(r, 10));
-        return {
-          success: true,
-          dryRun: false,
-          summary: {},
-        };
-      });
-
-      const slotTime = new Date("2026-10-26T12:00:00Z"); // 09h00 SP
-
-      // Cenário com a trava ativa (código de produção normal):
-      const prodA = createTrelloSlackScheduler({
-        store: sharedStore,
-        auditRunner: mockAuditRunner,
-        enabled: true,
-      });
-      const prodB = createTrelloSlackScheduler({
-        store: sharedStore,
-        auditRunner: mockAuditRunner,
-        enabled: true,
-      });
-
-      await Promise.all([
-        prodA.tick({ now: slotTime, enforceLock: true }),
-        prodB.tick({ now: slotTime, enforceLock: true }),
-      ]);
-
-      // Com a trava, temos rigorosamente 1 execução:
-      expect(mockAuditRunner).toHaveBeenCalledTimes(1);
-
-      // Agora o teste do MUTANTE: enforceLock = false (como se a trava de concorrência tivesse sido removida do código)
-      mockAuditRunner.mockClear();
-      const mutatedStore = createInMemoryAuditRunsStore();
-
-      const mutantA = createTrelloSlackScheduler({
-        store: mutatedStore,
-        auditRunner: mockAuditRunner,
-        enabled: true,
-      });
-      const mutantB = createTrelloSlackScheduler({
-        store: mutatedStore,
-        auditRunner: mockAuditRunner,
-        enabled: true,
-      });
-
-      await Promise.all([
-        mutantA.tick({ now: slotTime, enforceLock: false }), // MUTANTE: trava desativada/removida
-        mutantB.tick({ now: slotTime, enforceLock: false }), // MUTANTE: trava desativada/removida
-      ]);
-
-      // Prova da mutação: sem a trava, ambas as instâncias chamam o auditRunner, totalizando 2 execuções!
-      expect(mockAuditRunner).toHaveBeenCalledTimes(2);
-
-      // Se aplicássemos a asserção de unicidade (toBe(1)) sobre o mutante, ela falharia:
-      const assercaoDeUnicidadeFalhariaNoMutante = () => {
-        expect(mockAuditRunner.mock.calls.length).toBe(1);
-      };
-
-      expect(assercaoDeUnicidadeFalhariaNoMutante).toThrow();
     });
   });
 });
