@@ -98,18 +98,29 @@ vi.mock("../campaign-outbound.js", async (importOriginal) => {
   };
 });
 
+let mockSimulateOldSchema = false;
+
 vi.mock("../services/database.js", () => {
   const createChain = (table) => {
+    let selectedColumns = "";
     const chain = {
       eq: () => chain,
       in: () => chain,
       not: () => chain,
       order: () => chain,
       limit: () => chain,
-      select: () => chain,
+      select: (cols) => {
+        selectedColumns = String(cols || "");
+        return chain;
+      },
       maybeSingle: async () => {
         if (table === "campaigns") return { data: mockCampaignData, error: null };
-        if (table === "campaign_dispatches") return { data: mockDispatchData, error: null };
+        if (table === "campaign_dispatches") {
+          if (mockSimulateOldSchema && selectedColumns.includes("dispatch_options")) {
+            return { data: null, error: { code: "42703", message: 'column "dispatch_options" does not exist' } };
+          }
+          return { data: mockDispatchData, error: null };
+        }
         if (table === "lead_import_items") return { data: mockLeadImportItemData, error: null };
         return { data: null, error: null };
       },
@@ -118,10 +129,15 @@ vi.mock("../services/database.js", () => {
         if (table === "lead_import_items") mockUpdatedProgressPatches.push(data);
         return chain;
       },
-      insert: (data) => {
+      insert: async (data) => {
         if (table === "lead_messages") {
+          const payload = Array.isArray(data) ? data[0] : data;
+          if (mockSimulateOldSchema && payload?.dispatch_id) {
+            return { data: null, error: { code: "42703", message: 'column "dispatch_id" does not exist' } };
+          }
           if (Array.isArray(data)) mockInsertedLeadMessages.push(...data);
           else mockInsertedLeadMessages.push(data);
+          return { data, error: null };
         }
         return chain;
       },
@@ -133,18 +149,14 @@ vi.mock("../services/database.js", () => {
     supabase: {
       from: (table) => {
         return {
-          select: () => createChain(table),
+          select: (cols) => createChain(table).select(cols),
           update: (data) => {
             if (table === "leads") mockUpdatedLeads.push(data);
             if (table === "lead_import_items") mockUpdatedProgressPatches.push(data);
             return createChain(table);
           },
-          insert: (data) => {
-            if (table === "lead_messages") {
-              if (Array.isArray(data)) mockInsertedLeadMessages.push(...data);
-              else mockInsertedLeadMessages.push(data);
-            }
-            return createChain(table);
+          insert: async (data) => {
+            return createChain(table).insert(data);
           },
         };
       },
@@ -171,6 +183,7 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
     mockUpdatedLeads = [];
     mockUpdatedProgressPatches = [];
     mockHealthStatus = { state: "open" };
+    mockSimulateOldSchema = false;
 
     mockCampaignData = {
       id: "camp-handoff-1",
@@ -497,6 +510,76 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
       expect(openerMessage).toBeDefined();
       expect(openerMessage.dispatch_id).toBe("disp-frozen-snapshot");
       expect(openerMessage.meta.dispatchId).toBe("disp-frozen-snapshot");
+    });
+
+    it("continua com sucesso mesmo se o banco estiver no schema antigo sem as colunas dispatch_options e dispatch_id (tolerância a erro 42703)", async () => {
+      mockSimulateOldSchema = true;
+
+      mockCampaignData = {
+        id: "camp-handoff-legacy",
+        name: "Campanha em Schema Legado",
+        client_id: "tenant-vexo",
+        status: "running",
+        analytics_meta: {
+          sequence: [
+            { id: "step-1", type: "text", order: 1, text: "Olá! Quer receber o convite?", triggerMode: "immediate", enabled: true },
+            { id: "step-2", type: "text", order: 2, text: "Aqui está o link: https://evento.com", triggerMode: "after_reply", enabled: true },
+          ],
+          dispatchOptions: {
+            waitForReply: true,
+            evolutionInstanceId: "chip-a-batedor-uuid",
+            handoffEnabled: true,
+            handoffChipId: "chip-b-fechador-uuid",
+            handoffChipIds: ["chip-b-fechador-uuid"],
+            handoffBridgingText: "Aviso da ponte para {{nome}}",
+            handoffOpenerText: "Olá {{nome}}, sou o especialista!",
+          },
+        },
+      };
+
+      // Disparo em schema antigo: sem dispatch_options
+      mockDispatchData = {
+        id: "disp-legacy-schema",
+        evolution_instance_id: "chip-a-batedor-uuid",
+        steps: mockCampaignData.analytics_meta.sequence,
+      };
+
+      const campaignMatch = {
+        id: "camp-handoff-legacy",
+        leadImportItem: {
+          id: "item-lead-legacy",
+          progress: {
+            waitForReply: true,
+            status: "aguardando_usuario",
+            nextStepIndex: 1,
+            sentSteps: [0],
+            dispatchId: "disp-legacy-schema",
+            leadName: "Ana Clara",
+          },
+          normalized_data: {
+            nome: "Ana Clara",
+            telefone: "5534984400049",
+          },
+        },
+      };
+
+      const result = await continueCampaignLeadFromReply({
+        clientId: "tenant-vexo",
+        phone: "5534984400049",
+        campaignMatch,
+        replyPayload: {
+          instance: "chip-batedor",
+          text: "Quero sim!",
+        },
+        delayMs: 1,
+      });
+
+      expect(result.continued).toBe(true);
+      expect(result.handoff?.executed).toBe(true);
+      expect(result.handoff?.transferredTo).toBe("CHIP FECHADOR");
+
+      // Mensagem foi salva com sucesso no fallback
+      expect(mockInsertedLeadMessages.length).toBeGreaterThan(0);
     });
   });
 });

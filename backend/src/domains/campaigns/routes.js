@@ -5930,7 +5930,7 @@ export function registerCampaignsRoutes(app, deps) {
         .insert(insertPayload)
         .select("*")
         .single();
-      if (error && String(error.message).includes("dispatch_options")) {
+      if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_options"))) {
         const fallbackPayload = { ...insertPayload };
         delete fallbackPayload.dispatch_options;
         const fallbackRes = await supabase
@@ -6029,13 +6029,26 @@ export function registerCampaignsRoutes(app, deps) {
         patch.steps = validation.analyticsMeta.sequence;
       }
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("campaign_dispatches")
         .update(patch)
         .eq("id", dispatchId)
         .eq("client_id", authorizedClientId)
         .select("*")
         .single();
+      if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_options"))) {
+        const fallbackPatch = { ...patch };
+        delete fallbackPatch.dispatch_options;
+        const retryRes = await supabase
+          .from("campaign_dispatches")
+          .update(fallbackPatch)
+          .eq("id", dispatchId)
+          .eq("client_id", authorizedClientId)
+          .select("*")
+          .single();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
       if (error) throw error;
       if (!data) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
       res.json({ dispatch: data });

@@ -538,12 +538,22 @@ export function SchedulingStep({
               data-testid="handoff-switch"
               checked={Boolean(dispatchOptions.handoffEnabled)}
               onCheckedChange={(checked) =>
-                setDispatchOptions((curr) => ({
-                  ...curr,
-                  handoffEnabled: checked,
-                  handoffBridgingText: curr.handoffBridgingText ?? defaultBridgingText,
-                  handoffOpenerText: curr.handoffOpenerText ?? defaultOpenerText,
-                }))
+                setDispatchOptions((curr) => {
+                  const currentList = Array.isArray(curr.handoffChipIds) && curr.handoffChipIds.length > 0
+                    ? curr.handoffChipIds
+                    : (curr.handoffChipId ? [curr.handoffChipId] : []);
+                  const nextList = checked && currentList.length === 0 && eligibleHandoffChips.length === 1
+                    ? [eligibleHandoffChips[0].id]
+                    : currentList;
+                  return {
+                    ...curr,
+                    handoffEnabled: checked,
+                    handoffChipIds: nextList,
+                    handoffChipId: nextList[0] || null,
+                    handoffBridgingText: curr.handoffBridgingText ?? defaultBridgingText,
+                    handoffOpenerText: curr.handoffOpenerText ?? defaultOpenerText,
+                  };
+                })
               }
             />
           </div>
@@ -560,6 +570,10 @@ export function SchedulingStep({
                   {eligibleHandoffChips.length === 0 ? (
                     <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
                       Requer ao menos 2 chips cadastrados
+                    </span>
+                  ) : selectedHandoffChipIds.length === 0 ? (
+                    <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold animate-pulse">
+                      ⚠️ Selecione ao menos 1 chip abaixo
                     </span>
                   ) : (
                     <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">

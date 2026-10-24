@@ -183,7 +183,7 @@ export function createLeadMessaging({
     let { error } = await supabase.from("lead_messages").insert(payload);
 
     // Se falhar por coluna dispatch_id inexistente, tenta sem ela
-    if (error && String(error.message).includes("dispatch_id")) {
+    if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_id"))) {
       const fallbackPayload = { ...payload };
       delete fallbackPayload.dispatch_id;
       const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);

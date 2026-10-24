@@ -248,48 +248,100 @@ async function materializeOne({ pool, now, campaign, resolveTimezone, buildSteps
 
   // Um comando só: avança a campanha (condicionado ao horário vencido), cria o lote (se não pulou) e registra a
   // ocorrência. Ou tudo acontece, ou nada — e o segundo tick concorrente não acha a linha em `claimed`.
-  const { rows } = await pool.query(
-    `WITH claimed AS (
-       UPDATE public.campaigns
-          SET next_run_at = $3::timestamptz,
-              recurrence_occurrences_count = $4::int,
-              recurrence_ended_at = CASE WHEN $5::boolean THEN $6::timestamptz ELSE recurrence_ended_at END
-        WHERE id = $1 AND next_run_at = $2::timestamptz AND is_recurring = true
-        RETURNING id, client_id
-     ), disp AS (
-       INSERT INTO public.campaign_dispatches
-         (campaign_id, client_id, name, steps, dispatch_options, trigger_type, scheduled_at, status, limit_per_run, target_count,
-          recurrence_occurrence_at, recurrence_variant_offset)
-       SELECT id, client_id, $7, $8::jsonb, $14::jsonb, 'scheduled', $2::timestamptz, 'scheduled', $9::int, COALESCE($10::int, 0),
-              $2::timestamptz, $4::int
-         FROM claimed
-        WHERE $11::boolean
-       RETURNING id
-     ), occ AS (
-       INSERT INTO public.campaign_recurrence_occurrences
-         (campaign_id, client_id, occurrence_at, outcome, reason, dispatch_id, audience_count)
-       SELECT c.id, c.client_id, $2::timestamptz, $12, $13, (SELECT id FROM disp), $10::int
-         FROM claimed c
-       RETURNING id, dispatch_id
-     )
-     SELECT id, dispatch_id FROM occ`,
-    [
-      campaign.id,
-      slot.toISOString(),
-      ended ? null : next.toISOString(),
-      newCount,
-      ended,
-      now.toISOString(),
-      dispatchName,
-      JSON.stringify(steps || []),
-      null, // ocorrência não tem limite por envio: público inteiro, cota do chip como freio
-      audienceCount,
-      created,
-      outcome,
-      reason,
-      JSON.stringify(campaign.analytics_meta?.dispatchOptions || {}),
-    ]
-  );
+  let rows;
+  try {
+    const res = await pool.query(
+      `WITH claimed AS (
+         UPDATE public.campaigns
+            SET next_run_at = $3::timestamptz,
+                recurrence_occurrences_count = $4::int,
+                recurrence_ended_at = CASE WHEN $5::boolean THEN $6::timestamptz ELSE recurrence_ended_at END
+          WHERE id = $1 AND next_run_at = $2::timestamptz AND is_recurring = true
+          RETURNING id, client_id
+       ), disp AS (
+         INSERT INTO public.campaign_dispatches
+           (campaign_id, client_id, name, steps, dispatch_options, trigger_type, scheduled_at, status, limit_per_run, target_count,
+            recurrence_occurrence_at, recurrence_variant_offset)
+         SELECT id, client_id, $7, $8::jsonb, $14::jsonb, 'scheduled', $2::timestamptz, 'scheduled', $9::int, COALESCE($10::int, 0),
+                $2::timestamptz, $4::int
+           FROM claimed
+          WHERE $11::boolean
+         RETURNING id
+       ), occ AS (
+         INSERT INTO public.campaign_recurrence_occurrences
+           (campaign_id, client_id, occurrence_at, outcome, reason, dispatch_id, audience_count)
+         SELECT c.id, c.client_id, $2::timestamptz, $12, $13, (SELECT id FROM disp), $10::int
+           FROM claimed c
+         RETURNING id, dispatch_id
+       )
+       SELECT id, dispatch_id FROM occ`,
+      [
+        campaign.id,
+        slot.toISOString(),
+        ended ? null : next.toISOString(),
+        newCount,
+        ended,
+        now.toISOString(),
+        dispatchName,
+        JSON.stringify(steps || []),
+        null, // ocorrência não tem limite por envio: público inteiro, cota do chip como freio
+        audienceCount,
+        created,
+        outcome,
+        reason,
+        JSON.stringify(campaign.analytics_meta?.dispatchOptions || {}),
+      ]
+    );
+    rows = res.rows;
+  } catch (err) {
+    if (err && (err.code === "42703" || String(err.message || "").includes("dispatch_options"))) {
+      // Fallback para schema legado onde campaign_dispatches ainda não possui dispatch_options
+      const res = await pool.query(
+        `WITH claimed AS (
+           UPDATE public.campaigns
+              SET next_run_at = $3::timestamptz,
+                  recurrence_occurrences_count = $4::int,
+                  recurrence_ended_at = CASE WHEN $5::boolean THEN $6::timestamptz ELSE recurrence_ended_at END
+            WHERE id = $1 AND next_run_at = $2::timestamptz AND is_recurring = true
+            RETURNING id, client_id
+         ), disp AS (
+           INSERT INTO public.campaign_dispatches
+             (campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, limit_per_run, target_count,
+              recurrence_occurrence_at, recurrence_variant_offset)
+           SELECT id, client_id, $7, $8::jsonb, 'scheduled', $2::timestamptz, 'scheduled', $9::int, COALESCE($10::int, 0),
+                  $2::timestamptz, $4::int
+             FROM claimed
+            WHERE $11::boolean
+           RETURNING id
+         ), occ AS (
+           INSERT INTO public.campaign_recurrence_occurrences
+             (campaign_id, client_id, occurrence_at, outcome, reason, dispatch_id, audience_count)
+           SELECT c.id, c.client_id, $2::timestamptz, $12, $13, (SELECT id FROM disp), $10::int
+             FROM claimed c
+           RETURNING id, dispatch_id
+         )
+         SELECT id, dispatch_id FROM occ`,
+        [
+          campaign.id,
+          slot.toISOString(),
+          ended ? null : next.toISOString(),
+          newCount,
+          ended,
+          now.toISOString(),
+          dispatchName,
+          JSON.stringify(steps || []),
+          null,
+          audienceCount,
+          created,
+          outcome,
+          reason,
+        ]
+      );
+      rows = res.rows;
+    } else {
+      throw err;
+    }
+  }
 
   if (rows.length === 0) return { campaignId: campaign.id, status: "already_claimed" };
   return {

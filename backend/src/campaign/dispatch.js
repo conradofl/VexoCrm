@@ -2118,11 +2118,19 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   let dispatchSnapshot = null;
   if (dispatchId) {
     try {
-      const { data: dispRec } = await supabase
+      let { data: dispRec, error: dispErr } = await supabase
         .from("campaign_dispatches")
         .select("id, steps, dispatch_options, evolution_instance_id")
         .eq("id", dispatchId)
         .maybeSingle();
+      if (dispErr && (dispErr.code === "42703" || String(dispErr.message || "").includes("dispatch_options"))) {
+        const retry = await supabase
+          .from("campaign_dispatches")
+          .select("id, steps, evolution_instance_id")
+          .eq("id", dispatchId)
+          .maybeSingle();
+        dispRec = retry.data;
+      }
       if (dispRec) dispatchSnapshot = dispRec;
     } catch (err) {
       console.warn("[continueCampaignLeadFromReply] failed to load dispatch snapshot:", err?.message || err);
