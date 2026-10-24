@@ -268,96 +268,80 @@ export async function executeScheduledSlot({
   store = getDefaultAuditRunsStore(),
   auditRunner = runTrelloDailyAudit,
   dryRun = false,
-  enforceLock = true,
 }) {
   let hasAdvisoryLock = false;
 
   try {
-    if (enforceLock) {
-      // 1. Tenta obter o advisory lock da instância
-      hasAdvisoryLock = await store.tryAdvisoryLock();
-      if (!hasAdvisoryLock) {
-        return {
-          executed: false,
-          skipped: true,
-          reason: "CONCURRENT_LOCK_HELD",
-          slotKey: slot.slotKey,
-        };
-      }
-
-      // 2. Tenta fazer o claim atômico do slot no banco
-      const claim = await store.claimSlot({
+    // 1. Tenta obter o advisory lock da instância
+    hasAdvisoryLock = await store.tryAdvisoryLock();
+    if (!hasAdvisoryLock) {
+      return {
+        executed: false,
+        skipped: true,
+        reason: "CONCURRENT_LOCK_HELD",
         slotKey: slot.slotKey,
-        mode: slot.mode,
-        scheduledTime: slot.scheduledTime,
-      });
+      };
+    }
 
-      if (!claim.acquired) {
-        return {
-          executed: false,
-          skipped: true,
-          reason: claim.reason || "SLOT_ALREADY_CLAIMED",
-          slotKey: slot.slotKey,
-        };
-      }
+    // 2. Tenta fazer o claim atômico do slot no banco
+    const claim = await store.claimSlot({
+      slotKey: slot.slotKey,
+      mode: slot.mode,
+      scheduledTime: slot.scheduledTime,
+    });
 
-      // 3. Executa a auditoria chamando diretamente o serviço em memória
-      const runId = claim.runId;
-      try {
-        const result = await auditRunner({
-          mode: slot.mode,
-          dryRun,
-        });
+    if (!claim.acquired) {
+      return {
+        executed: false,
+        skipped: true,
+        reason: claim.reason || "SLOT_ALREADY_CLAIMED",
+        slotKey: slot.slotKey,
+      };
+    }
 
-        await store.recordSuccess({
-          runId,
-          reportSummary: result?.summary || {},
-        });
-
-        console.log(
-          `[trello-slack-scheduler] Boletim ${slot.mode} executado e enviado com sucesso ao Slack (${slot.slotKey}).`
-        );
-
-        return {
-          executed: true,
-          success: true,
-          runId,
-          slotKey: slot.slotKey,
-          mode: slot.mode,
-          result,
-        };
-      } catch (auditError) {
-        await store.recordFailure({
-          runId,
-          error: auditError,
-        });
-
-        console.error(
-          `[trello-slack-scheduler] FALHA ao executar auditoria Trello -> Slack para o slot ${slot.slotKey}:`,
-          auditError
-        );
-
-        return {
-          executed: true,
-          success: false,
-          runId,
-          slotKey: slot.slotKey,
-          mode: slot.mode,
-          error: auditError?.message || String(auditError),
-        };
-      }
-    } else {
-      // Mutação: sem trava de concorrência
+    // 3. Executa a auditoria chamando diretamente o serviço em memória
+    const runId = claim.runId;
+    try {
       const result = await auditRunner({
         mode: slot.mode,
         dryRun,
       });
+
+      await store.recordSuccess({
+        runId,
+        reportSummary: result?.summary || {},
+      });
+
+      console.log(
+        `[trello-slack-scheduler] Boletim ${slot.mode} executado e enviado com sucesso ao Slack (${slot.slotKey}).`
+      );
+
       return {
         executed: true,
         success: true,
+        runId,
         slotKey: slot.slotKey,
         mode: slot.mode,
         result,
+      };
+    } catch (auditError) {
+      await store.recordFailure({
+        runId,
+        error: auditError,
+      });
+
+      console.error(
+        `[trello-slack-scheduler] FALHA ao executar auditoria Trello -> Slack para o slot ${slot.slotKey}:`,
+        auditError
+      );
+
+      return {
+        executed: true,
+        success: false,
+        runId,
+        slotKey: slot.slotKey,
+        mode: slot.mode,
+        error: auditError?.message || String(auditError),
       };
     }
   } finally {
@@ -383,7 +367,6 @@ export function createTrelloSlackScheduler({
   async function tick({
     now = new Date(),
     dryRun = false,
-    enforceLock = true,
     store: callStore = store,
     auditRunner: callAuditRunner = auditRunner,
     enabled: callEnabled = enabled !== undefined ? enabled : isTrelloSlackScheduleEnabled(),
@@ -419,7 +402,6 @@ export function createTrelloSlackScheduler({
       store: callStore,
       auditRunner: callAuditRunner,
       dryRun,
-      enforceLock,
     });
 
     return {
