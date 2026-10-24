@@ -10,6 +10,7 @@
  *   SLACK_BOT_TOKEN="xoxb-seu-token" node backend/src/scripts/setup-slack-channels.mjs
  *   ou simplesmente:
  *   node backend/src/scripts/setup-slack-channels.mjs (lê SLACK_BOT_TOKEN do backend/.env)
+ *   node backend/src/scripts/setup-slack-channels.mjs --dry-run (só mostra o que faria; nenhuma chamada ao Slack)
  */
 
 import fs from "node:fs";
@@ -53,6 +54,7 @@ function loadEnvFallback() {
 loadEnvFallback();
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+const dryRun = process.argv.slice(2).includes("--dry-run");
 
 const OFFICIAL_CHANNELS = [
   {
@@ -136,6 +138,19 @@ async function run() {
   console.log("\n=======================================================");
   console.log("🚀 SETUP DE CANAIS OFICIAIS DO SLACK · GERAÇÃO DIGITAL");
   console.log("=======================================================\n");
+  console.log(`• Dry Run (Apenas Prévia): \x1b[33m${dryRun ? "SIM" : "NÃO"}\x1b[0m\n`);
+
+  // Para antes de qualquer chamada de rede: nem auth.test. Com backend/.env presente o token real é carregado, e
+  // sem esta parada rodar o script (ou o teste dele) cria os canais de verdade.
+  if (dryRun) {
+    console.log(`🔐 SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN ? "presente" : "não informado"}`);
+    console.log("📋 Canais que seriam criados ou atualizados (tópico e descrição):");
+    for (const item of OFFICIAL_CHANNELS) {
+      console.log(`   • #${item.name} — ${item.topic}`);
+    }
+    console.log("\n✨ Execução em modo Dry Run finalizada! (Nenhuma chamada ao Slack)\n");
+    return;
+  }
 
   if (!SLACK_BOT_TOKEN) {
     console.error("❌ ERRO FATAL: SLACK_BOT_TOKEN não informado.");

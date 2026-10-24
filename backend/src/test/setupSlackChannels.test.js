@@ -40,22 +40,25 @@ describe("Setup Slack Channels Script", () => {
     expect(content).toContain("conversations.create");
   });
 
-  it("deve carregar o ponto de entrada do script sem erro de importação", async () => {
+  it("--dry-run carrega o ponto de entrada sem erro de importação e não faz nenhuma chamada de rede", async () => {
     const srcScriptPath = path.resolve(__dirname, "../scripts/setup-slack-channels.mjs");
     const rootScriptPath = path.resolve(__dirname, "../../scripts/setup-slack-channels.mjs");
     const activePath = fs.existsSync(srcScriptPath) ? srcScriptPath : rootScriptPath;
 
-    try {
-      await execFileAsync(process.execPath, [activePath], {
-        env: { ...process.env, SLACK_BOT_TOKEN: "" },
-      });
-      expect.unreachable("Deveria sair com código de erro quando token não é fornecido");
-    } catch (err) {
-      // O script deve rodar, validar o token e exibir erro amigável, sem lançar ERR_MODULE_NOT_FOUND
-      const output = `${err.stdout || ""} ${err.stderr || ""}`;
-      expect(output).not.toContain("ERR_MODULE_NOT_FOUND");
-      expect(output).toContain("SETUP DE CANAIS OFICIAIS DO SLACK");
-      expect(output).toContain("ERRO FATAL: SLACK_BOT_TOKEN não informado");
+    // Token presente (falso) para o script passar da validação, e fetch trocado por um que acusa a chamada: se o
+    // dry-run não parar antes da rede, o teste falha em vez de criar canal. Sem --dry-run, rodar o script aqui leria o
+    // token real de backend/.env e criaria os seis canais.
+    const fetchQueAcusa = `data:text/javascript,globalThis.fetch=async()=>{console.log("CHAMADA_DE_REDE");throw new Error("CHAMADA_DE_REDE")}`;
+    const { stdout, stderr } = await execFileAsync(process.execPath, ["--import", fetchQueAcusa, activePath, "--dry-run"], {
+      env: { ...process.env, SLACK_BOT_TOKEN: "xoxb-falso-de-teste" },
+    });
+    const output = `${stdout} ${stderr}`;
+    expect(output).not.toContain("ERR_MODULE_NOT_FOUND");
+    expect(output).not.toContain("CHAMADA_DE_REDE");
+    expect(output).toContain("SETUP DE CANAIS OFICIAIS DO SLACK");
+    expect(output).toContain("Nenhuma chamada ao Slack");
+    for (const ch of ["00-comunicados", "01-ops-geral", "01-ops-trafego", "01-ops-criativos", "01-ops-comercial", "99-resenha"]) {
+      expect(output).toContain(`#${ch}`);
     }
   });
 });
