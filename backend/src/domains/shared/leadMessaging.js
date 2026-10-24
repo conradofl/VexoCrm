@@ -184,6 +184,9 @@ export function createLeadMessaging({
 
     // Se falhar por coluna dispatch_id inexistente, tenta sem ela
     if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_id"))) {
+      console.error(
+        `[lead-messaging:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_id' ausente na tabela 'lead_messages' (erro 42703). A mensagem para '${phone}' foi gravada SEM o dispatch_id '${resolvedDispatchId}' porque a migration 20261024150000 não foi aplicada no banco! Retentando insert degradado sem dispatch_id.`
+      );
       const fallbackPayload = { ...payload };
       delete fallbackPayload.dispatch_id;
       const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);

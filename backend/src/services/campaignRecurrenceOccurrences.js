@@ -295,6 +295,9 @@ async function materializeOne({ pool, now, campaign, resolveTimezone, buildSteps
     rows = res.rows;
   } catch (err) {
     if (err && (err.code === "42703" || String(err.message || "").includes("dispatch_options"))) {
+      console.error(
+        `[campaign-recurrence:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_options' ausente na tabela 'campaign_dispatches' (erro 42703) ao gerar ocorrência recorrente para campanha '${campaign.id}'. O lote nasceu SEM SNAPSHOT de dispatch_options porque a migration 20261024150000 não foi aplicada no banco! Executando query degradada sem a coluna.`
+      );
       // Fallback para schema legado onde campaign_dispatches ainda não possui dispatch_options
       const res = await pool.query(
         `WITH claimed AS (

@@ -514,6 +514,7 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
 
     it("continua com sucesso mesmo se o banco estiver no schema antigo sem as colunas dispatch_options e dispatch_id (tolerância a erro 42703)", async () => {
       mockSimulateOldSchema = true;
+      const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       mockCampaignData = {
         id: "camp-handoff-legacy",
@@ -580,6 +581,12 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
 
       // Mensagem foi salva com sucesso no fallback
       expect(mockInsertedLeadMessages.length).toBeGreaterThan(0);
+
+      // Garante que o fallback registrou alerta crítico no log e NÃO falhou em silêncio
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      const loggedErrors = consoleErrorSpy.mock.calls.map((args) => args.join(" "));
+      expect(loggedErrors.some((msg) => msg.includes("ALERTA CRÍTICO") && msg.includes("42703"))).toBe(true);
+      consoleErrorSpy.mockRestore();
     });
   });
 });

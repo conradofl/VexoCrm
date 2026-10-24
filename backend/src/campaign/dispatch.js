@@ -2124,6 +2124,9 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         .eq("id", dispatchId)
         .maybeSingle();
       if (dispErr && (dispErr.code === "42703" || String(dispErr.message || "").includes("dispatch_options"))) {
+        console.error(
+          `[continueCampaignLeadFromReply:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_options' ausente na tabela 'campaign_dispatches' (erro 42703) ao consultar lote '${dispatchId}'. A régua está executando sem snapshot de opções porque a migration 20261024150000 não foi aplicada no banco! Retentando select degradado sem dispatch_options.`
+        );
         const retry = await supabase
           .from("campaign_dispatches")
           .select("id, steps, evolution_instance_id")

@@ -5931,6 +5931,9 @@ export function registerCampaignsRoutes(app, deps) {
         .select("*")
         .single();
       if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_options"))) {
+        console.error(
+          `[campaign-dispatch:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_options' ausente na tabela 'campaign_dispatches' (erro 42703). O lote para a campanha '${campaignId}' nasceu SEM SNAPSHOT de dispatch_options porque a migration 20261024150000 não foi aplicada no banco! Retentando insert degradado sem a coluna.`
+        );
         const fallbackPayload = { ...insertPayload };
         delete fallbackPayload.dispatch_options;
         const fallbackRes = await supabase
@@ -6037,6 +6040,9 @@ export function registerCampaignsRoutes(app, deps) {
         .select("*")
         .single();
       if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_options"))) {
+        console.error(
+          `[campaign-dispatch:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_options' ausente na tabela 'campaign_dispatches' (erro 42703) durante UPDATE do lote '${dispatchId}'. As opções atualizadas NÃO foram gravadas no snapshot do lote porque a migration 20261024150000 não foi aplicada no banco! Retentando update degradado sem a coluna.`
+        );
         const fallbackPatch = { ...patch };
         delete fallbackPatch.dispatch_options;
         const retryRes = await supabase
