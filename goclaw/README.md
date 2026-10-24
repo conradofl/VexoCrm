@@ -65,8 +65,20 @@ A gestão de acessos e permissões do GoClaw é dividida em dois arquivos:
 
 ### 🔐 Geração Segura de Senhas (Argon2id)
 
-Para gerar hashes de senha compatíveis com o validador interno do GoClaw (`user.VerifyPassword` / `user.parseArgon2Hash`):
+O utilitário `goclaw/scripts/gerar-hash.mjs` roda localmente na máquina do dono/operador para gerar os hashes compatíveis com o runtime GoClaw (`user.VerifyPassword` / `user.parseArgon2Hash`) sem expor senhas em texto plano nem gravá-las em disco ou logs.
 
+#### 1. Instalação da Dependência (`argon2`)
+Como o pacote `argon2` não é dependência do sistema em produção e não faz parte dos `package.json` do repositório, instale-o previamente no seu ambiente local:
+
+```bash
+# Opção A: Instalação local pontual (sem alterar package.json versionado)
+npm install --no-save argon2
+
+# Opção B: Instalação global na sua máquina
+npm install -g argon2
+```
+
+#### 2. Geração do Hash
 ```bash
 # Modo 1: Interativo (digitação no terminal com máscara de asteriscos)
 node goclaw/scripts/gerar-hash.mjs

@@ -91,9 +91,13 @@ lanes:
         action: "run_evening_checkout"
         targetChannel: "slack:#01-ops-geral"
 
-storage:
+session:
   store: "sqlite"
   storePath: "./data/goclaw_sessions.db"
+  inherit: false
+
+memoryGraph:
+  dbPath: "data/memory_graph.db"
 
 security:
   sandbox: true

@@ -52,6 +52,9 @@
     "storePath": "./data/goclaw_sessions.db",
     "inherit": false
   },
+  "memoryGraph": {
+    "dbPath": "data/memory_graph.db"
+  },
   "lanes": {
     "maestro": {
       "name": "COO Maestro",
