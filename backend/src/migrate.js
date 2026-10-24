@@ -425,6 +425,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='inbound_extraction_prompt')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='followup_companies' AND column_name='inbound_extraction_enabled')
     ) AS ok`,
+    "20261024130000_create_trello_slack_audit_runs.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='trello_slack_audit_runs')
+      AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trello_slack_audit_runs_slot_key_unique')
+    ) AS ok`,
   };
 
   const query = checks[filename];
