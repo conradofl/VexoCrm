@@ -1,8 +1,8 @@
 import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
-import { AlertTriangle, Archive, ArrowRightLeft, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Archive, ArrowRightLeft, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Save, Send, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -102,6 +102,9 @@ interface SchedulingStepProps {
   recurrencePreviewInput?: RecurrencePanelProps["previewInput"];
 
   onSubmit: () => void;
+  onDispatchNow?: () => void;
+  alreadyReceivedCount?: number;
+  isWithoutSource?: boolean;
   isSubmitting: boolean;
   editingCampaignId: string | null;
   onCancelEdit: () => void;
@@ -115,6 +118,9 @@ export function SchedulingStep({
   setDispatchOptions,
   evolutionInstanceOptions,
   totalLeads = 0,
+  onDispatchNow,
+  alreadyReceivedCount = 0,
+  isWithoutSource = false,
   batchingEnabled,
   setBatchingEnabled,
   batchSize,
@@ -173,6 +179,7 @@ export function SchedulingStep({
   onNovaCampanha,
   preDispatchAudit,
 }: SchedulingStepProps) {
+  const [showConfirmDispatchModal, setShowConfirmDispatchModal] = useState(false);
   const [internalIsRecurring, setInternalIsRecurring] = useState(false);
   const [internalPattern, setInternalPattern] = useState<RecurrencePattern>("monthly");
   const [internalDayOfMonth, setInternalDayOfMonth] = useState(15);
@@ -977,29 +984,55 @@ export function SchedulingStep({
         )}
 
         <div className="pt-2">
-          <Button
-            onClick={onSubmit}
-            disabled={isSubmitting}
-            className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow"
-          >
-            <Zap className="h-4 w-4" />
-            {editingCampaignId
-              ? "Salvar Alterações de Campanha"
-              : (newTriggerType === "manual"
+          {editingCampaignId ? (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                onClick={() => setShowConfirmDispatchModal(true)}
+                disabled={isSubmitting || isWithoutSource || totalLeads === 0}
+                className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow"
+              >
+                <Send className="h-4 w-4" />
+                Disparar agora
+              </Button>
+              {isWithoutSource && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 text-center font-medium">
+                  Esta campanha não tem planilha de origem definida. Escolha a origem antes de disparar.
+                </p>
+              )}
+              <Button
+                type="button"
+                onClick={onSubmit}
+                disabled={isSubmitting}
+                variant="outline"
+                className="w-full h-11 text-xs font-bold gap-2 rounded-xl border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+              >
+                <Save className="h-4 w-4" />
+                Salvar Alterações de Campanha
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onCancelEdit}
+                className="w-full h-11 text-xs font-bold rounded-xl"
+              >
+                Cancelar Edição
+              </Button>
+            </div>
+          ) : (
+            <Button
+              onClick={onSubmit}
+              disabled={isSubmitting}
+              className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow"
+            >
+              <Zap className="h-4 w-4" />
+              {newTriggerType === "manual"
                 ? "Salvar e Disparar Lote Agora"
                 : (newTriggerType === "scheduled" ? "Salvar e Agendar Disparo" : "Salvar Campanha em Rascunho")
-              )
-            }
-          </Button>
-          {editingCampaignId && (
-            <Button
-              variant="outline"
-              onClick={onCancelEdit}
-              className="w-full h-11 text-xs font-bold mt-2 rounded-xl"
-            >
-              Cancelar Edição
+              }
             </Button>
           )}
+
           {/* Sempre visivel: editando ou nao, o formulario acumula estado (base
               selecionada, agendamento, lotes, agente) e nao havia como zerar. */}
           <Button
@@ -1012,6 +1045,84 @@ export function SchedulingStep({
             Criar nova campanha (limpa o formulário)
           </Button>
         </div>
+
+        {/* Modal de Confirmação de Disparo Imediato na Edição */}
+        <Dialog open={showConfirmDispatchModal} onOpenChange={setShowConfirmDispatchModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                <Send className="h-5 w-5 text-emerald-600" />
+                Confirmar Disparo de Campanha
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Revise os números antes de iniciar o disparo deste lote.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border p-3 bg-muted/30">
+                  <span className="text-[11px] text-muted-foreground block">Total de Destinatários</span>
+                  <span className="text-xl font-extrabold text-foreground">{totalLeads}</span>
+                  <span className="text-[10px] text-muted-foreground block">leads na seleção atual</span>
+                </div>
+                <div className="rounded-xl border p-3 bg-muted/30">
+                  <span className="text-[11px] text-muted-foreground block">Já Receberam</span>
+                  <span className="text-xl font-extrabold text-amber-600 dark:text-amber-400">{alreadyReceivedCount}</span>
+                  <span className="text-[10px] text-muted-foreground block">desta campanha</span>
+                </div>
+              </div>
+
+              {alreadyReceivedCount > 0 ? (
+                <div className="rounded-xl border border-amber-300/60 bg-amber-500/10 p-3 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
+                  <p className="font-semibold">Atenção ao público já impactado:</p>
+                  <p className="mt-0.5">
+                    {alreadyReceivedCount} lead(s) desta seleção já receberam mensagens desta campanha no ciclo atual. O sistema de proteção por ciclo irá ignorá-los para não enviar em duplicidade.
+                  </p>
+                  <p className="mt-1 font-semibold text-emerald-700 dark:text-emerald-300">
+                    Novos envios previstos: {Math.max(0, totalLeads - alreadyReceivedCount)} lead(s).
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-emerald-300/60 bg-emerald-500/10 p-3 text-[11px] text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-200">
+                  <p className="font-semibold">Nenhum envio anterior detectado:</p>
+                  <p className="mt-0.5">
+                    Todos os {totalLeads} leads selecionados receberão a mensagem da campanha.
+                  </p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-muted-foreground">
+                Deseja confirmar a criação do lote e iniciar os envios agora?
+              </p>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowConfirmDispatchModal(false)}
+                disabled={isSubmitting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-1.5"
+                disabled={isSubmitting}
+                onClick={async () => {
+                  setShowConfirmDispatchModal(false);
+                  if (onDispatchNow) {
+                    await onDispatchNow();
+                  }
+                }}
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Confirmar e Disparar Agora
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Modal de Auditoria de Variáveis / Leads Segurados */}
         {preDispatchAudit && (

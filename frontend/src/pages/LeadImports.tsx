@@ -47,6 +47,7 @@ import {
   useTriggerDispatch,
   useUpdateDispatch,
   useAllDispatches,
+  useCampaignRecipients,
   type Campaign,
   type CampaignDispatch,
   type CampaignStatus,
@@ -1357,8 +1358,65 @@ export default function LeadImports({
     toast({ title: "Formulário limpo", description: "Pronto para uma nova campanha." });
   }
 
-  async function handleCreateAndDispatch() {
-    if (newTriggerType === "scheduled") {
+  const isWithoutSource = useMemo(() => {
+    if (selectedFile) return false;
+    if (bancoAudience) {
+      // Regra CAMPAIGN_WITHOUT_SOURCE: público do Banco sem planilha/importação associada
+      const hasImportId = Boolean(selectedImportId && selectedImportId !== ALL_IMPORTS_VALUE && selectedImportId !== "all" && selectedImportId !== "");
+      const hasImportIds = selectedImportIds.length > 0;
+      const hasCriteriaImport = Boolean(bancoAudienceCriteria?.importId);
+      return !hasImportId && !hasImportIds && !hasCriteriaImport;
+    }
+    if (selectedImportIds.length > 0) return false;
+    if (selectedImportId && selectedImportId !== ALL_IMPORTS_VALUE && selectedImportId !== "all" && selectedImportId !== "") return false;
+    if (selectedImportId === ALL_IMPORTS_VALUE) return false;
+    return true;
+  }, [selectedFile, bancoAudience, bancoAudienceCriteria, selectedImportIds, selectedImportId]);
+
+  const { data: campaignRecipientsData } = useCampaignRecipients(editingCampaignId);
+
+  const alreadyReceivedCount = useMemo(() => {
+    if (!editingCampaignId) return 0;
+    if (campaignRecipientsData?.recipients && campaignRecipientsData.recipients.length > 0) {
+      const sentPhones = new Set<string>();
+      const sentLeadIds = new Set<string>();
+      for (const r of campaignRecipientsData.recipients) {
+        if (r.status === "sent" || r.status === "claimed") {
+          const digits = String(r.phone || "").replace(/\D/g, "");
+          if (digits) {
+            sentPhones.add(digits);
+            if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+              sentPhones.add(digits.slice(2));
+            } else if (digits.length === 10 || digits.length === 11) {
+              sentPhones.add(`55${digits}`);
+            }
+          }
+          if (r.leadId) sentLeadIds.add(String(r.leadId));
+        }
+      }
+      if (sentPhones.size > 0 || sentLeadIds.size > 0) {
+        let matchCount = 0;
+        const rows = selectedFile ? previewRows : filteredRows;
+        for (const row of rows) {
+          const d = String(row.telefone || "").replace(/\D/g, "");
+          const ddi = d.startsWith("55") ? d : `55${d}`;
+          const nonDdi = d.startsWith("55") ? d.slice(2) : d;
+          const id = String(row.id || "");
+          if (
+            (d && (sentPhones.has(d) || sentPhones.has(ddi) || sentPhones.has(nonDdi))) ||
+            (id && sentLeadIds.has(id))
+          ) {
+            matchCount++;
+          }
+        }
+        return matchCount;
+      }
+    }
+    return campaignRecipientsData?.counts?.sent ?? 0;
+  }, [editingCampaignId, campaignRecipientsData, selectedFile, previewRows, filteredRows]);
+
+  async function handleCreateAndDispatch({ deliberateDispatch = false }: { deliberateDispatch?: boolean } = {}) {
+    if (newTriggerType === "scheduled" && !deliberateDispatch) {
       if (!newScheduledAt) {
         toast({
           title: "Data e hora obrigatórias",
@@ -1424,7 +1482,7 @@ export default function LeadImports({
       return;
     }
 
-    await executeCreateAndDispatch();
+    await executeCreateAndDispatch({ deliberateDispatch });
   }
 
   async function handleCancelPreviousAndCreate() {
@@ -1510,8 +1568,8 @@ export default function LeadImports({
     setRecurrenceOverrunConfirmed(false);
   }
 
-  async function executeCreateAndDispatch() {
-    if (newTriggerType === "scheduled") {
+  async function executeCreateAndDispatch({ deliberateDispatch = false }: { deliberateDispatch?: boolean } = {}) {
+    if (!deliberateDispatch && newTriggerType === "scheduled") {
       if (!newScheduledAt) {
         toast({
           title: "Data e hora obrigatórias",
@@ -1710,7 +1768,8 @@ export default function LeadImports({
 
       // Salvar não dispara (ver lib/campaignSaveActions.ts): edição nunca cria lote; rascunho novo também não.
       const isEdit = Boolean(editingCampaignId) && savedCampaign.id === editingCampaignId;
-      const plano = planAfterCampaignSave({ isEdit, isRecurring: false, trigger: newTriggerType });
+      const effectiveTrigger = deliberateDispatch ? "manual" : newTriggerType;
+      const plano = planAfterCampaignSave({ isEdit, isRecurring: false, trigger: effectiveTrigger, deliberateDispatch });
       if (!plano.createDispatch) {
         if (isEdit) {
           // Lotes ainda não disparados guardam a versão anterior das mensagens: o dono decide atualizar ou manter.
@@ -1750,7 +1809,7 @@ export default function LeadImports({
 
       // 2. Register Dispatch Batch Execution
       const token = await getIdToken();
-      const scheduledIso = newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
+      const scheduledIso = !deliberateDispatch && newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
 
       let totalLeads = 0;
       if (selectedFile || bancoAudience) {
@@ -1764,15 +1823,15 @@ export default function LeadImports({
         const interval = Number.parseFloat(batchIntervalHours) || 1;
         const numBatches = Math.ceil(totalLeads / size);
 
-        let baseDate = newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : new Date();
+        let baseDate = !deliberateDispatch && newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : new Date();
 
         for (let i = 0; i < numBatches; i++) {
           const offset = i * size;
           const batchDate = new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
           const batchScheduledIso = batchDate.toISOString();
           let batchTriggerType = "scheduled";
-          if (newTriggerType === "manual" && i === 0) batchTriggerType = "manual";
-          if (newTriggerType === "draft") batchTriggerType = "draft";
+          if ((deliberateDispatch || newTriggerType === "manual") && i === 0) batchTriggerType = "manual";
+          if (!deliberateDispatch && newTriggerType === "draft") batchTriggerType = "draft";
 
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
             method: "POST",
@@ -1793,7 +1852,7 @@ export default function LeadImports({
           const dispatchId = dispatchData.dispatch.id;
 
           // Se for manual e for o primeiro lote, dispara imediatamente
-          if (i === 0 && newTriggerType === "manual") {
+          if (i === 0 && (deliberateDispatch || newTriggerType === "manual")) {
             setSubmittingStatus(`Disparando lote 1/${numBatches}...`);
             await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
               method: "POST",
@@ -1809,15 +1868,16 @@ export default function LeadImports({
             : `${numBatches} lotes criados, mas não vão disparar até conectar um chip.`,
         });
       } else {
+        const effectiveTriggerType = deliberateDispatch ? "manual" : newTriggerType;
         const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             name: `${campaignName.trim()} — Lote Principal`,
             steps: campaignSequence,
-            triggerType: newTriggerType,
-            status: newTriggerType === "draft" ? "draft" : undefined,
-            scheduledAt: scheduledIso,
+            triggerType: effectiveTriggerType,
+            status: effectiveTriggerType === "draft" ? "draft" : undefined,
+            scheduledAt: effectiveTriggerType === "scheduled" ? scheduledIso : null,
             evolutionInstanceId: dispatchOptions.evolutionInstanceId,
           }),
         });
@@ -1828,14 +1888,14 @@ export default function LeadImports({
         const hasConnectedChips = evolutionInstanceOptions.length > 0 || Boolean(selectedLeadClient?.n8n_settings?.dispatch_webhook_url);
 
         // 3. Trigger immediate execution if manual
-        if (newTriggerType === "manual") {
+        if (effectiveTriggerType === "manual") {
           setSubmittingStatus("Disparando lote de envios...");
           await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}` },
           });
           toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
-        } else if (newTriggerType === "draft") {
+        } else if (effectiveTriggerType === "draft") {
           toast({
             title: "Campanha salva!",
             description: hasConnectedChips
@@ -2531,7 +2591,10 @@ export default function LeadImports({
               recurrenceOverrunConfirmed={recurrenceOverrunConfirmed}
               setRecurrenceOverrunConfirmed={setRecurrenceOverrunConfirmed}
               recurrencePreviewInput={recurrencePreviewInput}
-              onSubmit={handleCreateAndDispatch}
+              onSubmit={() => void handleCreateAndDispatch({ deliberateDispatch: false })}
+              onDispatchNow={() => void handleCreateAndDispatch({ deliberateDispatch: true })}
+              isWithoutSource={isWithoutSource}
+              alreadyReceivedCount={alreadyReceivedCount}
               isSubmitting={isSubmitting}
               editingCampaignId={editingCampaignId}
               onCancelEdit={() => {
