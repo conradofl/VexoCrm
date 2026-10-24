@@ -4,7 +4,7 @@
     "role": "owner",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$pNiOgNVoIvCGa5bwdn8EQw$4CROxuT9i02we13i20D3J7zKPSLKpEcRBkE0vFaRnY4"
   },
   "caio": {
     "name": "Caio Almeida",
