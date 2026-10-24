@@ -96,6 +96,7 @@ import { closeFollowupQueue } from "./followup/queue.js";
 import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
 import { stopDueDispatchScheduler } from "./domains/campaigns/routes.js";
+import { startTrelloSlackScheduler, stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
 import { loadKnownLeadsColumns } from "./services/leadUpsert.js";
 // getSegmentationCatalog, normalizeSegmentationCatalog, isFilterShape, normalizeFilters,
 // leadMatchesSegmentation, buildDefaultSegmentationConfig, sanitizeSegmentationConfig ficaram
@@ -769,6 +770,7 @@ let httpServer = null;
 
 function startBackgroundServices() {
   startCampaignScheduler();
+  startTrelloSlackScheduler();
   if (supabase) {
     setSupabaseClient(supabase);
   }
@@ -910,8 +912,9 @@ async function gracefulShutdown(signal) {
     // ── ETAPA 4: Fechar workers BullMQ, filas BullMQ, conexões Redis e pool Postgres ──
     const t4 = Date.now();
     try {
-      // 4a. Workers BullMQ (close)
+      // 4a. Workers BullMQ (close) e Schedulers
       const tw = Date.now();
+      stopTrelloSlackScheduler();
       await Promise.allSettled([
         stopFollowupWorker(),
         stopRagWorker(),
