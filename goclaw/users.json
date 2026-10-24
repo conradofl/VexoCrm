@@ -11,48 +11,48 @@
     "role": "owner",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$BDin1BZsseiy+uNTftXaDQ$33/u9NpYAFgtwKPna/6RXnE5FhSEf6eQPk/vyqnbJGA"
   },
   "duda": {
     "name": "Duda Eduarda",
     "role": "colaborador",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$BDin1BZsseiy+uNTftXaDQ$33/u9NpYAFgtwKPna/6RXnE5FhSEf6eQPk/vyqnbJGA"
   },
   "arthur": {
     "name": "Arthur Henrique",
     "role": "colaborador",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$DKzCXhYJ8sPscboRRHD9jw$y0ymG8OJ78WYoN9S+Yx7eMNghxaWq6brA/Ie109zGEM"
   },
   "santana": {
     "name": "Santana",
     "role": "colaborador",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$y8kC9cPxS4AjJcTFv/e0Tw$rWAj7w2psvit/uQTuDYOx7rkEcm8LgYaeZQKPRiXRZM"
   },
   "eflen": {
     "name": "Eflen",
     "role": "colaborador",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$SnRCBhTVw4pryiATqEXODg$bIeAVwezMw8TDGIJSTJxDLKhCmkUnBSXE2+7FbWZ8JE"
   },
   "carlos": {
     "name": "Carlos Rafael",
     "role": "colaborador",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$Z5Il9Tcy0MuqkvDXFJQ/fg$5BwbIZQDucxuUtjDcEVd7rNxbHh3lLuw6An4YTypdFk"
   },
   "gabriel": {
     "name": "Gabriel",
     "role": "colaborador",
     "thinking": false,
     "thinking_level": "off",
-    "http_password_hash": ""
+    "http_password_hash": "$argon2id$v=19$m=65536,t=1,p=4$rTLb9x/bfFJLhKj6WwgRLQ$2+BrJIm0gQK6OB1vJGpYZj0SGnjK2DvO8lRFXmDRpPM"
   }
 }
