@@ -75,6 +75,16 @@ vi.mock("../campaign-outbound.js", async (importOriginal) => {
     }),
     dispatchCampaignSequence: vi.fn(async (args) => {
       mockDispatchedCalls.push(args);
+      const stepsToDispatch = args.steps || args.analyticsMeta?.sequence || [];
+      if (typeof args.onStepDispatched === "function" && Array.isArray(stepsToDispatch) && stepsToDispatch.length > 0) {
+        await args.onStepDispatched({
+          step: stepsToDispatch[0],
+          stepIndex: 0,
+          sentAt: new Date().toISOString(),
+          instanceName: "CHIP BATEDOR",
+          activeChip: { instanceId: "chip-a-batedor-uuid", instanceName: "CHIP BATEDOR" },
+        });
+      }
       return {
         summary: {
           successCount: 1,
@@ -399,6 +409,94 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
       expect(handoffResult2.executed).toBe(true);
       expect(handoffResult2.transferredTo).toBe("CHIP FECHADOR");
       expect(handoffResult2.targetChipIndex).toBe(0);
+    });
+  });
+
+  describe("Teste 5: Decoupling e Snapshot Imutável do Lote (Frente C)", () => {
+    it("executa handoff com sucesso mesmo se a campanha ativa teve handoff desabilitado após o disparo do lote", async () => {
+      // A campanha no banco foi editada depois e handoff foi desmarcado
+      mockCampaignData = {
+        id: "camp-handoff-edited",
+        name: "Campanha Editada",
+        client_id: "tenant-vexo",
+        status: "running",
+        analytics_meta: {
+          sequence: [
+            { id: "step-1", type: "text", order: 1, text: "Olá!", triggerMode: "immediate", enabled: true },
+            { id: "step-2", type: "text", order: 2, text: "Gostaria de ver?", triggerMode: "after_reply", enabled: true },
+          ],
+          dispatchOptions: {
+            waitForReply: true,
+            evolutionInstanceId: "chip-a-batedor-uuid",
+            handoffEnabled: false, // <-- EDITADA: desabilitado na campanha!
+          },
+        },
+      };
+
+      // O lote gravado no banco tem o snapshot com handoffEnabled: true!
+      mockDispatchData = {
+        id: "disp-frozen-snapshot",
+        evolution_instance_id: "chip-a-batedor-uuid",
+        dispatch_options: {
+          waitForReply: true,
+          evolutionInstanceId: "chip-a-batedor-uuid",
+          handoffEnabled: true,
+          handoffChipId: "chip-b-fechador-uuid",
+          handoffChipIds: ["chip-b-fechador-uuid"],
+          handoffBridgingText: "Aviso da ponte para {{nome}}",
+          handoffOpenerText: "Olá {{nome}}, sou o especialista!",
+        },
+      };
+
+      const campaignMatch = {
+        id: "camp-handoff-edited",
+        leadImportItem: {
+          id: "item-lead-snapshot",
+          progress: {
+            waitForReply: true,
+            status: "aguardando_usuario",
+            nextStepIndex: 1,
+            sentSteps: [0],
+            dispatchId: "disp-frozen-snapshot",
+            leadName: "Marcos Paulo",
+          },
+          normalized_data: {
+            nome: "Marcos Paulo",
+            telefone: "5534984400049",
+          },
+        },
+      };
+
+      const result = await continueCampaignLeadFromReply({
+        clientId: "tenant-vexo",
+        phone: "5534984400049",
+        campaignMatch,
+        replyPayload: {
+          instance: "chip-batedor",
+          text: "Sim!",
+        },
+        delayMs: 1,
+      });
+
+      expect(result.continued).toBe(true);
+      expect(result.handoff?.executed).toBe(true);
+      expect(result.handoff?.transferredTo).toBe("CHIP FECHADOR");
+
+      // Verifica que as mensagens geradas (passo 2, bridge, opener) possuem dispatch_id gravado
+      const step2Message = mockInsertedLeadMessages.find((m) => m.meta?.source === "campaign_reply_progression");
+      expect(step2Message).toBeDefined();
+      expect(step2Message.dispatch_id).toBe("disp-frozen-snapshot");
+      expect(step2Message.meta.dispatchId).toBe("disp-frozen-snapshot");
+
+      const bridgeMessage = mockInsertedLeadMessages.find((m) => m.meta?.is_handoff_bridge === true);
+      expect(bridgeMessage).toBeDefined();
+      expect(bridgeMessage.dispatch_id).toBe("disp-frozen-snapshot");
+      expect(bridgeMessage.meta.dispatchId).toBe("disp-frozen-snapshot");
+
+      const openerMessage = mockInsertedLeadMessages.find((m) => m.meta?.is_handoff_opener === true);
+      expect(openerMessage).toBeDefined();
+      expect(openerMessage.dispatch_id).toBe("disp-frozen-snapshot");
+      expect(openerMessage.meta.dispatchId).toBe("disp-frozen-snapshot");
     });
   });
 });

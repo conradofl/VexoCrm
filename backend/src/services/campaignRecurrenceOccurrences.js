@@ -258,9 +258,9 @@ async function materializeOne({ pool, now, campaign, resolveTimezone, buildSteps
         RETURNING id, client_id
      ), disp AS (
        INSERT INTO public.campaign_dispatches
-         (campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, limit_per_run, target_count,
+         (campaign_id, client_id, name, steps, dispatch_options, trigger_type, scheduled_at, status, limit_per_run, target_count,
           recurrence_occurrence_at, recurrence_variant_offset)
-       SELECT id, client_id, $7, $8::jsonb, 'scheduled', $2::timestamptz, 'scheduled', $9::int, COALESCE($10::int, 0),
+       SELECT id, client_id, $7, $8::jsonb, $14::jsonb, 'scheduled', $2::timestamptz, 'scheduled', $9::int, COALESCE($10::int, 0),
               $2::timestamptz, $4::int
          FROM claimed
         WHERE $11::boolean
@@ -287,6 +287,7 @@ async function materializeOne({ pool, now, campaign, resolveTimezone, buildSteps
       created,
       outcome,
       reason,
+      JSON.stringify(campaign.analytics_meta?.dispatchOptions || {}),
     ]
   );
 

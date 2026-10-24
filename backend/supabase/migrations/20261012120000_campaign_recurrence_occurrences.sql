@@ -31,6 +31,7 @@ COMMENT ON COLUMN public.campaigns.recurrence_no_end_confirmed_at IS 'Confirmaca
 ALTER TABLE public.campaign_dispatches
   ADD COLUMN IF NOT EXISTS evolution_instance_id UUID,
   ADD COLUMN IF NOT EXISTS target_count INTEGER DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS dispatch_options JSONB DEFAULT '{}'::jsonb,
   ADD COLUMN IF NOT EXISTS recurrence_occurrence_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS recurrence_variant_offset INT;
 

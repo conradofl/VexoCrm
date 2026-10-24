@@ -2996,7 +2996,8 @@ export function registerCampaignsRoutes(app, deps) {
     await pgDatabasePool.query(`
       ALTER TABLE public.campaign_dispatches
       ADD COLUMN IF NOT EXISTS evolution_instance_id UUID,
-      ADD COLUMN IF NOT EXISTS target_count INTEGER DEFAULT 0
+      ADD COLUMN IF NOT EXISTS target_count INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS dispatch_options JSONB DEFAULT '{}'::jsonb
     `);
   }
 
@@ -3017,19 +3018,22 @@ export function registerCampaignsRoutes(app, deps) {
     return true;
   }
 
-
-
-  // Meta de campanha com o chip do LOTE por cima (o do lote vence o da campanha). É o que resolveCampaignDispatchSettings
-  // lê para decidir o webhook de envio — runCampaignDispatch e o agendador usam a mesma função, para olharem o MESMO chip.
+  // Meta de campanha com o snapshot do LOTE por cima (o do lote vence o da campanha). É o que resolveCampaignDispatchSettings
+  // lê para decidir o webhook de envio e opções de handoff/cadência — runCampaignDispatch e o agendador usam a mesma função.
   function buildDispatchCampaignMeta(campaign, dispatch) {
     const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
+    const dispatchOptions = {
+      ...campaignMeta.dispatchOptions,
+      ...(dispatch.dispatch_options || {}),
+    };
     const dispatchEvolutionInstanceId = normalizeString(dispatch.evolution_instance_id);
-    return dispatchEvolutionInstanceId
-      ? {
-          ...campaignMeta,
-          dispatchOptions: { ...campaignMeta.dispatchOptions, evolutionInstanceId: dispatchEvolutionInstanceId },
-        }
-      : campaignMeta;
+    if (dispatchEvolutionInstanceId) {
+      dispatchOptions.evolutionInstanceId = dispatchEvolutionInstanceId;
+    }
+    return {
+      ...campaignMeta,
+      dispatchOptions,
+    };
   }
 
   // A linha da instância dona do webhook com que este lote envia (ou null se o webhook não é de instância cadastrada).
@@ -5899,24 +5903,44 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
-      const { data, error } = await supabase
+      const dispatchOptionsSnapshot = {
+        ...(validation.analyticsMeta?.dispatchOptions || {}),
+        ...(body.dispatch_options || body.dispatchOptions || {}),
+        ...(requestedEvolutionInstanceId ? { evolutionInstanceId: requestedEvolutionInstanceId } : {}),
+      };
+
+      const insertPayload = {
+        campaign_id: campaignId,
+        client_id: authorizedClientId,
+        name,
+        steps: validation.analyticsMeta.sequence,
+        dispatch_options: dispatchOptionsSnapshot,
+        campaign_prompt_id: dispatchPromptId,
+        trigger_type: triggerType,
+        scheduled_at: scheduledAt,
+        evolution_instance_id: requestedEvolutionInstanceId,
+        status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
+        limit_per_run: limitPerRun,
+        offset: offset,
+        target_count: targetCount,
+      };
+
+      let { data, error } = await supabase
         .from("campaign_dispatches")
-        .insert({
-          campaign_id: campaignId,
-          client_id: authorizedClientId,
-          name,
-          steps: validation.analyticsMeta.sequence,
-          campaign_prompt_id: dispatchPromptId,
-          trigger_type: triggerType,
-          scheduled_at: scheduledAt,
-          evolution_instance_id: requestedEvolutionInstanceId,
-          status: triggerType === "scheduled" && scheduledAt ? "scheduled" : "draft",
-          limit_per_run: limitPerRun,
-          offset: offset,
-          target_count: targetCount,
-        })
+        .insert(insertPayload)
         .select("*")
         .single();
+      if (error && String(error.message).includes("dispatch_options")) {
+        const fallbackPayload = { ...insertPayload };
+        delete fallbackPayload.dispatch_options;
+        const fallbackRes = await supabase
+          .from("campaign_dispatches")
+          .insert(fallbackPayload)
+          .select("*")
+          .single();
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
       if (error) throw error;
       res.status(201).json({ dispatch: data });
     } catch (err) {
@@ -5953,6 +5977,11 @@ export function registerCampaignsRoutes(app, deps) {
         return sendError(res, 400, "INVALID_EVOLUTION_INSTANCE_ID", parsedEvInstanceId.error);
       }
       patch.evolution_instance_id = parsedEvInstanceId.value || null;
+    }
+    if (body.dispatch_options || body.dispatchOptions) {
+      patch.dispatch_options = {
+        ...(body.dispatch_options || body.dispatchOptions || {}),
+      };
     }
     if (body.status != null && ["draft","scheduled","paused","cancelled"].includes(body.status)) patch.status = body.status;
     patch.updated_at = new Date().toISOString();
