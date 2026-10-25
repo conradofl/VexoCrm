@@ -198,19 +198,66 @@ describe("Camada 1 — Seletor de Chip do Agente (Backend followup/routes.js)", 
     consoleErrorSpy.mockRestore();
   });
 
-  it("3. Teste de Mutação: sem o descarte de órfão, gravaria 2 elementos; com o descarte, grava exatamente 1", async () => {
-    // Simulando o comportamento antigo (sem filtro de instâncias ativas do tenant)
-    const rawInput = ["slug-orfao", "bia-spazio-4343"];
-    const semFiltro = [...rawInput];
-    expect(semFiltro.length).toBe(2);
+  it("3. POST /companies com órfão + chip válido descarta o órfão através da rota de produção e persiste apenas o chip ativo", async () => {
+    let capturedInsert = null;
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    // Com o descarte ativo implementado na rota:
-    const activeSlugs = activeChips.map((c) => c.name.toLowerCase()).concat(
-      activeChips.map((c) => c.dispatch_webhook_url.split("/").pop().toLowerCase())
+    supabaseMock.from.mockImplementation((table) => {
+      if (table === "followup_companies") {
+        return {
+          select: (fields) => {
+            if (fields.includes("evolution_instances")) {
+              return {
+                eq: () => ({
+                  is: () => Promise.resolve({ data: [], error: null }),
+                }),
+              };
+            }
+            return {
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({ data: null, error: null }),
+              }),
+            };
+          },
+          insert: (payload) => {
+            capturedInsert = payload;
+            return {
+              select: () => ({
+                maybeSingle: () => Promise.resolve({
+                  data: { id: "novo-agente", ...payload },
+                  error: null,
+                }),
+              }),
+            };
+          },
+        };
+      }
+      return {};
+    });
+
+    const handler = getRouteHandler("/companies", "post");
+    const req = {
+      body: {
+        name: "Novo Agente Teste",
+        tenant_id: "bia-do-spazio",
+        evolution_instances: ["orfao-zumbi", "bia-spazio-4343"],
+      },
+      authAccess: adminAccess(),
+    };
+    const res = fakeRes();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(201);
+    expect(capturedInsert).not.toBeNull();
+    // O órfão foi descartado pelo código de produção em routes.js!
+    expect(capturedInsert.evolution_instances).toEqual(["bia-spazio-4343"]);
+    expect(capturedInsert.evolution_instance).toBe("bia-spazio-4343");
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[followup/routes] Descartando vínculo órfão 'orfao-zumbi'")
     );
-    const comFiltro = rawInput.filter((item) => activeSlugs.includes(item.toLowerCase()));
-    expect(comFiltro.length).toBe(1);
-    expect(comFiltro).toEqual(["bia-spazio-4343"]);
+
+    consoleErrorSpy.mockRestore();
   });
 
   it("4. Chip pertencente a outro agente devolve 409 CHIP_ALREADY_OWNED com o nome do agente proprietário", async () => {
