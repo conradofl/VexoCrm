@@ -4,6 +4,7 @@ import {
   Bot,
   Save,
   AlertCircle,
+  AlertTriangle,
   Sparkles,
   Plus,
   Trash2,
@@ -82,12 +83,26 @@ function instanceNameFromChip(chip: { name?: string; dispatch_webhook_url?: stri
   const last = url.split("/").filter(Boolean).pop();
   return (last && !last.includes("?") ? last : chip?.name) || "";
 }
+
+// Verifica se uma string de instância salva (id, nome ou slug) corresponde a um chip ativo do tenant
+function findMatchingChip(val: string, chips: any[]) {
+  if (!val || !Array.isArray(chips)) return null;
+  const raw = String(val).trim().toLowerCase();
+  return (
+    chips.find((c) => {
+      if (!c || c.active === false) return false;
+      if (c.id && String(c.id).toLowerCase() === raw) return true;
+      if (c.name && String(c.name).toLowerCase() === raw) return true;
+      const slug = instanceNameFromChip(c).toLowerCase();
+      return slug && slug === raw;
+    }) || null
+  );
+}
+
 // Resolve qualquer formato (UUID, slug da URL ou nome amigável) para o slug técnico da Evolution
 function resolveTechnicalSlug(val: string, chips: any[]): string {
   if (!val) return "";
-  const found = chips.find(
-    (c) => c.id === val || instanceNameFromChip(c) === val || c.name === val
-  );
+  const found = findMatchingChip(val, chips);
   return found ? instanceNameFromChip(found) : val;
 }
 // Números (chips) gravados numa linha de agente — mesma regra de fallback
@@ -245,6 +260,9 @@ export default function InboundAgentConfig() {
   // Números atendidos por ESTE agente. Um agente qualificador pode cobrir os
   // celulares de vários consultores sem duplicar prompt, modelo e SPIN.
   const [numerosVinculados, setNumerosVinculados] = useState<string[]>([]);
+  // Quantidade de vínculos no banco que não resolvem para nenhum chip ativo do tenant
+  const [orphanCount, setOrphanCount] = useState<number>(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [inboundRole, setInboundRole] = useState<"atendimento" | "qualificador">("atendimento");
   const [inboundExtractionEnabled, setInboundExtractionEnabled] = useState(true);
   const [inboundExtractionPrompt, setInboundExtractionPrompt] = useState("");
@@ -276,8 +294,10 @@ export default function InboundAgentConfig() {
   ]);
   const [simInput, setSimInput] = useState("");
 
-  // Depende do ID, nao do objeto: recarregar a lista nao pode apagar o que o
-  // usuario acabou de mexer e ainda nao salvou.
+  // Depende do ID e dos chips do tenant:
+  // - Valores que resolvem para chip ativo entram em numerosVinculados.
+  // - Valores órfãos NÃO entram na contagem nem no estado de numerosVinculados.
+  // - Se houver órfão no banco, orphanCount registra para exibir o aviso explícito ao usuário.
   useEffect(() => {
     if (activeCompany) {
       const isPlaceholder = isDraftCompanyId(activeCompany.id);
@@ -290,38 +310,41 @@ export default function InboundAgentConfig() {
       setSdrTransferEnabled(activeCompany.sdr_transfer_enabled ?? false);
       setSpinFields(activeCompany.inbound_spin_fields ?? []);
       setInboundWebhookUrl(activeCompany.inbound_webhook_url ?? "");
+      setSaveError(null);
+
       const rawLista = !isPlaceholder && Array.isArray(activeCompany.evolution_instances) && activeCompany.evolution_instances.length > 0
         ? activeCompany.evolution_instances
         : (!isPlaceholder && activeCompany.evolution_instance ? [activeCompany.evolution_instance] : []);
-      const converted = chips.length > 0
-        ? Array.from(new Set(rawLista.map((v: string) => resolveTechnicalSlug(v, chips)).filter(Boolean)))
-        : rawLista;
-      setNumerosVinculados(converted);
+
+      if (chips.length > 0) {
+        const validSlugs: string[] = [];
+        let orphansFound = 0;
+
+        for (const item of rawLista) {
+          const match = findMatchingChip(item, chips);
+          if (match) {
+            const slug = instanceNameFromChip(match);
+            if (slug && !validSlugs.includes(slug)) {
+              validSlugs.push(slug);
+            }
+          } else {
+            orphansFound++;
+          }
+        }
+
+        setNumerosVinculados(validSlugs);
+        setOrphanCount(orphansFound);
+      } else {
+        setNumerosVinculados(rawLista);
+        setOrphanCount(0);
+      }
+
       setInboundRole(activeCompany.inbound_role === "qualificador" ? "qualificador" : "atendimento");
       setInboundExtractionPrompt(activeCompany.inbound_extraction_prompt ?? "");
       setInboundExtractionEnabled(activeCompany.inbound_extraction_enabled ?? true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id]);
-
-  // Ao carregar os chips do tenant, normaliza valores antigos salvos (UUID ou display name)
-  // para o slug técnico e remove duplicatas no estado local.
-  useEffect(() => {
-    if (chips.length > 0) {
-      setNumerosVinculados((atual) => {
-        const converted = Array.from(
-          new Set(atual.map((v) => resolveTechnicalSlug(v, chips)).filter(Boolean))
-        );
-        if (
-          converted.length !== atual.length ||
-          converted.some((v, idx) => v !== atual[idx])
-        ) {
-          return converted;
-        }
-        return atual;
-      });
-    }
-  }, [chips]);
+  }, [activeCompany?.id, chips]);
 
   // Ligar/desligar grava na hora. Antes era estado local ate clicar em Salvar,
   // entao sair da tela desfazia — parecia que o agente "desligava sozinho".
@@ -418,6 +441,7 @@ export default function InboundAgentConfig() {
     }
 
     try {
+      setSaveError(null);
       await updateCompany.mutateAsync({
         id: activeCompany.id,
         name: agentName.trim() || activeCompany.name,
@@ -431,9 +455,12 @@ export default function InboundAgentConfig() {
           sdrDistribution,
         });
       }
+      setOrphanCount(0);
       toast({ title: "Sucesso", description: "Configurações salvas." });
     } catch (e: any) {
-      toast({ title: "Erro", description: e.message, variant: "destructive" });
+      const msg = e?.message || "Erro ao salvar configurações.";
+      setSaveError(msg);
+      toast({ title: "Erro", description: msg, variant: "destructive" });
     }
   };
 
@@ -708,7 +735,7 @@ export default function InboundAgentConfig() {
                           {numerosVinculados.length === 0
                             ? "Nenhum número — escolha um chip"
                             : numerosVinculados.length === 1
-                              ? (chips.find((c) => instanceNameFromChip(c) === numerosVinculados[0] || c.name === numerosVinculados[0] || c.id === numerosVinculados[0])?.name || "chip removido ou desconectado")
+                              ? (chips.find((c) => instanceNameFromChip(c) === numerosVinculados[0] || c.name === numerosVinculados[0] || c.id === numerosVinculados[0])?.name || numerosVinculados[0])
                               : `${numerosVinculados.length} números vinculados`}
                         </span>
                         <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
@@ -725,6 +752,7 @@ export default function InboundAgentConfig() {
                           const slug = instanceNameFromChip(chip);
                           const marcado = numerosVinculados.includes(slug);
                           const toggleItem = () => {
+                            setSaveError(null);
                             setNumerosVinculados((atual) => {
                               if (atual.includes(slug)) {
                                 return atual.filter((v) => v !== slug);
@@ -751,6 +779,28 @@ export default function InboundAgentConfig() {
                       </div>
                     </PopoverContent>
                   </Popover>
+                  {orphanCount > 0 && (
+                    <div
+                      data-testid="orphan-chip-warning"
+                      className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        {orphanCount === 1
+                          ? "1 vínculo antigo não reconhecido — será removido ao salvar"
+                          : `${orphanCount} vínculos antigos não reconhecidos — serão removidos ao salvar`}
+                      </span>
+                    </div>
+                  )}
+                  {saveError && (
+                    <div
+                      data-testid="agent-chip-conflict-error"
+                      className="flex items-start gap-2 rounded-md border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-400"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-rose-500" />
+                      <span>{saveError}</span>
+                    </div>
+                  )}
                   <p className="text-xs text-slate-500">
                     Um chip marcado aqui não pode estar marcado em outro agente deste tenant — salvar
                     recusa e diz qual agente já o usa.
@@ -1249,6 +1299,19 @@ export default function InboundAgentConfig() {
               </Card>
             </CollapsibleContent>
           </Collapsible>
+
+          {saveError && (
+            <div
+              data-testid="agent-save-error"
+              className="flex items-start gap-2.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-500"
+            >
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-500" />
+              <div className="space-y-0.5">
+                <p className="font-semibold text-rose-400">Não foi possível salvar</p>
+                <p className="text-rose-300">{saveError}</p>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-end border-t border-slate-200 pt-6 dark:border-slate-800">
             <Button
