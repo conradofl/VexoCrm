@@ -177,3 +177,16 @@ Se a pergunta for "onde a automacao de leads roda hoje?", a resposta correta e:
 Se a pergunta for "onde o CRM web consulta dados?", a resposta correta e:
 
 - `backend/`
+
+## Execução de Scripts e Medições contra Produção
+
+> ⚠️ **REGRA OBRIGATÓRIA:** Medição, scripts de diagnóstico ou manutenção contra o banco de dados de produção devem ser executados **exclusivamente dentro do contêiner da aplicação** (ex: console do EasyPanel no serviço `bk-vexo`), **NUNCA a partir da máquina local do desenvolvedor**.
+
+- **Banco de dados ativo de produção:** `72.61.37.181`, serviço `db-vexo` (EasyPanel), banco `vexo`.
+- **Servidor legado desativado (morto):** O host `187.77.52.167` e o banco `vexo-data` foram desativados. Qualquer tentativa de conexão é recusada com erro fatal pelos scripts.
+- **Como executar o diagnóstico de chips/órfãos após o deploy:**
+  ```bash
+  # No console do contêiner bk-vexo (EasyPanel ou docker exec):
+  node src/scripts/measureAgentChipSelector.js all
+  ```
+

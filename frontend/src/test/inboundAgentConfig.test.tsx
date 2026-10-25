@@ -490,7 +490,7 @@ describe("InboundAgentConfig — Seletor de Número atendido (Urgente 1)", () =>
     });
   });
 
-  it("d) chip salvo que não existe mais na lista -> rótulo diz 'chip removido ou desconectado'", async () => {
+  it("d) chip salvo que não existe mais na lista -> zero marcados, não entra em numerosVinculados e mostra aviso de vínculo antigo", async () => {
     mockCompanies([
       {
         id: "agente-1",
@@ -503,10 +503,143 @@ describe("InboundAgentConfig — Seletor de Número atendido (Urgente 1)", () =>
     const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
     renderWithProviders(<InboundAgentConfig />);
 
+    // Zero marcados: rótulo mostra "Nenhum número — escolha um chip"
     await waitFor(() => {
-      expect(screen.getAllByText("chip removido ou desconectado").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("Nenhum número — escolha um chip")).toBeTruthy();
     });
+
+    // Mostra aviso de vínculo antigo não reconhecido
+    expect(screen.getByTestId("orphan-chip-warning")).toBeTruthy();
+    expect(
+      screen.getByText("1 vínculo antigo não reconhecido — será removido ao salvar")
+    ).toBeTruthy();
+    // O órfão sai do estado e não é exibido como chip selecionado
     expect(screen.queryByText("chip-inexistente-ou-deletado-uuid")).toBeNull();
+  });
+
+  it("e) agente com órfão no banco: marcar um chip válido e salvar grava 1, não 2", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Dra. Beatriz - Pessoal 2",
+        agent_kind: "atendimento",
+        inbound_enabled: false,
+        evolution_instances: ["chip-inexistente-ou-deletado-uuid"],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Nenhum número — escolha um chip")).toBeTruthy();
+    });
+
+    // Abrir o popover de seleção
+    const triggerBtn = screen.getByRole("button", { name: /Nenhum número — escolha um chip/i });
+    fireEvent.click(triggerBtn);
+
+    // Marcar o chip válido "Chip Eleição 4343"
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    // Rótulo atualiza para o chip marcado (1 único número)
+    expect(screen.getAllByText("Chip Eleição 4343").length).toBeGreaterThanOrEqual(1);
+
+    // Salvar alterações
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "agente-1",
+          evolution_instances: ["bia-do-spazio-4343-eleicao"],
+        })
+      );
+    });
+    // Gravou exatamente 1 chip, sem acumular o órfão
+    const lastCall = updateMutateAsync.mock.calls[updateMutateAsync.mock.calls.length - 1][0];
+    expect(lastCall.evolution_instances).toHaveLength(1);
+    expect(lastCall.evolution_instances).toEqual(["bia-do-spazio-4343-eleicao"]);
+  });
+
+  it("f) esvaziar a lista limpa de verdade: desmarcar todos os chips salva evolution_instances: []", async () => {
+    mockCompanies([
+      {
+        id: "agente-1",
+        name: "Bia do Spazio",
+        agent_kind: "atendimento",
+        inbound_enabled: true,
+        evolution_instances: ["bia-do-spazio-4343-eleicao"],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Chip Eleição 4343").length).toBeGreaterThanOrEqual(1);
+    });
+
+    const buttons = screen.getAllByRole("button", { name: /Chip Eleição 4343/i });
+    const triggerBtn = buttons.find((b) => b.getAttribute("aria-haspopup") === "dialog") || buttons[1] || buttons[0];
+    fireEvent.click(triggerBtn);
+
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeChecked();
+    // Desmarcar o chip
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      expect(updateMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "agente-1",
+          evolution_instances: [],
+        })
+      );
+    });
+  });
+
+  it("g) erro 409 CHIP_ALREADY_OWNED: exibe a mensagem de conflito na tela dizendo qual agente já possui o chip", async () => {
+    const conflictMessage = 'O chip "4343-ATENDIMENTO" já pertence ao agente "Dra. Beatriz - Pessoal (Padrão)". Escolha outro chip ou remova-o daquele agente primeiro.';
+    updateMutateAsync.mockRejectedValueOnce(new Error(conflictMessage));
+
+    mockCompanies([
+      {
+        id: "agente-2",
+        name: "Dra. Beatriz - Pessoal 2",
+        agent_kind: "atendimento",
+        inbound_enabled: false,
+        evolution_instances: [],
+      },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Nenhum número — escolha um chip")).toBeTruthy();
+    });
+
+    const triggerBtn = screen.getByRole("button", { name: /Nenhum número — escolha um chip/i });
+    fireEvent.click(triggerBtn);
+
+    const checkbox = screen.getByRole("checkbox");
+    fireEvent.click(checkbox);
+
+    const saveBtn = screen.getByRole("button", { name: /Salvar Alterações/i });
+    fireEvent.click(saveBtn);
+
+    // Mensagem de conflito 409 deve aparecer na tela para o usuário não achar que o sistema quebrou
+    await waitFor(() => {
+      expect(screen.getByTestId("agent-save-error")).toBeTruthy();
+    });
+    expect(screen.getByTestId("agent-chip-conflict-error")).toBeTruthy();
+    expect(screen.getAllByText(conflictMessage).length).toBeGreaterThanOrEqual(1);
   });
 });
 
