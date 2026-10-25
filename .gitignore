@@ -93,3 +93,8 @@ scratch/
 backend/scripts/
 *.xlsx
 *.csv
+
+# Database dumps e backups (nunca versionar)
+*.dump
+*.sql.gz
+
