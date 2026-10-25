@@ -501,6 +501,8 @@ function normalizeInstanceList(list, fallback) {
       inbound_webhook_url,
       sdr_whatsapp_number,
       sdr_transfer_enabled,
+      inbound_extraction_prompt,
+      inbound_extraction_enabled,
       agent_kind,
       livpub_aniversario_prompt,
       livpub_inativo_prompt,
