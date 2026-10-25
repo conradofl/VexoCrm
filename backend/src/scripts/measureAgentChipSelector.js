@@ -39,11 +39,23 @@ export async function run(connectionString = process.env.DATABASE_URL, targetTen
 
   const isAll = !targetTenantId || targetTenantId === "all" || targetTenantId === "--all";
   const url = new URL(connectionString);
+
   log(`\n================================================================================`);
-  log(`Conectando (SOMENTE LEITURA) a: ${url.hostname}:${url.port || 5432}/${url.pathname.slice(1)}`);
-  log(`Modo: ${isAll ? "TODOS OS TENANTS" : `Tenant '${targetTenantId}'`}`);
-  log(`Timestamp da execução: ${new Date().toISOString()}`);
+  log(`[CONEXÃO DE BANCO DE DADOS - SCRIPT DIAGNÓSTICO]`);
+  log(`  HOST:      ${url.hostname}`);
+  log(`  PORTA:     ${url.port || 5432}`);
+  log(`  BANCO:     ${url.pathname.slice(1)}`);
+  log(`  MODO:      ${isAll ? "TODOS OS TENANTS" : `Tenant '${targetTenantId}'`}`);
+  log(`  DATA/HORA: ${new Date().toISOString()}`);
   log(`================================================================================\n`);
+
+  // Guarda obrigatória: recusar rodar no servidor morto antigo
+  const DEAD_SERVERS = ["187.77.52.167"];
+  if (DEAD_SERVERS.includes(url.hostname) || url.pathname.includes("vexo-data")) {
+    const errorMsg = `Conexão abortada: O host '${url.hostname}' (ou banco '${url.pathname.slice(1)}') é o servidor antigo DESATIVADO (morto). O banco de produção ativo é 72.61.37.181 (serviço db-vexo, banco vexo). Corrija o DATABASE_URL antes de rodar.`;
+    log(`🚨 [FATAL] ${errorMsg}\n`);
+    throw new Error(errorMsg);
+  }
 
   const explicitSsl = String(process.env.DATABASE_SSL || process.env.PGSSLMODE || "").toLowerCase();
   const ssl = ["1", "true", "require"].includes(explicitSsl) ? { rejectUnauthorized: false } : false;

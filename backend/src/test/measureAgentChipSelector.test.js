@@ -51,4 +51,20 @@ describe("measureAgentChipSelector helper logic", () => {
     expect(checkInstanceMatch(null, chips)).toBeNull();
     expect(checkInstanceMatch("", chips)).toBeNull();
   });
+
+  it("recusar rodar e lançar erro fatal se o host for o servidor desativado 187.77.52.167", async () => {
+    const { run } = await import("../scripts/measureAgentChipSelector.js");
+    const deadUrl = "postgresql://user:pass@187.77.52.167:5432/vexo-data";
+    await expect(run(deadUrl, "all", () => {})).rejects.toThrow(
+      /servidor antigo DESATIVADO \(morto\)/i
+    );
+  });
+
+  it("recusar rodar e lançar erro fatal se o banco for o antigo vexo-data", async () => {
+    const { run } = await import("../scripts/measureAgentChipSelector.js");
+    const oldDbUrl = "postgresql://user:pass@some-host:5432/vexo-data";
+    await expect(run(oldDbUrl, "all", () => {})).rejects.toThrow(
+      /servidor antigo DESATIVADO \(morto\)/i
+    );
+  });
 });
