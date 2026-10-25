@@ -52,19 +52,19 @@ describe("measureAgentChipSelector helper logic", () => {
     expect(checkInstanceMatch("", chips)).toBeNull();
   });
 
-  it("recusar rodar e lançar erro fatal se o host for o servidor desativado 187.77.52.167", async () => {
+  it("recusar rodar e lançar erro fatal se o host não for da infraestrutura permitida", async () => {
     const { run } = await import("../scripts/measureAgentChipSelector.js");
-    const deadUrl = "postgresql://user:pass@187.77.52.167:5432/vexo-data";
-    await expect(run(deadUrl, "all", () => {})).rejects.toThrow(
-      /servidor antigo DESATIVADO \(morto\)/i
+    const foreignUrl = "postgresql://user:pass@192.0.2.1:5432/vexo";
+    await expect(run(foreignUrl, "all", () => {})).rejects.toThrow(
+      /Toda a produção vive em 72\.61\.37\.181/i
     );
   });
 
-  it("recusar rodar e lançar erro fatal se o banco for o antigo vexo-data", async () => {
+  it("recusar rodar e lançar erro fatal se o banco não for a base vexo", async () => {
     const { run } = await import("../scripts/measureAgentChipSelector.js");
-    const oldDbUrl = "postgresql://user:pass@some-host:5432/vexo-data";
-    await expect(run(oldDbUrl, "all", () => {})).rejects.toThrow(
-      /servidor antigo DESATIVADO \(morto\)/i
+    const wrongDbUrl = "postgresql://user:pass@72.61.37.181:5432/banco-estranho";
+    await expect(run(wrongDbUrl, "all", () => {})).rejects.toThrow(
+      /Toda a produção vive em 72\.61\.37\.181/i
     );
   });
 });

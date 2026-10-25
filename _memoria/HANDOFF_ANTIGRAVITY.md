@@ -78,11 +78,11 @@ Toda a memória do projeto vive em `~/Documents/vexo-sales-module/_memoria/`. Ar
   - **bk-vexo** — backend Node. Variáveis de ambiente e logs ficam aqui.
   - **Evolution API** — gateway WhatsApp (envio + QR).
   - **Redis** — cache/chat.
-- **Console do Postgres:** Easypanel → **db-vexo → Console → botão "Cliente Postgres"** abre o `psql` já conectado (não precisa digitar senha). Usuário: **`dbvexo`** · banco: **`vexo-data`** (estes não são segredo; a **senha** é — pegar na aba Credenciais, nunca colar em arquivo).
+- **Console do Postgres:** Easypanel → **db-vexo → Console → botão "Cliente Postgres"** abre o `psql` já conectado (não precisa digitar senha). Usuário: **`dbvexo`** · banco: **`vexo`** (estes não são segredo; a **senha** é — pegar na aba Credenciais, nunca colar em arquivo).
 - **Vercel:** hospeda o front (`crm.vexoia.com`). Deploy **automático** a cada push na `main`. Painel Vercel mostra status do build.
 - **Confirmar deploy do backend (bk-vexo):** o push NÃO reinicia na hora. Faça poll do health e observe o **reset de uptime** (processo novo):
   ```bash
-  curl -s https://bks-bk-vexo.ymqjmy.easypanel.host/health
+  curl -s https://vexo-backend.xdvm8y.easypanel.host/health
   # uptimeSeconds caindo para ~0 = deploy novo no ar; postgresPing:true = banco OK
   ```
 

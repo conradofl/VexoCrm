@@ -138,10 +138,13 @@ Se o teste de integridade passou e você precisa colocar o banco restaurado no a
 Nunca desligue/apague o recurso antigo antes de validar o novo **pela ponta** (`crm.vexoia.com`).
 Sempre com backup do banco antigo em mãos.
 
-## Servidor antigo (a desativar)
-Easypanel `187.77.52.167`: projeto `bks/bk-vexo` (backend antigo) e `apps/db-vexo`
-(database `vexo-data`, user `dbvexo`). Não confundir com `bks/bk-gestao` (produto separado
-LF Soluções, usa Supabase — nada a ver com o VexoCrm).
+## Infraestrutura de Produção Ativa
+Toda a produção vive em `72.61.37.181` (EasyPanel, projeto `vexo`):
+- **Backend:** serviço `bk-vexo` (`https://vexo-backend.xdvm8y.easypanel.host`, porta interna 3001)
+- **Banco:** serviço `db-vexo` (host interno `vexo_db-vexo:5432`, base `vexo`)
+- **Serviços de IA e WhatsApp:** Evolution e GoClaw integrados no mesmo ambiente.
+
+Qualquer host diferente desse é erro — não conectar, não medir, não escrever.
 
 ## Segredos
 Rotacionar periodicamente e nunca commitar/printar: senha do Postgres, GROQ_API_KEY,

@@ -49,10 +49,15 @@ export async function run(connectionString = process.env.DATABASE_URL, targetTen
   log(`  DATA/HORA: ${new Date().toISOString()}`);
   log(`================================================================================\n`);
 
-  // Guarda obrigatória: recusar rodar no servidor morto antigo
-  const DEAD_SERVERS = ["187.77.52.167"];
-  if (DEAD_SERVERS.includes(url.hostname) || url.pathname.includes("vexo-data")) {
-    const errorMsg = `Conexão abortada: O host '${url.hostname}' (ou banco '${url.pathname.slice(1)}') é o servidor antigo DESATIVADO (morto). O banco de produção ativo é 72.61.37.181 (serviço db-vexo, banco vexo). Corrija o DATABASE_URL antes de rodar.`;
+  // Regra positiva: Toda a produção vive em 72.61.37.181 (EasyPanel, projeto vexo): db-vexo (base vexo).
+  // Qualquer host diferente desse é erro — não conectar, não medir, não escrever.
+  const ALLOWED_HOSTS = ["72.61.37.181", "db-vexo", "vexo_db-vexo", "localhost", "127.0.0.1"];
+  const dbName = url.pathname.slice(1).toLowerCase();
+  const isAllowedHost = ALLOWED_HOSTS.includes(url.hostname.toLowerCase());
+  const isAllowedDb = dbName === "vexo" || url.hostname === "localhost" || url.hostname === "127.0.0.1";
+
+  if (!isAllowedHost || !isAllowedDb) {
+    const errorMsg = `Conexão abortada: Host '${url.hostname}' ou banco '${dbName}' inválido. Toda a produção vive em 72.61.37.181 (EasyPanel, projeto vexo): backend bk-vexo, banco db-vexo (base vexo). Qualquer host ou banco diferente desse é erro — não conectar, não medir, não escrever.`;
     log(`🚨 [FATAL] ${errorMsg}\n`);
     throw new Error(errorMsg);
   }

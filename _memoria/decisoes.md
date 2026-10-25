@@ -136,7 +136,7 @@ Confirmado: `psql`/`pg_dump` 18.4 disponíveis e `DATABASE_URL` presente no `bac
 - **KPIs de segmentação são personalizados por empresa.** O tenant guarda `segmentation_config` em `lead_client_n8n_settings`, com KPIs/campos editáveis na criação da empresa e leitura desses KPIs na criação da campanha.
 
 ## 2026-06-08
-- **Migração Supabase→PostgreSQL concluída.** A infra é PostgreSQL (Easypanel, `db-vexo`/`vexo-data`); não há serviço Supabase ativo. O código mantém o rótulo "Supabase" apontando para o PostgreSQL — renomear foi revertido por quebrar migrations, então fica como está.
+- **Migração Supabase→PostgreSQL concluída.** A infra é PostgreSQL (Easypanel, projeto vexo, serviço `db-vexo`, base `vexo`); não há serviço Supabase ativo. O código mantém o rótulo "Supabase" apontando para o PostgreSQL — renomear foi revertido por quebrar migrations, então fica como está.
 - **Incidente de key vazada resolvido.** Keys revogadas; sem risco ativo. Deixa de ser pendência.
 - **Fila priorizada = Máquina de Disparos (Etapa 1).** Dashboard (Fase 1) entra em espera numa fila separada, para retomar depois — foco único evita colisão entre as duas frentes.
 - **CONTRACT do dashboard renomeado para `CONTRACT-dashboard.md`.** Para preservar a Fase 0 do dashboard sem confundir com o novo `CONTRACT.md` (disparos), que é o contrato ativo na raiz.

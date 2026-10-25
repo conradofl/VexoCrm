@@ -20,9 +20,7 @@
 
 ## 1. Verificar QUAL banco e QUAL backend estão vivos (antes de qualquer diagnóstico)
 
-**Incidente:** horas perdidas depurando o backend errado. O frontend apontava para um
-backend antigo (`bks-bk-vexo`, servidor 187.77.52.167) cujo banco tinha sido desligado.
-O backend novo e saudável (`vexo/bk-vexo`, 72.61.37.181) estava certo o tempo todo.
+**Incidente:** horas perdidas depurando o backend errado quando o frontend apontava para uma instância desativada cujo banco tinha sido desligado, enquanto o backend de produção em 72.61.37.181 estava saudável o tempo todo.
 
 **Regra:** antes de investigar qualquer erro 500, confirme o caminho real da requisição:
 
@@ -38,10 +36,8 @@ O backend novo e saudável (`vexo/bk-vexo`, 72.61.37.181) estava certo o tempo t
 Se os logs do backend que você olha **não mudam** quando você reproduz o erro, você está
 olhando o backend/instância errado. Pare e ache o certo antes de continuar.
 
-**Estado atual correto** (confirme sempre em INFRA.md, pode mudar):
-- Backend prod: `https://vexo-backend.xdvm8y.easypanel.host` (porta interna 3001).
-- Banco: `vexo_db-vexo:5432/vexo` (host interno, servidor 72.61.37.181).
-- Servidor velho `187.77.52.167` (projetos `bks`, `apps`) está **TOTALMENTE DESATIVADO** — não tente conectar nele nunca mais. O acesso de fora/scripts à base de produção é exclusivamente através da API do backend em `https://vexo-backend.xdvm8y.easypanel.host`.
+**Regra de infraestrutura:**
+Toda a produção vive em 72.61.37.181 (EasyPanel, projeto vexo): backend bk-vexo, banco db-vexo (base vexo), Evolution e GoClaw. Qualquer host diferente desse é erro — não conectar, não medir, não escrever.
 
 ---
 
@@ -152,10 +148,9 @@ outras rotas quebravam por schema). O sintoma sumiu do console, a causa continuo
 1. **Número em relatório vem de execução real:** Se a consulta falhou ou a ferramenta deu erro, o relatório deve dizer expressamente *"não consegui medir, motivo X"*. **NUNCA** estime, **NUNCA** preencha por dedução, **NUNCA** escreva um valor que não veio diretamente do banco/API.
 2. **Erro é REPORTADO, não convertido em lista vazia, zero ou valor padrão:** Erro de conexão, timeout, 401, 403 ou 500 é **REPORTADO**, não convertido em lista vazia, zero ou fallback. Script que faz `Array.isArray(x) ? x : []` sobre resposta de API está escondendo erro — scripts de auditoria devem checar `res.ok` e o corpo do erro explicitamente (`throw new Error(...)` se o status não for 200/204 ou se o payload contiver `{ error }`).
 3. **Query e timestamp da execução obrigatórios:** Toda medição ou contagem vem com a query exata executada e o timestamp ISO da execução colados no relatório.
-4. **Topologia do banco e proibição do IP legado:**
-   - O banco de produção é `vexo_db-vexo:5432`, database `vexo`, no servidor `72.61.37.181`.
-   - O acesso de fora/scripts à base de produção é exclusivamente através da API do backend em `https://vexo-backend.xdvm8y.easypanel.host`.
-   - O IP `187.77.52.167` está **TOTALMENTE DESATIVADO** — não tente conectar nele nunca mais (porta 5432 ou qualquer outra).
+4. **Topologia de produção e execução segura:**
+   - Toda a produção vive em 72.61.37.181 (EasyPanel, projeto vexo): backend bk-vexo, banco db-vexo (base vexo), Evolution e GoClaw. Qualquer host diferente desse é erro — não conectar, não medir, não escrever.
+   - Medição ou scripts contra o banco de produção são executados exclusivamente dentro do contêiner da aplicação (`bk-vexo`), nunca a partir da máquina local.
 5. **Divergência entre relatórios bloqueia implementação:** Se um relatório contradisser outro relatório anterior (contagens diferentes, faixas temporais em conflito), isso é assunto prioritário obrigatório antes de qualquer implementação. Não siga em frente com dois números.
 
 ---
