@@ -25,7 +25,7 @@ Concorrentes BR limitam a 5–10 chips conectados. Meta do Vexo: 20+ (a Evolutio
 ## Stack (CONFIRMAR inspecionando o repo antes de assumir nomes)
 - Frontend: React + TypeScript, deploy na Vercel
 - Backend: Node/TypeScript, serviço `bk-vexo` no Easypanel (porta 3001)
-- Banco: **PostgreSQL** (`db-vexo`, database `vexo-data`, user `dbvexo`) no Easypanel.
+- Banco: **PostgreSQL** (`db-vexo`, database `vexo`, host `72.61.37.181`, user `dbvexo`) no Easypanel.
   Credenciais já fornecidas ao Claude Code. NÃO usa Supabase como serviço.
   ATENÇÃO: o CÓDIGO ainda está todo NOMEADO como "Supabase" (variáveis, helpers,
   nomes) — é rótulo herdado apontando para o PostgreSQL. O Luiz tentou renomear,

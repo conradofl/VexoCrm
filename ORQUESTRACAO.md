@@ -84,7 +84,7 @@ aquecimento mais importam).
 | P3 | QR/status automático via webhook Evolution | a fazer |
 
 Notas permanentes:
-- Banco é PostgreSQL (Easypanel, `db-vexo`/`vexo-data`). Código está nomeado "Supabase" — rótulo herdado. NÃO renomear (já quebrou migrations).
+- Banco é PostgreSQL (Easypanel, projeto vexo, serviço `db-vexo`, base `vexo`). Código está nomeado "Supabase" — rótulo herdado. NÃO renomear (já quebrou migrations).
 - Repo ativo confirmado em 2026-06-13 = `/home/luizfelipe/Documents/Programação/Vexo/VexoCrm`, branch `main`, HEAD `93653a7`.
 - Entidade de conexão = `lead_client_evolution_instances` (Luiz, PR #120). Migration `connections` do T1 **DESCARTADA**.
 - P4 Copiloto dashboard: bônus condicionado ao fechamento da Liv Pub (prazo era 06/06). Perguntar status antes de priorizar.
