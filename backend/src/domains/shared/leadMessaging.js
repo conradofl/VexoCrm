@@ -39,6 +39,7 @@ export function createLeadMessaging({
     messageText,
     engagementSignal = null,
     campaignId = null,
+    dispatchId = null,
     leadId = null,
     deliveredAt = null,
     meta = null,
@@ -136,6 +137,8 @@ export function createLeadMessaging({
       }
     }
 
+    const resolvedDispatchId = dispatchId || meta?.dispatchId || attributedDispatchId || null;
+
     let canonicalInstanceName = instanceName || null;
     if (canonicalInstanceName) {
       try {
@@ -164,7 +167,7 @@ export function createLeadMessaging({
       delivered_at: deliveredAt || new Date().toISOString(),
       message_timestamp: messageTimestamp || deliveredAt || new Date().toISOString(),
       meta: {
-        ...(attributedDispatchId ? { dispatchId: attributedDispatchId } : {}),
+        ...(resolvedDispatchId ? { dispatchId: resolvedDispatchId } : {}),
         ...(meta && typeof meta === "object" ? meta : {}),
         ...(resolvedMediaUrl ? { mediaUrl: resolvedMediaUrl, media_url: resolvedMediaUrl } : {}),
         ...(resolvedContentType ? { contentType: resolvedContentType, content_type: resolvedContentType } : {}),
@@ -174,9 +177,21 @@ export function createLeadMessaging({
       media_path: mediaPath || null,
       media_url: resolvedMediaUrl,
       content_type: resolvedContentType,
+      ...(resolvedDispatchId ? { dispatch_id: resolvedDispatchId } : {}),
     };
 
     let { error } = await supabase.from("lead_messages").insert(payload);
+
+    // Se falhar por coluna dispatch_id inexistente, tenta sem ela
+    if (error && (error.code === "42703" || String(error.message || "").includes("dispatch_id"))) {
+      console.error(
+        `[lead-messaging:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_id' ausente na tabela 'lead_messages' (erro 42703). A mensagem para '${phone}' foi gravada SEM o dispatch_id '${resolvedDispatchId}' porque a migration 20261024150000 não foi aplicada no banco! Retentando insert degradado sem dispatch_id.`
+      );
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.dispatch_id;
+      const retryRes = await supabase.from("lead_messages").insert(fallbackPayload);
+      error = retryRes.error;
+    }
 
     // Se falhar por colunas media_url / content_type inexistentes, tenta sem elas
     if (error && (String(error.message).includes("media_url") || String(error.message).includes("content_type"))) {

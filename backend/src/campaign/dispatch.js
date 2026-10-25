@@ -1771,11 +1771,13 @@ export async function executeCampaignChipHandoff({
   leadImportItemId = null,
   leadImportItem = null,
   delayMs = undefined,
+  dispatchId = null,
 }) {
   if (!supabase || !clientId || !phone || !campaign?.id) {
     return { executed: false, reason: "missing_context" };
   }
 
+  const resolvedDispatchId = dispatchId || progress?.dispatchId || null;
   const analyticsMeta = campaign.analytics_meta || {};
   const dispatchOptions = analyticsMeta.dispatchOptions || {};
 
@@ -1923,6 +1925,7 @@ export async function executeCampaignChipHandoff({
     await appendLeadMessage({
       clientId,
       campaignId: campaign.id,
+      dispatchId: resolvedDispatchId,
       leadId: lead?.id || null,
       phone,
       senderType: "bot",
@@ -1934,7 +1937,7 @@ export async function executeCampaignChipHandoff({
       meta: {
         is_handoff_bridge: true,
         // lote que iniciou a conversa (progresso do lead) — com vários lotes da mesma campanha, diz de qual veio
-        dispatchId: progress?.dispatchId || null,
+        dispatchId: resolvedDispatchId,
         transferred_to_chip: chipB.name,
         transferred_to_chip_id: chipB.id,
         source_campaign_id: campaign.id,
@@ -1979,6 +1982,7 @@ export async function executeCampaignChipHandoff({
   await appendLeadMessage({
     clientId,
     campaignId: campaign.id,
+    dispatchId: resolvedDispatchId,
     leadId: lead?.id || null,
     phone,
     direction: "outbound",
@@ -1989,7 +1993,7 @@ export async function executeCampaignChipHandoff({
     messageTimestamp: new Date().toISOString(),
     meta: {
       is_handoff_opener: true,
-      dispatchId: progress?.dispatchId || null,
+      dispatchId: resolvedDispatchId,
       source_campaign_id: campaign.id,
       transferred_from_chip: chipAName,
       transferred_to_chip: chipB.name,
@@ -2079,12 +2083,6 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   if (fetchError) throw fetchError;
   if (!campaign) return { continued: false, reason: "campaign_not_found" };
 
-  const stepPlan = getCampaignStepPlan(campaign.analytics_meta || {});
-  const analyticsMeta = stepPlan.analyticsMeta;
-  const steps = stepPlan.enabledSteps;
-  if (!stepPlan.shouldUseReplyFlow) {
-    return { continued: false, reason: "campaign_not_waiting_reply" };
-  }
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
   const nextIdxBase = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
@@ -2096,6 +2094,69 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
 
   if (!hasPendingProgress) {
     return { continued: false, reason: "lead_not_waiting_reply" };
+  }
+
+  // Resolução do lote (dispatchId) e leitura do snapshot congelado (steps e dispatch_options)
+  let dispatchId = progress?.dispatchId || null;
+  if (!dispatchId && pgDatabasePool) {
+    try {
+      const phoneVariants = Array.from(buildPhoneLookupVariants(phone) || [phone]);
+      const { rows } = await pgDatabasePool.query(
+        `SELECT dispatch_id FROM public.campaign_dispatch_runs
+         WHERE campaign_id = $1 AND phone = ANY($2::text[]) AND dispatch_id IS NOT NULL
+         ORDER BY created_at DESC LIMIT 1`,
+        [campaign.id, phoneVariants]
+      );
+      if (rows?.[0]?.dispatch_id) {
+        dispatchId = rows[0].dispatch_id;
+      }
+    } catch {
+      // fallback gracioso
+    }
+  }
+
+  let dispatchSnapshot = null;
+  if (dispatchId) {
+    try {
+      let { data: dispRec, error: dispErr } = await supabase
+        .from("campaign_dispatches")
+        .select("id, steps, dispatch_options, evolution_instance_id")
+        .eq("id", dispatchId)
+        .maybeSingle();
+      if (dispErr && (dispErr.code === "42703" || String(dispErr.message || "").includes("dispatch_options"))) {
+        console.error(
+          `[continueCampaignLeadFromReply:schema-fallback] 🚨 ALERTA CRÍTICO: Coluna 'dispatch_options' ausente na tabela 'campaign_dispatches' (erro 42703) ao consultar lote '${dispatchId}'. A régua está executando sem snapshot de opções porque a migration 20261024150000 não foi aplicada no banco! Retentando select degradado sem dispatch_options.`
+        );
+        const retry = await supabase
+          .from("campaign_dispatches")
+          .select("id, steps, evolution_instance_id")
+          .eq("id", dispatchId)
+          .maybeSingle();
+        dispRec = retry.data;
+      }
+      if (dispRec) dispatchSnapshot = dispRec;
+    } catch (err) {
+      console.warn("[continueCampaignLeadFromReply] failed to load dispatch snapshot:", err?.message || err);
+    }
+  }
+
+  const liveCampaignMeta = campaign.analytics_meta || {};
+  const effectiveMeta = {
+    ...liveCampaignMeta,
+    ...(dispatchSnapshot?.steps && Array.isArray(dispatchSnapshot.steps) && dispatchSnapshot.steps.length > 0
+      ? { sequence: dispatchSnapshot.steps }
+      : {}),
+    dispatchOptions: {
+      ...(liveCampaignMeta.dispatchOptions || {}),
+      ...(dispatchSnapshot?.dispatch_options || {}),
+    },
+  };
+
+  const stepPlan = getCampaignStepPlan(effectiveMeta);
+  const analyticsMeta = stepPlan.analyticsMeta;
+  const steps = stepPlan.enabledSteps;
+  if (!stepPlan.shouldUseReplyFlow) {
+    return { continued: false, reason: "campaign_not_waiting_reply" };
   }
 
   const nextStepIndex = nextIdxBase;
@@ -2160,20 +2221,24 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   }
 
   // Fonte 2: O lote original do lead (se ainda não resolvido)
-  if (!sendingEvolutionInstanceId && progress?.dispatchId) {
-    const { data: disp } = await supabase
-      .from("campaign_dispatches")
-      .select("evolution_instance_id")
-      .eq("id", progress.dispatchId)
-      .maybeSingle();
-    if (disp?.evolution_instance_id) sendingEvolutionInstanceId = disp.evolution_instance_id;
+  if (!sendingEvolutionInstanceId && (dispatchSnapshot?.evolution_instance_id || dispatchId || progress?.dispatchId)) {
+    if (dispatchSnapshot?.evolution_instance_id) {
+      sendingEvolutionInstanceId = dispatchSnapshot.evolution_instance_id;
+    } else {
+      const { data: disp } = await supabase
+        .from("campaign_dispatches")
+        .select("evolution_instance_id")
+        .eq("id", dispatchId || progress.dispatchId)
+        .maybeSingle();
+      if (disp?.evolution_instance_id) sendingEvolutionInstanceId = disp.evolution_instance_id;
+    }
   }
 
   // Fonte 3: Configuração da própria campanha
   if (!sendingEvolutionInstanceId) {
     const campaignChipId = normalizeString(
-      campaign.analytics_meta?.dispatchOptions?.evolutionInstanceId ||
-      analyticsMeta?.dispatchOptions?.evolutionInstanceId
+      effectiveMeta?.dispatchOptions?.evolutionInstanceId ||
+      campaign.analytics_meta?.dispatchOptions?.evolutionInstanceId
     );
     if (campaignChipId) sendingEvolutionInstanceId = campaignChipId;
   }
@@ -2202,17 +2267,20 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
 
   const campaignWithChip = {
     ...campaign,
+    analytics_meta: {
+      ...effectiveMeta,
+      ...(sendingEvolutionInstanceId
+        ? {
+            dispatchOptions: {
+              ...(effectiveMeta?.dispatchOptions || {}),
+              evolutionInstanceId: sendingEvolutionInstanceId,
+            },
+          }
+        : {}),
+    },
   };
 
-  if (sendingEvolutionInstanceId) {
-    campaignWithChip.analytics_meta = {
-      ...analyticsMeta,
-      dispatchOptions: {
-        ...analyticsMeta?.dispatchOptions,
-        evolutionInstanceId: sendingEvolutionInstanceId,
-      },
-    };
-  } else {
+  if (!sendingEvolutionInstanceId) {
     // TRAVA DE SEGURANÇA ESTRITA: Se o chip receptor não puder ser determinado de forma alguma, NÃO dispare por outro chip aleatório
     console.error("[campaign-dispatch] Abortando continuação: chip receptor não identificado para evitar envio por chip trocado", {
       clientId,
@@ -2298,7 +2366,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     });
     const handoff = await executeCampaignChipHandoff({
       clientId,
-      campaign,
+      campaign: campaignWithChip,
       lead,
       phone,
       repliedAt,
@@ -2307,6 +2375,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       progress,
       leadImportItemId: leadImportItem?.id || null,
       leadImportItem,
+      dispatchId: dispatchId || progress?.dispatchId || null,
     });
     const campaignFinalization = await maybeFinalizeCampaignAfterReply({ campaignId: campaign.id, clientId });
     return {
@@ -2420,6 +2489,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         await appendLeadMessage({
           clientId,
           campaignId: campaign.id,
+          dispatchId: dispatchId || progress?.dispatchId || null,
           leadId: null,
           phone,
           senderType: "bot",
@@ -2435,7 +2505,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
           meta: {
             source: "campaign_reply_progression",
             // lote que iniciou esta conversa (gravado no progresso desde 40b3c6b)
-            dispatchId: progress?.dispatchId || null,
+            dispatchId: dispatchId || progress?.dispatchId || null,
             stepId: step.id,
             stepType: step.type,
             stepOrder: step.order ?? originalStepIndex + 1,
@@ -2567,7 +2637,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         clientId,
         lead: { id: leadImportItem.id, nome: lead.nome },
         phone,
-        campaign,
+        campaign: campaignWithChip,
         step: actuallySentStep,
         stepIndex: actuallySentStepIndex,
         totalSteps: steps.length,
@@ -2575,6 +2645,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         nextStepIndex: pendingNextStepIndex,
         status: newProgressStatus,
         userRepliedAt: repliedAt,
+        dispatchId: dispatchId || progress?.dispatchId || null,
       });
     } catch (error) {
       finalizationWarning =
@@ -2589,7 +2660,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   if (finalizedCurrentLead) {
     handoff = await executeCampaignChipHandoff({
       clientId,
-      campaign,
+      campaign: campaignWithChip,
       lead,
       phone,
       repliedAt,
@@ -2598,6 +2669,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       progress,
       leadImportItemId: leadImportItem?.id || null,
       leadImportItem,
+      dispatchId: dispatchId || progress?.dispatchId || null,
     });
 
     n8nQualification = await callCampaignQualificationWebhook({

@@ -83,8 +83,142 @@ import {
 import { resolveSdrTarget, resolveTenantSdrNumbers, normalizeSdrNumber } from "../../services/sdrTarget.js";
 import { resolveCampaignAgent, AGENTE_CAMPANHA, AGENTE_NENHUM } from "../../services/campaignAgentRouting.js";
 import { validateOutboundMessage } from "../../services/jsonExtractor.js";
-import { getCampaignStepPlan } from "../../campaign-outbound.js";
+import { getCampaignStepPlan, normalizeCampaignAnalyticsMeta } from "../../campaign-outbound.js";
 import { normalizeCampaignPendingStepIndex } from "../../campaign/dispatch.js";
+
+export async function resolvePendingCampaignRunForPhone({
+  clientId,
+  phone,
+  campaignReplyContext,
+  pgDatabasePool,
+  supabase,
+}) {
+  if (!clientId || !phone) return null;
+
+  // 1. Prioridade A: Se findCampaignReplyMatches já encontrou match em waitForReplyMatches
+  if (campaignReplyContext?.waitForReplyMatches && campaignReplyContext.waitForReplyMatches.length > 0) {
+    const candidate = campaignReplyContext.waitForReplyMatches[0];
+    const stepPlan = getCampaignStepPlan(candidate.analyticsMeta || {});
+    if (stepPlan.shouldUseReplyFlow) {
+      const steps = stepPlan.enabledSteps || [];
+      const currentProgress = candidate.leadImportItem?.progress || {};
+      const nextIdx = normalizeCampaignPendingStepIndex(currentProgress.nextStepIndex) ?? 1;
+      if (nextIdx < steps.length) {
+        return {
+          ...candidate,
+          leadImportItem: {
+            ...(candidate.leadImportItem || {}),
+            id: candidate.leadImportItem?.id || null,
+            progress: {
+              ...currentProgress,
+              waitForReply: true,
+              status: "aguardando_usuario",
+              nextStepIndex: nextIdx,
+            },
+          },
+        };
+      }
+    }
+  }
+
+  // 2. Prioridade B: Consulta campaign_dispatch_runs para este telefone
+  const phoneVariants = Array.from(buildPhoneLookupVariants(phone) || [phone]);
+  if (phoneVariants.length === 0) return null;
+
+  let pendingRun = null;
+  if (pgDatabasePool) {
+    try {
+      const { rows } = await pgDatabasePool.query(
+        `SELECT r.id AS run_id, r.dispatch_id, r.campaign_id, r.phone, r.lead_id, r.lead_import_item_id, r.status, r.sent_at,
+                c.id AS camp_id, c.name AS camp_name, c.client_id, c.analytics_meta, c.status AS camp_status, c.mode AS camp_mode
+         FROM public.campaign_dispatch_runs r
+         JOIN public.campaigns c ON c.id = r.campaign_id
+         WHERE r.client_id = $1
+           AND r.phone = ANY($2::text[])
+           AND r.status = 'sent'
+         ORDER BY r.sent_at DESC
+         LIMIT 1`,
+        [clientId, phoneVariants]
+      );
+      if (rows && rows.length > 0) {
+        pendingRun = rows[0];
+      }
+    } catch (err) {
+      console.warn("[resolvePendingCampaignRunForPhone] pool error:", err?.message || err);
+    }
+  }
+
+  if (!pendingRun && supabase) {
+    try {
+      const { data: runs } = await supabase
+        .from("campaign_dispatch_runs")
+        .select("id, dispatch_id, campaign_id, phone, lead_id, lead_import_item_id, status, sent_at")
+        .eq("client_id", clientId)
+        .in("phone", phoneVariants)
+        .eq("status", "sent")
+        .order("sent_at", { ascending: false })
+        .limit(1);
+
+      if (runs && runs.length > 0) {
+        const run = runs[0];
+        const { data: camp } = await supabase
+          .from("campaigns")
+          .select("id, name, client_id, analytics_meta, status, mode")
+          .eq("id", run.campaign_id)
+          .maybeSingle();
+        if (camp) {
+          pendingRun = {
+            run_id: run.id,
+            dispatch_id: run.dispatch_id,
+            campaign_id: run.campaign_id,
+            phone: run.phone,
+            lead_id: run.lead_id,
+            lead_import_item_id: run.lead_import_item_id,
+            status: run.status,
+            sent_at: run.sent_at,
+            camp_id: camp.id,
+            camp_name: camp.name,
+            client_id: camp.client_id,
+            analytics_meta: camp.analytics_meta,
+            camp_status: camp.status,
+            camp_mode: camp.mode,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[resolvePendingCampaignRunForPhone] supabase error:", err?.message || err);
+    }
+  }
+
+  if (pendingRun) {
+    const analyticsMeta = normalizeCampaignAnalyticsMeta(pendingRun.analytics_meta || {});
+    const stepPlan = getCampaignStepPlan(analyticsMeta);
+    if (stepPlan.shouldUseReplyFlow) {
+      const steps = stepPlan.enabledSteps || [];
+      if (steps.length > 1) {
+        return {
+          id: pendingRun.camp_id,
+          name: pendingRun.camp_name,
+          clientId,
+          analyticsMeta,
+          mode: pendingRun.camp_mode || "disparo",
+          leadImportItem: {
+            id: pendingRun.lead_import_item_id || null,
+            progress: {
+              campaignId: pendingRun.camp_id,
+              dispatchId: pendingRun.dispatch_id || null,
+              waitForReply: true,
+              status: "aguardando_usuario",
+              nextStepIndex: 1,
+            },
+          },
+        };
+      }
+    }
+  }
+
+  return null;
+}
 import {
   isWithinSendWindow,
   resolveSendWindowConfig,
@@ -2893,9 +3027,10 @@ export function registerChatbotRoutes(app, deps) {
     let campaignPromptIdOverride = null;
     let temCampanhaParaEsteTelefone = false;
     let activeWaitCampaignToDispatch = null;
+    let campaignReplyContext = null;
 
     try {
-      const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
+      campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
       const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
@@ -3118,6 +3253,62 @@ export function registerChatbotRoutes(app, deps) {
     } else {
       // Chip SEM agente próprio: depende do chatbot global do tenant
       if (tenantSettings && tenantSettings.chatbot_enabled === false) {
+        // Frente B: Antes de descartar, verifica se o telefone tem run de campanha aguardando resposta
+        const pendingCampaignMatch = await resolvePendingCampaignRunForPhone({
+          clientId,
+          phone,
+          campaignReplyContext,
+          pgDatabasePool,
+          supabase,
+        });
+
+        if (pendingCampaignMatch) {
+          console.log("[campaign-routing] bypass chatbot_disabled: lead tem campanha aguardando resposta", {
+            clientId,
+            phone: maskPhoneForLog(phone),
+            campaignId: pendingCampaignMatch.id,
+          });
+
+          // Responde 200 à Evolution imediatamente
+          responder(
+            {
+              ok: true,
+              status: "campaign_step_dispatched",
+              matched_campaign: {
+                id: pendingCampaignMatch.id,
+                name: pendingCampaignMatch.name,
+                reason: "campaign_run_waiting_reply_bypass",
+              },
+            },
+            {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              campaignId: pendingCampaignMatch.id,
+            }
+          );
+
+          // Executa avanço da campanha em background
+          (async () => {
+            try {
+              await continueCampaignLeadFromReply({
+                clientId,
+                phone,
+                repliedAt: new Date().toISOString(),
+                campaignMatch: pendingCampaignMatch,
+                replyPayload: {
+                  ...body,
+                  instance: body.instance || body.instanceName || body.instance_name || req.params?.instanceName || null,
+                  message: messageData?.text || "",
+                },
+              });
+            } catch (err) {
+              console.error("[campaign-routing] ERRO no avanço de passo por bypass de chatbot_disabled:", err);
+            }
+          })();
+
+          return;
+        }
+
         descartar("chatbot_disabled", { clientId, phone: maskPhoneForLog(phone) });
         return;
       }

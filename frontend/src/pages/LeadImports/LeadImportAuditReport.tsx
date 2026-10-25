@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Copy,
   Download,
   ExternalLink,
   Loader2,
@@ -191,6 +192,7 @@ export function LeadImportAuditReport({
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const [creatingSubset, setCreatingSubset] = useState(false);
   const [deletingItems, setDeletingItems] = useState(false);
@@ -204,11 +206,17 @@ export function LeadImportAuditReport({
     setAuditItems([]);
     setLegacyCampaigns([]);
     setSelectedItemIds(new Set());
+    setSelectedRecipientIds(new Set());
     setSearchTerm("");
     setActiveFilter("all");
     setSelectedReason(null);
     setPage(1);
   }, [activeClientId]);
+
+  // ── Limpeza de seleção de destinatários ao trocar filtros ou campanha ────
+  useEffect(() => {
+    setSelectedRecipientIds(new Set());
+  }, [selectedCampaignId, activeFilter, searchTerm, selectedReason]);
 
   // ── Sincronização de seleção com os imports válidos do tenant atual ──────
   useEffect(() => {
@@ -323,11 +331,17 @@ export function LeadImportAuditReport({
     return Math.round((campaignCounts.replied / campaignCounts.sent) * 100);
   }, [campaignCounts]);
 
-  const handleExportCampaignCsv = () => {
-    if (!campaignRecipientsData?.recipients || campaignRecipientsData.recipients.length === 0) {
+  const handleExportCampaignCsv = (onlySelected: boolean = false) => {
+    const recipientsToExport = onlySelected
+      ? filteredCampaignRecipients.filter((r) => selectedRecipientIds.has(r.leadId || r.telefone))
+      : filteredCampaignRecipients;
+
+    if (!recipientsToExport || recipientsToExport.length === 0) {
       toast({
         title: "Nenhum dado para exportar",
-        description: "Não há destinatários para exportar nesta campanha.",
+        description: onlySelected
+          ? "Nenhum destinatário selecionado para exportar."
+          : "Não há destinatários para exportar nesta campanha.",
         variant: "destructive",
       });
       return;
@@ -353,7 +367,7 @@ export function LeadImportAuditReport({
       return `"${clean}"`;
     };
 
-    const rows = filteredCampaignRecipients.map((r) => [
+    const rows = recipientsToExport.map((r) => [
       escapeCsv(r.nome),
       escapeCsv(r.telefone),
       escapeCsv(r.replied ? "Respondido" : r.status),
@@ -364,7 +378,7 @@ export function LeadImportAuditReport({
       escapeCsv(r.failureReason),
     ]);
 
-    const csvContent = "﻿" + [headers.join(","), ...rows.map((row) => row.join(","))].join("\r\n");
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((row) => row.join(","))].join("\r\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -378,7 +392,7 @@ export function LeadImportAuditReport({
 
     toast({
       title: "Relatório exportado!",
-      description: `${filteredCampaignRecipients.length} registros exportados em CSV com sucesso.`,
+      description: `${recipientsToExport.length} registros exportados em CSV com sucesso.`,
     });
   };
 
@@ -646,6 +660,48 @@ export function LeadImportAuditReport({
       next.add(id);
     }
     setSelectedItemIds(next);
+  };
+
+  const handleToggleSelectAllCampaignRecipients = () => {
+    if (selectedRecipientIds.size === filteredCampaignRecipients.length) {
+      setSelectedRecipientIds(new Set());
+    } else {
+      setSelectedRecipientIds(new Set(filteredCampaignRecipients.map((r) => r.leadId || r.telefone)));
+    }
+  };
+
+  const handleToggleSelectCampaignRecipient = (id: string) => {
+    const next = new Set(selectedRecipientIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setSelectedRecipientIds(next);
+  };
+
+  const handleCopySelectedPhones = () => {
+    const selectedRecipients = filteredCampaignRecipients.filter((r) =>
+      selectedRecipientIds.has(r.leadId || r.telefone)
+    );
+    const phones = selectedRecipients
+      .map((r) => (r.telefone || "").replace(/\D/g, ""))
+      .filter(Boolean);
+
+    if (phones.length === 0) {
+      toast({
+        title: "Nenhum telefone válido",
+        description: "Os destinatários selecionados não possuem telefones válidos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    navigator.clipboard.writeText(phones.join("\n"));
+    toast({
+      title: "Telefones copiados!",
+      description: `${phones.length} telefone(s) copiado(s) para a área de transferência.`,
+    });
   };
 
   const handleCreateCohortCampaign = async () => {
@@ -1042,7 +1098,7 @@ export function LeadImportAuditReport({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={handleExportCampaignCsv}
+                      onClick={() => handleExportCampaignCsv(false)}
                       className="h-8 gap-1.5 text-xs font-semibold rounded-xl border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
                       data-testid="export-campaign-csv"
                     >
@@ -1051,6 +1107,53 @@ export function LeadImportAuditReport({
                     </Button>
                   </div>
                 </div>
+
+                {/* ── Barra de Ações em Massa para Destinatários Selecionados ── */}
+                {selectedRecipientIds.size > 0 && (
+                  <div
+                    data-testid="campaign-recipients-selection-bar"
+                    className="flex flex-wrap items-center justify-between gap-3 p-3 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl animate-in fade-in duration-200"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Badge className="bg-indigo-600 text-white font-bold text-xs px-2.5 py-0.5 rounded-lg shadow-sm">
+                        {selectedRecipientIds.size} selecionado{selectedRecipientIds.size > 1 ? "s" : ""}
+                      </Badge>
+                      <span className="text-xs text-indigo-950 dark:text-indigo-200 font-medium">
+                        de {filteredCampaignRecipients.length} destinatários filtrados
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleExportCampaignCsv(true)}
+                        className="h-7 text-xs font-semibold rounded-xl gap-1 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950"
+                        data-testid="export-selected-campaign-recipients"
+                      >
+                        <Download className="h-3 w-3 text-indigo-500" />
+                        <span>Exportar Selecionados ({selectedRecipientIds.size})</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCopySelectedPhones}
+                        className="h-7 text-xs font-semibold rounded-xl gap-1 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950"
+                        data-testid="copy-selected-campaign-phones"
+                      >
+                        <Copy className="h-3 w-3 text-indigo-500" />
+                        <span>Copiar Telefones</span>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSelectedRecipientIds(new Set())}
+                        className="h-7 text-xs text-muted-foreground hover:text-foreground rounded-xl"
+                      >
+                        Limpar seleção ✕
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── Tabela de Destinatários da Campanha ── */}
                 {filteredCampaignRecipients.length === 0 ? (
@@ -1062,6 +1165,15 @@ export function LeadImportAuditReport({
                     <Table className="text-xs">
                       <TableHeader className="bg-muted/30 dark:bg-muted/10">
                         <TableRow className="border-slate-200/60 dark:border-white/5">
+                          <TableHead className="w-12 text-center h-10 py-0">
+                            <input
+                              type="checkbox"
+                              data-testid="select-all-campaign-recipients"
+                              checked={filteredCampaignRecipients.length > 0 && selectedRecipientIds.size === filteredCampaignRecipients.length}
+                              onChange={handleToggleSelectAllCampaignRecipients}
+                              className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                            />
+                          </TableHead>
                           <TableHead className="w-12 text-center h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">#</TableHead>
                           <SortableTableHead sortKey="nome" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Nome</SortableTableHead>
                           <SortableTableHead sortKey="telefone" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Telefone</SortableTableHead>
@@ -1075,11 +1187,25 @@ export function LeadImportAuditReport({
                       <TableBody>
                         {pagedCampaignRecipients.map((item, idx) => {
                           const cleanPhone = (item.telefone || "").replace(/\D/g, "");
+                          const itemKey = item.leadId || item.telefone;
+                          const isSelected = selectedRecipientIds.has(itemKey);
                           return (
                             <TableRow
                               key={item.leadId ? `${item.leadId}-${idx}` : `row-${idx}`}
-                              className="border-border hover:bg-muted/10"
+                              className={cn(
+                                "border-border hover:bg-muted/10",
+                                isSelected ? "bg-indigo-50/10 dark:bg-indigo-950/5" : ""
+                              )}
                             >
+                              <TableCell className="text-center py-2">
+                                <input
+                                  type="checkbox"
+                                  data-testid={`select-recipient-${itemKey}`}
+                                  checked={isSelected}
+                                  onChange={() => handleToggleSelectCampaignRecipient(itemKey)}
+                                  className="rounded border-slate-300 dark:border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                                />
+                              </TableCell>
                               <TableCell className="text-center py-2 text-muted-foreground font-mono text-[10px]">
                                 {(safeCampaignPage - 1) * PAGE_SIZE + idx + 1}
                               </TableCell>

@@ -280,4 +280,70 @@ describe("BLOCO 2 — Relatório & Auditoria Universal por Campanha", () => {
 
     expect(await screen.findByText("Nenhuma planilha importada")).toBeTruthy();
   });
+
+  it("permite selecionar destinatários individualmente e em massa com barra de ações para copiar telefones e exportar", async () => {
+    const createObjectURLMock = vi.fn(() => "blob:mock-url");
+    const revokeObjectURLMock = vi.fn();
+    global.URL.createObjectURL = createObjectURLMock;
+    global.URL.revokeObjectURL = revokeObjectURLMock;
+
+    const writeTextMock = vi.fn();
+    Object.assign(navigator, {
+      clipboard: { writeText: writeTextMock },
+    });
+
+    renderWithProviders(
+      <LeadImportAuditReport
+        activeClientId="cliente-vip"
+        imports={[]}
+        campaigns={[mockCampaign]}
+        onSelectImportForFollowup={vi.fn()}
+      />
+    );
+
+    await screen.findByTestId("audit-campaign-numbers");
+
+    // Barra de ações não deve existir inicialmente
+    expect(screen.queryByTestId("campaign-recipients-selection-bar")).toBeNull();
+
+    // Seleciona o primeiro lead (lead-1)
+    const lead1Checkbox = screen.getByTestId("select-recipient-lead-1") as HTMLInputElement;
+    expect(lead1Checkbox.checked).toBe(false);
+    fireEvent.click(lead1Checkbox);
+    expect(lead1Checkbox.checked).toBe(true);
+
+    // Barra de seleção aparece com 1 selecionado
+    expect(screen.getByTestId("campaign-recipients-selection-bar")).toBeTruthy();
+    expect(screen.getByText("1 selecionado")).toBeTruthy();
+
+    // Copiar telefones do selecionado
+    const copyBtn = screen.getByTestId("copy-selected-campaign-phones");
+    fireEvent.click(copyBtn);
+    expect(writeTextMock).toHaveBeenCalledWith("5511999990001");
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Telefones copiados!",
+      })
+    );
+
+    // Clicar em Selecionar Todos
+    const selectAllCheckbox = screen.getByTestId("select-all-campaign-recipients") as HTMLInputElement;
+    fireEvent.click(selectAllCheckbox);
+    expect(screen.getByText("4 selecionados")).toBeTruthy();
+
+    // Exportar selecionados
+    const exportSelectedBtn = screen.getByTestId("export-selected-campaign-recipients");
+    fireEvent.click(exportSelectedBtn);
+    expect(createObjectURLMock).toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "4 registros exportados em CSV com sucesso.",
+      })
+    );
+
+    // Limpar seleção
+    const clearSelectionBtn = screen.getByRole("button", { name: /Limpar seleção/ });
+    fireEvent.click(clearSelectionBtn);
+    expect(screen.queryByTestId("campaign-recipients-selection-bar")).toBeNull();
+  });
 });

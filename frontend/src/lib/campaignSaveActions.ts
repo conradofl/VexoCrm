@@ -18,13 +18,16 @@ export function planAfterCampaignSave({
   isEdit,
   isRecurring,
   trigger,
+  deliberateDispatch,
 }: {
   isEdit: boolean;
   isRecurring: boolean;
   trigger: CampaignTriggerChoice;
+  deliberateDispatch?: boolean;
 }): AfterSavePlan {
-  if (isRecurring || isEdit || trigger === "draft") return { createDispatch: false, triggerNow: false };
-  if (trigger === "manual") return { createDispatch: true, triggerNow: true };
+  if (isRecurring || trigger === "draft") return { createDispatch: false, triggerNow: false };
+  if (isEdit && !deliberateDispatch) return { createDispatch: false, triggerNow: false };
+  if (trigger === "manual" || deliberateDispatch) return { createDispatch: true, triggerNow: true };
   return { createDispatch: true, triggerNow: false };
 }
 

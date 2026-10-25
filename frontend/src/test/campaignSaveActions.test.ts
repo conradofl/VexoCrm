@@ -8,6 +8,11 @@ describe("planAfterCampaignSave — salvar não dispara", () => {
       expect(planAfterCampaignSave({ isEdit: true, isRecurring: false, trigger })).toEqual({ createDispatch: false, triggerNow: false });
     }
   });
+  it("editar campanha com botão deliberado 'Disparar agora' cria exatamente 1 lote e dispara", () => {
+    expect(
+      planAfterCampaignSave({ isEdit: true, isRecurring: false, trigger: "manual", deliberateDispatch: true })
+    ).toEqual({ createDispatch: true, triggerNow: true });
+  });
   it("nova + Disparar Agora cria e dispara", () => {
     expect(planAfterCampaignSave({ isEdit: false, isRecurring: false, trigger: "manual" })).toEqual({ createDispatch: true, triggerNow: true });
   });
