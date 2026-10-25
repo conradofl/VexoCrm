@@ -399,9 +399,9 @@ function normalizeInstanceList(list, fallback) {
       livpub_inactive_delay_months,
     } = req.body || {};
 
-    const instanceList = normalizeInstanceList(evolution_instances, evolution_instance);
-    if (!str(name) || instanceList.length === 0) {
-      return sendErr(res, 400, "MISSING_FIELDS", "name e ao menos um número (evolution_instance) são obrigatórios");
+    const rawInstanceList = normalizeInstanceList(evolution_instances, evolution_instance);
+    if (!str(name)) {
+      return sendErr(res, 400, "MISSING_FIELDS", "name é obrigatório");
     }
     try {
       const supabase = getSupabase();
@@ -411,17 +411,49 @@ function normalizeInstanceList(list, fallback) {
         ? str(tenant_id) || authorizedTenantIds(req)[0] || null
         : authorizedTenantIds(req)[0] || null;
 
+      // Validação de instâncias ativas do tenant: descarta órfãos
+      const tenantInstances = await getLeadClientEvolutionInstances(boundTenantId).catch(() => []);
+      const activeChips = (tenantInstances || []).filter((c) => c && c.active !== false);
+      let validInstances = rawInstanceList;
+
+      if (tenantInstances && tenantInstances.length > 0) {
+        validInstances = [];
+        for (const item of rawInstanceList) {
+          const raw = item.trim().toLowerCase();
+          const match = activeChips.find((c) => {
+            if (c.id && String(c.id).toLowerCase() === raw) return true;
+            if (c.name && String(c.name).toLowerCase() === raw) return true;
+            const urlParts = (c.dispatch_webhook_url || "").split("/").filter(Boolean);
+            const slug = (urlParts.pop() || "").split("?")[0].toLowerCase();
+            return slug && slug === raw;
+          });
+          if (match) {
+            validInstances.push(item);
+          } else {
+            console.error(
+              `[followup/routes] Descartando vínculo órfão '${item}' na criação de agente '${name}' (tenant '${boundTenantId}'). Instância não existe ou está inativa.`
+            );
+          }
+        }
+
+        if (rawInstanceList.length > 0 && validInstances.length === 0) {
+          return sendErr(res, 400, "INVALID_CHIP", "Nenhum dos números informados corresponde a um chip ativo deste tenant.");
+        }
+      }
+
       // "Um chip pertence a um agente só" — recusa ANTES de gravar.
-      const conflitoMsg = await checkChipExclusivity({ supabase, tenantId: boundTenantId, instanceList, agentIdBeingSaved: null });
-      if (conflitoMsg) return sendErr(res, 409, "CHIP_ALREADY_OWNED", conflitoMsg);
+      if (validInstances.length > 0) {
+        const conflitoMsg = await checkChipExclusivity({ supabase, tenantId: boundTenantId, instanceList: validInstances, agentIdBeingSaved: null });
+        if (conflitoMsg) return sendErr(res, 409, "CHIP_ALREADY_OWNED", conflitoMsg);
+      }
 
       const { data, error } = await supabase
         .from("followup_companies")
         .insert({
           tenant_id: boundTenantId,
           name: str(name),
-          evolution_instance: instanceList[0],
-          evolution_instances: instanceList,
+          evolution_instance: validInstances[0] || null,
+          evolution_instances: validInstances,
           inbound_role: inbound_role === "qualificador" ? "qualificador" : "atendimento",
           agent_kind: agent_kind === "campanha" ? "campanha" : "atendimento",
           webhook_url: str(webhook_url),
@@ -479,6 +511,20 @@ function normalizeInstanceList(list, fallback) {
     } = req.body || {};
 
     try {
+      const supabase = getSupabase();
+      const { data: existing, error: fetchError } = await supabase
+        .from("followup_companies")
+        .select("id, name, tenant_id")
+        .eq("id", id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      if (!existing) return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
+
+      // Fora do escopo do usuário: 404, não 403 — nunca confirma que a empresa existe.
+      if (!hasTenantAccess(req, existing.tenant_id)) {
+        return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
+      }
+
       const patch = { updated_at: new Date().toISOString() };
       if (str(name)) patch.name = str(name);
       if ("inbound_role" in req.body) {
@@ -488,14 +534,76 @@ function normalizeInstanceList(list, fallback) {
         patch.agent_kind = agent_kind === "campanha" ? "campanha" : "atendimento";
       }
       if ("evolution_instances" in req.body) {
-        const lista = normalizeInstanceList(evolution_instances, evolution_instance);
-        if (lista.length > 0) {
-          patch.evolution_instances = lista;
-          patch.evolution_instance = lista[0]; // coluna antiga = primeiro da lista
+        const rawArray = Array.isArray(evolution_instances)
+          ? evolution_instances
+          : evolution_instances
+            ? [evolution_instances]
+            : [];
+        const clean = rawArray.map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean);
+        const requestedList = [...new Set(clean)];
+
+        if (requestedList.length === 0) {
+          // Lista vazia explícita: limpa de verdade!
+          patch.evolution_instances = [];
+          patch.evolution_instance = null;
+        } else {
+          // Descartar do patch qualquer valor que não corresponda a instância ativa do tenant
+          const tenantInstances = await getLeadClientEvolutionInstances(existing.tenant_id).catch(() => []);
+          const activeChips = (tenantInstances || []).filter((c) => c && c.active !== false);
+
+          let validList = requestedList;
+          if (tenantInstances && tenantInstances.length > 0) {
+            validList = [];
+            for (const item of requestedList) {
+              const raw = item.trim().toLowerCase();
+              const match = activeChips.find((c) => {
+                if (c.id && String(c.id).toLowerCase() === raw) return true;
+                if (c.name && String(c.name).toLowerCase() === raw) return true;
+                const urlParts = (c.dispatch_webhook_url || "").split("/").filter(Boolean);
+                const slug = (urlParts.pop() || "").split("?")[0].toLowerCase();
+                return slug && slug === raw;
+              });
+
+              if (match) {
+                validList.push(item);
+              } else {
+                console.error(
+                  `[followup/routes] Descartando vínculo órfão '${item}' do agente '${existing.name || id}' (tenant '${existing.tenant_id}'). Instância não existe ou está inativa.`
+                );
+              }
+            }
+          }
+
+          patch.evolution_instances = validList;
+          patch.evolution_instance = validList.length > 0 ? validList[0] : null;
         }
       } else if (str(evolution_instance)) {
-        patch.evolution_instance = str(evolution_instance);
-        patch.evolution_instances = [str(evolution_instance)];
+        const single = str(evolution_instance);
+        const tenantInstances = await getLeadClientEvolutionInstances(existing.tenant_id).catch(() => []);
+        const activeChips = (tenantInstances || []).filter((c) => c && c.active !== false);
+        if (tenantInstances && tenantInstances.length > 0) {
+          const raw = single.trim().toLowerCase();
+          const match = activeChips.find((c) => {
+            if (c.id && String(c.id).toLowerCase() === raw) return true;
+            if (c.name && String(c.name).toLowerCase() === raw) return true;
+            const urlParts = (c.dispatch_webhook_url || "").split("/").filter(Boolean);
+            const slug = (urlParts.pop() || "").split("?")[0].toLowerCase();
+            return slug && slug === raw;
+          });
+          if (match) {
+            patch.evolution_instance = single;
+            patch.evolution_instances = [single];
+          } else {
+            console.error(
+              `[followup/routes] Descartando vínculo órfão '${single}' do agente '${existing.name || id}' (tenant '${existing.tenant_id}'). Instância não existe ou está inativa.`
+            );
+            patch.evolution_instance = null;
+            patch.evolution_instances = [];
+          }
+        } else {
+          patch.evolution_instance = single;
+          patch.evolution_instances = [single];
+        }
       }
       if ("webhook_url" in req.body) patch.webhook_url = str(webhook_url);
       if ("calendly_webhook_secret" in req.body)
@@ -517,23 +625,9 @@ function normalizeInstanceList(list, fallback) {
       if ("no_reply_delay_hours" in req.body) patch.no_reply_delay_hours = Number(no_reply_delay_hours);
       if ("livpub_inactive_delay_months" in req.body) patch.livpub_inactive_delay_months = Number(livpub_inactive_delay_months);
 
-      const supabase = getSupabase();
-      const { data: existing, error: fetchError } = await supabase
-        .from("followup_companies")
-        .select("id, tenant_id")
-        .eq("id", id)
-        .maybeSingle();
-      if (fetchError) throw fetchError;
-      if (!existing) return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
-
-      // Fora do escopo do usuário: 404, não 403 — nunca confirma que a empresa existe.
-      if (!hasTenantAccess(req, existing.tenant_id)) {
-        return sendErr(res, 404, "NOT_FOUND", "Empresa não encontrada");
-      }
-
       // "Um chip pertence a um agente só" — só checa se a lista de chips está
       // sendo alterada nesta chamada (não pune um PATCH que nem mexeu nisso).
-      if (Array.isArray(patch.evolution_instances)) {
+      if (Array.isArray(patch.evolution_instances) && patch.evolution_instances.length > 0) {
         const conflitoMsg = await checkChipExclusivity({
           supabase,
           tenantId: existing.tenant_id,
