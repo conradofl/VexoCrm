@@ -1,5 +1,6 @@
 import { Bot, Database, MessageCircle, Clock, AlertCircle } from "lucide-react";
 import { Arrow } from "./Arrow";
+import { defaultGroqModel } from "@/lib/llmModels";
 
 // Extraído de src/pages/ChatbotDocs.tsx (Onda 4 Run F8) — movimento puro, sem alteração de forma.
 
@@ -49,7 +50,7 @@ export function BufferDiagram() {
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xs dark:border-white/10 dark:bg-white/5">
             <Bot className="mx-auto h-4 w-4 text-slate-400" />
             <p className="mt-1 font-medium">IA processa</p>
-            <p className="text-slate-400">Groq llama-3.3-70b</p>
+            <p className="text-slate-400">{defaultGroqModel()}</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xs dark:border-white/10 dark:bg-white/5">
             <MessageCircle className="mx-auto h-4 w-4 text-slate-400" />

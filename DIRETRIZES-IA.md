@@ -268,3 +268,15 @@ outras rotas quebravam por schema). O sintoma sumiu do console, a causa continuo
      -d '{"limit": 10}'
    ```
 
+---
+
+## 14. Migration que corrige dado tem que corrigir a fonte do dado na mesma migration
+
+**Incidente (26/10/2026):** a migration `20260825180000_migrate_dead_llama_models_to_gpt_oss.sql` atualizou os modelos LLM mortos existentes (`llama-3.3-70b-versatile`, etc.) via `UPDATE`, mas manteve intacto o `DEFAULT` nas colunas do schema (`lead_client_n8n_settings.chatbot_llm_model` e `followup_companies.inbound_model`). Resultado: nove tenants criados ou configurados após a migration voltaram a nascer com os modelos mortos através do valor default da coluna, gerando alertas repetidos e latência em atendimentos de clientes reais.
+
+**Regra obrigatória:**
+Toda migration que corrige dados obsoletos, corrompidos ou em formato antigo DEVE obrigatoriamente corrigir a FONTE geradora desse dado no mesmo arquivo:
+1. Se a coluna possuir `DEFAULT` com valor obsoleto/inválido: execute `ALTER TABLE ... ALTER COLUMN ... DROP DEFAULT` (ou atualize o default para o valor canônico correto) no início da migration.
+2. Re-aplique o `UPDATE` para sanear linhas criadas durante a janela de transição.
+3. Adicione asserção/verificação explícita na própria migration (via bloco `DO $$` em Postgres) conferindo que o default indesejado não existe mais (`column_default IS NULL` ou valor esperado) e que a contagem de registros no estado morto é exatamente zero. Se a asserção falhar, a migration deve abortar a transação com `RAISE EXCEPTION`.
+
