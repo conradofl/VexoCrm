@@ -1537,23 +1537,123 @@ export async function provisionLeadClientEvolutionInstance(clientId, input, auth
   };
 }
 
-export async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
-  if (!(await ensureLeadClientEvolutionInstancesTable())) return null;
+export async function deleteLeadClientEvolutionInstance(clientId, instanceId, pool = null) {
+  const dbPool = pool || pgDatabasePool;
+  if (!(await ensureLeadClientEvolutionInstancesTable(dbPool))) return null;
 
-  const client = await pgDatabasePool.connect();
+  const client = typeof dbPool?.connect === "function" ? await dbPool.connect() : dbPool;
   try {
     const instanceRes = await client.query(
       `SELECT dispatch_webhook_url, name FROM public.lead_client_evolution_instances WHERE id = $1 AND client_id = $2`,
       [instanceId, clientId]
     );
     const instanceRow = instanceRes.rows[0];
+    if (!instanceRow) return null;
 
     await client.query("BEGIN");
+
+    // 1. Antes de excluir, contar os lotes pendentes/ativos cujo dispatch_options aponta para o chip.
+    // Deriva a condição do conjunto de status finalizados ('done', 'failed', 'cancelled', 'interrupted').
+    // Qualquer lote fora dos finalizados (como 'draft', 'scheduled', 'running', 'paused') bloqueia a exclusão com 409.
+    const inUseDispatches = await client.query(
+      `
+        SELECT id, name, status, created_at
+        FROM public.campaign_dispatches
+        WHERE client_id = $1
+          AND status NOT IN ('done', 'failed', 'cancelled', 'interrupted')
+          AND (
+            (dispatch_options->'handoffChipIds') ? $2
+            OR (dispatch_options->>'handoffChipId') = $2
+          )
+        ORDER BY created_at DESC
+      `,
+      [clientId, instanceId]
+    );
+
+    if (inUseDispatches.rows.length > 0) {
+      const err = new Error("Chip em uso por lote de disparo ativo");
+      err.code = "CHIP_IN_USE_BY_DISPATCH";
+      err.statusCode = 409;
+      err.dispatches = inUseDispatches.rows;
+      throw err;
+    }
+
+    // 2. Contar lotes finalizados que usaram este chip (lotes finalizados são preservados como histórico)
+    const finishedDispatchesRes = await client.query(
+      `
+        SELECT count(*)::int as count
+        FROM public.campaign_dispatches
+        WHERE client_id = $1
+          AND status IN ('done', 'failed', 'cancelled', 'interrupted')
+          AND (
+            (dispatch_options->'handoffChipIds') ? $2
+            OR (dispatch_options->>'handoffChipId') = $2
+          )
+      `,
+      [clientId, instanceId]
+    );
+    const affectedDispatchesCount = Number(finishedDispatchesRes.rows[0]?.count || 0);
+
+    // 3. Remove o uuid de agentes (followup_companies.evolution_instances e chatbot_prompts.evolution_instances)
+    const agentsUpdateRes = await client.query(
+      `
+        UPDATE public.followup_companies
+        SET evolution_instances = COALESCE(
+          (
+            SELECT jsonb_agg(elem)
+            FROM jsonb_array_elements_text(evolution_instances) elem
+            WHERE elem <> $2
+          ),
+          '[]'::jsonb
+        ),
+        evolution_instance = CASE
+          WHEN evolution_instance = $2 THEN NULL
+          ELSE evolution_instance
+        END,
+        updated_at = now()
+        WHERE tenant_id = $1
+          AND (evolution_instances ? $2 OR evolution_instance = $2)
+        RETURNING id
+      `,
+      [clientId, instanceId]
+    );
+    let affectedAgentsCount = agentsUpdateRes.rowCount || 0;
+
+    try {
+      const promptColCheck = await client.query(`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'chatbot_prompts' AND column_name = 'evolution_instances'
+      `);
+      if (promptColCheck.rowCount > 0) {
+        const promptUpdate = await client.query(
+          `
+            UPDATE public.chatbot_prompts
+            SET evolution_instances = COALESCE(
+              (
+                SELECT jsonb_agg(elem)
+                FROM jsonb_array_elements_text(evolution_instances) elem
+                WHERE elem <> $2
+              ),
+              '[]'::jsonb
+            ),
+            updated_at = now()
+            WHERE client_id = $1 AND evolution_instances ? $2
+            RETURNING id
+          `,
+          [clientId, instanceId]
+        );
+        affectedAgentsCount += (promptUpdate.rowCount || 0);
+      }
+    } catch {
+      // Ignora se tabela ou coluna não existir
+    }
+
+    // 4. Excluir a instância
     const removed = await client.query(
       `
         DELETE FROM public.lead_client_evolution_instances
         WHERE id = $1 AND client_id = $2
-        RETURNING id, client_id, is_default
+        RETURNING id, client_id, is_default, name
       `,
       [instanceId, clientId]
     );
@@ -1577,6 +1677,7 @@ export async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
 
     await client.query("COMMIT");
 
+    // 5. Só chamar DELETE /instance/delete na Evolution depois do COMMIT bem-sucedido
     if (instanceRow?.dispatch_webhook_url) {
       const parts = instanceRow.dispatch_webhook_url.split("/");
       const instanceName = parts[parts.length - 1];
@@ -1602,12 +1703,16 @@ export async function deleteLeadClientEvolutionInstance(clientId, instanceId) {
       }
     }
 
-    return removed.rows[0] || null;
+    return {
+      ...(removed.rows[0] || {}),
+      affectedAgentsCount,
+      affectedDispatchesCount,
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
-    client.release();
+    if (typeof client?.release === "function") client.release();
   }
 }
 
