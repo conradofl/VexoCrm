@@ -71,7 +71,11 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     .replace(/\{\{\s*(?:telefone|phone|celular)\s*\}\}/gi, telResolvido);
 
   if (schedulingLink) {
+    if (/^https?:\/\//i.test(schedulingLink)) {
+      raw = raw.replace(/https?:\/\/\s*\{\{\s*(?:scheduling_link|link|agendamento)\s*\}\}/gi, schedulingLink);
+    }
     raw = raw.replace(/\{\{\s*(?:scheduling_link|link|agendamento)\s*\}\}/gi, schedulingLink);
+    raw = raw.replace(/https?:\/\/https?:\/\//gi, "https://");
   }
 
   // 5. Variável de acordo comercial (SOMENTE se confirmado por humano)

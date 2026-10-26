@@ -3,7 +3,9 @@ import {
   normalizeCampaignAnalyticsMeta,
   validateCampaignAnalyticsMeta,
   getEnabledCampaignSteps,
+  buildTextPayload,
 } from "../campaign-outbound.js";
+import { applyMessagePlaceholders } from "../services/messagePlaceholders.js";
 import { sendTextMessageViaEvolution } from "../services/evolution.js";
 
 describe("Link Preview Nativo e Passo de Envio de Link", () => {
@@ -136,4 +138,57 @@ describe("Link Preview Nativo e Passo de Envio de Link", () => {
       }
     });
   });
+
+  describe("Integridade Estrita de URLs no Pipeline de Disparo (Anti-Corrupção)", () => {
+    it("URL digitada pelo operador atravessa o pipeline de disparo 100% idêntica (sem uppercase, sem reencode, sem alteração)", () => {
+      const originalUrl = "https://vexo.com.br/agenda-exclusiva?ref=Teste_123&utm_source=whatsApp&param=A1B2";
+      const step = {
+        id: "step-link-exact",
+        type: "link",
+        linkUrl: originalUrl,
+        text: "👉 É aqui, leva 10 minutos:",
+      };
+
+      const payload = buildTextPayload("5534996541902", step, {
+        lead: { nome: "Conrado", telefone: "5534996541902" },
+      });
+
+      expect(payload.text).toBe(`👉 É aqui, leva 10 minutos:\n\n${originalUrl}`);
+      expect(payload.text).toContain(originalUrl);
+      // Garante que não foi feito uppercase na URL nem no protocolo
+      expect(payload.text).not.toContain("HTTPS://");
+      expect(payload.text).not.toContain("%20HTTPS");
+      expect(payload.text).not.toContain("VEXO.COM.BR");
+    });
+
+    it("Prevenção de duplicidade: https://{{scheduling_link}} com URL absoluta resolve sem 'https://https://'", () => {
+      const step = {
+        id: "step-sched",
+        type: "link",
+        linkUrl: "https://{{scheduling_link}}",
+        text: "Agende sua reunião:",
+      };
+
+      const payload = buildTextPayload("5534996541902", step, {
+        lead: {
+          nome: "Conrado",
+          scheduling_link: "https://calendly.com/consultor-spazio/15min",
+        },
+      });
+
+      expect(payload.text).toBe("Agende sua reunião:\n\nhttps://calendly.com/consultor-spazio/15min");
+      expect(payload.text).not.toContain("https://https://");
+    });
+
+    it("Deduplica protocolo quando template tem https:// e valor já tem https://", () => {
+      const text = "Acesse o link: https://{{scheduling_link}}";
+      const resolved = applyMessagePlaceholders(text, {
+        scheduling_link: "https://calendly.com/consultor-spazio/15min",
+      });
+
+      expect(resolved).toBe("Acesse o link: https://calendly.com/consultor-spazio/15min");
+      expect(resolved).not.toContain("https://https://");
+    });
+  });
 });
+

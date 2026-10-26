@@ -31,7 +31,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse o link oficial para conferir a apresentação completa e reservar seu horário com nosso consultor especialista:",
       },
     ],
@@ -62,7 +62,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse o link oficial para escolher o melhor dia e horário para o seu atendimento:",
       },
     ],
@@ -93,7 +93,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse o link oficial para ativar sua matrícula com os benefícios exclusivos aplicados:",
       },
     ],
@@ -124,7 +124,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse o link oficial para conferir as ofertas selecionadas e agendar sua visita ou test-drive:",
       },
     ],
@@ -155,7 +155,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse o link oficial para aplicar seu desconto exclusivo e garantir seu pedido:",
       },
     ],
@@ -186,7 +186,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse nossa agenda oficial para escolher o melhor horário para uma breve reunião de diagnóstico:",
       },
     ],
@@ -217,7 +217,7 @@ const CONTINGENCY_TEMPLATES = {
         order: 3,
         type: "link",
         triggerMode: "after_reply",
-        linkUrl: "https://{{scheduling_link}}",
+        linkUrl: "{{scheduling_link}}",
         text: "👉 Acesse o link oficial para garantir sua condição exclusiva e tirar suas dúvidas:",
       },
     ],
@@ -336,7 +336,7 @@ function sanitizeMagicCampaignOutput(parsed, fallback) {
       order: 3,
       type: "link",
       triggerMode: "after_reply",
-      linkUrl: String(rawSteps[2]?.linkUrl || rawSteps[2]?.link || "https://{{scheduling_link}}").trim(),
+      linkUrl: String(rawSteps[2]?.linkUrl || rawSteps[2]?.link || "{{scheduling_link}}").trim(),
       text: String(rawSteps[2]?.text || rawSteps[2]?.mensagem || fallback.steps[2].text).trim(),
     },
   ];
@@ -392,7 +392,7 @@ O JSON deve seguir rigorosamente a seguinte estrutura:
       "order": 3,
       "type": "link",
       "triggerMode": "after_reply",
-      "linkUrl": "https://{{scheduling_link}}",
+      "linkUrl": "{{scheduling_link}}",
       "text": "👉 Texto curto direcionando para o link oficial"
     }
   ],
@@ -402,7 +402,7 @@ O JSON deve seguir rigorosamente a seguinte estrutura:
 Diretrizes Críticas de Copywriting para WhatsApp Brasil:
 - Passo 1: Saudação calorosa, pergunta rápida e curiosidade genuína. Nunca apresente a venda logo de cara.
 - Passo 2: Disparo após a primeira resposta do lead (triggerMode: 'after_reply'). Apresenta o benefício principal de forma leve e persuasiva, com 2 botões de resposta rápida ('Quero aproveitar' / 'Agora não').
-- Passo 3: Envio de link oficial (type: 'link', triggerMode: 'after_reply') com linkUrl: 'https://{{scheduling_link}}' para fechar o agendamento/garantir a condição exclusiva.
+- Passo 3: Envio de link oficial (type: 'link', triggerMode: 'after_reply') com linkUrl: '{{scheduling_link}}' para fechar o agendamento/garantir a condição exclusiva.
 - Agent Prompt: Dê orientações práticas para a IA atender quem responder com dúvidas sobre preço, horários, localização e detalhes da oferta.`;
 
   const userPrompt = `Crie uma campanha completa de alta conversão:

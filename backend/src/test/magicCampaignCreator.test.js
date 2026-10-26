@@ -40,7 +40,7 @@ describe("magicCampaignCreator", () => {
       expect(res.steps[2].order).toBe(3);
       expect(res.steps[2].type).toBe("link");
       expect(res.steps[2].triggerMode).toBe("after_reply");
-      expect(res.steps[2].linkUrl).toBe("https://{{scheduling_link}}");
+      expect(res.steps[2].linkUrl).toBe("{{scheduling_link}}");
       expect(res.steps[2].text).toContain("👉");
 
       // Agent prompt
@@ -57,7 +57,7 @@ describe("magicCampaignCreator", () => {
         expect(res.steps[1].triggerMode).toBe("after_reply");
         expect(res.steps[1].buttons).toBeDefined();
         expect(res.steps[2].triggerMode).toBe("after_reply");
-        expect(res.steps[2].linkUrl).toBe("https://{{scheduling_link}}");
+        expect(res.steps[2].linkUrl).toBe("{{scheduling_link}}");
       }
     });
 
@@ -96,7 +96,7 @@ describe("magicCampaignCreator", () => {
             order: 3,
             type: "link",
             triggerMode: "after_reply",
-            linkUrl: "https://{{scheduling_link}}",
+            linkUrl: "{{scheduling_link}}",
             text: "👉 Acesse o link oficial para escolher o horário da visita:",
           },
         ],
@@ -116,7 +116,7 @@ describe("magicCampaignCreator", () => {
       expect(result.steps).toHaveLength(3);
       expect(result.steps[0].text).toContain("Oi {{primeiro_nome}}");
       expect(result.steps[1].buttons[0].displayText).toBe("1 - Quero conferir");
-      expect(result.steps[2].linkUrl).toBe("https://{{scheduling_link}}");
+      expect(result.steps[2].linkUrl).toBe("{{scheduling_link}}");
       expect(result.agentPrompt).toContain("Atenda o lead");
     });
 
@@ -146,7 +146,7 @@ describe("magicCampaignCreator", () => {
 
       expect(result.campaignName).toContain("Crossfit Desafio 30 Dias");
       expect(result.steps).toHaveLength(3);
-      expect(result.steps[2].linkUrl).toBe("https://{{scheduling_link}}");
+      expect(result.steps[2].linkUrl).toBe("{{scheduling_link}}");
     });
   });
 });

@@ -1,4 +1,4 @@
-import { ExternalLink, ImagePlus, Link2 } from "lucide-react";
+import { AlertTriangle, ExternalLink, ImagePlus, Link2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CampaignSequenceStep } from "@/hooks/useCampanhas";
 import type { StepActionButton } from "@/lib/leadImports/spreadsheet";
@@ -92,18 +92,39 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
 
                       const isLink = step.type === "link";
                       const rawLink = step.linkUrl || "";
-                      const resolvedLink = rawLink
+                      const defaultSchedLink = multiAgendaEnabled ? "https://calendly.com/consultor" : "https://suaempresa.com.br/apresentacao";
+                      let resolvedLink = rawLink
                         .replace(/\{\{\s*nome\s*\}\}/gi, "Maria Silva")
                         .replace(/\{\{\s*telefone\s*\}\}/gi, "5511999999999")
-                        .replace(/\{\{\s*scheduling_link\s*\}\}/gi, multiAgendaEnabled ? "https://calendly.com/consultor" : "https://suaempresa.com.br/apresentacao");
+                        .replace(/https?:\/\/\s*\{\{\s*scheduling_link\s*\}\}/gi, defaultSchedLink)
+                        .replace(/\{\{\s*scheduling_link\s*\}\}/gi, defaultSchedLink);
 
                       let displayHost = "suaempresa.com.br";
+                      let isInvalidHost = false;
                       if (resolvedLink) {
+                        const cleanLink = resolvedLink.trim();
                         try {
-                          const parsed = new URL(resolvedLink.startsWith("http") ? resolvedLink : `https://${resolvedLink}`);
-                          displayHost = parsed.hostname;
+                          const urlToParse = cleanLink.startsWith("http://") || cleanLink.startsWith("https://")
+                            ? cleanLink
+                            : `https://${cleanLink}`;
+                          const parsed = new URL(urlToParse);
+                          const host = (parsed.hostname || "").trim().toLowerCase();
+                          // Host corrompido: se for 'https', 'http', sem ponto, ou TLD ausente
+                          if (!host || !host.includes(".") || host === "https" || host === "http") {
+                            isInvalidHost = true;
+                            displayHost = "suaempresa.com.br";
+                          } else {
+                            displayHost = host;
+                          }
                         } catch {
-                          displayHost = resolvedLink;
+                          const match = cleanLink.match(/(?:https?:\/\/)?([^\/\s?#]+)/i);
+                          const matchedHost = (match ? match[1] : "").trim().toLowerCase();
+                          if (!matchedHost || !matchedHost.includes(".") || matchedHost === "https" || matchedHost === "http") {
+                            isInvalidHost = true;
+                            displayHost = "suaempresa.com.br";
+                          } else {
+                            displayHost = matchedHost;
+                          }
                         }
                       }
 
@@ -141,17 +162,26 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
 
                             {isLink && (
                               <div className="rounded-xl overflow-hidden border border-cyan-500/20 bg-slate-950/70 p-2.5 space-y-2 shadow-inner">
+                                {isInvalidHost && (
+                                  <div
+                                    data-testid="invalid-link-warning"
+                                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-medium"
+                                  >
+                                    <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                                    <span>Link corrompido ou formato inválido: exibindo fallback</span>
+                                  </div>
+                                )}
                                 <div className="h-24 w-full bg-gradient-to-br from-cyan-950/80 via-slate-800 to-slate-900 rounded-lg flex flex-col items-center justify-center text-cyan-300 gap-1.5 border border-white/5">
                                   <div className="h-8 w-8 rounded-full bg-cyan-500/20 flex items-center justify-center">
                                     <Link2 className="h-4 w-4 text-cyan-300" />
                                   </div>
-                                  <span className="text-[10px] font-semibold tracking-wide text-cyan-200 uppercase">
-                                    {displayHost}
+                                  <span className="text-[10px] font-semibold tracking-wide text-cyan-200">
+                                    {displayHost.toLowerCase()}
                                   </span>
                                 </div>
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-bold text-slate-100 truncate">
-                                    {displayHost.replace(/^www\./, "").toUpperCase()} · Prévia Rich Open Graph
+                                    {displayHost.replace(/^www\./i, "").toLowerCase()} · Prévia Rich Open Graph
                                   </p>
                                   <p className="text-[10px] text-slate-400 line-clamp-2 leading-tight">
                                     O WhatsApp e a Evolution API carregarão automaticamente a imagem de capa (og:image) e o título oficial desta página.
@@ -167,9 +197,12 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
                             {step.type !== "link" ? (
                               <p className="whitespace-pre-wrap leading-relaxed">{textoFinal}</p>
                             ) : (
-                              step.text ? (
-                                <p className="whitespace-pre-wrap leading-relaxed">{resolvedText}</p>
-                              ) : null
+                              <div className="space-y-1 whitespace-pre-wrap leading-relaxed">
+                                {resolvedText && <p>{resolvedText}</p>}
+                                {resolvedLink && !resolvedText?.includes(resolvedLink) && (
+                                  <p className="text-cyan-400 underline break-all">{resolvedLink}</p>
+                                )}
+                              </div>
                             )}
                           </div>
 

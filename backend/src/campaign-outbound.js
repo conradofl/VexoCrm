@@ -607,7 +607,7 @@ export function formatStepTextWithButtons(baseText, stepButtons, context = {}, p
   return text;
 }
 
-function buildTextPayload(phone, step, context = {}) {
+export function buildTextPayload(phone, step, context = {}) {
   let baseText = step.text || "";
 
   // Se o passo for do tipo link (ou contiver linkUrl), compõe o texto apropriadamente

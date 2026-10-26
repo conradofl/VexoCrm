@@ -54,7 +54,7 @@ const mockGeneratedCampaign: MagicCampaignResult = {
       order: 3,
       type: "link",
       triggerMode: "after_reply",
-      linkUrl: "https://{{scheduling_link}}",
+      linkUrl: "{{scheduling_link}}",
       text: "👉 Acesse o link oficial para escolher o horário de atendimento com nosso consultor:",
     },
   ],
@@ -153,7 +153,7 @@ describe("MagicCreatorModal", () => {
     expect(screen.getByText("2 - Agora não")).toBeInTheDocument();
 
     // Verifica link oficial no Passo 3
-    expect(screen.getByText("https://{{scheduling_link}}")).toBeInTheDocument();
+    expect(screen.getByText("{{scheduling_link}}")).toBeInTheDocument();
 
     // Verifica Roteiro do Robô
     expect(screen.getByText(/Instruções para o Agente IA/i)).toBeInTheDocument();
