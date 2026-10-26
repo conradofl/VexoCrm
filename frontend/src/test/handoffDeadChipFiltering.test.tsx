@@ -66,36 +66,38 @@ describe("SPEC 1 — Filtragem e Alerta de Chips de Handoff Mortos / Excluídos"
 
       return (
         <SchedulingStep
-          dispatchOptions={dispatchOpts}
-          setDispatchOptions={handleSetDispatchOpts}
-          evolutionInstanceOptions={evolutionInstanceOptions}
-          totalLeads={10}
-          batchingEnabled={batching}
-          setBatchingEnabled={setBatching}
-          batchSize={batchSize}
-          setBatchSize={setBatchSize}
-          batchIntervalHours={batchInterval}
-          setBatchIntervalHours={setBatchInterval}
-          replyAgent={replyAgent}
-          setReplyAgent={setReplyAgent}
-          campaignAgentPrompt={prompt}
-          setCampaignAgentPrompt={setPrompt}
-          passosAposResposta={1}
-          multiAgendaEnabled={multiAgenda}
-          setMultiAgendaEnabled={setMultiAgenda}
-          consultants={[]}
-          consultantsError={null}
-          loadingConsultants={false}
-          onRetryConsultants={() => {}}
-          updateConsultant={{ mutateAsync: async () => {} } as any}
-          deleteConsultant={{ mutateAsync: async () => {} } as any}
-          activeClientId="bia-do-spazio"
-          newConsultantName={cName}
-          setNewConsultantName={setCName}
-          newConsultantLink={cLink}
-          onCreateConsultant={() => {}}
-          createConsultant={{ mutateAsync: async () => {} } as any}
-          editingCampaignId={null}
+          {...({
+            dispatchOptions: dispatchOpts,
+            setDispatchOptions: handleSetDispatchOpts,
+            evolutionInstanceOptions: evolutionInstanceOptions,
+            totalLeads: 10,
+            batchingEnabled: batching,
+            setBatchingEnabled: setBatching,
+            batchSize: batchSize,
+            setBatchSize: setBatchSize,
+            batchIntervalHours: batchInterval,
+            setBatchIntervalHours: setBatchInterval,
+            replyAgent: replyAgent,
+            setReplyAgent: setReplyAgent,
+            campaignAgentPrompt: prompt,
+            setCampaignAgentPrompt: setPrompt,
+            passosAposResposta: 1,
+            multiAgendaEnabled: multiAgenda,
+            setMultiAgendaEnabled: setMultiAgenda,
+            consultants: [],
+            consultantsError: null,
+            loadingConsultants: false,
+            onRetryConsultants: () => {},
+            updateConsultant: { mutateAsync: async () => {} } as any,
+            deleteConsultant: { mutateAsync: async () => {} } as any,
+            activeClientId: "bia-do-spazio",
+            newConsultantName: cName,
+            setNewConsultantName: setCName,
+            newConsultantLink: cLink,
+            onCreateConsultant: () => {},
+            createConsultant: { mutateAsync: async () => {} } as any,
+            editingCampaignId: null,
+          } as any)}
         />
       );
     }
