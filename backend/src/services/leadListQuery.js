@@ -52,6 +52,7 @@ export const activeCollation = () => ICU;
 const WS = "E' \\t\\n\\r\\f\\v\\u00a0\\u1680\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff'";
 
 import { classifyTagKind } from "./leadProcedencia.js";
+import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 import {
   queryStalledLeadsList,
   sqlStalledStageCondition,
@@ -59,6 +60,28 @@ import {
   sqlIsStalled,
   sqlDaysIdle,
 } from "./leadReactivationEngine.js";
+
+const tableExistsByPool = new WeakMap();
+export async function checkTableExists(pool, tableName) {
+  if (!pool) return false;
+  let cache = tableExistsByPool.get(pool);
+  if (!cache) {
+    cache = new Map();
+    tableExistsByPool.set(pool, cache);
+  }
+  if (cache.has(tableName)) return cache.get(tableName);
+  try {
+    const { rows } = await pool.query(`SELECT to_regclass($1) AS tbl`, [tableName]);
+    const exists = Boolean(rows[0]?.tbl);
+    cache.set(tableName, exists);
+    return exists;
+  } catch {
+    return false;
+  }
+}
+export const checkLeadMessagesTable = (pool) => checkTableExists(pool, "public.lead_messages");
+
+export const DISPATCHED_FILTER_VALUES = ["all", "never", "received", "recent"];
 
 export const MARKETING_CHANNEL_IDS = [
   "instagram", "google", "facebook", "tiktok", "indicacao", "whatsapp", "campanha", "organico", "trafego_pago",
@@ -113,27 +136,100 @@ const SQL_SEGMENT = `(CASE
   END)`;
 
 /** Quais colunas derivadas uma consulta realmente usa, a partir dos filtros: só estas são montadas (cada uma custa por linha). */
-const needsOf = (filters = {}) => [filters.source ? "source" : null, filters.channel && filters.channel !== "all" ? "channel" : null, filters.segment ? "segment" : null].filter(Boolean);
+const needsOf = (filters = {}, isPageQuery = false) =>
+  [
+    filters.source ? "source" : null,
+    filters.channel && filters.channel !== "all" ? "channel" : null,
+    filters.segment ? "segment" : null,
+    (filters.dispatched && filters.dispatched !== "all") || isPageQuery ? "dispatched" : null,
+  ].filter(Boolean);
 
 /**
- * Base enriquecida: leads do tenant (no escopo do usuário) + as colunas derivadas PEDIDAS em `needs` ("source", "channel", "segment").
+ * Base enriquecida: leads do tenant (no escopo do usuário) + as colunas derivadas PEDIDAS em `needs` ("source", "channel", "segment", "dispatched").
  * Cada consulta paga só pelo que usa. Alias final: e.
  *
- * `OFFSET 0` na camada `t` é uma cerca de propósito: sem ela o planejador do Postgres "achata" a subconsulta e SUBSTITUI `_s`
- * (lower + btrim) em cada uma das ~30 referências da cadeia de canais — 30 vezes por linha. Medido em 25 mil leads: 3,2 s sem a cerca,
- * 0,18 s com ela (o ICU não é o custo: sem collation o tempo era o mesmo, 3,2 s).
+ * `OFFSET 0` na camada `t` e no CTE `dispatched_summary` é uma cerca de propósito: sem ela o planejador do Postgres "achata" a subconsulta.
+ * No caso dos disparos, a cerca `dispatched_summary ... OFFSET 0` materializa o agregado por telefone (MAX data + última campanha)
+ * UMA VEZ por tenant, permitindo ao Postgres fazer Hash Join direto por telefone canônico com a tabela `leads` (~25ms em 25.000 leads).
  */
-function enrichedCte(scopeSql, needs = ["source", "channel", "segment"]) {
+function enrichedCte(
+  scopeSql,
+  needs = ["source", "channel", "segment"],
+  clientIdSql = null,
+  tables = {}
+) {
   const need = new Set(needs);
   if (need.has("channel")) need.add("source");
-  const s0Cols = [need.has("source") ? `${SQL_SOURCE} AS _source` : null, need.has("segment") ? `${SQL_SUMMARY} AS _summary` : null].filter(Boolean);
+  const { hasLeadMessages = false, hasDispatchRuns = false, hasCampaigns = false } = tables;
+
+  const unionParts = [];
+  if (need.has("dispatched") && clientIdSql) {
+    if (hasLeadMessages) {
+      unionParts.push(`SELECT
+        ${SQL_CANONICAL_PHONE("lm.phone")} AS cp,
+        COALESCE(lm.message_timestamp, lm.created_at) AS dispatched_at,
+        ${hasCampaigns ? "COALESCE(c.name, 'Campanha')" : "'Campanha'"} AS campaign_name
+      FROM public.lead_messages lm
+      ${hasCampaigns ? "LEFT JOIN public.campaigns c ON c.id::text = lm.campaign_id::text" : ""}
+      WHERE lm.client_id = ${clientIdSql}
+        AND lm.phone IS NOT NULL AND lm.phone <> ''
+        AND lm.direction = 'outbound'
+        AND (lm.campaign_id IS NOT NULL OR lm.dispatch_id IS NOT NULL)`);
+    }
+    if (hasDispatchRuns) {
+      unionParts.push(`SELECT
+        ${SQL_CANONICAL_PHONE("r.phone")} AS cp,
+        COALESCE(r.sent_at, r.created_at) AS dispatched_at,
+        ${hasCampaigns ? "COALESCE(c.name, 'Campanha')" : "'Campanha'"} AS campaign_name
+      FROM public.campaign_dispatch_runs r
+      ${hasCampaigns ? "LEFT JOIN public.campaigns c ON c.id::text = r.campaign_id::text" : ""}
+      WHERE r.client_id = ${clientIdSql}
+        AND r.phone IS NOT NULL AND r.phone <> ''
+        AND r.status = 'sent'`);
+    }
+  }
+
+  const dispatchedCte = need.has("dispatched")
+    ? (unionParts.length > 0
+        ? `dispatched_summary AS (
+             SELECT
+               cp,
+               MAX(dispatched_at) AS last_dispatched_at,
+               (ARRAY_AGG(campaign_name ORDER BY dispatched_at DESC))[1] AS last_campaign_name
+             FROM (
+               ${unionParts.join(" UNION ALL ")}
+             ) all_disp
+             WHERE cp IS NOT NULL AND cp <> ''
+             GROUP BY cp
+             OFFSET 0 /* cerca anti-achatamento: materializa o resumo por telefone uma so vez */
+           ), `
+        : `dispatched_summary AS (
+             SELECT ''::text AS cp, NULL::timestamptz AS last_dispatched_at, NULL::text AS last_campaign_name WHERE false
+           ), `)
+    : "";
+
+  const s0Cols = [
+    need.has("source") ? `${SQL_SOURCE} AS _source` : null,
+    need.has("segment") ? `${SQL_SUMMARY} AS _summary` : null,
+    need.has("dispatched") ? "ds.last_dispatched_at, ds.last_campaign_name AS last_dispatched_campaign_name" : null,
+  ].filter(Boolean);
+
+  const s0Join = need.has("dispatched")
+    ? `LEFT JOIN dispatched_summary ds ON ds.cp = ${SQL_CANONICAL_PHONE("COALESCE(NULLIF(s.telefone, ''), s.phone, '')")}`
+    : "";
+
   const t = need.has("channel")
     ? `SELECT s0.*, btrim(lower(s0._source COLLATE ${ICU}), ${WS}) AS _s FROM s0 OFFSET 0 /* cerca anti-achatamento: NAO REMOVER (3,2 s -> 0,18 s) */`
     : `SELECT s0.* FROM s0`;
-  const eCols = [need.has("channel") ? `${SQL_CHANNEL} AS _channel` : null, need.has("segment") ? `${SQL_SEGMENT} AS _segment` : null].filter(Boolean);
-  return `WITH s0 AS (
+  const eCols = [
+    need.has("channel") ? `${SQL_CHANNEL} AS _channel` : null,
+    need.has("segment") ? `${SQL_SEGMENT} AS _segment` : null,
+  ].filter(Boolean);
+
+  return `WITH ${dispatchedCte}s0 AS (
       SELECT s.*${s0Cols.length ? `, ${s0Cols.join(", ")}` : ""}
         FROM public.leads s
+        ${s0Join}
        WHERE ${scopeSql}
     ), t AS (
       ${t}
@@ -231,6 +327,17 @@ export function buildFilterConditions(params, f = {}) {
     const p = params.add(f.stalledDays);
     c.stalledDays = `${sqlIsStalled("e", p)}
       AND ${sqlStalledStageCondition("e")}`;
+  }
+  if (f.dispatched) {
+    if (f.dispatched === "never") {
+      c.dispatched = "e.last_dispatched_at IS NULL";
+    } else if (f.dispatched === "received") {
+      c.dispatched = "e.last_dispatched_at IS NOT NULL";
+    } else if (f.dispatched === "recent") {
+      const days = Number(f.dispatchedDays) || 30;
+      const p = params.add(days);
+      c.dispatched = `(e.last_dispatched_at IS NOT NULL AND e.last_dispatched_at >= NOW() - (${p}::int * interval '1 day'))`;
+    }
   }
   return c;
 }
@@ -389,22 +496,33 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
   const safePage = Math.max(1, Number(page) || 1);
   const offset = (safePage - 1) * safeLimit;
 
+  const hasLeadMessages = await checkTableExists(pool, "public.lead_messages");
+  const hasDispatchRuns = await checkTableExists(pool, "public.campaign_dispatch_runs");
+  const hasCampaigns = await checkTableExists(pool, "public.campaigns");
+  const tables = { hasLeadMessages, hasDispatchRuns, hasCampaigns };
+
   // Um conjunto de parâmetros por consulta: o Postgres recusa parâmetro que a SQL não usa ("could not determine data type").
-  const prepare = (keys) => {
+  const prepare = (keys, isPage = false) => {
     const p = new Params();
     const scopeSql = buildScope(p, scope);
     const only = Object.fromEntries(keys.map((k) => [k, filters[k]]));
+    if (filters.dispatchedDays) only.dispatchedDays = filters.dispatchedDays;
     const where = whereOf(buildFilterConditions(p, only), keys);
-    return { p, cte: enrichedCte(scopeSql, needsOf(only)), where };
+    const needs = needsOf(only, isPage);
+    let clientIdSql = null;
+    if (needs.includes("dispatched") && (hasLeadMessages || hasDispatchRuns)) {
+      clientIdSql = p.add(scope.clientId);
+    }
+    return { p, cte: enrichedCte(scopeSql, needs, clientIdSql, tables), where };
   };
-  const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"];
-  const TAB_KEYS = ["temperature", "tag", "search", "importId", "stalledDays"]; // as abas ignoram estágio, origem, canal e faixa
+  const ALL_KEYS = ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays", "dispatched"];
+  const TAB_KEYS = ["temperature", "tag", "search", "importId", "stalledDays", "dispatched"]; // as abas ignoram estágio, origem, canal e faixa
 
-  const total = prepare(ALL_KEYS);
-  const pageQ = prepare(ALL_KEYS);
+  const total = prepare(ALL_KEYS, false);
+  const pageQ = prepare(ALL_KEYS, true);
   const limitSql = pageQ.p.add(safeLimit);
   const offsetSql = pageQ.p.add(offset);
-  const tabs = prepare(TAB_KEYS);
+  const tabs = prepare(TAB_KEYS, false);
 
   const [{ rows: totalRows }, { rows: pageRows }, tabsRes] = await Promise.all([
     pool.query(`${total.cte} SELECT count(*)::int AS n FROM e ${total.where}`, total.p.values),
@@ -442,12 +560,22 @@ export async function queryLeadsPage(pool, { scope, filters = {}, sort = null, d
  */
 export async function queryLeadIds(pool, { scope, filters = {}, contacts = false }) {
   await useCollation(pool);
+  const hasLeadMessages = await checkTableExists(pool, "public.lead_messages");
+  const hasDispatchRuns = await checkTableExists(pool, "public.campaign_dispatch_runs");
+  const hasCampaigns = await checkTableExists(pool, "public.campaigns");
+  const tables = { hasLeadMessages, hasDispatchRuns, hasCampaigns };
+
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const conds = buildFilterConditions(p, filters);
-  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"]);
+  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays", "dispatched"]);
+  const needs = needsOf(filters);
+  let clientIdSql = null;
+  if (needs.includes("dispatched") && (hasLeadMessages || hasDispatchRuns)) {
+    clientIdSql = p.add(scope.clientId);
+  }
   const { rows } = await pool.query(
-    `${enrichedCte(scopeSql, needsOf(filters))} SELECT e.id${contacts ? ", e.nome, e.telefone, e.phone" : ""} FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
+    `${enrichedCte(scopeSql, needs, clientIdSql, tables)} SELECT e.id${contacts ? ", e.nome, e.telefone, e.phone" : ""} FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${MAX_IDS + 1}`,
     p.values
   );
   const truncated = rows.length > MAX_IDS;
@@ -614,12 +742,22 @@ export async function lookupLead(pool, { scope, leadId = null, phoneVariants = [
 /** Chaves personalizadas (dados.campos) presentes na combinação de filtros: as colunas extras da exportação. */
 export async function queryCustomKeys(pool, { scope, filters = {} }) {
   await useCollation(pool);
+  const hasLeadMessages = await checkTableExists(pool, "public.lead_messages");
+  const hasDispatchRuns = await checkTableExists(pool, "public.campaign_dispatch_runs");
+  const hasCampaigns = await checkTableExists(pool, "public.campaigns");
+  const tables = { hasLeadMessages, hasDispatchRuns, hasCampaigns };
+
   const p = new Params();
   const scopeSql = buildScope(p, scope);
   const conds = buildFilterConditions(p, filters);
-  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"]);
+  const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays", "dispatched"]);
+  const needs = needsOf(filters);
+  let clientIdSql = null;
+  if (needs.includes("dispatched") && (hasLeadMessages || hasDispatchRuns)) {
+    clientIdSql = p.add(scope.clientId);
+  }
   const { rows } = await pool.query(
-    `${enrichedCte(scopeSql, needsOf(filters))}
+    `${enrichedCte(scopeSql, needs, clientIdSql, tables)}
      SELECT DISTINCT k.key AS key FROM e
        CROSS JOIN LATERAL jsonb_object_keys(CASE WHEN jsonb_typeof(e.dados->'campos') = 'object' THEN e.dados->'campos' ELSE '{}'::jsonb END) AS k(key)
       ${where} ORDER BY 1`,
@@ -631,18 +769,28 @@ export async function queryCustomKeys(pool, { scope, filters = {} }) {
 /** Exportação SEM teto: percorre a combinação de filtros em blocos por posição (created_at, id), sem carregar tudo. */
 export async function* iterateLeadsForExport(pool, { scope, filters = {}, blockSize = 2000 }) {
   const collation = await resolveCollation(pool);
+  const hasLeadMessages = await checkTableExists(pool, "public.lead_messages");
+  const hasDispatchRuns = await checkTableExists(pool, "public.campaign_dispatch_runs");
+  const hasCampaigns = await checkTableExists(pool, "public.campaigns");
+  const tables = { hasLeadMessages, hasDispatchRuns, hasCampaigns };
+
   let offset = 0;
   for (;;) {
     ICU = collation;
     const p = new Params();
     const scopeSql = buildScope(p, scope);
     const conds = buildFilterConditions(p, filters);
-    const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays"]);
+    const where = whereOf(conds, ["stage", "temperature", "tag", "search", "source", "channel", "segment", "importId", "stalledDays", "dispatched"]);
+    const needs = needsOf(filters);
+    let clientIdSql = null;
+    if (needs.includes("dispatched") && (hasLeadMessages || hasDispatchRuns)) {
+      clientIdSql = p.add(scope.clientId);
+    }
     const limitSql = p.add(blockSize);
     const offsetSql = p.add(offset);
     const { rows } = await pool.query(
-      `${enrichedCte(scopeSql, needsOf(filters))}
-       SELECT e.id, e.nome, e.telefone, e.stage, e.temperature, e.tags, e.raw_chat_summary, e.created_at, e.last_interaction_at, e.dados
+      `${enrichedCte(scopeSql, needs, clientIdSql, tables)}
+       SELECT e.id, e.nome, e.telefone, e.stage, e.temperature, e.tags, e.raw_chat_summary, e.created_at, e.last_interaction_at, e.dados${needs.includes("dispatched") ? ", e.last_dispatched_at, e.last_dispatched_campaign_name" : ""}
          FROM e ${where} ORDER BY e.created_at DESC, e.id LIMIT ${limitSql} OFFSET ${offsetSql}`,
       p.values
     );
@@ -665,6 +813,20 @@ export function parseLeadListFilters(query = {}) {
     }
   }
 
+  const dispatchedRaw = norm(query.dispatched);
+  if (dispatchedRaw && !DISPATCHED_FILTER_VALUES.includes(dispatchedRaw)) {
+    return { problem: `Filtro de disparo inválido: ${dispatchedRaw}` };
+  }
+  let dispatchedDays = undefined;
+  if (query.dispatchedDays !== undefined && query.dispatchedDays !== null && String(query.dispatchedDays).trim() !== "") {
+    const parsed = parseInt(String(query.dispatchedDays).trim(), 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      dispatchedDays = parsed;
+    }
+  } else if (dispatchedRaw === "recent") {
+    dispatchedDays = 30;
+  }
+
   const filters = {
     stage: norm(query.stage),
     temperature: norm(query.temperature),
@@ -675,6 +837,7 @@ export function parseLeadListFilters(query = {}) {
     segment: norm(query.segment),
     importId: norm(query.importId),
     ...(stalledDays !== undefined ? { stalledDays } : {}),
+    ...(dispatchedRaw && dispatchedRaw !== "all" ? { dispatched: dispatchedRaw, ...(dispatchedDays ? { dispatchedDays } : {}) } : {}),
   };
   if (filters.channel && filters.channel !== "all" && !MARKETING_CHANNEL_IDS.includes(filters.channel)) {
     return { problem: `Canal inválido: ${filters.channel}` };

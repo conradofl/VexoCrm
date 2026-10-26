@@ -37,6 +37,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  Send,
   Instagram,
   HelpCircle,
   CheckSquare,
@@ -327,6 +328,8 @@ export interface LeadIntelligenceItem {
   raw_chat_summary?: string | null;
   created_at: string;
   updated_at?: string;
+  last_dispatched_at?: string | null;
+  last_dispatched_campaign_name?: string | null;
   [key: string]: any;
 }
 
@@ -567,6 +570,8 @@ export default function BancoDeDados() {
   const [selectedSource, setSelectedSource] = useState<string>("");
   const [selectedChannel, setSelectedChannel] = useState<string>("all");
   const [selectedSegment, setSelectedSegment] = useState<BasePotentialSegmentId | null>(null);
+  const [selectedDispatched, setSelectedDispatched] = useState<string>("all");
+  const [dispatchedDays, setDispatchedDays] = useState<number>(30);
   const [isInstagramImportModalOpen, setIsInstagramImportModalOpen] = useState(false);
   const { data: contactsWithoutChannel = [] } = useContactsWithoutChannel(clientId);
 
@@ -796,6 +801,8 @@ export default function BancoDeDados() {
     segment: selectedSegment,
     importId: selectedImportId || undefined,
     stalledDays: isStalledFilterActive ? 3 : undefined,
+    dispatched: selectedDispatched !== "all" ? selectedDispatched : undefined,
+    dispatchedDays: selectedDispatched === "recent" ? dispatchedDays : undefined,
   };
 
   const isMountedRef = useRef(true);
@@ -885,7 +892,7 @@ export default function BancoDeDados() {
   };
 
   // Mudou filtro, busca, ordem ou tamanho de página → volta à página 1 e pede ao servidor (uma só chamada, sem a página velha)
-  const listFilterKey = JSON.stringify([clientId, activeTab, selectedTag, debouncedSearch, selectedSource, selectedChannel, selectedSegment, selectedImportId, sortColumn, sortDirection, pageSize]);
+  const listFilterKey = JSON.stringify([clientId, activeTab, selectedTag, debouncedSearch, selectedSource, selectedChannel, selectedSegment, selectedImportId, selectedDispatched, dispatchedDays, sortColumn, sortDirection, pageSize]);
   const prevListFilterKeyRef = useRef(listFilterKey);
   useEffect(() => {
     if (prevListFilterKeyRef.current !== listFilterKey) {
@@ -4046,6 +4053,64 @@ export default function BancoDeDados() {
                           </DropdownMenu>
                         </div>
                       </TableHead>
+                      <TableHead className="w-[170px] py-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn(
+                            "text-[10px] uppercase tracking-wider font-semibold",
+                            selectedDispatched !== "all" ? "text-indigo-600 dark:text-indigo-400 font-bold" : "text-muted-foreground"
+                          )}>
+                            Disparo
+                          </span>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                data-testid="filter-dispatched-trigger"
+                                className={cn(
+                                  "p-1 rounded hover:bg-muted transition-colors",
+                                  selectedDispatched !== "all" ? "text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50" : "text-muted-foreground/60 hover:text-foreground"
+                                )}
+                                title={selectedDispatched !== "all" ? `Disparo filtrado: ${selectedDispatched}` : "Filtrar por Disparo"}
+                              >
+                                <Filter className={cn("w-3 h-3", selectedDispatched !== "all" && "fill-indigo-600 dark:fill-indigo-400")} />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start" className="w-56">
+                              <DropdownMenuItem
+                                onClick={() => setSelectedDispatched("all")}
+                                className={cn("text-xs cursor-pointer", selectedDispatched === "all" && "font-semibold text-indigo-600 dark:text-indigo-400")}
+                              >
+                                Todos os disparos
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => setSelectedDispatched("never")}
+                                data-testid="filter-dispatched-never"
+                                className={cn("text-xs cursor-pointer text-slate-700 dark:text-zinc-300", selectedDispatched === "never" && "font-semibold text-indigo-600 dark:text-indigo-400")}
+                              >
+                                Nunca recebeu disparo
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setSelectedDispatched("received")}
+                                data-testid="filter-dispatched-received"
+                                className={cn("text-xs cursor-pointer text-indigo-600 dark:text-indigo-400", selectedDispatched === "received" && "font-semibold bg-indigo-50 dark:bg-indigo-950/40")}
+                              >
+                                Já recebeu disparo
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedDispatched("recent");
+                                  setDispatchedDays(30);
+                                }}
+                                data-testid="filter-dispatched-recent"
+                                className={cn("text-xs cursor-pointer text-emerald-600 dark:text-emerald-400", selectedDispatched === "recent" && "font-semibold bg-emerald-50 dark:bg-emerald-950/40")}
+                              >
+                                Recebeu nos últimos 30 dias
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </TableHead>
                       <TableHead className="w-[150px] py-[10px]">
                         <button
                           type="button"
@@ -4077,7 +4142,7 @@ export default function BancoDeDados() {
                         data-testid="selection-criterion-banner"
                         className="bg-indigo-50/90 dark:bg-indigo-950/60 border-b border-indigo-200/80 dark:border-indigo-900/50 hover:bg-indigo-50/90 dark:hover:bg-indigo-950/60 transition-colors"
                       >
-                        <TableCell colSpan={8} className="py-2.5 px-4 text-center text-xs font-medium text-indigo-950 dark:text-indigo-200">
+                        <TableCell colSpan={9} className="py-2.5 px-4 text-center text-xs font-medium text-indigo-950 dark:text-indigo-200">
                           {selectionMode === "criterion" ? (
                             <span>
                               Todos os <strong>{effectiveBaseTotal.toLocaleString("pt-BR")}</strong> leads que batem com este filtro estão selecionados
@@ -4230,6 +4295,25 @@ export default function BancoDeDados() {
                               {getStageBadge(lead.stage, lead.lost_reason, lead.stage_source)}
                               <StalledLeadBadge lead={lead} minDays={3} />
                             </div>
+                          </TableCell>
+
+                          {/* Coluna Disparo: Último envio e nome da campanha */}
+                          <TableCell className="text-[12px] py-[10px] max-w-[200px]" data-testid={`lead-dispatched-cell-${lead.id}`}>
+                            {lead.last_dispatched_at ? (
+                              <div className="flex flex-col gap-0.5 min-w-0" title={`Último disparo: ${new Date(lead.last_dispatched_at).toLocaleString("pt-BR")}`}>
+                                <div className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400 font-medium truncate">
+                                  <Send className="w-3 h-3 shrink-0" />
+                                  <span className="truncate text-[11.5px] font-semibold">{lead.last_dispatched_campaign_name || "Campanha"}</span>
+                                </div>
+                                <span className="text-[10.5px] text-muted-foreground tabular-nums">
+                                  {formatShortDate(lead.last_dispatched_at)}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground/60 italic">
+                                Nunca disparado
+                              </span>
+                            )}
                           </TableCell>
 
                           {/* Coluna 4: Última conversa */}
