@@ -230,6 +230,7 @@ import {
   recordAgentMute,
   clearAgentMute,
 } from "../../services/agentMuteGuard.js";
+import { resolveActiveWaitCampaign } from "../../services/campaignReplySelection.js";
 
 export function registerChatbotRoutes(app, deps) {
   const {
@@ -3031,12 +3032,19 @@ export function registerChatbotRoutes(app, deps) {
 
     try {
       campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
-      const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+      // SPEC 8: Troca o [0] pela campanha cuja última mensagem outbound para aquele telefone é a mais recente
+      const activeWaitCampaign = await resolveActiveWaitCampaign({
+        pool: pgDatabasePool,
+        supabase,
+        clientId,
+        phone,
+        processingWaitForReplyMatches: campaignReplyContext.processingWaitForReplyMatches,
+      });
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
 
       // Por que este lead caiu (ou nao) no fluxo de resposta.
-      const candidato = campaignReplyContext.waitForReplyMatches[0] || campaignReplyContext.matches[0] || null;
+      const candidato = activeWaitCampaign || campaignReplyContext.waitForReplyMatches[0] || campaignReplyContext.matches[0] || null;
       const progressoConsultado = candidato?.leadImportItem?.progress ?? null;
       console.log("[campaign-routing] contexto", {
         clientId,

@@ -25,6 +25,11 @@
 
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
+import {
+  resolveActiveWaitCampaign,
+  findConflictingPendingCampaignLeads,
+  expireStaleCampaignProgress,
+} from "../../services/campaignReplySelection.js";
 import { isScheduledDateInPast, BACKEND_SCHEDULE_GRACE_MS } from "../../services/campaignScheduleValidation.js";
 import {
   isEvolutionOpenState,
@@ -2926,6 +2931,13 @@ export function registerCampaignsRoutes(app, deps) {
       } catch (err) {
         console.error("[stalled-notifications-scheduler] background sync failed:", err);
       }
+      try {
+        if (pgDatabasePool) {
+          await expireStaleCampaignProgress(pgDatabasePool, { ttlDays: 7 });
+        }
+      } catch (err) {
+        console.error("[campaign-progress-ttl] background expire failed:", err);
+      }
     }, 30000); // ticks every 30 seconds
     if (_dueDispatchInterval?.unref) _dueDispatchInterval.unref();
   }
@@ -2945,11 +2957,15 @@ export function registerCampaignsRoutes(app, deps) {
       const stalledNotifyResult = pgDatabasePool
         ? await syncDailyStalledNotificationsForAllTenants(pgDatabasePool)
         : null;
+      const expireResult = pgDatabasePool
+        ? await expireStaleCampaignProgress(pgDatabasePool, { ttlDays: 7 })
+        : null;
       res.json({
         campaigns: result,
         independentDispatches: dispatchResult,
         skipped: dispatchResult?.skipped || [],
         stalledNotifications: stalledNotifyResult,
+        expiredProgress: expireResult,
       });
     } catch (error) {
       console.error("campaign run-due error:", error);
@@ -5838,8 +5854,9 @@ export function registerCampaignsRoutes(app, deps) {
       const offset = body.offset != null ? Number(body.offset) : null;
 
       let targetCount = 0;
+      let previewLeads = [];
       try {
-        const previewLeads = await buildDispatchLeads({
+        previewLeads = await buildDispatchLeads({
           clientId: authorizedClientId,
           importId: resolveCampaignImportSelection(campaign),
           limit: limitPerRun,
@@ -5850,6 +5867,29 @@ export function registerCampaignsRoutes(app, deps) {
         targetCount = previewLeads.length;
       } catch (err) {
         console.error("Erro ao calcular target_count:", err);
+      }
+
+      // SPEC 8 - Item 2: Impedir duas réguas vivas no mesmo telefone.
+      // Ao criar lote para um lead que já tem progresso pendente de outra campanha:
+      // recusar o lote com aviso nomeando a campanha conflitante.
+      if (previewLeads.length > 0) {
+        const conflictCheck = await findConflictingPendingCampaignLeads({
+          pool: pgDatabasePool,
+          supabase,
+          clientId: authorizedClientId,
+          campaignId,
+          targetLeads: previewLeads,
+        });
+        if (conflictCheck.hasConflict) {
+          const leadRef = conflictCheck.conflictingLead?.phone || conflictCheck.conflictingLead?.nome || "um dos leads";
+          const campRef = conflictCheck.conflictingCampaign?.name || conflictCheck.conflictingCampaign?.id || "outra campanha";
+          return sendError(
+            res,
+            422,
+            "CONFLICTING_CAMPAIGN_PROGRESS",
+            `Não foi possível criar o lote: o lead ${leadRef} já possui a campanha '${campRef}' aguardando resposta.`
+          );
+        }
       }
 
       // Roteiro do agente ISOLADO por disparo: o disparo nasce com uma COPIA da linha
@@ -6235,7 +6275,15 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
-      const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+      // SPEC 8: Troca o [0] pela campanha cuja última mensagem outbound para aquele telefone é a mais recente
+      const activeWaitCampaign = await resolveActiveWaitCampaign({
+        pool: pgDatabasePool,
+        supabase,
+        clientId,
+        phone,
+        processingWaitForReplyMatches: campaignReplyContext.processingWaitForReplyMatches,
+        logFn: logCampaignReplyFlow,
+      });
 
       logCampaignReplyFlow("info", "webhook_received", {
         clientId,
