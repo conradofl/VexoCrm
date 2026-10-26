@@ -174,7 +174,9 @@ function enrichedCte(
       WHERE lm.client_id = ${clientIdSql}
         AND lm.phone IS NOT NULL AND lm.phone <> ''
         AND lm.direction = 'outbound'
-        AND (lm.campaign_id IS NOT NULL OR lm.dispatch_id IS NOT NULL)`);
+        AND (lm.campaign_id IS NOT NULL
+             OR lm.dispatch_id IS NOT NULL
+             OR lm.meta->>'source' IN ('campaign_dispatch', 'campaign_reply_progression'))`);
     }
     if (hasDispatchRuns) {
       unionParts.push(`SELECT

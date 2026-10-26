@@ -55,6 +55,7 @@ const SCHEMA = `
     phone text NOT NULL,
     direction text NOT NULL DEFAULT 'outbound',
     message_text text,
+    meta jsonb NOT NULL DEFAULT '{}'::jsonb,
     message_timestamp timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
   );
@@ -221,6 +222,50 @@ describe("Filtro e exibição de disparos no Banco de Dados (Gabriel, 26/10)", (
       // No Tenant Gabriel, o disparo do outro tenant no mesmo telefone 34991093607 NÃO substitui a campanha da Gabriel
       const gabrielRes = await queryLeadsPage(pool, { scope, filters: { dispatched: "recent" } });
       expect(gabrielRes.items[0].last_dispatched_campaign_name).toBe("Campanha Black Friday");
+    });
+  });
+
+  describe("Diferenciação obrigatória de mensagens órfãs por meta->>'source'", () => {
+    it("conta mensagem outbound sem campaign_id com meta source campaign_dispatch como 'received', e ignora hardcoded-chat-webhook", async () => {
+      // Lead E: recebeu disparo órfão (source: 'campaign_dispatch', sem campaign_id e sem dispatch_id)
+      // Lead F: recebeu apenas resposta do robô de atendimento (source: 'hardcoded-chat-webhook', sem campaign_id e sem dispatch_id)
+      await pool.query(
+        `INSERT INTO leads (id, client_id, telefone, phone, nome, created_at) VALUES
+         ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', $1, '34993334444', '34993334444', 'Lead E - Disparo Órfão', now() - interval '20 days'),
+         ('ffffffff-ffff-ffff-ffff-ffffffffffff', $1, '34995556666', '34995556666', 'Lead F - Atendimento Robô', now() - interval '20 days')`,
+        [T]
+      );
+
+      // Disparo de campanha órfão: sem campaign_id e sem dispatch_id, mas meta source = 'campaign_dispatch'
+      await pool.query(
+        `INSERT INTO lead_messages (client_id, campaign_id, dispatch_id, phone, direction, meta, created_at) VALUES
+         ($1, null, null, '5534993334444', 'outbound', '{"source": "campaign_dispatch"}'::jsonb, now() - interval '3 days')`,
+        [T]
+      );
+
+      // Mensagem de atendimento robô: sem campaign_id e sem dispatch_id, meta source = 'hardcoded-chat-webhook'
+      await pool.query(
+        `INSERT INTO lead_messages (client_id, campaign_id, dispatch_id, phone, direction, meta, created_at) VALUES
+         ($1, null, null, '5534995556666', 'outbound', '{"source": "hardcoded-chat-webhook"}'::jsonb, now() - interval '1 day')`,
+        [T]
+      );
+
+      // Consulta no estado 'received': Lead E DEVE constar, Lead F NÃO DEVE constar
+      const resReceived = await queryLeadsPage(pool, { scope, filters: { dispatched: "received" } });
+      const receivedIds = resReceived.items.map((x) => x.id);
+      expect(receivedIds).toContain("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+      expect(receivedIds).not.toContain("ffffffff-ffff-ffff-ffff-ffffffffffff");
+
+      // O Lead E deve exibir 'Campanha' como fallback no nome da campanha (COALESCE(c.name, 'Campanha'))
+      const leadE = resReceived.items.find((x) => x.id === "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+      expect(leadE.last_dispatched_campaign_name).toBe("Campanha");
+      expect(leadE.last_dispatched_at).not.toBeNull();
+
+      // Consulta no estado 'never': Lead F DEVE constar (nunca recebeu campanha), Lead E NÃO DEVE constar
+      const resNever = await queryLeadsPage(pool, { scope, filters: { dispatched: "never" } });
+      const neverIds = resNever.items.map((x) => x.id);
+      expect(neverIds).toContain("ffffffff-ffff-ffff-ffff-ffffffffffff");
+      expect(neverIds).not.toContain("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
     });
   });
 
