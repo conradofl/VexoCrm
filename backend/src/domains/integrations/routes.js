@@ -1089,8 +1089,22 @@ export function registerIntegrationsRoutes(app, deps) {
           return;
         }
 
-        res.json({ item: removed });
+        res.json({
+          item: removed,
+          affectedAgentsCount: removed.affectedAgentsCount ?? 0,
+          affectedDispatchesCount: removed.affectedDispatchesCount ?? 0,
+        });
       } catch (error) {
+        if (error?.code === "CHIP_IN_USE_BY_DISPATCH") {
+          sendError(
+            res,
+            409,
+            "CHIP_IN_USE_BY_DISPATCH",
+            error.message || "Chip em uso por lote de disparo ativo",
+            { dispatches: error.dispatches || [] }
+          );
+          return;
+        }
         console.error("lead client evolution instance delete error:", error);
         sendError(res, 500, "EVOLUTION_INSTANCE_DELETE_FAILED", "Failed to delete Evolution instance");
       }
