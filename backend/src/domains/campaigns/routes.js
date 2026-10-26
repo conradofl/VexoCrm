@@ -5909,6 +5909,48 @@ export function registerCampaignsRoutes(app, deps) {
         ...(requestedEvolutionInstanceId ? { evolutionInstanceId: requestedEvolutionInstanceId } : {}),
       };
 
+      // Trava de integridade de chips de handoff (Anti-propagação de chip morto / SPEC 1)
+      const rawHandoffEnabled = Boolean(dispatchOptionsSnapshot.handoffEnabled);
+      const rawHandoffChipList = Array.isArray(dispatchOptionsSnapshot.handoffChipIds) && dispatchOptionsSnapshot.handoffChipIds.length > 0
+        ? dispatchOptionsSnapshot.handoffChipIds
+        : (dispatchOptionsSnapshot.handoffChipId ? [dispatchOptionsSnapshot.handoffChipId] : []);
+      const uniqueHandoffChipIds = [...new Set(rawHandoffChipList)].filter(Boolean);
+
+      if (uniqueHandoffChipIds.length > 0) {
+        const { data: existingInstances, error: instErr } = await supabase
+          .from("lead_client_evolution_instances")
+          .select("id")
+          .eq("client_id", authorizedClientId)
+          .in("id", uniqueHandoffChipIds);
+
+        if (instErr) {
+          console.error("[campaign-dispatch] erro ao validar chips de handoff contra o banco", instErr);
+          return sendError(res, 500, "DATABASE_ERROR", "Falha ao validar instâncias de handoff.");
+        }
+
+        const existingIds = new Set((existingInstances || []).map((i) => i.id));
+        const invalidChipIds = uniqueHandoffChipIds.filter((id) => !existingIds.has(id));
+
+        if (invalidChipIds.length > 0) {
+          return sendError(
+            res,
+            422,
+            "HANDOFF_CHIP_NOT_FOUND",
+            `Os seguintes chips de transbordo (handoff) não existem ou foram excluídos: ${invalidChipIds.join(", ")}`,
+            { invalidChipIds }
+          );
+        }
+      }
+
+      if (rawHandoffEnabled && uniqueHandoffChipIds.length === 0) {
+        return sendError(
+          res,
+          422,
+          "HANDOFF_CHIPS_EMPTY",
+          "A passagem de bastão (handoff) está ativada mas nenhum chip fechador válido foi selecionado."
+        );
+      }
+
       const insertPayload = {
         campaign_id: campaignId,
         client_id: authorizedClientId,

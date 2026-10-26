@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Archive, ArrowRightLeft, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Save, Send, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -245,22 +245,64 @@ export function SchedulingStep({
   const bridgingText = dispatchOptions.handoffBridgingText ?? defaultBridgingText;
   const openerText = dispatchOptions.handoffOpenerText ?? defaultOpenerText;
 
-  const selectedHandoffChipIds = useMemo(() => {
+  const validEvolutionInstanceIds = useMemo(() => {
+    return new Set(evolutionInstanceOptions.map((i) => i.id));
+  }, [evolutionInstanceOptions]);
+
+  const rawHandoffChipIds = useMemo(() => {
     if (Array.isArray(dispatchOptions.handoffChipIds) && dispatchOptions.handoffChipIds.length > 0) {
       return dispatchOptions.handoffChipIds;
     }
     return dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : [];
   }, [dispatchOptions.handoffChipIds, dispatchOptions.handoffChipId]);
 
+  // selectedHandoffChipIds devolve só ids presentes em evolutionInstanceOptions (SPEC 1)
+  const selectedHandoffChipIds = useMemo(() => {
+    return rawHandoffChipIds.filter((id) => validEvolutionInstanceIds.has(id));
+  }, [rawHandoffChipIds, validEvolutionInstanceIds]);
+
+  const [droppedHandoffChipsCount, setDroppedHandoffChipsCount] = useState<number>(() => {
+    if (evolutionInstanceOptions.length === 0) return 0;
+    const initialRaw = Array.isArray(dispatchOptions.handoffChipIds) && dispatchOptions.handoffChipIds.length > 0
+      ? dispatchOptions.handoffChipIds
+      : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []);
+    const validIds = new Set(evolutionInstanceOptions.map((i) => i.id));
+    return initialRaw.filter((id) => !validIds.has(id)).length;
+  });
+
+  // Descartar do estado antes de propagar e antes de ir no payload
+  useEffect(() => {
+    if (evolutionInstanceOptions.length === 0) return;
+    const rawList = Array.isArray(dispatchOptions.handoffChipIds) && dispatchOptions.handoffChipIds.length > 0
+      ? dispatchOptions.handoffChipIds
+      : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []);
+    if (rawList.length === 0) return;
+
+    const validIds = new Set(evolutionInstanceOptions.map((i) => i.id));
+    const cleaned = rawList.filter((id) => validIds.has(id));
+    const dropped = rawList.length - cleaned.length;
+    if (dropped > 0) {
+      setDroppedHandoffChipsCount((prev) => Math.max(prev, dropped));
+    }
+    if (cleaned.length !== rawList.length) {
+      setDispatchOptions((curr) => ({
+        ...curr,
+        handoffChipIds: cleaned,
+        handoffChipId: cleaned[0] || null,
+      }));
+    }
+  }, [evolutionInstanceOptions, dispatchOptions.handoffChipIds, dispatchOptions.handoffChipId, setDispatchOptions]);
+
   const targetHandoffChips = useMemo(() => {
     return evolutionInstanceOptions.filter((i) => selectedHandoffChipIds.includes(i.id));
   }, [evolutionInstanceOptions, selectedHandoffChipIds]);
 
   const toggleHandoffChipId = (id: string) => {
+    if (!validEvolutionInstanceIds.has(id)) return;
     setDispatchOptions((curr) => {
-      const currentList = Array.isArray(curr.handoffChipIds) && curr.handoffChipIds.length > 0
+      const currentList = (Array.isArray(curr.handoffChipIds) && curr.handoffChipIds.length > 0
         ? curr.handoffChipIds
-        : (curr.handoffChipId ? [curr.handoffChipId] : []);
+        : (curr.handoffChipId ? [curr.handoffChipId] : [])).filter((item) => validEvolutionInstanceIds.has(item));
       const exists = currentList.includes(id);
       const nextList = exists ? currentList.filter((item) => item !== id) : [...currentList, id];
       return {
@@ -585,6 +627,23 @@ export function SchedulingStep({
                 <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
                   Selecione 1 ou mais chips fechadores. Com múltiplos chips, os leads que responderem serão distribuídos em rodízio automático (Round-Robin) entre os consultores.
                 </p>
+
+                {droppedHandoffChipsCount > 0 && (
+                  <div
+                    data-testid="handoff-dropped-chips-warning"
+                    className="p-3 rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-700/80 dark:bg-amber-950/40 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2.5"
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-bold">
+                        {droppedHandoffChipsCount} {droppedHandoffChipsCount === 1 ? "chip excluído foi removido" : "chips excluídos foram removidos"} da seleção deste lote
+                      </p>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                        Instâncias apagadas anteriormente não existem mais no sistema e foram descartadas automaticamente para evitar falhas no transbordo.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {eligibleHandoffChips.length === 0 ? (
                   <div className="p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-300">
