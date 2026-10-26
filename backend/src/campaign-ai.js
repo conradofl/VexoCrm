@@ -480,6 +480,21 @@ export function hasSameVariableCounts(baseText, variantText) {
   return true;
 }
 
+export function extractUrlsFromText(text) {
+  if (!text || typeof text !== "string") return [];
+  const matches = [...text.matchAll(/https?:\/\/[^\s]+/gi)];
+  const urls = [];
+  for (const m of matches) {
+    const raw = m[0];
+    const punctuationMatch = raw.match(/^(https?:\/\/[^\s]+?)([.,;:!?)">]*)$/);
+    const cleanUrl = punctuationMatch ? punctuationMatch[1] : raw;
+    if (cleanUrl && !urls.includes(cleanUrl)) {
+      urls.push(cleanUrl);
+    }
+  }
+  return urls;
+}
+
 export async function generateCampaignTemplateVariants(input = {}) {
   const count = Math.min(
     Math.max(Number.parseInt(String(input.count ?? "6"), 10) || 6, 2),
@@ -503,7 +518,17 @@ export async function generateCampaignTemplateVariants(input = {}) {
     throw error;
   }
 
-  const varCounts = getVariableCounts(baseText);
+  // Extrai e mascara todas as URLs para que nunca sofram alteração, reescrita ou re-encoding da IA
+  const rawUrls = extractUrlsFromText(baseText);
+  let textForAi = baseText;
+  const urlTokens = new Map();
+  rawUrls.forEach((u, i) => {
+    const token = `{{__url_immutable_${i}__}}`;
+    urlTokens.set(token, u);
+    textForAi = textForAi.replaceAll(u, token);
+  });
+
+  const varCounts = getVariableCounts(textForAi);
   const varKeys = Object.keys(varCounts);
   const varRules = varKeys.length > 0
     ? `As seguintes variáveis estão na mensagem base e DEVEM aparecer em CADA variação EXATAMENTE com a mesma contagem:\n${varKeys.map((k) => `- ${k}: exatamente ${varCounts[k]} vez(es)`).join("\n")}\nPROIBIDO duplicar ou omitir qualquer uma dessas variáveis.`
@@ -513,19 +538,20 @@ export async function generateCampaignTemplateVariants(input = {}) {
 Sua missão é REESCREVER a mensagem base abaixo gerando exatamente ${count} variações HUMANIZADAS, COMPLETAS e NATURAIS para rotação antiban.
 
 MENSAGEM BASE DO CLIENTE:
-"""${baseText}"""
+"""${textForAi}"""
 
 REGRAS OBRIGATÓRIAS DE REESCRITA:
 1. REESCRITA INTEGRAL: Reescreva a mensagem por completo usando sinônimos e estruturas de frases diferentes. PROIBIDO apenas colar cumprimentos na frente da mensagem base.
 2. MESMA INTENÇÃO E OBJETIVO: Todas as variações devem transmitir rigorosamente a mesma mensagem, pedido ou proposta da original.
 3. COMPRIMENTO SIMILAR: Mantenha tamanho e tom próximos ao original.
-4. PRESERVAÇÃO EXATA DE VARIÁVEIS:
+4. PRESERVAÇÃO EXATA DE VARIÁVEIS E TOKENS DE URL:
 ${varRules}
 5. UMA ÚNICA SAUDAÇÃO NATURAL: Proibido juntar cumprimentos como "Oi! Olá". Use uma única saudação ou vá direto ao assunto.
 6. SAUDAÇÕES ATEMPORAIS: Proibido "bom dia", "boa tarde", "boa noite". Use "Olá", "Oi", "Tudo bem?", ou inicie direto.
 7. SEM DUPLICATAS: Nenhuma variação pode ser idêntica à mensagem base nem a outra variação.
 8. Português do Brasil coloquial, educado e fluido.
 9. FLUXO CONTÍNUO DE FRASES: NUNCA quebre linhas no meio de uma mesma frase (ex.: quebras artificiais de ~60 caracteres). Mantenha cada frase em linha contínua. Use quebra dupla (\n\n) exclusivamente para separar parágrafos distintos.
+10. PRESERVAÇÃO INTEGRAL DE URLS: Se houver tokens de URL como {{__url_immutable_0__}}, mantenha-os intactos, sem espaços, sem maiúsculas e sem reescrever.
 
 Retorne EXCLUSIVAMENTE um objeto JSON no formato:
 {
@@ -569,6 +595,13 @@ Retorne EXCLUSIVAMENTE um objeto JSON no formato:
         v = v.replaceAll(singleBrace, k);
       }
     }
+    // Restaura as URLs exatamente como digitadas originalmente (sem nenhuma mutação ou re-encoding)
+    for (const [token, originalUrl] of urlTokens.entries()) {
+      v = v.replaceAll(token, originalUrl);
+    }
+    // Trava estrita de integridade: cada URL original deve estar presente integralmente na variação
+    if (rawUrls.some((u) => !v.includes(u))) continue;
+
     const lower = v.toLowerCase();
     if (seen.has(lower)) continue;
     if (!hasSameVariableCounts(baseText, v)) continue;
@@ -578,7 +611,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON no formato:
   }
 
   if (cleanVariants.length === 0) {
-    const error = new Error("A IA não gerou variações válidas que preservem o texto original e suas variáveis.");
+    const error = new Error("A IA não gerou variações válidas que preservem o texto original, URLs e suas variáveis.");
     error.statusCode = 502;
     error.code = "GROQ_NO_VALID_VARIANTS";
     throw error;

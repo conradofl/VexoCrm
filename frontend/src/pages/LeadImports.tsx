@@ -1843,6 +1843,10 @@ export default function LeadImports({
               status: batchTriggerType === "draft" ? "draft" : undefined,
               scheduledAt: (batchTriggerType === "scheduled") ? batchScheduledIso : null,
               evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+              dispatchOptions: {
+                ...dispatchOptions,
+                replyAgent,
+              },
               limitPerRun: size,
               offset: offset,
             }),
@@ -1879,6 +1883,10 @@ export default function LeadImports({
             status: effectiveTriggerType === "draft" ? "draft" : undefined,
             scheduledAt: effectiveTriggerType === "scheduled" ? scheduledIso : null,
             evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+            dispatchOptions: {
+              ...dispatchOptions,
+              replyAgent,
+            },
           }),
         });
         if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");

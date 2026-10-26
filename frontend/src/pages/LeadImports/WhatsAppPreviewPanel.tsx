@@ -100,10 +100,13 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
                       let displayHost = "suaempresa.com.br";
                       if (resolvedLink) {
                         try {
-                          const parsed = new URL(resolvedLink.startsWith("http") ? resolvedLink : `https://${resolvedLink}`);
-                          displayHost = parsed.hostname;
+                          const trimmed = resolvedLink.trim();
+                          const urlToParse = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+                          const parsed = new URL(urlToParse);
+                          displayHost = parsed.hostname || "suaempresa.com.br";
                         } catch {
-                          displayHost = resolvedLink;
+                          const clean = resolvedLink.trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
+                          displayHost = clean || resolvedLink.trim() || "suaempresa.com.br";
                         }
                       }
 
@@ -145,20 +148,20 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
                                   <div className="h-8 w-8 rounded-full bg-cyan-500/20 flex items-center justify-center">
                                     <Link2 className="h-4 w-4 text-cyan-300" />
                                   </div>
-                                  <span className="text-[10px] font-semibold tracking-wide text-cyan-200 uppercase">
+                                  <span className="text-[10px] font-semibold tracking-wide text-cyan-200">
                                     {displayHost}
                                   </span>
                                 </div>
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-bold text-slate-100 truncate">
-                                    {displayHost.replace(/^www\./, "").toUpperCase()} · Prévia Rich Open Graph
+                                    {displayHost.replace(/^www\./i, "").toUpperCase()} · Prévia Rich Open Graph
                                   </p>
                                   <p className="text-[10px] text-slate-400 line-clamp-2 leading-tight">
                                     O WhatsApp e a Evolution API carregarão automaticamente a imagem de capa (og:image) e o título oficial desta página.
                                   </p>
                                   <div className="flex items-center gap-1 text-[10px] text-cyan-400 font-mono truncate pt-0.5">
                                     <ExternalLink className="h-3 w-3 shrink-0" />
-                                    <span className="truncate">{resolvedLink || "https://..."}</span>
+                                    <span className="truncate">{resolvedLink.trim() || "https://..."}</span>
                                   </div>
                                 </div>
                               </div>

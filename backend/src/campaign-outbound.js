@@ -607,12 +607,12 @@ export function formatStepTextWithButtons(baseText, stepButtons, context = {}, p
   return text;
 }
 
-function buildTextPayload(phone, step, context = {}) {
-  let baseText = step.text || "";
+export function buildTextPayload(phone, step, context = {}) {
+  let baseText = applyMessagePlaceholders(step.text || "", context.lead, phone);
 
   // Se o passo for do tipo link (ou contiver linkUrl), compõe o texto apropriadamente
   if (step.type === "link" || step.linkUrl) {
-    const rawLinkUrl = step.linkUrl || step.url || "";
+    const rawLinkUrl = (step.linkUrl || step.url || "").trim();
     const resolvedLinkUrl = applyMessagePlaceholders(rawLinkUrl, context.lead, phone);
     if (resolvedLinkUrl) {
       if (!baseText) {
