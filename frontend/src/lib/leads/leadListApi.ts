@@ -17,6 +17,9 @@ export interface LeadListFilters {
   importId?: string;
   /** Inatividade em dias para filtro de leads parados (Pilar 1) */
   stalledDays?: number | string;
+  /** "all" | "never" | "received" | "recent" */
+  dispatched?: string;
+  dispatchedDays?: number | string;
 }
 
 export type LeadSortColumn = "contato" | "ultima_conversa" | "stalled" | "days_idle";
@@ -215,6 +218,13 @@ export function filterParams(filters: LeadListFilters): URLSearchParams {
   if (importId) p.set("importId", importId);
   if (filters.stalledDays !== undefined && filters.stalledDays !== null && String(filters.stalledDays).trim() !== "") {
     p.set("stalledDays", String(filters.stalledDays).trim());
+  }
+  const dispatched = (filters.dispatched || "").trim();
+  if (dispatched && dispatched !== "all") {
+    p.set("dispatched", dispatched);
+    if (filters.dispatchedDays !== undefined && filters.dispatchedDays !== null && String(filters.dispatchedDays).trim() !== "") {
+      p.set("dispatchedDays", String(filters.dispatchedDays).trim());
+    }
   }
   return p;
 }
