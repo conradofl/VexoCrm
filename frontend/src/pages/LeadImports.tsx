@@ -686,7 +686,7 @@ export default function LeadImports({
           {
             id: makeCampaignStepId(),
             text: s.text || "",
-            linkUrl: s.linkUrl || (s.type === "link" ? "https://{{scheduling_link}}" : ""),
+            linkUrl: s.linkUrl || (s.type === "link" ? "{{scheduling_link}}" : ""),
             triggerMode: s.triggerMode || (idx === 0 ? "immediate" : "after_reply"),
             enabled: true,
             buttons: s.buttons ? [...s.buttons] : [],
@@ -1382,7 +1382,7 @@ export default function LeadImports({
       const sentLeadIds = new Set<string>();
       for (const r of campaignRecipientsData.recipients) {
         if (r.status === "sent" || r.status === "claimed") {
-          const digits = String(r.phone || "").replace(/\D/g, "");
+          const digits = String(r.telefone || "").replace(/\D/g, "");
           if (digits) {
             sentPhones.add(digits);
             if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
@@ -1715,6 +1715,10 @@ export default function LeadImports({
           sequence: campaignSequence,
           dispatchOptions: {
             ...dispatchOptions,
+            handoffChipIds: (Array.isArray(dispatchOptions.handoffChipIds) ? dispatchOptions.handoffChipIds : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []))
+              .filter((id) => evolutionInstanceOptions.some((inst) => inst.id === id)),
+            handoffChipId: (Array.isArray(dispatchOptions.handoffChipIds) ? dispatchOptions.handoffChipIds : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []))
+              .filter((id) => evolutionInstanceOptions.some((inst) => inst.id === id))[0] || null,
             replyAgent,
             // "Só enviar os passos" silencia o chatbot: e o waitForReply que faz
             // o roteamento parar em skipped_disparo_only. Nas outras duas opcoes
