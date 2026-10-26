@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import { pgDatabasePool as pool } from "../services/database.js";
 import { QUEUE_NAME, getRedisConnection } from "./slackQueue.js";
+import { buildOnboardingNames } from "../services/onboardingNaming.js";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 
@@ -41,13 +42,8 @@ async function processSlackJob(job) {
     throw new Error("SLACK_BOT_TOKEN não configurado.");
   }
 
-  // Nome do canal: cli-{slug}
-  const slug = (clientName || "cliente-sem-nome")
-    .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "-")
-    .replace(/-+/g, "-")
-    .slice(0, 21);
+  // Nome padronizado único do canal: 02-cli-{slug}
+  const onboardingNames = buildOnboardingNames(clientName);
   // Helper para criar canal e retornar ID
   async function createSlackChannel(rawName) {
     const name = (rawName || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9-_]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
@@ -136,7 +132,9 @@ async function processSlackJob(job) {
     }
   }
 
-  const channelName = slackChannelName || `gd-${slug}`;
+  const channelName = (slackChannelName && !slackChannelName.startsWith("gd-"))
+    ? slackChannelName
+    : onboardingNames.slackChannelName;
   const channelId = await createSlackChannel(channelName);
   await joinSlackChannel(channelId);
   await inviteToChannel(channelId, slackMembers);

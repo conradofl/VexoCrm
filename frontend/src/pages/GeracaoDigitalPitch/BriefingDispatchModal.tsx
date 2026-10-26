@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import type { BriefingField } from "@/lib/geracaoDigital/types";
 import type { ClientContractInfo } from "./BriefingBlockContract";
+import { buildOnboardingNames } from "@/lib/onboardingNaming";
 
 interface BriefingDispatchModalProps {
   isOpen: boolean;
@@ -64,17 +65,9 @@ export function BriefingDispatchModal({
   // Atualiza nomes padrão a partir do clientInfo
   useEffect(() => {
     const nome = clientInfo.razaoSocial || "cliente";
-    const slug = nome
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]/g, "-")
-      .replace(/-+/g, "-")
-      .slice(0, 21);
-    setSlackChannelName(`gd-${slug}`);
-
-    const firstName = nome.split(" ")[0];
-    setWhatsappGroupName(`GD & ${firstName}`);
+    const names = buildOnboardingNames(nome);
+    setSlackChannelName(names.slackChannelName);
+    setWhatsappGroupName(names.whatsappGroupName);
     setProspectEmail(clientInfo.email || "");
   }, [clientInfo.razaoSocial, clientInfo.email]);
 

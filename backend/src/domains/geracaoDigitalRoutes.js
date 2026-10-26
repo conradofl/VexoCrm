@@ -14,6 +14,7 @@ import {
 import { isManagerOrAdmin } from "../access/claims.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { calculateImplementationReadiness } from "./geracaoDigital/briefingReadiness.js";
+import { buildOnboardingNames, sanitizeWhatsAppGroupSubject } from "../services/onboardingNaming.js";
 
 // Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
 // grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
@@ -463,10 +464,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       };
       const jid = whatsappGroupId ? whatsappGroupId : (normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net");
 
-      const slug = (clientName || "cliente-sem-nome")
-        .toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").slice(0, 21);
+      const onboardingNames = buildOnboardingNames(clientName);
 
       async function createSlackChannel(rawName) {
         const name = (rawName || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9-_]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
@@ -564,7 +562,9 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
       }
 
-      const channelName = slackChannelName || `gd-${slug}`;
+      const channelName = (slackChannelName && !slackChannelName.startsWith("gd-"))
+        ? slackChannelName
+        : onboardingNames.slackChannelName;
       const channelId = await createSlackChannel(channelName);
       await joinSlackChannel(channelId);
       await inviteToChannel(channelId, slackMembers);
@@ -827,7 +827,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         }
 
         const payload = {
-          subject: subject.substring(0, 25), // WhatsApp group name limit
+          subject: sanitizeWhatsAppGroupSubject(subject),
           participants: uniqueParticipants
         };
 
@@ -865,7 +865,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
 
       // Create WhatsApp Group
       if (createWhatsappGroup) {
-         const subject = whatsappGroupName || `GD & ${prospectName}`;
+         const onboardingNames = buildOnboardingNames(prospectName);
+         const subject = (whatsappGroupName && !whatsappGroupName.startsWith("GD &"))
+           ? sanitizeWhatsAppGroupSubject(whatsappGroupName)
+           : onboardingNames.whatsappGroupName;
          const groupRes = await createEvolutionGroup(subject, [whatsappGroupMembers, sectorsWhatsapp].filter(Boolean).join(","));
          whatsappGroupStatus = groupRes.status;
          whatsappGroupError = groupRes.error || null;

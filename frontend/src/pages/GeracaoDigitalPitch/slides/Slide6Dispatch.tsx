@@ -12,6 +12,7 @@ import { DEFAULT_BRIEFING_FIELDS } from "@/lib/geracaoDigital/defaults";
 import { playChime } from "@/lib/geracaoDigital/helpers";
 import type { User } from "@/lib/firebase";
 import type { BriefingField, CustomTheme } from "@/lib/geracaoDigital/types";
+import { buildOnboardingNames } from "@/lib/onboardingNaming";
 
 // Extraído de src/pages/GeracaoDigitalPitch.tsx (Onda 4 Run F5) — Slide 6 (revisão e disparo do handoff), movimento puro.
 interface Slide6DispatchProps {
@@ -80,18 +81,9 @@ export function Slide6Dispatch({
   const [whatsappGroupMembers, setWhatsappGroupMembers] = useState("");
 
   useEffect(() => {
-    // Generate default slug for channel
-    const slug = (theme.prospectName || "cliente")
-      .toLowerCase()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]/g, "-")
-      .replace(/-+/g, "-")
-      .slice(0, 21);
-    setSlackChannelName(`gd-${slug}`);
-    
-    // Default WhatsApp Group Name
-    const firstName = (theme.prospectName || "Cliente").split(" ")[0];
-    setWhatsappGroupName(`GD & ${firstName}`);
+    const names = buildOnboardingNames(theme.prospectName || "Cliente");
+    setSlackChannelName(names.slackChannelName);
+    setWhatsappGroupName(names.whatsappGroupName);
   }, [theme.prospectName]);
 
   const [isLoadingSlack, setIsLoadingSlack] = useState(true);
