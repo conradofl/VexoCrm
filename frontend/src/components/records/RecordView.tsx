@@ -52,10 +52,18 @@ interface RecordViewProps<T> {
   onExpandedChange?: (id: string | null) => void;
 }
 
-/** Valor de um campo, marcado com data-field para conferir que cartão e linha mostram os mesmos. */
-export function FieldValue<T>({ field, item }: { field: RecordField<T>; item: T }) {
+/**
+ * Valor de um campo, marcado com data-field para conferir que cartão e linha mostram os mesmos.
+ * Bloco, não inline: overflow (e portanto truncate/line-clamp) não vale em caixa inline — nas colunas curtas o corte
+ * funcionava por acaso. `twoLines` é o nome da linha: os nomes de campanha carregam a tag de importação inteira e uma
+ * linha só não diz nada, então quebra em duas e corta.
+ */
+export function FieldValue<T>({ field, item, twoLines = false }: { field: RecordField<T>; item: T; twoLines?: boolean }) {
   return (
-    <span data-field={field.key} className={cn("min-w-0 truncate", field.className)}>
+    <span
+      data-field={field.key}
+      className={cn("block min-w-0", twoLines ? "line-clamp-2 break-words" : "truncate", field.className)}
+    >
       {field.render(item)}
     </span>
   );
@@ -142,8 +150,8 @@ export function RecordView<T>({
               <div className="flex items-center gap-2 p-2.5">
                 {compact ? (
                   <div className="min-w-0 flex-1 space-y-0.5 text-xs">
-                    <div className="font-semibold text-foreground">
-                      <FieldValue field={nameField} item={item} />
+                    <div className="min-w-0 font-semibold text-foreground" title={name}>
+                      <FieldValue field={nameField} item={item} twoLines />
                     </div>
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
                       {otherFields.map((f) => (
@@ -153,8 +161,10 @@ export function RecordView<T>({
                   </div>
                 ) : (
                   <div className="grid min-w-0 flex-1 items-center gap-3 text-xs" style={{ gridTemplateColumns: columns }}>
-                    <div className="font-semibold text-foreground">
-                      <FieldValue field={nameField} item={item} />
+                    {/* min-w-0: item de grid tem min-width:auto e se recusava a encolher abaixo do nome — a coluna
+                        estourava por cima da do lado (Estado, na Fila de Envios) e o corte nunca entrava. */}
+                    <div data-testid={`${testIdPrefix}-row-name-${id}`} className="min-w-0 font-semibold text-foreground" title={name}>
+                      <FieldValue field={nameField} item={item} twoLines />
                     </div>
                     {otherFields.map((f) => (
                       <FieldValue key={f.key} field={f} item={item} />
