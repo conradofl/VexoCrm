@@ -350,7 +350,7 @@ describe("POST /api/campaigns/:campaignId/dispatches/bulk-action", () => {
 
     const updateCall = pool.calls.find((c) => c.sql.includes("UPDATE public.campaign_dispatches"));
     expect(updateCall.sql).toContain("SET status = 'scheduled'");
-    expect(updateCall.params[2]).toEqual(["paused"]);
+    expect(updateCall.params[2]).toEqual(["paused", "interrupted", "failed"]);
   });
 
   it("cancelar nunca inclui lotes 'running' no alvo — o que está em voo termina sozinho", async () => {
@@ -419,7 +419,7 @@ describe("POST /api/campaigns/:campaignId/dispatches/bulk-action", () => {
 
       const updateCall = pool.calls.find((c) => c.sql.includes("UPDATE public.campaign_dispatches"));
       expect(updateCall.sql).toContain("SET status = 'scheduled', scheduled_at = $4");
-      expect(updateCall.params[2]).toEqual(["paused"]); // só os pausados são alvo
+      expect(updateCall.params[2]).toEqual(["paused", "interrupted", "failed"]);
       expect(updateCall.params[3]).toBe(scheduledAt);
     });
 

@@ -2561,7 +2561,7 @@ export function registerCampaignsRoutes(app, deps) {
       // 1. Prioriza lotes com status = 'scheduled' (evita Head-of-Line Blocking causado por lotes paused antigos)
       const { data: scheduledDispatches, error: scheduledErr } = await supabase
         .from("campaign_dispatches")
-        .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset, error_message")
+        .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset, target_count, error_message")
         .eq("status", "scheduled")
         .lte("scheduled_at", now)
         .order("scheduled_at", { ascending: true })
@@ -2576,7 +2576,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (remainingLimit > 0) {
         let pausedQuery = supabase
           .from("campaign_dispatches")
-          .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset, error_message")
+          .select("id, campaign_id, client_id, name, steps, trigger_type, scheduled_at, status, evolution_instance_id, limit_per_run, offset, target_count, error_message")
           .eq("status", "paused")
           .lte("scheduled_at", now)
           .order("scheduled_at", { ascending: true });
@@ -3117,6 +3117,36 @@ export function registerCampaignsRoutes(app, deps) {
   }
   // ────────────────────────────────────────────────────────────────────────────
 
+  async function getDispatchRunCounts(pool, dispatchId) {
+    if (!pool) return null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const countsRes = await pool.query(
+          `SELECT
+             COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
+             COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
+             COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
+             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped
+           FROM public.campaign_dispatch_runs
+           WHERE dispatch_id = $1`,
+          [dispatchId]
+        );
+        if (countsRes?.rows?.[0]) {
+          return {
+            sent: Number(countsRes.rows[0].sent || 0),
+            failed: Number(countsRes.rows[0].failed || 0),
+            invalid: Number(countsRes.rows[0].invalid || 0),
+            skipped: Number(countsRes.rows[0].skipped || 0),
+          };
+        }
+      } catch (err) {
+        console.error(`[campaign-dispatch] tentativa ${attempt + 1} de contagem falhou para lote ${dispatchId}:`, err?.message || err);
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    return null;
+  }
+
   async function runCampaignDispatch({ dispatch, campaign, supabase: db, ignoreSendWindow = false }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
@@ -3260,26 +3290,18 @@ export function registerCampaignsRoutes(app, deps) {
     }
 
     if (cycleLeads.length === 0) {
-      let totalSent = 0;
-      let totalFailed = 0;
-      let totalInvalid = 0;
-      let totalSkipped = 0;
-      if (pgDatabasePool) {
-        const countsRes = await pgDatabasePool.query(
-          `SELECT
-             COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
-             COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
-             COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
-             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped
-           FROM public.campaign_dispatch_runs
-           WHERE dispatch_id = $1`,
-          [dispatchId]
-        ).catch(() => ({ rows: [] }));
-        totalSent = Number(countsRes?.rows?.[0]?.sent || 0);
-        totalFailed = Number(countsRes?.rows?.[0]?.failed || 0);
-        totalInvalid = Number(countsRes?.rows?.[0]?.invalid || 0);
-        totalSkipped = Number(countsRes?.rows?.[0]?.skipped || 0);
+      const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
+      if (!counts) {
+        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Status do lote NÃO será alterado para evitar fabricação de dados.`);
+        // Comportamento real: o lote foi reivindicado como 'running' e fica 'running' até o próximo boot, quando
+        // recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe. Até lá a trava de uma ocorrência rodando por
+        // campanha segue ocupada e a tela mostra "em execução".
+        return;
       }
+      const totalSent = counts.sent;
+      const totalFailed = counts.failed;
+      const totalInvalid = counts.invalid;
+      const totalSkipped = counts.skipped;
       const totalProcessed = totalSent + totalFailed + totalInvalid + totalSkipped;
       const targetCount = Number(dispatch.target_count || 0) || totalProcessed;
 
@@ -3380,26 +3402,18 @@ export function registerCampaignsRoutes(app, deps) {
     }
 
     if (validLeads.length === 0) {
-      let totalSent = 0;
-      let totalFailed = 0;
-      let totalInvalid = 0;
-      let totalSkipped = 0;
-      if (pgDatabasePool) {
-        const countsRes = await pgDatabasePool.query(
-          `SELECT
-             COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
-             COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
-             COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
-             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped
-           FROM public.campaign_dispatch_runs
-           WHERE dispatch_id = $1`,
-          [dispatchId]
-        ).catch(() => ({ rows: [] }));
-        totalSent = Number(countsRes?.rows?.[0]?.sent || 0);
-        totalFailed = Number(countsRes?.rows?.[0]?.failed || 0);
-        totalInvalid = Number(countsRes?.rows?.[0]?.invalid || 0);
-        totalSkipped = Number(countsRes?.rows?.[0]?.skipped || 0);
+      const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
+      if (!counts) {
+        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Status do lote NÃO será alterado para evitar fabricação de dados.`);
+        // Comportamento real: o lote foi reivindicado como 'running' e fica 'running' até o próximo boot, quando
+        // recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe. Até lá a trava de uma ocorrência rodando por
+        // campanha segue ocupada e a tela mostra "em execução".
+        return;
       }
+      const totalSent = counts.sent;
+      const totalFailed = counts.failed;
+      const totalInvalid = counts.invalid;
+      const totalSkipped = counts.skipped;
       const totalProcessed = totalSent + totalFailed + totalInvalid + totalSkipped;
       const targetCount = Number(dispatch.target_count || 0) || totalProcessed;
 
@@ -4106,24 +4120,21 @@ export function registerCampaignsRoutes(app, deps) {
     let totalFailed = failedCount;
     let totalInvalid = 0;
     let totalSkipped = 0;
-    if (pgDatabasePool) {
-      const countsRes = await pgDatabasePool.query(
-        `SELECT
-           COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
-           COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
-           COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
-           COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped
-         FROM public.campaign_dispatch_runs
-         WHERE dispatch_id = $1`,
-        [dispatchId]
-      ).catch(() => ({ rows: [] }));
-      totalSent = Number(countsRes?.rows?.[0]?.sent ?? sentCount);
-      totalFailed = Number(countsRes?.rows?.[0]?.failed ?? failedCount);
-      totalInvalid = Number(countsRes?.rows?.[0]?.invalid ?? 0);
-      totalSkipped = Number(countsRes?.rows?.[0]?.skipped ?? 0);
+    const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
+    if (counts) {
+      totalSent = Number(counts.sent ?? sentCount);
+      totalFailed = Number(counts.failed ?? failedCount);
+      totalInvalid = Number(counts.invalid ?? 0);
+      totalSkipped = Number(counts.skipped ?? 0);
+    } else {
+      console.error(`[campaign-dispatch] contagem pós-envio falhou para lote ${dispatchId}. Status do lote NÃO será marcado como interrupted.`);
     }
     const totalProcessed = totalSent + totalFailed + totalInvalid + totalSkipped;
-    const targetCount = Number(dispatch.target_count || 0) || (leads.length + totalProcessed);
+    // Mesma regra dos outros dois fechamentos (lote sem fila): sem alvo gravado, o alvo é o que foi processado.
+    // Somar leads.length (o que acabou de sair) ao processado contava esses leads duas vezes: o agendador e o
+    // run-pending liam o lote sem target_count e todo lote que enviava fechava "Interrompido: N pendentes" com N = o
+    // que enviou (18 de 19 lotes 'interrupted' em produção estavam completos, 27/10/2026).
+    const targetCount = Number(dispatch.target_count || 0) || totalProcessed;
 
     if (quotaGate.unidentifiedMessages > 0) {
       console.warn("[campaign-quota] mensagens enviadas sem cota (chip não identificado):", {
@@ -4177,8 +4188,9 @@ export function registerCampaignsRoutes(app, deps) {
       return;
     }
 
-    // REGRA RÍGIDA: Lote só pode ser 'done' quando TODO lead tiver um desfecho registrado
-    if (targetCount > 0 && totalProcessed < targetCount) {
+    // REGRA RÍGIDA: Lote só pode ser 'done' quando TODO lead tiver um desfecho registrado.
+    // Mas se a contagem do banco falhou, NUNCA marca 'interrupted' por falta de dados.
+    if (counts && targetCount > 0 && totalProcessed < targetCount) {
       const pendingCount = targetCount - totalProcessed;
       const finalMsg = `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`;
       await db.from("campaign_dispatches").update({
@@ -4186,6 +4198,17 @@ export function registerCampaignsRoutes(app, deps) {
         sent_count: totalSent,
         failed_count: totalFailed,
         error_message: finalMsg,
+        updated_at: new Date().toISOString(),
+      }).eq("id", dispatchId);
+      return;
+    }
+
+    // Contagem falhou nas duas tentativas: grava só os números deste envio e NÃO decide o status. Comportamento real:
+    // o lote fica 'running' até o próximo boot, quando recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe.
+    if (!counts) {
+      await db.from("campaign_dispatches").update({
+        sent_count: totalSent,
+        failed_count: totalFailed,
         updated_at: new Date().toISOString(),
       }).eq("id", dispatchId);
       return;
@@ -4309,7 +4332,7 @@ export function registerCampaignsRoutes(app, deps) {
   // cancelar nunca inclui 'running' — o que está em voo termina sozinho, "o
   // que falta" é o que ainda não começou ou ficou parado.
   const PAUSE_TARGET_STATUSES = ["running", "draft", "scheduled", "failed", "interrupted"];
-  const RESUME_TARGET_STATUSES = ["paused"];
+  const RESUME_TARGET_STATUSES = ["paused", "interrupted", "failed"];
   const CANCEL_TARGET_STATUSES = ["draft", "scheduled", "paused", "failed", "interrupted"];
 
   // GET /api/campaigns/dispatch-summary — "uma linha por campanha, lote vira
@@ -4618,6 +4641,15 @@ export function registerCampaignsRoutes(app, deps) {
 
       const { rows } = await pgDatabasePool.query(query, params);
       const affectedLeads = rows.reduce((sum, r) => sum + (Number(r.target_count) || 0), 0);
+
+      if (action === "resume" && rows.length === 0) {
+        return sendError(
+          res,
+          400,
+          "NO_DISPATCHES_RESUMED",
+          "Nenhum lote elegível para retomada (pausado, interrompido ou com falha) foi encontrado."
+        );
+      }
 
       res.json({
         success: true,
@@ -5377,7 +5409,7 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       const { data: dispatch, error: dispatchErr } = await supabase
         .from("campaign_dispatches")
-        .select("id, client_id, campaign_id, name, status, limit_per_run, offset, steps, evolution_instance_id")
+        .select("id, client_id, campaign_id, name, status, limit_per_run, offset, target_count, steps, evolution_instance_id")
         .eq("id", dispatchId)
         .maybeSingle();
 

@@ -12,9 +12,9 @@ describe("Recuperação de Lotes Órfãos no Startup com Retomada Automática", 
       query: vi.fn(async (sql, params = []) => {
         const text = sql.trim();
 
-        // 1. SELECT running dispatches
-        if (text.includes("FROM public.campaign_dispatches") && text.includes("WHERE status = 'running'")) {
-          return { rows: dispatchRows.filter((d) => d.status === "running") };
+        // 1. SELECT running or interrupted dispatches
+        if (text.includes("FROM public.campaign_dispatches") && (text.includes("WHERE status = 'running'") || text.includes("WHERE status IN ('running', 'interrupted')"))) {
+          return { rows: dispatchRows.filter((d) => d.status === "running" || d.status === "interrupted") };
         }
 
         // 2. COUNT sent leads
@@ -56,7 +56,7 @@ describe("Recuperação de Lotes Órfãos no Startup com Retomada Automática", 
           const failedCount = params[1];
           const errorMsg = params[2];
           const dispatchId = params[3];
-          const disp = dispatchRows.find((d) => d.id === dispatchId && d.status === "running");
+          const disp = dispatchRows.find((d) => d.id === dispatchId && (d.status === "running" || d.status === "interrupted"));
           if (disp) {
             disp.status = "paused";
             disp.sent_count = sentCount;
@@ -135,6 +135,33 @@ describe("Recuperação de Lotes Órfãos no Startup com Retomada Automática", 
     const lead2Run = mockPool.runRows.find((r) => r.id === "run-2");
     expect(lead2Run.status).toBe("skipped");
     expect(lead2Run.error_message).toContain("envio não confirmado");
+  });
+
+  it("lote 'interrupted' no boot também vira 'paused' para retomada manual segura", async () => {
+    const mockPool = createMockPool({
+      dispatches: [
+        {
+          id: "disp-interrupted-1",
+          name: "Lote Interrompido Anteriormente",
+          campaign_id: "camp-1",
+          client_id: "geracao-digital",
+          status: "interrupted",
+          triggered_at: "2026-08-23T18:15:00.000Z",
+        },
+      ],
+      runs: [],
+    });
+
+    const result = await recoverOrphanDispatches(mockPool);
+
+    expect(result.recovered).toBe(1);
+    expect(result.items[0]).toMatchObject({
+      dispatchId: "disp-interrupted-1",
+      dispatchName: "Lote Interrompido Anteriormente",
+      leadsSent: 0,
+      leadsUnconfirmed: 0,
+    });
+    expect(mockPool.dispatchRows[0].status).toBe("paused");
   });
 
   it("lotes em 'done', 'failed', 'draft' ou 'paused' permanecem 100% intocados", async () => {
