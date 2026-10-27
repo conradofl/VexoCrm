@@ -386,7 +386,7 @@ export function SchedulingStep({
                   ⚠️ Selecione ao menos 1 chip
                 </span>
               ) : (
-                <span className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                <span data-testid="dispatch-chip-count" className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                   {selectedDispatchChipIds.length === 1 ? "1 chip selecionado" : `${selectedDispatchChipIds.length} chips em rodízio (Round-Robin)`}
                 </span>
               )}
@@ -700,7 +700,7 @@ export function SchedulingStep({
                       ⚠️ Selecione ao menos 1 chip abaixo
                     </span>
                   ) : (
-                    <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span data-testid="handoff-chip-count" className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
                       {selectedHandoffChipIds.length} {selectedHandoffChipIds.length === 1 ? "chip selecionado" : "chips em rodízio"}
                     </span>
                   )}

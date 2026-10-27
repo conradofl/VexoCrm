@@ -110,7 +110,8 @@ describe("SPEC 1 — Filtragem e Alerta de Chips de Handoff Mortos / Excluídos"
     expect(warningBanner.textContent).toContain("1 chip excluído foi removido da seleção");
 
     // 2. Apenas o chip vivo (19f36f2c...) deve constar selecionado (1 chip selecionado)
-    expect(screen.getByText("1 chip selecionado")).toBeInTheDocument();
+    // (o seletor de chips de envio da SPEC 10 mostra um contador com o mesmo texto: lê o da troca de chip)
+    expect(screen.getByTestId("handoff-chip-count").textContent).toBe("1 chip selecionado");
 
     // 3. O estado sincronizado deve ter expurgado o deadChipUuid
     await waitFor(() => {

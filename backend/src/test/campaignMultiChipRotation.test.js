@@ -9,7 +9,6 @@
 //    restaurado -> 3 chips, cota 2 cada, 9 leads -> 6 enviados (2 por chip) e 3 barrados com motivo registrado
 //    medido em evolution_instance_daily_usage real via PGlite.
 
-import { readFileSync } from "fs";
 import { resolve } from "path";
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { registerCampaignsRoutes } from "../domains/campaigns/routes.js";
@@ -198,6 +197,8 @@ async function montarMundoMultiChip({
   limitB = null,
   limitC = null,
   steps = [{ id: "step-1", type: "text", text: "Mensagem para {{nome}}", order: 1, enabled: true, delayAfterSeconds: 0 }],
+  quotaIndisponivel = false,
+  resolveAuthorizedClientId = (_req, _res, id) => id || TENANT,
 } = {}) {
   const instances = montarInstancias({ limitA, limitB, limitC });
   const estado = { claimed: [], sent: [], sentLeadIds: new Set() };
@@ -252,6 +253,7 @@ async function montarMundoMultiChip({
     query: vi.fn(async (sql, params) => {
       const t = String(sql);
       if (t.includes("evolution_instance_daily_usage")) {
+        if (quotaIndisponivel) throw new Error("connection terminated unexpectedly");
         return qdb.query(sql, params);
       }
       if (t.includes("INSERT INTO public.campaign_dispatch_runs")) {
@@ -313,7 +315,7 @@ async function montarMundoMultiChip({
     requireCampaignDispatchAccess: () => (_req, _res, next) => next(),
     requireFirebaseAuth: (_req, _res, next) => next(),
     requireInternalPageAccess: () => (_req, _res, next) => next(),
-    resolveAuthorizedClientId: (_req, _res, id) => id || TENANT,
+    resolveAuthorizedClientId,
     resolveCampaignDispatchSettings: async () => ({
       webhookUrl: "http://evo.test/message/sendText/chip-antigo",
       webhookToken: "token-antigo",
@@ -356,7 +358,7 @@ async function montarMundoMultiChip({
   };
 }
 
-describe("SPEC 10 — Rodízio Multi-Chip de Disparo e Provas por Mutação", () => {
+describe("SPEC 10 — Rodízio Multi-Chip de Disparo", () => {
   describe("Trava de validação na criação e atualização do lote (Item 4 / Ajustes a e b)", () => {
     it("POST /api/campaigns/:id/dispatches: recusa lote com chip inexistente devolvendo 422 DISPATCH_CHIP_NOT_FOUND", async () => {
       const qdb = await criarBancoReal();
@@ -475,8 +477,50 @@ describe("SPEC 10 — Rodízio Multi-Chip de Disparo e Provas por Mutação", ()
     });
   });
 
-  describe("Mutação 1 — Prova de presença do chipProvider em routes.js (Regra d1)", () => {
-    it("COM chipProvider em routes.js: 3 chips e 9 leads -> distribuição uniforme 3-3-3 (VERDE)", async () => {
+    it("PATCH /api/campaigns/dispatches/:dispatchId: sem acesso ao tenant responde só o 403 e não segue (nem valida chip, nem grava)", async () => {
+      const qdb = await criarBancoReal();
+      const negar = vi.fn((_req, res) => {
+        res.statusCode = 403;
+        res.body = { error: { code: "NO_CLIENT_ACCESS" } };
+        return null;
+      });
+      const mundo = await montarMundoMultiChip({ qdb, resolveAuthorizedClientId: negar });
+      mundo.dispatch.status = "draft";
+      const tabelasTocadas = [];
+      const origFrom = mundo.supabase.from;
+      mundo.supabase.from = (table) => {
+        tabelasTocadas.push(table);
+        return origFrom(table);
+      };
+      const handler = mundo.routesMap["patch /api/campaigns/dispatches/:dispatchId"];
+      const res = { statusCode: 200, status(st) { this.statusCode = st; return this; }, json(d) { this.body = d; return this; } };
+
+      await handler({ params: { dispatchId: mundo.dispatch.id }, body: { name: "Outro tenant", dispatch_options: { dispatchChipIds: [CHIP_A] } } }, res);
+
+      expect(negar).toHaveBeenCalledTimes(1);
+      expect(res.statusCode).toBe(403);
+      expect(mundo.deps.sendError).not.toHaveBeenCalled();
+      expect(tabelasTocadas).not.toContain("lead_client_evolution_instances");
+      expect(mundo.dispatch.name).toBe("Lote Multi-Chip");
+    });
+
+  describe("Contador de cota fora do ar no rodízio (Ajuste d)", () => {
+    it("loga UMA vez por lote, não uma por lead, e o envio segue", async () => {
+      const qdb = await criarBancoReal();
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mundo = await montarMundoMultiChip({ qdb, nLeads: 9, quotaIndisponivel: true });
+
+      await mundo.routes.runCampaignDispatch({ dispatch: mundo.dispatch, campaign: mundo.campaign, supabase: mundo.supabase });
+
+      const avisos = errorSpy.mock.calls.filter((c) => String(c[0]).includes("[campaign-quota] cota indisponível no rodízio"));
+      expect(avisos).toHaveLength(1);
+      const calls = globalThis.fetch.mock.calls.filter((c) => String(c[0]).includes("/message/sendText/"));
+      expect(calls).toHaveLength(9);
+    });
+  });
+
+  describe("Rodízio ligado: chipProvider chega ao envio (Regra d1)", () => {
+    it("3 chips e 9 leads -> distribuição uniforme 3-3-3", async () => {
       const qdb = await criarBancoReal();
       const mundo = await montarMundoMultiChip({ qdb, nLeads: 9 });
 
@@ -518,20 +562,9 @@ describe("SPEC 10 — Rodízio Multi-Chip de Disparo e Provas por Mutação", ()
       expect(mundo.dispatch.status).toBe("done");
     });
 
-    it("PROVA DE MUTAÇÃO 1: sem chipProvider na chamada, 9 leads saem todos pelo mesmo chip de fallback (VERMELHA / 9-0-0)", () => {
-      const routesSrc = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
-
-      // 1. Prova estática: a chamada real da fila em routes.js TEM chipProvider
-      expect(routesSrc).toMatch(/\n\s+chipProvider,\n\s+quotaGate,/);
-
-      // 2. Simulação da mutação: se chipProvider fosse removido da chamada de dispatchCampaignSequence em routes.js
-      const semChipProvider = routesSrc.replace(/\n\s+chipProvider,\n(\s+quotaGate,)/, "\n$1");
-      expect(semChipProvider).not.toEqual(routesSrc);
-      expect(semChipProvider).not.toMatch(/\n\s+chipProvider,\n\s+quotaGate,/);
-    });
   });
 
-  describe("Mutação 2 — Prova de respeito à cota no rodízio (Regra d2)", () => {
+  describe("Cota respeitada no rodízio (Regra d2)", () => {
     it("CASO OBRIGATÓRIO (Regra d2): 3 chips, cota 2 cada, 9 leads -> 6 enviados (2 por chip em evolution_instance_daily_usage real) e 3 barrados", async () => {
       const qdb = await criarBancoReal();
       const mundo = await montarMundoMultiChip({
@@ -566,17 +599,6 @@ describe("SPEC 10 — Rodízio Multi-Chip de Disparo e Provas por Mutação", ()
       expect(mundo.dispatch.status).toBe("paused");
       expect(mundo.dispatch.error_message).toContain("cota diária do chip atingida (2/2)");
       expect(mundo.estado.sent).toHaveLength(6);
-    });
-
-    it("PROVA DE MUTAÇÃO 2: apagar o 'if (reserved > limit)' em routes.js deixaria o chip estourado continuar enviando", () => {
-      const routesSrc = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
-
-      // Prova estática: routes.js contém a checagem que remove o chip estourado da rotação
-      expect(routesSrc).toMatch(/if\s*\(\s*reserved\s*>\s*limit\s*\)[\s\S]*?lastExhausted\s*=\s*\{/);
-
-      // Simulação da mutação: se o teste de cota for apagado, a sentinela quebra
-      const semChecagemCota = routesSrc.replace(/if\s*\(\s*reserved\s*>\s*limit\s*\)\s*\{[^}]*\}/, "");
-      expect(semChecagemCota).not.toEqual(routesSrc);
     });
 
     it("Chip que estoura cota sai do rodízio no meio do lote sem derrubar os outros chips", async () => {

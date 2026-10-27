@@ -6128,6 +6128,7 @@ export function registerCampaignsRoutes(app, deps) {
         .single();
       if (existingErr || !existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
       const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
+      if (!authorizedClientId) return;
       const isPauseRequest = existing.status === "running" && patch.status === "paused" && Object.keys(patch).length === 2;
       if (existing.status === "running" && !isPauseRequest) {
         return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
