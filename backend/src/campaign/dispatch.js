@@ -168,6 +168,16 @@ export function resolveCampaignImportSelectionStrict(campaign) {
   return "__all__";
 }
 
+// SPEC 17: o limite de um lote é o do PRÓPRIO lote. Lote sem fatia (limit_per_run nulo) cobre o público inteiro.
+// O limit_per_run da CAMPANHA deixou de ser fallback: era o "50" padrão da tela, que ninguém escolhe e que cortava
+// campanha sem lotes em silêncio (120 leads, saíam 50). Ocorrência recorrente continua sem limite. Lotes que já
+// existiam no deploy ganham o limite efetivo de antes por scripts/backfillDispatchLimit.js, rodado ANTES do deploy.
+export function resolveDispatchLeadLimit(dispatch, { isOccurrence = false } = {}) {
+  if (isOccurrence) return null;
+  const limit = Number(dispatch?.limit_per_run);
+  return Number.isInteger(limit) && limit > 0 ? limit : null;
+}
+
 export async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null }) {
   if (!supabase) return [];
 

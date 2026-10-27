@@ -46,6 +46,7 @@ import {
   isLeadBlockedByActiveCycleProgress,
   resolveCampaignImportSelection,
   resolveCampaignImportSelectionStrict,
+  resolveDispatchLeadLimit,
 } from "../../campaign/dispatch.js";
 import {
   generateCampaignCopySuggestion,
@@ -3222,6 +3223,7 @@ export function registerCampaignsRoutes(app, deps) {
     // (claimed/sent/failed) → segunda execução do mesmo disparo traz 0 leads.
     // Ocorrencia de campanha recorrente: publico inteiro (sem limit_per_run, nem o da campanha) e outra variacao do
     // texto para o mesmo lead a cada ocorrencia. A cota do chip e o freio.
+    // Lote sem fatia (limit_per_run nulo) tambem cobre o publico inteiro: ver resolveDispatchLeadLimit.
     const occurrence = pgDatabasePool
       ? await readOccurrenceInfo(pgDatabasePool, dispatchId)
       : { isOccurrence: false, variantOffset: null };
@@ -3229,7 +3231,7 @@ export function registerCampaignsRoutes(app, deps) {
     const leads = await buildDispatchLeads({
       clientId,
       importId: resolveCampaignImportSelection(campaign),
-      limit: occurrence.isOccurrence ? null : dispatch.limit_per_run ?? campaign.limit_per_run,
+      limit: resolveDispatchLeadLimit(dispatch, { isOccurrence: occurrence.isOccurrence }),
       offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
       segmentation: validation.analyticsMeta.segmentation || null,
       excludeDispatchId: dispatchId,
@@ -5438,7 +5440,7 @@ export function registerCampaignsRoutes(app, deps) {
       const pendingLeads = await buildDispatchLeads({
         clientId: authorizedClientId,
         importId: resolveCampaignImportSelection(campaign),
-        limit: occurrence.isOccurrence ? null : dispatch.limit_per_run ?? campaign.limit_per_run,
+        limit: resolveDispatchLeadLimit(dispatch, { isOccurrence: occurrence.isOccurrence }),
         offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
         excludeDispatchId: dispatchId,
       });
@@ -5922,7 +5924,9 @@ export function registerCampaignsRoutes(app, deps) {
         return sendError(res, 400, "INVALID_DISPATCH_TEMPLATE", validation.message);
       }
 
-      const limitPerRun = body.limitPerRun != null ? Number(body.limitPerRun) : null;
+      // Limite opcional do lote (SPEC 17): inteiro positivo ou nulo (= publico inteiro). Nunca NaN nem 0.
+      const rawLimitPerRun = body.limitPerRun != null ? Number(body.limitPerRun) : null;
+      const limitPerRun = Number.isInteger(rawLimitPerRun) && rawLimitPerRun > 0 ? rawLimitPerRun : null;
       const offset = body.offset != null ? Number(body.offset) : null;
 
       let targetCount = 0;
