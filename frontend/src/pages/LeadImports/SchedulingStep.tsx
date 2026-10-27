@@ -218,36 +218,75 @@ export function SchedulingStep({
   const sendWindow = (client?.n8n_settings as { send_window?: any } | undefined)?.send_window;
   const sendWindowNotice = useMemo(() => formatSendWindowNotice(sendWindow), [sendWindow]);
 
-  const selectedInst =
-    evolutionInstanceOptions.find((i) => i.id === dispatchOptions.evolutionInstanceId) ||
-    evolutionInstanceOptions.find((i) => i.isDefault) ||
-    evolutionInstanceOptions[0] ||
-    null;
+  const validEvolutionInstanceIds = useMemo(() => {
+    return new Set(evolutionInstanceOptions.map((i) => i.id));
+  }, [evolutionInstanceOptions]);
+
+  const rawDispatchChipIds = useMemo(() => {
+    if (Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0) {
+      return dispatchOptions.dispatchChipIds;
+    }
+    return dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : [];
+  }, [dispatchOptions.dispatchChipIds, dispatchOptions.evolutionInstanceId]);
+
+  const selectedDispatchChipIds = useMemo(() => {
+    const valid = rawDispatchChipIds.filter((id) => validEvolutionInstanceIds.has(id));
+    if (valid.length === 0 && evolutionInstanceOptions.length > 0) {
+      const def = evolutionInstanceOptions.find((i) => i.isDefault) || evolutionInstanceOptions[0];
+      return def ? [def.id] : [];
+    }
+    return valid;
+  }, [rawDispatchChipIds, validEvolutionInstanceIds, evolutionInstanceOptions]);
+
+  const selectedDispatchChips = useMemo(() => {
+    return evolutionInstanceOptions.filter((i) => selectedDispatchChipIds.includes(i.id));
+  }, [evolutionInstanceOptions, selectedDispatchChipIds]);
+
+  const toggleDispatchChipId = (id: string) => {
+    if (!validEvolutionInstanceIds.has(id)) return;
+    setDispatchOptions((curr) => {
+      const currentList = (Array.isArray(curr.dispatchChipIds) && curr.dispatchChipIds.length > 0
+        ? curr.dispatchChipIds
+        : (curr.evolutionInstanceId ? [curr.evolutionInstanceId] : [])).filter((item) => validEvolutionInstanceIds.has(item));
+      const exists = currentList.includes(id);
+      let nextList = exists ? currentList.filter((item) => item !== id) : [...currentList, id];
+      if (nextList.length === 0) {
+        nextList = [id];
+      }
+      return {
+        ...curr,
+        dispatchChipIds: nextList,
+        evolutionInstanceId: nextList.length === 1 ? nextList[0] : (nextList[0] || null),
+      };
+    });
+  };
+
+  const selectedInst = selectedDispatchChips[0] || null;
   const chipState = (selectedInst?.chipState || "").toLowerCase() === "warm" ? "warm" : "cold";
   const chipStateLabel = chipState === "warm" ? "aquecido" : "frio";
-  const dailyQuota =
-    Number(selectedInst?.dailyLimitOverride) > 0
-      ? Number(selectedInst?.dailyLimitOverride)
-      : (chipState === "warm" ? 500 : 50);
+
+  const totalDailyQuota = useMemo(() => {
+    if (selectedDispatchChips.length === 0) return 50;
+    return selectedDispatchChips.reduce((acc, inst) => {
+      const state = (inst.chipState || "").toLowerCase() === "warm" ? "warm" : "cold";
+      const q = Number(inst.dailyLimitOverride) > 0 ? Number(inst.dailyLimitOverride) : (state === "warm" ? 500 : 50);
+      return acc + q;
+    }, 0);
+  }, [selectedDispatchChips]);
 
   const numLeads = Number(totalLeads) || 0;
-  const daysNeeded = numLeads && dailyQuota ? Math.ceil(numLeads / dailyQuota) : 1;
-  const isOverDailyQuota = numLeads > dailyQuota;
+  const daysNeeded = numLeads && totalDailyQuota ? Math.ceil(numLeads / totalDailyQuota) : 1;
+  const isOverDailyQuota = numLeads > totalDailyQuota;
 
-  const currentChipId = dispatchOptions.evolutionInstanceId || selectedInst?.id || null;
   const eligibleHandoffChips = useMemo(() => {
-    return evolutionInstanceOptions.filter((inst) => inst.id !== currentChipId);
-  }, [evolutionInstanceOptions, currentChipId]);
+    return evolutionInstanceOptions.filter((inst) => !selectedDispatchChipIds.includes(inst.id));
+  }, [evolutionInstanceOptions, selectedDispatchChipIds]);
 
   const defaultBridgingText = "Perfeito, {{nome}}! Vou pedir para o nosso especialista te chamar agora no WhatsApp dele para alinhar todos os detalhes.";
   const defaultOpenerText = "Olá {{nome}}! Minha equipe me passou seu contato sobre nosso evento/campanha. Como posso te ajudar?";
 
   const bridgingText = dispatchOptions.handoffBridgingText ?? defaultBridgingText;
   const openerText = dispatchOptions.handoffOpenerText ?? defaultOpenerText;
-
-  const validEvolutionInstanceIds = useMemo(() => {
-    return new Set(evolutionInstanceOptions.map((i) => i.id));
-  }, [evolutionInstanceOptions]);
 
   const rawHandoffChipIds = useMemo(() => {
     if (Array.isArray(dispatchOptions.handoffChipIds) && dispatchOptions.handoffChipIds.length > 0) {
@@ -331,28 +370,69 @@ export function SchedulingStep({
         <CardDescription>Defina a instância do WhatsApp, revezamento de agendas e data de envio</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Instância WhatsApp</p>
-            <Select
-              value={dispatchOptions.evolutionInstanceId || "company-default"}
-              onValueChange={(val) => setDispatchOptions(curr => ({ ...curr, evolutionInstanceId: val === "company-default" ? null : val }))}
-            >
-              <SelectTrigger className="h-10 rounded-xl text-xs">
-                <SelectValue placeholder="Selecione a instância..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="company-default">Padrão da Empresa</SelectItem>
-                {evolutionInstanceOptions.map((inst) => (
-                  <SelectItem key={inst.id} value={inst.id}>
-                    {inst.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="space-y-4">
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] uppercase font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                <Zap className="h-3 w-3 text-indigo-500" />
+                Chips de Disparo (Instâncias WhatsApp)
+              </label>
+              {evolutionInstanceOptions.length === 0 ? (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                  Nenhum chip cadastrado
+                </span>
+              ) : selectedDispatchChipIds.length === 0 ? (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold animate-pulse">
+                  ⚠️ Selecione ao menos 1 chip
+                </span>
+              ) : (
+                <span className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
+                  {selectedDispatchChipIds.length === 1 ? "1 chip selecionado" : `${selectedDispatchChipIds.length} chips em rodízio (Round-Robin)`}
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-snug">
+              Selecione 1 ou mais chips de envio. Com múltiplos chips, os envios são distribuídos automaticamente em rodízio (Round-Robin) por lead, respeitando a cota diária de cada chip.
+            </p>
+
+            {evolutionInstanceOptions.length === 0 ? (
+              <div className="p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-300">
+                Nenhum chip ativo encontrado. Conecte instâncias no módulo de WhatsApp para disparar.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {evolutionInstanceOptions.map((inst) => {
+                  const isSelected = selectedDispatchChipIds.includes(inst.id);
+                  return (
+                    <button
+                      key={inst.id}
+                      type="button"
+                      onClick={() => toggleDispatchChipId(inst.id)}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none",
+                        isSelected
+                          ? "bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 shadow-xs"
+                          : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300/80 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-600 hover:bg-indigo-50/30 dark:hover:bg-indigo-950/20"
+                      )}
+                    >
+                      <span className={cn("flex h-4 w-4 items-center justify-center rounded-full text-[10px]", isSelected ? "bg-white/20 text-white font-bold" : "bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400")}>
+                        {isSelected ? "✓" : "+"}
+                      </span>
+                      <span>{inst.name}</span>
+                      {inst.chipState && (
+                        <span className={cn("text-[9px] px-1 py-0.2 rounded font-mono uppercase", isSelected ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500")}>
+                          {inst.chipState}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-1.5 pt-1">
             <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground flex items-center gap-1">
               Atraso entre envios (segundos)
               <InfoTip text="Tempo de espera sugerido entre contatos para evitar bans no WhatsApp." />
@@ -360,7 +440,7 @@ export function SchedulingStep({
             <Input
               type="number"
               min="1"
-              className="h-10 text-xs rounded-xl"
+              className="h-10 text-xs rounded-xl max-w-xs"
               value={dispatchOptions.leadDelaySeconds}
               onChange={(e) => setDispatchOptions(curr => ({ ...curr, leadDelaySeconds: Math.max(1, Number(e.target.value)) }))}
             />
@@ -373,10 +453,12 @@ export function SchedulingStep({
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
             <div className="space-y-1">
               <p className="font-semibold text-amber-900 dark:text-amber-100">
-                Este chip é '{chipStateLabel}' e tem {dailyQuota} envios/dia.
+                {selectedDispatchChips.length > 1
+                  ? `${selectedDispatchChips.length} chips selecionados com cota combinada de ${totalDailyQuota} envios/dia.`
+                  : `Este chip é '${chipStateLabel}' e tem ${totalDailyQuota} envios/dia.`}
               </p>
               <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                Seu lote tem {numLeads.toLocaleString("pt-BR")} destinatários — serão necessários {daysNeeded} dias.
+                Seu lote tem {numLeads.toLocaleString("pt-BR")} destinatários — serão necessários {daysNeeded} {daysNeeded === 1 ? "dia" : "dias"}.
               </p>
             </div>
           </div>

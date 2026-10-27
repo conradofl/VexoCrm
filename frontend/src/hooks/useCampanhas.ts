@@ -166,6 +166,7 @@ export interface CampaignDispatchOptions {
   stopOnStepFailure: boolean;
   aiAssisted: boolean;
   evolutionInstanceId?: string | null;
+  dispatchChipIds?: string[];
   templateStrategy?: "single" | "ai_variations";
   templateVariantCount?: number;
   waitForReply?: boolean;

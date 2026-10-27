@@ -69,6 +69,7 @@ describe("contrato das chamadas de dispatchCampaignSequence", () => {
       "onLeadDispatched", // fecha o lead como sent (sem isso nada vira 'sent')
       "onStepDispatched", // grava a mensagem e o chip que enviou
       "quotaGate", // cota diária por mensagem (a que sumiu em 28/08)
+      "chipProvider", // SPEC 10: rodízio multi-chip de disparo
       "shouldContinue", // pausa/cancelamento do lote e janela de envio
       "leadDelayProvider", // intervalo entre leads (anti-ban)
     ];

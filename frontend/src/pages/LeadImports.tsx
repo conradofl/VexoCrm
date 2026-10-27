@@ -1715,6 +1715,9 @@ export default function LeadImports({
           sequence: campaignSequence,
           dispatchOptions: {
             ...dispatchOptions,
+            dispatchChipIds: Array.isArray(dispatchOptions.dispatchChipIds)
+              ? dispatchOptions.dispatchChipIds.filter((id) => evolutionInstanceOptions.some((inst) => inst.id === id))
+              : (dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : []),
             handoffChipIds: (Array.isArray(dispatchOptions.handoffChipIds) ? dispatchOptions.handoffChipIds : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []))
               .filter((id) => evolutionInstanceOptions.some((inst) => inst.id === id)),
             handoffChipId: (Array.isArray(dispatchOptions.handoffChipIds) ? dispatchOptions.handoffChipIds : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []))
@@ -1837,6 +1840,9 @@ export default function LeadImports({
           if ((deliberateDispatch || newTriggerType === "manual") && i === 0) batchTriggerType = "manual";
           if (!deliberateDispatch && newTriggerType === "draft") batchTriggerType = "draft";
 
+          const dispatchChipList = Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0
+            ? dispatchOptions.dispatchChipIds
+            : (dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : []);
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -1847,6 +1853,10 @@ export default function LeadImports({
               status: batchTriggerType === "draft" ? "draft" : undefined,
               scheduledAt: (batchTriggerType === "scheduled") ? batchScheduledIso : null,
               evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+              dispatch_options: {
+                ...dispatchOptions,
+                dispatchChipIds: dispatchChipList,
+              },
               limitPerRun: size,
               offset: offset,
             }),
@@ -1873,6 +1883,9 @@ export default function LeadImports({
         });
       } else {
         const effectiveTriggerType = deliberateDispatch ? "manual" : newTriggerType;
+        const dispatchChipList = Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0
+          ? dispatchOptions.dispatchChipIds
+          : (dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : []);
         const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -1883,6 +1896,10 @@ export default function LeadImports({
             status: effectiveTriggerType === "draft" ? "draft" : undefined,
             scheduledAt: effectiveTriggerType === "scheduled" ? scheduledIso : null,
             evolutionInstanceId: dispatchOptions.evolutionInstanceId,
+            dispatch_options: {
+              ...dispatchOptions,
+              dispatchChipIds: dispatchChipList,
+            },
           }),
         });
         if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");

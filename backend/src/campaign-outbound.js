@@ -981,8 +981,10 @@ export async function dispatchCampaignSequence({
     let leadWebhookUrl = webhookUrl;
     let leadWebhookToken = webhookToken;
     let activeChip = null;
+    let activeChipBurst = 0;
     if (typeof chipProvider === "function") {
-      activeChip = await chipProvider({ leadIndex });
+      const burst = countBurstSteps(enabledSteps, Boolean(context?.isReplyTrigger));
+      activeChip = await chipProvider({ leadIndex, burst, count: burst });
       if (!activeChip || activeChip.exhausted) {
         summary.allChipsExhausted = true;
         summary.exhaustedChipName = activeChip?.chipName || null;
@@ -992,6 +994,7 @@ export async function dispatchCampaignSequence({
         summary.paused = true;
         break;
       }
+      activeChipBurst = burst;
       leadWebhookUrl = activeChip.webhookUrl;
       leadWebhookToken = activeChip.webhookToken ?? null;
     }
@@ -999,21 +1002,30 @@ export async function dispatchCampaignSequence({
     // Cota diária do chip que envia: reserva 1 unidade por MENSAGEM deste lead antes de reivindicar/enviar. Esgotada, o
     // lote pausa AQUI (antes do claim, então nenhum lead fica meio enviado); chip não identificado segue sem cota.
     let quotaReservation = null;
-    let quotaReservedCount = 0;
+    let quotaReservedCount = activeChipBurst;
     let quotaSentCount = 0;
     const releaseUnusedQuota = async () => {
       const reservation = quotaReservation;
       quotaReservation = null;
       const unused = quotaReservedCount - quotaSentCount;
-      if (reservation && unused > 0) {
-        try {
-          await reservation.release(unused);
-        } catch {
-          /* devolução de cota é best-effort */
+      if (unused > 0) {
+        if (reservation) {
+          try {
+            await reservation.release(unused);
+          } catch {
+            /* devolução de cota é best-effort */
+          }
+        }
+        if (activeChip && typeof activeChip.release === "function") {
+          try {
+            await activeChip.release(unused);
+          } catch {
+            /* devolução de cota é best-effort */
+          }
         }
       }
     };
-    if (quotaGate && typeof quotaGate.reserve === "function") {
+    if (!activeChip && quotaGate && typeof quotaGate.reserve === "function") {
       const burst = countBurstSteps(enabledSteps, Boolean(context?.isReplyTrigger));
       let reservation;
       try {
@@ -1048,13 +1060,6 @@ export async function dispatchCampaignSequence({
       const claimed = await onLeadClaim({ lead, phone, leadIndex });
       if (!claimed) {
         await releaseUnusedQuota();
-        if (activeChip && typeof activeChip.release === "function") {
-          try {
-            await activeChip.release();
-          } catch {
-            /* devolução de cota é best-effort */
-          }
-        }
         continue;
       }
     }
@@ -1189,13 +1194,7 @@ export async function dispatchCampaignSequence({
               /* rollback best-effort */
             }
           }
-          if (activeChip && typeof activeChip.release === "function") {
-            try {
-              await activeChip.release();
-            } catch {
-              /* devolução de cota best-effort */
-            }
-          }
+          await releaseUnusedQuota();
           break;
         }
 
@@ -1246,14 +1245,6 @@ export async function dispatchCampaignSequence({
     await releaseUnusedQuota();
 
     if (summary.paused) break;
-
-    if (activeChip && typeof activeChip.release === "function" && !leadSentAnything) {
-      try {
-        await activeChip.release();
-      } catch {
-        /* devolução de cota é best-effort */
-      }
-    }
 
     if (!leadFailed) {
       summary.successCount += 1;

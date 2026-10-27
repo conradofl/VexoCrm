@@ -76,6 +76,7 @@ vi.mock("@/hooks/useCampanhas", () => ({
   useDispatchRecipients: () => ({ data: { items: [], summary: {} }, isLoading: false, refetch: vi.fn() }),
   useRetryFailedDispatchLeads: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRunPendingDispatchLeads: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCampaignRecipients: () => ({ data: null, isLoading: false }),
 }));
 
 vi.mock("@/hooks/useConsultantSchedules", () => ({

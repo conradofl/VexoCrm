@@ -3493,7 +3493,43 @@ export function registerCampaignsRoutes(app, deps) {
     let targetInstances = [];
     let chipMismatchWarning = null;
 
-    if (dispatchEvolutionInstanceId) {
+    const configuredChipIds = (
+      Array.isArray(dispatchCampaignMeta.dispatchOptions?.dispatchChipIds) && dispatchCampaignMeta.dispatchOptions.dispatchChipIds.length > 0
+        ? dispatchCampaignMeta.dispatchOptions.dispatchChipIds
+        : (Array.isArray(dispatch.dispatch_options?.dispatchChipIds) && dispatch.dispatch_options.dispatchChipIds.length > 0
+            ? dispatch.dispatch_options.dispatchChipIds
+            : [])
+    ).filter(Boolean);
+
+    if (configuredChipIds.length > 0) {
+      const matched = configuredChipIds
+        .map((id) =>
+          activeInstances.find(
+            (inst) =>
+              inst.id === id ||
+              inst.name === id ||
+              normalizeString(inst.dispatch_webhook_url) === normalizeString(id)
+          )
+        )
+        .filter(Boolean);
+
+      if (matched.length > 0) {
+        targetInstances = matched;
+      } else {
+        const pauseMsg = "Pausado — nenhum dos chips configurados para disparo está conectado. Reconecte os chips em Conexões para retomar.";
+        console.warn("[campaign-dispatch] Nenhum chip configurado ativo para este cliente:", {
+          clientId,
+          dispatchId,
+          configuredChipIds,
+        });
+        await db.from("campaign_dispatches").update({
+          status: "paused",
+          error_message: pauseMsg,
+          updated_at: new Date().toISOString(),
+        }).eq("id", dispatchId);
+        return;
+      }
+    } else if (dispatchEvolutionInstanceId) {
       const matched = activeInstances.filter(
         (inst) =>
           inst.id === dispatchEvolutionInstanceId ||
@@ -3601,22 +3637,29 @@ export function registerCampaignsRoutes(app, deps) {
     const tenantTimezone = sendWindowConfig.timezone || "America/Sao_Paulo";
     const todayDateKey = getDateKey(new Date(), tenantTimezone);
 
-    // ⚠️ CÓDIGO MORTO (verificado em 04/10/2026): este chipProvider NUNCA é passado ao dispatchCampaignSequence — o
-    // rodízio está desligado e as mensagens de cota daqui (incluindo "cota diária do chip atingida" abaixo) não são a
-    // origem da pausa por cota. A cota que vale é a do portão `quotaGate` (services/campaignQuotaGate.js), aplicado
-    // no chip que de fato envia. Ligar este rodízio é outra decisão (muda quem envia, a variação de texto e pausa o
-    // lote com chip caído no pool). Preservado de propósito; não leia como a origem da cota.
+    // SPEC 10: rodízio multi-chip ligado! Round-robin por lead, respeitando a cota diária de cada chip.
+    // Ativa quando dispatchChipIds for configurado na campanha/disparo.
+    // Chip que bate a cota sai do rodízio no meio do lote, sem derrubar o lote.
+    const isMultiChip = configuredChipIds.length > 0;
     let rotationCursor = 0;
+    let quotaUnavailableWarned = false;
     const chipProvider =
-      rotationPool.length > 0
-        ? async () => {
+      isMultiChip && rotationPool.length > 0
+        ? async ({ leadIndex, burst = 1 } = {}) => {
+            const count = Number.isInteger(burst) && burst > 0 ? burst : 1;
             let lastExhausted = null;
             for (let attempt = 0; attempt < rotationPool.length; attempt += 1) {
               const inst = rotationPool[(rotationCursor + attempt) % rotationPool.length];
               const limit = resolveEvolutionInstanceDailyLimit(inst);
-              const reserved = await reserveEvolutionInstanceDailyQuota(inst.id, todayDateKey);
-
-              if (reserved === null) {
+              let reserved;
+              try {
+                reserved = await reserveEvolutionInstanceDailyQuota(inst.id, todayDateKey, pgDatabasePool, count);
+                if (reserved === null) throw new Error("contador de cota indisponível");
+              } catch (err) {
+                if (!quotaUnavailableWarned) {
+                  quotaUnavailableWarned = true;
+                  console.error("[campaign-quota] cota indisponível no rodízio: o envio segue sem cota para os chips deste lote:", err?.message || err);
+                }
                 rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
                 return {
                   webhookUrl: normalizeString(inst.dispatch_webhook_url),
@@ -3624,17 +3667,23 @@ export function registerCampaignsRoutes(app, deps) {
                   instanceId: inst.id,
                   instanceName: inst.name || inst.id,
                   sequence: null,
-                  release: null,
+                  release: () => {},
+                  limitQuota: limit,
+                  usedQuota: 0,
                 };
               }
 
               if (reserved > limit) {
-                await releaseEvolutionInstanceDailyQuota(inst.id, todayDateKey);
+                try {
+                  await releaseEvolutionInstanceDailyQuota(inst.id, todayDateKey, pgDatabasePool, count);
+                } catch {
+                  /* best-effort */
+                }
                 lastExhausted = {
                   exhausted: true,
                   chipName: inst.name || inst.id,
                   limitQuota: limit,
-                  usedQuota: limit,
+                  usedQuota: Math.min(Math.max(reserved - count, 0), limit),
                   exhaustedQuotaMessage: `Pausado — cota diária do chip atingida (${limit}/${limit}). Retoma amanhã.`,
                 };
                 continue;
@@ -3647,7 +3696,13 @@ export function registerCampaignsRoutes(app, deps) {
                 instanceId: inst.id,
                 instanceName: inst.name || inst.id,
                 sequence: reserved,
-                release: () => releaseEvolutionInstanceDailyQuota(inst.id, todayDateKey),
+                release: (unused) =>
+                  releaseEvolutionInstanceDailyQuota(
+                    inst.id,
+                    todayDateKey,
+                    pgDatabasePool,
+                    Number.isInteger(unused) && unused > 0 ? unused : count
+                  ).catch(() => {}),
                 limitQuota: limit,
                 usedQuota: reserved,
               };
@@ -3765,7 +3820,7 @@ export function registerCampaignsRoutes(app, deps) {
           leadId,
           phone: cleanPhone,
           sentAt,
-          chipId: runChipTracker.take(lead?.id), // chipId: runChipTracker.take(lead.id)
+          chipId: runChipTracker.take(targetLead.id), // chipId: runChipTracker.take(lead.id)
         });
 
         if (result?.rowCount === 0) {
@@ -3923,6 +3978,7 @@ export function registerCampaignsRoutes(app, deps) {
     const result = await dispatchCampaignSequence({
       webhookUrl,
       webhookToken,
+      chipProvider,
       quotaGate,
       leads: validLeads,
       analyticsMeta: usaFluxoDeResposta
@@ -5909,6 +5965,38 @@ export function registerCampaignsRoutes(app, deps) {
         ...(requestedEvolutionInstanceId ? { evolutionInstanceId: requestedEvolutionInstanceId } : {}),
       };
 
+      // Trava de integridade de chips de envio (Anti-propagação de chip morto / SPEC 10)
+      const rawDispatchChipList = Array.isArray(dispatchOptionsSnapshot.dispatchChipIds) && dispatchOptionsSnapshot.dispatchChipIds.length > 0
+        ? dispatchOptionsSnapshot.dispatchChipIds
+        : (Array.isArray(body.dispatchChipIds) && body.dispatchChipIds.length > 0 ? body.dispatchChipIds : []);
+      const uniqueDispatchChipIds = [...new Set(rawDispatchChipList)].filter(Boolean);
+
+      if (uniqueDispatchChipIds.length > 0) {
+        const { data: existingDispatchInstances, error: dispatchInstErr } = await supabase
+          .from("lead_client_evolution_instances")
+          .select("id")
+          .eq("client_id", authorizedClientId)
+          .in("id", uniqueDispatchChipIds);
+
+        if (dispatchInstErr) {
+          console.error("[campaign-dispatch] erro ao validar chips de envio contra o banco", dispatchInstErr);
+          return sendError(res, 500, "DATABASE_ERROR", "Falha ao validar instâncias de envio.");
+        }
+
+        const existingIds = new Set((existingDispatchInstances || []).map((i) => i.id));
+        const invalidChipIds = uniqueDispatchChipIds.filter((id) => !existingIds.has(id));
+
+        if (invalidChipIds.length > 0) {
+          return sendError(
+            res,
+            422,
+            "DISPATCH_CHIP_NOT_FOUND",
+            `Os seguintes chips de envio não existem ou foram excluídos: ${invalidChipIds.join(", ")}`,
+            { invalidChipIds }
+          );
+        }
+      }
+
       // Trava de integridade de chips de handoff (Anti-propagação de chip morto / SPEC 1)
       const rawHandoffEnabled = Boolean(dispatchOptionsSnapshot.handoffEnabled);
       const rawHandoffChipList = Array.isArray(dispatchOptionsSnapshot.handoffChipIds) && dispatchOptionsSnapshot.handoffChipIds.length > 0
@@ -6040,7 +6128,11 @@ export function registerCampaignsRoutes(app, deps) {
         .single();
       if (existingErr || !existing) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
       const authorizedClientId = resolveAuthorizedClientId(req, res, existing.client_id);
-      if (!authorizedClientId) return;
+      const isPauseRequest = existing.status === "running" && patch.status === "paused" && Object.keys(patch).length === 2;
+      if (existing.status === "running" && !isPauseRequest) {
+        return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
+      }
+
       if (
         Object.prototype.hasOwnProperty.call(patch, "evolution_instance_id") &&
         !(await validateCampaignDispatchEvolutionInstance(authorizedClientId, patch.evolution_instance_id, res))
@@ -6048,9 +6140,34 @@ export function registerCampaignsRoutes(app, deps) {
         return;
       }
 
-      const isPauseRequest = existing.status === "running" && patch.status === "paused" && Object.keys(patch).length === 2;
-      if (existing.status === "running" && !isPauseRequest) {
-        return sendError(res, 409, "DISPATCH_RUNNING", "Cannot update a running dispatch");
+      // Trava de integridade de chips de envio no update (SPEC 10)
+      const patchDispatchChipList = Array.isArray(patch.dispatch_options?.dispatchChipIds) && patch.dispatch_options.dispatchChipIds.length > 0
+        ? patch.dispatch_options.dispatchChipIds
+        : (Array.isArray(body.dispatchChipIds) && body.dispatchChipIds.length > 0 ? body.dispatchChipIds : []);
+      const uniquePatchDispatchChipIds = [...new Set(patchDispatchChipList)].filter(Boolean);
+      if (uniquePatchDispatchChipIds.length > 0) {
+        const { data: existingDispatchInstances, error: dispatchInstErr } = await supabase
+          .from("lead_client_evolution_instances")
+          .select("id")
+          .eq("client_id", authorizedClientId)
+          .in("id", uniquePatchDispatchChipIds);
+
+        if (dispatchInstErr) {
+          console.error("[campaign-dispatch] erro ao validar chips de envio contra o banco no update", dispatchInstErr);
+          return sendError(res, 500, "DATABASE_ERROR", "Falha ao validar instâncias de envio.");
+        }
+
+        const existingIds = new Set((existingDispatchInstances || []).map((i) => i.id));
+        const invalidChipIds = uniquePatchDispatchChipIds.filter((id) => !existingIds.has(id));
+        if (invalidChipIds.length > 0) {
+          return sendError(
+            res,
+            422,
+            "DISPATCH_CHIP_NOT_FOUND",
+            `Os seguintes chips de envio não existem ou foram excluídos: ${invalidChipIds.join(", ")}`,
+            { invalidChipIds }
+          );
+        }
       }
       if (patch.status === "paused") {
         await ensureCampaignDispatchPausedStatusAllowed();
