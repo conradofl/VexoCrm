@@ -1,11 +1,15 @@
-# SPEC 17 — O default "50" da tela não pode virar limite real de envio
+# SPEC 17 — O limite da campanha não pode virar, em silêncio, o limite do lote
 
 Status: **APROVADA em 27/10 com ressalvas (seção 7). Implementada na branch `feat/spec17-limite-opcional`. Merge e deploy SÓ no fim de semana.**
 Base: `main` em `776bf109` (SPEC 13 já em produção). Data: 27/10/2026.
 
 ## 1. Diagnóstico (provado no código, `file:line` em `776bf109`)
 
-Campanha sem lotes configurados (o caminho "Lote Principal") envia no máximo **50 leads**, mesmo que o público tenha mais, e a tela mostra o público inteiro.
+**O problema é o fallback silencioso do limite da campanha para o lote**, não o número 50. Um lote sem limite próprio herda `campaigns.limit_per_run`, e esse campo tem **dois significados** que ninguém escolheu como "teto deste lote":
+- com loteamento, guarda o **tamanho do lote** que a pessoa configurou (`LeadImports.tsx:1653`: `limitForCampaign = batchingEnabled ? batchSize : limitPerRun`), por isso o valor dominante em produção é 10, não 50;
+- sem loteamento, guarda o **50 padrão** invisível da tela.
+
+Qualquer lote criado sem limite próprio (o "Lote Principal" da campanha sem lotes, e outros caminhos) envia no máximo esse valor, mesmo que o público tenha mais, e a tela mostra o público inteiro. O caso de 50 é só o mais fácil de reproduzir.
 
 | # | Fato | Onde |
 |---|------|------|
@@ -37,12 +41,13 @@ Esta é a linha de base vermelha: a prova da correção exige `120` no lugar de 
 
 Escolho **tornar o limite opcional (nulo = sem limite)** em vez de apenas avisar na tela.
 
-Justificativa:
-1. **Não há escolha do usuário para avisar.** O campo não existe na tela (fato 1). Um aviso pediria confirmação de um número que ninguém digitou.
-2. **Já existe precedente no backend.** Campanha recorrente cobre o público inteiro e a cota do chip é o freio (`routes.js:2419`, `3223`).
-3. **O freio anti-ban independe do limite.** Cota diária por chip, janela de envio e pausa com retomada no dia seguinte (`QUOTA_PAUSE_MARKER`) continuam valendo. "Sem limite" não é rajada: o lote avança por dias.
-4. **Evita três números diferentes para o mesmo lote.** Hoje: criação 120, prévia 120, envio 50. Sem o fallback, os três coincidem.
-5. **Não depende de schema.** A regra vive no lote, então nenhuma coluna nova e nenhuma migration (produção não roda migration no boot).
+Justificativa (reescrita em 28/10; o porquê é o fallback, não o default):
+1. **O defeito é uma herança silenciosa entre dois campos.** `campaigns.limit_per_run` significa "tamanho do lote" (com loteamento) ou "50 padrão" (sem), e o lote o herda como se alguém tivesse decidido "este lote leva só N". Ninguém decidiu. Um aviso na tela não resolve: o número que cortou foi, em boa parte dos casos, um tamanho de lote que a pessoa escolheu para **outra** coisa (fatiar), vazando para um lote que não era fatia.
+2. **Já foi medido em produção, e não é só o 50.** A medição E2 (28/10) achou lotes com alvo maior que o limite herdado em campanhas com limite 10, 20 e 40 (seção 7). O limite dominante das campanhas é 10 (13 campanhas, E3), que é tamanho de lote configurado.
+3. **Já existe precedente no backend.** Campanha recorrente cobre o público inteiro e a cota do chip é o freio (`routes.js:2419`, `3223`).
+4. **O freio anti-ban independe do limite.** Cota diária por chip, janela de envio e pausa com retomada no dia seguinte (`QUOTA_PAUSE_MARKER`) continuam valendo. "Sem limite" não é rajada: o lote avança por dias.
+5. **Evita três números diferentes para o mesmo lote.** Hoje: criação 120, prévia 120, envio 50 (ou 10, ou 20). Sem o fallback, os três coincidem.
+6. **Não depende de schema.** A regra vive no lote, então nenhuma coluna nova e nenhuma migration (produção não roda migration no boot).
 
 Quem quer limitar por vontade própria passa a ter um campo **opcional e visível**: "Enviar só os primeiros N" (vazio por padrão). Ele grava `limit_per_run` no **lote** e usa a mesma conta em `target_count`.
 
@@ -83,9 +88,9 @@ Além disso: `node --check` em todo arquivo de backend alterado, suítes inteira
 
 ## 5. Medição de raio (antes de implementar)
 
-Pergunta do dono: quantas campanhas em produção têm `limit_per_run = 50` e público acima de 50, e quais.
+Pergunta original do dono: quantas campanhas em produção têm `limit_per_run = 50` e público acima de 50, e quais.
 
-Medida pelo lote, não por estimativa: o `target_count` do lote sem limite foi gravado com o público inteiro na criação (fato 5). Logo, "campanha com limite 50, lote com `limit_per_run` nulo e `target_count > 50`" é exatamente o conjunto cortado. O comando foi entregue ao dono na conversa; o resultado entra aqui quando chegar.
+Medida pelo lote, não por estimativa: o `target_count` do lote sem limite foi gravado com o público inteiro na criação (fato 5). O critério correto é **lote com `limit_per_run` nulo e `target_count` maior que o `limit_per_run` da campanha, qualquer que seja esse limite** (não só 50). A primeira medição usou só 50 e saiu estreita demais (ver seção 7). Comando F1, na conversa; o resultado entra aqui quando chegar.
 
 Medição R1 do mesmo comando confirma se `campaigns.limit_per_run` e `campaign_dispatches.limit_per_run` aceitam nulo (decide só a nota do `POST /api/campaigns`; a regra nova não depende disso).
 
@@ -99,10 +104,20 @@ Lotes já cortados ficam `interrupted` com "N pendentes". Com a SPEC 13 em produ
 
 ## 7. Decisões do dono, medição de raio e desvios da implementação (27/10, noite)
 
-### Medição de raio (bk-vexo, 21:40Z)
+### Medição de raio (bk-vexo) — CORRIGIDA em 28/10
+**Correção do registro:** a versão de 27/10 dizia "0 cortadas, ainda não cortou nenhuma campanha em produção". **Isso estava errado.** A medição pedia só campanhas com `limit_per_run = 50`, que é um filtro estreito demais.
 - R1: `campaigns.limit_per_run` e `campaign_dispatches.limit_per_run` aceitam nulo. **`campaigns.limit_per_run` tem DEFAULT 50 no banco.**
-- R2: 10 campanhas com limite 50; **0 campanhas cortadas, 0 lotes cortados, 0 tenants.** R3: nenhuma linha.
-- Leitura: o defeito é real e reproduzido, mas **ainda não cortou nenhuma campanha em produção** pelo critério medido (lote sem limite com `target_count > 50`). Lotes com `target_count` nulo ou 0 não entram nesse critério.
+- R2/R3 (filtro estreito, só limite 50): 10 campanhas com limite 50, 0 cortadas. Verdadeiro, mas incompleto.
+- **E2 (28/10): 4 lotes com `target_count` > 50, sem limite próprio, em campanha com limite diferente de 50.** Esses lotes são cortados pelo limite da campanha (10, 20 ou 40). **O defeito ocorreu em produção.** Detalhe dos 4 (campanha, nome, alvo, limite herdado, enviados, status, se ainda podem rodar): comando F1, **pendente de colar aqui**.
+- E3: o limite dominante das campanhas é 10 (13 campanhas), não 50: é tamanho de lote configurado.
+- E4: 33 campanhas no total, 1 sem nenhum lote.
+- Informado pelo dono a partir da saída da medição E; as linhas completas não foram coladas na conversa.
+
+### Item 3 (edição que ligava loteamento): encerrado sem ação
+Medido (E1): 2 campanhas do vexo-adm, 11 leads no total. Nada a corrigir além do que a SPEC já corrige.
+
+### Backfill: quantas linhas o dry-run vai alterar
+**Número exato: pendente** do comando F2 (mesmo SQL do script, importado dele). Não presumir "poucas linhas": só os lotes `paused` e `interrupted` medidos na SPEC 13 já são 221, e o backfill alcança lotes de **todos** os status com limite nulo. O número medido entra aqui antes do deploy.
 
 ### Decisões
 1. **Aprovado:** limite opcional, nulo = público inteiro.
