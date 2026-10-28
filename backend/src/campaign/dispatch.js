@@ -910,6 +910,11 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
     return { started: false, reason: "campaign_without_source" };
   }
 
+  // CERCA INTENCIONAL — NÃO REMOVER NEM TORNAR NULA ACHANDO QUE É RESÍDUO (SPEC 17, dívida DT-001 em
+  // docs/DIVIDAS-TECNICAS.md). O limit_per_run da CAMPANHA (o 50 padrão, ou o tamanho do lote) limita aqui quais leads a
+  // fila pode iniciar. Esta fila inicia o próximo lead quando uma resposta conclui o anterior, FORA do agendador de
+  // lotes: sem claim, sem cota do chip, sem janela de envio. Sem a cerca, concluir uma resposta poderia iniciar qualquer
+  // lead da base que ainda não recebeu. Lote em si NÃO usa mais este valor (resolveDispatchLeadLimit).
   const allLeads = await buildDispatchLeads({
     clientId,
     importId: campaign.import_id || null,

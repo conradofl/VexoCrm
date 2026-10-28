@@ -126,3 +126,9 @@ Lotes já cortados ficam `interrupted` com "N pendentes". Com a SPEC 13 em produ
 3. `node src/scripts/backfillDispatchLimit.js --apply`; esperado: "restantes ... 0".
 4. Merge e deploy do código. **Nunca rodar o backfill depois do deploy.**
 5. Risco conhecido: lote criado por código velho entre os passos 3 e 4 ficaria sem limite e enviaria o público inteiro. Por isso a janela sem atividade.
+
+### Legado: desarmado (decisão 4, 28/10)
+Medição no bk-vexo (02:41Z): **L1 = 0** campanhas elegíveis ao runner legado, **L2 = 0** campanhas disparadas por ele em 30 dias sem nenhum lote, **L3 = 0 de 22** campanhas criadas em 30 dias com `scheduled_for`. Por isso `POST /api/campaigns/run-due` deixou de chamar `runDueCampaignDispatches` (devolve `disarmed: true`) e os lotes seguem. Commit separado, fácil de reverter. `executeCampaignDispatch` continua exportado (testes), sem porta de entrada.
+
+### A cerca do `dispatch.js` é intencional (registrar para ninguém removê-la)
+`campaigns.limit_per_run` continua gravado e **não deve ser anulado nem removido**. Ele deixou de ser limite de envio do lote, mas `startNextCampaignLeadInQueue` usa esse valor como cerca de quais leads a fila de respostas pode iniciar, e essa fila age fora do agendador de lotes (sem claim, cota nem janela). Sem a cerca, concluir uma resposta poderia iniciar qualquer lead ainda não enviado. Isso está comentado no código e nomeado como dívida **DT-001** em `docs/DIVIDAS-TECNICAS.md` (não resolvida de propósito).
