@@ -14,6 +14,10 @@
 // tem limite nulo e a campanha tem limite. NÃO toca em status, error_message, target_count, updated_at nem em ocorrência
 // de campanha recorrente (essa ignora limite). Idempotente: a segunda execução não encontra nada.
 //
+// ANTES do primeiro deploy este arquivo ainda não está na imagem do contêiner (ele faz parte do mesmo código). Nesse caso
+// use o equivalente de uma linha, gerado destes mesmos SQLs, com ESPERADO=<contagem do dry-run>: ele relê a contagem e
+// aborta sem escrever se mudou. Depois do deploy este script é o caminho (e o backfill NÃO deve rodar mais).
+//
 // Uso (dentro do contêiner bk-vexo, console do EasyPanel):
 //   node src/scripts/backfillDispatchLimit.js            # só conta (padrão), não escreve
 //   node src/scripts/backfillDispatchLimit.js --apply    # grava

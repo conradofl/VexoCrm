@@ -1,6 +1,6 @@
 # SPEC 17 — O limite da campanha não pode virar, em silêncio, o limite do lote
 
-Status: **APROVADA em 27/10 com ressalvas (seção 7). Implementada na branch `feat/spec17-limite-opcional`. Merge e deploy SÓ no fim de semana.**
+Status: **APROVADA em 27/10 com ressalvas (seção 7). Implementada na branch `feat/spec17-limite-opcional`. Sem janela de calendário (decisão do dono, 28/10): sobe quando o backfill for aplicado, na ordem da seção 7.**
 Base: `main` em `776bf109` (SPEC 13 já em produção). Data: 27/10/2026.
 
 ## 1. Diagnóstico (provado no código, `file:line` em `776bf109`)
@@ -117,14 +117,14 @@ Lotes já cortados ficam `interrupted` com "N pendentes". Com a SPEC 13 em produ
 Medido (E1): 2 campanhas do vexo-adm, 11 leads no total. Nada a corrigir além do que a SPEC já corrige.
 
 ### Backfill: quantas linhas o dry-run vai alterar
-**Número exato: pendente** do comando F2 (mesmo SQL do script, importado dele). Não presumir "poucas linhas": só os lotes `paused` e `interrupted` medidos na SPEC 13 já são 221, e o backfill alcança lotes de **todos** os status com limite nulo. O número medido entra aqui antes do deploy.
+**25 lotes** (F2, informado pelo dono em 28/10): `done` 22, `cancelled` 2, `paused` 1. Dos 25, o único que ainda pode rodar é o `paused` `f910bfc0` (alvo 59, limite herdado 20). Os outros 24 já terminaram, então o backfill é inofensivo para eles; existe para que o `f910bfc0` continue enviando 20 depois do deploy.
 
 ### Decisões
 1. **Aprovado:** limite opcional, nulo = público inteiro.
 2. **Recusado como estava:** lote que já existe não muda de comportamento no deploy. Entra o bloco "backfill": `backend/src/scripts/backfillDispatchLimit.js` grava no lote o limite efetivo de hoje (`COALESCE(d.limit_per_run, c.limit_per_run)`), um UPDATE atômico, **antes** do código novo; a regra nova vale só para lote criado depois do deploy. Só toca em `limit_per_run`; ignora ocorrência recorrente; idempotente; dry-run por padrão.
 3. **Lotes já cortados:** nenhum retomar em massa e nenhuma migração de status. R3 veio vazio, então não há lista a decidir.
 4. **Legado:** ver "Legado" abaixo.
-5. **Janela:** a SPEC muda volume de envio, então não sobe em dia útil.
+5. **Janela (revista em 28/10):** a regra de adiar por dia da semana caiu. Decide-se pelo raio medido, não pelo calendário. Raio medido: **1 lote** muda de comportamento se o backfill falhar (`f910bfc0`, `paused`, alvo 59, limite herdado 20). As travas que ficam: `activeDispatchesCount` = 0, backfill antes do código, dry-run antes do `--apply`, `git add` com pathspec explícito.
 6. `SchedulingStep.tsx` não foi tocado (o texto dos rótulos é decisão do dono).
 
 ### Desvios em relação à seção 3 (e por quê)
@@ -135,12 +135,14 @@ Medido (E1): 2 campanhas do vexo-adm, 11 leads no total. Nada a corrigir além d
 - A prova 5 (cota como freio) não ganhou teste novo: a cobertura existente de cota (`campaignChipQuota`) segue verde.
 - Um teste antigo (`compactCardsAndStableColor`) fixava "quantos leads = limit_per_run"; foi atualizado para ler os lotes. É mudança de comportamento intencional.
 
-### Ordem de deploy (fim de semana)
-1. Janela sem atividade e `activeDispatchesCount` = 0.
-2. `node src/scripts/backfillDispatchLimit.js` (dry-run) e conferir a contagem.
-3. `node src/scripts/backfillDispatchLimit.js --apply`; esperado: "restantes ... 0".
-4. Merge e deploy do código. **Nunca rodar o backfill depois do deploy.**
-5. Risco conhecido: lote criado por código velho entre os passos 3 e 4 ficaria sem limite e enviaria o público inteiro. Por isso a janela sem atividade.
+### Ordem de deploy (sem janela de calendário)
+**O script `backfillDispatchLimit.js` não está na imagem do contêiner antes do primeiro deploy** (ele faz parte deste código), então o backfill roda pelo equivalente de uma linha, gerado do mesmo SQL do script (`CANDIDATES_SQL` / `BACKFILL_SQL`) e com a mesma trava de contagem.
+1. `activeDispatchesCount` = 0 (`/health`).
+2. Dry-run (F2): conferir que dá **25** (`done` 22, `cancelled` 2, `paused` 1).
+3. Apply de uma linha com `ESPERADO=25`: ele relê a contagem e **aborta sem escrever** se mudou; esperado "APLICADO: 25" e "RESTANTES 0".
+4. Merge (fast-forward) e deploy do código. **Nunca rodar o backfill depois do deploy.**
+5. Medição de depois: `f910bfc0` continua com limite 20 e um lote novo com alvo maior envia tudo.
+6. Risco residual: lote criado por código velho entre os passos 3 e 4 ficaria sem limite e enviaria o público inteiro. O intervalo é de minutos; por isso o passo 4 vem logo depois do 3.
 
 ### Legado: desarmado (decisão 4, 28/10)
 Medição no bk-vexo (02:41Z): **L1 = 0** campanhas elegíveis ao runner legado, **L2 = 0** campanhas disparadas por ele em 30 dias sem nenhum lote, **L3 = 0 de 22** campanhas criadas em 30 dias com `scheduled_for`. Por isso `POST /api/campaigns/run-due` deixou de chamar `runDueCampaignDispatches` (devolve `disarmed: true`) e os lotes seguem. Commit separado, fácil de reverter. `executeCampaignDispatch` continua exportado (testes), sem porta de entrada.
