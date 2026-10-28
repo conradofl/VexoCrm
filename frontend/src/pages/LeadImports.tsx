@@ -111,6 +111,8 @@ import { describeImportProgress, isImportIncomplete } from "@/lib/leadImports/im
 import { ImportProgressBanner } from "./LeadImports/ImportProgressBanner";
 import { MessageSequenceStep } from "./LeadImports/MessageSequenceStep";
 import { SchedulingStep } from "./LeadImports/SchedulingStep";
+import { DispatchVolumeNotice } from "./LeadImports/DispatchVolumeNotice";
+import { parseDispatchCap } from "@/lib/leadImports/dispatchVolume";
 import { WhatsAppPreviewPanel } from "./LeadImports/WhatsAppPreviewPanel";
 import { CampaignsTable } from "./LeadImports/CampaignsTable";
 import { DispatchCampaignTracker } from "./LeadImports/DispatchCampaignTracker";
@@ -605,6 +607,9 @@ export default function LeadImports({
   const [editingCampaignId, setEditingCampaignId] = useLocalStorage<string | null>(`vexo_campaignId_${activeClientId}`, null);
   const [campaignName, setCampaignName] = useLocalStorage(`vexo_campaignName_${activeClientId}`, "");
   const [campaignLimitPerRun, setCampaignLimitPerRun] = useLocalStorage(`vexo_campaignLimit_${activeClientId}`, "50");
+  // SPEC 17: limite OPCIONAL de envio ("só os primeiros N"). Vazio = público inteiro. Estado comum, de propósito: não é
+  // lembrado entre campanhas (um limite esquecido de outra campanha é o mesmo defeito do "50" invisível).
+  const [dispatchCapText, setDispatchCapText] = useState("");
   const [campaignSequence, setCampaignSequence] = useLocalStorage<Array<CampaignSequenceStep & { buttons?: StepActionButton[] }>>(`vexo_campaignSequence_${activeClientId}`, [
     createCampaignStep("text", 1),
   ]);
@@ -1325,6 +1330,7 @@ export default function LeadImports({
     setCampaignSequence([createCampaignStep("text", 1)]);
     setCampaignTemplateStrategy("single");
     setCampaignLimitPerRun("50");
+    setDispatchCapText("");
     setDispatchOptions(defaultDispatchOptions);
     setReplyAgent("atendimento");
     setCampaignAgentPrompt("");
@@ -1546,6 +1552,7 @@ export default function LeadImports({
     setBatchingEnabled(false);
     setBatchSize("100");
     setBatchIntervalHours("1");
+    setDispatchCapText("");
     setCampaignName("");
     setEditingCampaignId(null);
     setEditTriggerType("manual");
@@ -1891,6 +1898,8 @@ export default function LeadImports({
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             name: `${campaignName.trim()} — Lote Principal`,
+            // SPEC 17: sem limite digitado, o lote cobre o público inteiro (não manda limitPerRun).
+            ...(parseDispatchCap(dispatchCapText) ? { limitPerRun: parseDispatchCap(dispatchCapText) } : {}),
             steps: campaignSequence,
             triggerType: effectiveTriggerType,
             status: effectiveTriggerType === "draft" ? "draft" : undefined,
@@ -2177,7 +2186,10 @@ export default function LeadImports({
     }
 
     // Restaura Loteamento / Batches
-    const hasBatchConfig = Boolean(c.limit_per_run && c.limit_per_run > 0);
+    // SPEC 17: loteamento só se a campanha JÁ tem mais de um lote. Antes bastava c.limit_per_run existir, e ele sempre
+    // existe (o "50" padrão): toda edição abria como "lotes de 50" e o Disparar agora criava "Lote 1/1" limitado a 50.
+    const campaignLotes = dispatches.filter((d) => d.campaign_id === c.id && d.status !== "cancelled");
+    const hasBatchConfig = campaignLotes.length > 1;
     setBatchingEnabled(hasBatchConfig);
     setBatchSize(String(c.limit_per_run || (meta.dispatchOptions as any)?.batchSize || 100));
     setBatchIntervalHours(String((meta.dispatchOptions as any)?.batchIntervalHours || (meta as any).batchIntervalHours || "1"));
@@ -2552,6 +2564,14 @@ export default function LeadImports({
               onAddStepButton={handleAddStepButton}
               onRemoveStepButton={handleRemoveStepButton}
               onUpdateStepButton={handleUpdateStepButton}
+            />
+
+            <DispatchVolumeNotice
+              totalLeads={selectedFile ? previewRows.length : filteredRows.length}
+              batchingEnabled={batchingEnabled}
+              batchSize={batchSize}
+              capText={dispatchCapText}
+              onCapChange={setDispatchCapText}
             />
 
             <SchedulingStep

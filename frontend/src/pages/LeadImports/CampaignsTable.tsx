@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
+import { describeCampaignLeads } from "@/lib/leadImports/dispatchVolume";
 import { getStableColor } from "@/lib/stableColor";
 import { CAMPAIGN_STATUS_LABELS, type Campaign, type CampaignDispatch } from "@/hooks/useCampanhas";
 import { formatRecurrenceBadge, recurrenceStatusText, getCampaignNextRunLabel } from "@/lib/campaignRecurrence";
@@ -26,7 +27,7 @@ export function buildCampaignFields(dispatches?: CampaignDispatch[]): RecordFiel
     { key: "name", label: "Campanha", render: (c) => c.name },
     { key: "state", label: "Estado", render: (c) => CAMPAIGN_STATUS_LABELS[c.status] ?? c.status ?? "Rascunho" },
     { key: "mode", label: "Modo", render: (c) => (c.mode === "agente" ? "Agente IA" : "Disparo Direto") },
-    { key: "leads", label: "Leads", render: (c) => `${c.limit_per_run} leads por lote` },
+    { key: "leads", label: "Leads", render: (c) => describeCampaignLeads(c.id, dispatches) },
     { key: "date", label: "Criada em", render: (c) => formatDateTime(c.created_at) },
     { key: "next_dispatch", label: "Próximo disparo", render: (c) => getCampaignNextRunLabel(c, dispatches) },
   ];

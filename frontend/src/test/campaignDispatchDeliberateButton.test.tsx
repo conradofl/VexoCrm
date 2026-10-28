@@ -283,6 +283,28 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
     // O lote deve ter sido criado com triggerType manual e disparado
     expect(createdDispatchesCalls[0].triggerType).toBe("manual");
     expect(triggeredDispatchesCalls[0]).toContain("/api/campaigns/dispatches/disp-deliberate-1/trigger");
+    // SPEC 17: ninguém digitou limite, então o lote NÃO leva limitPerRun (público inteiro, não o 50 padrão).
+    expect(createdDispatchesCalls[0]).not.toHaveProperty("limitPerRun");
+  });
+
+  it("SPEC 17: com 'só os primeiros N' digitado, o lote criado leva limitPerRun = N", async () => {
+    mockCampaignsList = [testCampaign];
+    renderLeadImports("enviadas");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Ver detalhes de Campanha em Edição/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Editar$/i }));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument();
+    });
+
+    fireEvent.change(await screen.findByTestId("dispatch-cap-input"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
+
+    await waitFor(() => {
+      expect(createdDispatchesCalls.length).toBe(1);
+    });
+    expect(createdDispatchesCalls[0].limitPerRun).toBe(1);
   });
 
   it("se a campanha não tem planilha/origem definida, o botão 'Disparar agora' fica travado", async () => {
