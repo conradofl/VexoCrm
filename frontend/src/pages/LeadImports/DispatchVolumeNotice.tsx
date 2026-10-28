@@ -19,8 +19,11 @@ export function DispatchVolumeNotice({ totalLeads, batchingEnabled, batchSize, c
 
   return (
     <div className="rounded-xl border border-border/60 bg-muted/20 p-3 space-y-2" data-testid="dispatch-volume-notice">
-      <p className="text-xs font-semibold text-foreground" data-testid="dispatch-volume-text">
-        {formatDispatchVolume(volume)}
+      <p className="text-xs text-foreground" data-testid="dispatch-volume-text">
+        {/* Números em destaque, cada um no seu elemento: a frase não repete "N leads" como texto corrido da tela. */}
+        {formatDispatchVolume(volume)
+          .split(/(\d+)/)
+          .map((parte, i) => (/^\d+$/.test(parte) ? <strong key={i}>{parte}</strong> : parte))}
       </p>
       {!batchingEnabled && (
         <div className="space-y-1">

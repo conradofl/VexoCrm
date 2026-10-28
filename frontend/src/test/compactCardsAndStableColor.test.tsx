@@ -370,6 +370,8 @@ describe("Campanhas — CampaignsTable.tsx", () => {
         clientId="sonhare"
         campaigns={[camp]}
         loadingCampaigns={false}
+        // SPEC 17: "quantos leads" vem dos lotes que existem (soma de target_count), não do limit_per_run da campanha.
+        dispatches={[{ id: "disp-001", campaign_id: "camp-001", status: "done", target_count: 85 } as any]}
         onEditCampaign={vi.fn()}
         onDuplicateCampaign={vi.fn()}
         onDeleteCampaign={vi.fn()}
