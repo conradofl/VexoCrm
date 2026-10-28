@@ -1,6 +1,6 @@
 # SPEC 17 — O default "50" da tela não pode virar limite real de envio
 
-Status: **PROPOSTA, aguardando aprovação do dono. Nenhum código foi escrito.**
+Status: **APROVADA em 27/10 com ressalvas (seção 7). Implementada na branch `feat/spec17-limite-opcional`. Merge e deploy SÓ no fim de semana.**
 Base: `main` em `776bf109` (SPEC 13 já em produção). Data: 27/10/2026.
 
 ## 1. Diagnóstico (provado no código, `file:line` em `776bf109`)
@@ -96,3 +96,33 @@ Lotes já cortados ficam `interrupted` com "N pendentes". Com a SPEC 13 em produ
 1. Aprovar "limite opcional, nulo = público inteiro" no lugar de apenas avisar.
 2. Lotes **já agendados** (`draft`/`scheduled`) com `target_count > 50` passam a enviar o público inteiro, que é o número que a tela mostrava na criação. Aprovar, ou congelar esses lotes.
 3. O que fazer com os lotes já cortados (lista da medição): retomar, ignorar ou reimportar o restante.
+
+## 7. Decisões do dono, medição de raio e desvios da implementação (27/10, noite)
+
+### Medição de raio (bk-vexo, 21:40Z)
+- R1: `campaigns.limit_per_run` e `campaign_dispatches.limit_per_run` aceitam nulo. **`campaigns.limit_per_run` tem DEFAULT 50 no banco.**
+- R2: 10 campanhas com limite 50; **0 campanhas cortadas, 0 lotes cortados, 0 tenants.** R3: nenhuma linha.
+- Leitura: o defeito é real e reproduzido, mas **ainda não cortou nenhuma campanha em produção** pelo critério medido (lote sem limite com `target_count > 50`). Lotes com `target_count` nulo ou 0 não entram nesse critério.
+
+### Decisões
+1. **Aprovado:** limite opcional, nulo = público inteiro.
+2. **Recusado como estava:** lote que já existe não muda de comportamento no deploy. Entra o bloco "backfill": `backend/src/scripts/backfillDispatchLimit.js` grava no lote o limite efetivo de hoje (`COALESCE(d.limit_per_run, c.limit_per_run)`), um UPDATE atômico, **antes** do código novo; a regra nova vale só para lote criado depois do deploy. Só toca em `limit_per_run`; ignora ocorrência recorrente; idempotente; dry-run por padrão.
+3. **Lotes já cortados:** nenhum retomar em massa e nenhuma migração de status. R3 veio vazio, então não há lista a decidir.
+4. **Legado:** ver "Legado" abaixo.
+5. **Janela:** a SPEC muda volume de envio, então não sobe em dia útil.
+6. `SchedulingStep.tsx` não foi tocado (o texto dos rótulos é decisão do dono).
+
+### Desvios em relação à seção 3 (e por quê)
+- **`campaigns.limit_per_run` continua sendo gravado (default 50).** Não escrevo NULL no `POST /api/campaigns`. O valor deixou de ser limite de envio, mas `startNextCampaignLeadInQueue` (`dispatch.js`, fluxo de resposta, ativo) o usa como cerca (`buildDispatchLeads({ limit: campaign.limit_per_run })`). Anular a cerca deixaria a conclusão de uma resposta iniciar leads ainda não enviados, fora do lote, sem cota nem janela.
+- **O aviso não ficou dentro do `SchedulingStep.tsx`** (decisão 6): é o componente novo `DispatchVolumeNotice.tsx`, montado logo acima dele em `LeadImports.tsx`.
+- **Achado extra, corrigido:** `handleEditCampaign` ligava o loteamento sempre que `c.limit_per_run` existia (sempre existe). Toda edição abria como "lotes de 50" e o Disparar agora criava "Lote 1/1" com `limitPerRun: 50`. Agora só liga se a campanha já tem mais de um lote.
+- Prova de frontend F2 (payload sem `limitPerRun: 50` no POST da campanha) foi trocada por prova no POST do **lote**, que é onde o valor decide o envio.
+- A prova 5 (cota como freio) não ganhou teste novo: a cobertura existente de cota (`campaignChipQuota`) segue verde.
+- Um teste antigo (`compactCardsAndStableColor`) fixava "quantos leads = limit_per_run"; foi atualizado para ler os lotes. É mudança de comportamento intencional.
+
+### Ordem de deploy (fim de semana)
+1. Janela sem atividade e `activeDispatchesCount` = 0.
+2. `node src/scripts/backfillDispatchLimit.js` (dry-run) e conferir a contagem.
+3. `node src/scripts/backfillDispatchLimit.js --apply`; esperado: "restantes ... 0".
+4. Merge e deploy do código. **Nunca rodar o backfill depois do deploy.**
+5. Risco conhecido: lote criado por código velho entre os passos 3 e 4 ficaria sem limite e enviaria o público inteiro. Por isso a janela sem atividade.
