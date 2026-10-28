@@ -2941,7 +2941,12 @@ export function registerCampaignsRoutes(app, deps) {
       : CAMPAIGN_SCHEDULER_MAX_BATCH;
 
     try {
-      const result = await runDueCampaignDispatches({ limit, triggerSource: "external_runner" });
+      // Runner LEGADO desarmado (SPEC 17): executeCampaignDispatch cortava em campaign.limit_per_run, não grava runs
+      // (ver buildLegacyDispatchCampaignsSql) e não passa por claim, cota nem janela. O scheduler legado já estava desligado
+      // (campaign/scheduler.js) e /:id/trigger responde 410; esta era a única porta que sobrava. Medido em produção em
+      // 28/10/2026: 0 campanhas elegíveis a ele, 0 disparadas por ele em 30 dias, 0 de 22 criadas com scheduled_for.
+      // Os lotes (campaign_dispatches) seguem normalmente logo abaixo.
+      const result = { success: true, processed: 0, sent: 0, failed: 0, items: [], disarmed: true, reason: "LEGACY_RUNNER_DISARMED" };
       const dispatchResult = await runDueIndependentDispatches({ limit });
       const stalledNotifyResult = pgDatabasePool
         ? await syncDailyStalledNotificationsForAllTenants(pgDatabasePool)
