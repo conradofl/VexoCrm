@@ -9,13 +9,14 @@
 
 import express from "express";
 import crypto from "crypto";
-import { requireFirebaseAuth, requireInternalPageAccess } from "../access/middlewares.js";
+import { requireFirebaseAuth } from "../access/middlewares.js";
 import { pgDatabasePool } from "../services/database.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { detectRagDocumentType, saveRagDocumentBuffer, deleteRagDocumentBuffer, RAG_MAX_BYTES } from "../services/storage.js";
 import { resolveEmbeddingIdentity } from "../services/embeddings.js";
 import { findRagContextForQuestion, resolveDefaultMinSimilarity } from "./chatSearch.js";
 import { getRagQueue } from "./queue.js";
+import { evaluateRagUser, evaluateRagAccess } from "./access.js";
 
 function sendErr(res, status, code, message) {
   console.error(`[rag/routes][${code}]`, message);
@@ -30,20 +31,42 @@ function getDb() {
   return pgDatabasePool;
 }
 
+// Passos do usuário (role + página "agente"), no router inteiro: barra antes
+// de qualquer rota, sem ler o banco.
+function requireRagUser(req, res, next) {
+  const verdict = evaluateRagUser(req.authAccess);
+  if (!verdict.allowed) return sendErr(res, verdict.status, verdict.reason, verdict.message);
+  return next();
+}
+
+// Passo do tenant (módulo agente_rag). Só dá para checar depois que cada rota
+// sabe de qual tenant se trata — por query, body ou pela linha do documento.
+async function assertRagAccess(req, res, clientId) {
+  const verdict = await evaluateRagAccess(req.authAccess, clientId);
+  if (verdict.allowed) return true;
+  sendErr(res, verdict.status, verdict.reason, verdict.message);
+  return false;
+}
+
 export function registerRagRoutes(app) {
   const router = express.Router();
 
-  // Permissão agente_rag (permissionsRegistry.js) já gateia a ABA na tela —
-  // sem isso no backend, a tela cobra e a API não: qualquer usuário
-  // autenticado, de qualquer plano, indexa documento e gasta a cota
-  // compartilhada do Gemini. Uma linha no router inteiro, não rota a rota —
-  // endpoint novo nunca nasce desprotegido.
-  //
-  // "chatbot-docs", não "agente": a página "agente" aparece nas páginas de
-  // DUAS permissões (agente_inbound E agente_rag) — gatear por ela deixaria
-  // passar quem só tem Agente Inbound, módulo e preço diferentes. Só
-  // "chatbot-docs" pertence exclusivamente ao RAG.
-  router.use(requireFirebaseAuth, requireInternalPageAccess("chatbot-docs"));
+  // GET /api/rag/access?clientId= — a tela pergunta antes de mostrar o upload.
+  // Registrada ANTES do router.use: quem não pode usar recebe { allowed: false }
+  // com o motivo, em vez de um 403 que a tela teria que adivinhar. A resposta
+  // sai da MESMA evaluateRagAccess do gate abaixo.
+  router.get("/access", requireFirebaseAuth, async (req, res) => {
+    const clientId = resolveAuthorizedClientId(req, res, str(req.query.clientId));
+    if (!clientId) return;
+    const verdict = await evaluateRagAccess(req.authAccess, clientId);
+    return res.json({ success: true, allowed: verdict.allowed, reason: verdict.reason, message: verdict.message });
+  });
+
+  // Gate em duas partes (rag/access.js). Aqui, uma linha no router inteiro: o
+  // usuário precisa da página "agente". Em cada rota, depois de resolver o
+  // tenant, assertRagAccess confere o módulo agente_rag — é isso que impede a
+  // fresta de quem só contratou Agente Inbound (que também tem "agente").
+  router.use(requireFirebaseAuth, requireRagUser);
 
   // POST /api/rag/documents?clientId=&companyId=
   // Header opcional: X-File-Name (nome original do arquivo, urlencoded).
@@ -58,6 +81,7 @@ export function registerRagRoutes(app) {
     async (req, res) => {
       const clientId = resolveAuthorizedClientId(req, res, str(req.query.clientId));
       if (!clientId) return;
+      if (!(await assertRagAccess(req, res, clientId))) return;
 
       const buffer = Buffer.isBuffer(req.body) ? req.body : null;
       if (!buffer || buffer.length === 0) {
@@ -141,6 +165,7 @@ export function registerRagRoutes(app) {
   router.get("/documents", requireFirebaseAuth, async (req, res) => {
     const clientId = resolveAuthorizedClientId(req, res, str(req.query.clientId));
     if (!clientId) return;
+    if (!(await assertRagAccess(req, res, clientId))) return;
     const companyId = str(req.query.companyId);
 
     const pool = getDb();
@@ -201,6 +226,7 @@ export function registerRagRoutes(app) {
 
     const clientId = resolveAuthorizedClientId(req, res, rows[0].client_id);
     if (!clientId) return;
+    if (!(await assertRagAccess(req, res, clientId))) return;
 
     const storageOk = await deleteRagDocumentBuffer(rows[0].storage_key);
     if (!storageOk) {
@@ -222,6 +248,7 @@ export function registerRagRoutes(app) {
   router.post("/search-test", requireFirebaseAuth, async (req, res) => {
     const clientId = resolveAuthorizedClientId(req, res, str(req.body?.clientId));
     if (!clientId) return;
+    if (!(await assertRagAccess(req, res, clientId))) return;
     const companyId = str(req.body?.companyId);
     const question = typeof req.body?.question === "string" ? req.body.question.trim() : "";
     if (!question) return sendErr(res, 400, "MISSING_QUESTION", "Pergunta de teste não fornecida.");
@@ -269,6 +296,7 @@ export function registerRagRoutes(app) {
     // payload mandaria (aqui nem manda: o tenant vem da linha).
     const clientId = resolveAuthorizedClientId(req, res, rows[0].client_id);
     if (!clientId) return;
+    if (!(await assertRagAccess(req, res, clientId))) return;
 
     await pool.query(
       `UPDATE public.rag_documents SET status = 'pending', error_log = NULL, updated_at = NOW() WHERE id = $1`,

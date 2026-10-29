@@ -12,6 +12,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 function mockHooks(documents: any[]) {
   vi.doMock("@/hooks/useRagDocuments", () => ({
+    useRagAccess: () => ({ data: { allowed: true, reason: null, message: null }, isLoading: false, isError: false }),
     useRagDocuments: (_clientId: string | undefined, companyId: string | undefined) => ({
       data: documents,
       isLoading: false,

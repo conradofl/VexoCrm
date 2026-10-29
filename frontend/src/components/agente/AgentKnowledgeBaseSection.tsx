@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
+  useRagAccess,
   useRagDocuments,
   useUploadRagDocument,
   useDeleteRagDocument,
@@ -49,7 +50,12 @@ const STATUS_BADGE: Record<RagDocument["status"], { label: string; className: st
 };
 
 export function AgentKnowledgeBaseSection({ clientId, companyId }: { clientId: string | undefined; companyId: string | undefined }) {
-  const { data: documents = [], isLoading } = useRagDocuments(RAG_LIVE ? clientId : undefined, companyId);
+  // Mesmo veredito do backend que a aba tenant-wide (GET /api/rag/access).
+  const accessQuery = useRagAccess(RAG_LIVE ? clientId : undefined);
+  const canUse = RAG_LIVE && accessQuery.data?.allowed === true;
+  const accessDenied = RAG_LIVE && (accessQuery.isError || accessQuery.data?.allowed === false);
+
+  const { data: documents = [], isLoading } = useRagDocuments(canUse ? clientId : undefined, companyId);
   const uploadMutation = useUploadRagDocument(clientId, companyId);
   const deleteMutation = useDeleteRagDocument(clientId);
   const reprocessMutation = useReprocessRagDocument(clientId);
@@ -82,6 +88,23 @@ export function AgentKnowledgeBaseSection({ clientId, companyId }: { clientId: s
     });
   };
 
+  if (accessDenied) {
+    const motivo =
+      accessQuery.data?.message ||
+      (accessQuery.error instanceof Error ? accessQuery.error.message : "Não foi possível verificar o acesso à base de conhecimento.");
+    return (
+      <Card className="border-border dark:border-zinc-800">
+        <CardContent className="flex items-start gap-3 p-5">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-foreground">Base de Conhecimento indisponível para você</p>
+            <p className="text-xs text-muted-foreground">{motivo}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-border dark:border-zinc-800">
       <CardHeader className="pb-3">
@@ -112,7 +135,7 @@ export function AgentKnowledgeBaseSection({ clientId, companyId }: { clientId: s
             type="file"
             accept=".pdf,.docx,.txt,.md"
             onChange={handleUpload}
-            disabled={!RAG_LIVE || !companyId || uploadMutation.isPending}
+            disabled={!canUse || !companyId || uploadMutation.isPending}
             className="absolute inset-0 opacity-0 w-full h-full disabled:cursor-not-allowed"
           />
           <div className="flex flex-col items-center gap-1.5 text-xs">

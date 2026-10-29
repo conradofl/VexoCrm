@@ -36,6 +36,37 @@ export interface RagSearchTestResult {
   needsReindexDocumentIds: string[];
 }
 
+export interface RagAccess {
+  allowed: boolean;
+  reason: string | null;
+  message: string | null;
+}
+
+// Pergunta ao backend se este usuário pode usar a Base de Conhecimento neste
+// tenant. O veredito sai da MESMA função que gateia as rotas (rag/access.js):
+// a tela não tem regra própria, só obedece — senão volta a mostrar um botão
+// que a API recusa com 403.
+export function useRagAccess(clientId: string | undefined) {
+  const { isAuthenticated, getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["ragAccess", clientId],
+    enabled: isAuthenticated && Boolean(clientId),
+    queryFn: async (): Promise<RagAccess> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const params = new URLSearchParams({ clientId: clientId as string });
+      const res = await fetchApi(`/api/rag/access?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(await readApiErrorMessage(res, "Não foi possível verificar o acesso à base de conhecimento"));
+      }
+      const data = await readApiJson<RagAccess>(res, "rag-access");
+      return { allowed: data.allowed === true, reason: data.reason ?? null, message: data.message ?? null };
+    },
+  });
+}
+
 // companyId presente = escopa a busca/upload a UM agente (rag_documents.company_id).
 // Documento amarrado a um agente só entra na busca daquele agente; documento
 // sem agente (company_id null) vale pro tenant inteiro — a mesma regra que já
