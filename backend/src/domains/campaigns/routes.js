@@ -3798,6 +3798,46 @@ export function registerCampaignsRoutes(app, deps) {
         console.warn("[campaign-dispatch] aviso ao checar duplicidade de envio:", checkErr?.message || checkErr);
       }
 
+      // 2. Trava por ciclo REAVALIADA NA HORA DO CLAIM (29/10/2026, campanha 0423a574). A mesma regra da montagem da lista
+      // (isLeadBlockedByActiveCycleProgress), que roda uma vez, no começo do lote. Entre a montagem e o envio a fila
+      // (startNextCampaignLeadInQueue) pode ter iniciado este lead: ela não cria run, só grava o progresso, então a checagem
+      // de runs acima não a enxerga e o lead recebia o passo 1 duas vezes, com variações diferentes. Registra 'skipped' para
+      // o lead contar como processado (o lote fecha 'done' em vez de "interrompido com pendentes").
+      const itemId = importItemIdOf(lead);
+      if (itemId) {
+        try {
+          const { rows: itemRows } = await pgDatabasePool.query(
+            `SELECT normalized_data FROM public.lead_import_items WHERE id = $1 AND client_id = $2`,
+            [itemId, clientId]
+          );
+          const progressoAtual = extractCampaignProgress(itemRows[0]?.normalized_data || {}, campaign.id);
+          if (isLeadBlockedByActiveCycleProgress({ progress: progressoAtual, occurrence, campaignId: campaign.id, dispatchId })) {
+            console.warn("[campaign-dispatch] lead pulado no claim: sequência já em andamento neste ciclo (iniciada fora deste lote)", {
+              dispatchId,
+              campaignId: campaign.id,
+              leadId: lead.id,
+              phone: maskPhoneForLog(lead.telefone || phone),
+              status: progressoAtual.status,
+            });
+            await pgDatabasePool
+              .query(
+                `INSERT INTO public.campaign_dispatch_runs
+                   (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
+                 VALUES ($1, $2, $3, $4, $5, 'skipped', 'Sequência já em andamento neste ciclo (iniciada fora deste lote)', now(), $6)
+                 ON CONFLICT (dispatch_id, lead_id) DO NOTHING`,
+                [dispatchId, campaign.id, clientId, lead.id, cleanPhone || normalizeString(phone), itemId]
+              )
+              .catch((err) => {
+                console.warn("[campaign-dispatch] falha ao registrar lead pulado no claim:", err?.message || err);
+              });
+            return false;
+          }
+        } catch (cycleErr) {
+          // Como a checagem de runs acima: falha de leitura não derruba o envio.
+          console.warn("[campaign-dispatch] aviso ao reavaliar a trava por ciclo no claim:", cycleErr?.message || cycleErr);
+        }
+      }
+
       if (!lead?.id) {
         const alvo = cleanPhone || normalizeString(phone);
         if (!alvo) return true;
