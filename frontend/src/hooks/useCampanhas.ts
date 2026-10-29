@@ -74,6 +74,8 @@ export interface Campaign {
   recurrenceWarnings?: string[];
   /** A conta de duração de cada envio, devolvida ao salvar. */
   recurrenceLoad?: { overrun: boolean; message: string } | null;
+  /** Proteção anti-ban (rodízio, cota, intervalo, repetição) que a edição removeu. Só vem na resposta de editar. */
+  dispatchProtectionWarnings?: { field: string; label: string; before: number; after: number | null }[];
   // ── Campos PRÉ-CABEADOS (Dashboard Fase 1 — desempenho por campanha).
   // O endpoint de campanhas ainda NÃO retorna estes; quando retornar, a tabela
   // do Dashboard preenche sozinha (helper "—" enquanto nulo).
@@ -724,8 +726,13 @@ export function useUpdateCampaign() {
         throw new CampaignApiError(`Erro ao atualizar campanha: ${res.status} ${message}`, code, res.status);
       }
 
-      const data = await readCampaignJson<{ item: Campaign; recurrenceWarnings?: string[]; recurrenceLoad?: Campaign["recurrenceLoad"] }>(res, "update_campaign");
-      return { ...data.item, recurrenceWarnings: data.recurrenceWarnings || [], recurrenceLoad: data.recurrenceLoad ?? null };
+      const data = await readCampaignJson<{ item: Campaign; recurrenceWarnings?: string[]; recurrenceLoad?: Campaign["recurrenceLoad"]; dispatchProtectionWarnings?: Campaign["dispatchProtectionWarnings"] }>(res, "update_campaign");
+      return {
+        ...data.item,
+        recurrenceWarnings: data.recurrenceWarnings || [],
+        recurrenceLoad: data.recurrenceLoad ?? null,
+        dispatchProtectionWarnings: data.dispatchProtectionWarnings || [],
+      };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
