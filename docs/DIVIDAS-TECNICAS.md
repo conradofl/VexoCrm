@@ -108,3 +108,21 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   produção são o que leva para 1 a 2 dias.
 - **Status:** aberta. Registrada em 29/10/2026. O RAG deixou de depender disso com `fix/rag-gate-agente-rag` (gate pela
   página `agente` + módulo do tenant), mas a dívida continua para qualquer página nova.
+
+## DT-007 — Todo deploy pausa os lotes que estão em voo
+
+- **Onde:** `backend/src/campaign/orphanRecovery.js`, `recoverOrphanDispatches` (chamada em `server.js:976`, logo depois de
+  `runMigrations`, antes de o servidor ouvir). A mensagem gravada está nas linhas 130-132.
+- **O que acontece:** um lote `running` no momento em que o processo reinicia fica órfão. No boot ele é recolhido e vai para
+  `paused` com "Pausado — servidor reiniciou durante o envio. Retome quando quiser." (com a contagem de leads de envio não
+  confirmado, quando há). Ninguém retoma sozinho.
+- **Medido em 29/10/2026:** lote 4/21 da campanha "Continuação - Apoio Julio": `paused`, target 10, sent 7, failed 0, com essa
+  mensagem. No log do boot anterior, "Lote 2/21" pausado com `leadsSent: 5`. Explica lotes "com pendentes" depois de um
+  deploy sem que a fila, o claim ou o envio tenham defeito.
+- **Por que não é defeito:** a recuperação protege contra reenvio (lead com envio não confirmado não é reenviado). O custo é
+  que **todo deploy nosso pega algum lote em voo** e o deixa parado até alguém clicar em retomar.
+- **O que fazer hoje:** antes de subir, conferir `activeDispatchesCount` no `/health` (`domains/insights/routes.js:163`) e
+  preferir subir com zero lotes em andamento; depois do deploy, listar e retomar os lotes pausados por reinício.
+- **Como resolver (futuro):** decisão do dono. Ou retomada automática dos lotes pausados por reinício (respeitando janela de
+  envio e cota do chip, e tratando os leads de envio não confirmado), ou drenagem do que está em voo antes do deploy.
+- **Status:** aberta. Registrada em 29/10/2026.
