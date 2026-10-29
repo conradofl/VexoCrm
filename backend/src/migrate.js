@@ -433,6 +433,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='campaign_dispatches' AND column_name='dispatch_options')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_messages' AND column_name='dispatch_id')
     ) AS ok`,
+    "20261029200000_create_campaign_queue_deferrals.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='campaign_queue_deferrals')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='campaign_queue_deferrals' AND column_name='retry_after')
+    ) AS ok`,
   };
 
   const query = checks[filename];

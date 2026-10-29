@@ -19,7 +19,9 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   de envio do lote.
 - **Como resolver (futuro):** ou a fila passa a criar/reaproveitar um lote (com claim, cota e janela), ou é desarmada
   para campanhas que usam lotes. Decisão do dono, com medição de quantas campanhas dependem dela.
-- **Status:** aberta, sem prioridade. Registrada em 28/10/2026.
+- **Status:** aberta. Registrada em 28/10/2026. Atualizado em 29/10/2026: a fila ganhou claim (PR #167), trava por ciclo no claim do lote
+  (PR 1b) e os três freios (PR 2): janela de envio, cota do chip e opt-out, com adiamento e retomada pelo agendador. Continua
+  fora do agendador de lotes (sem run); a rotação entre chips na fila é o PR 3.
 
 ## DT-002 — A tela não usa `missingOrigin` da recorrência sem origem
 
@@ -58,7 +60,8 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   considera candidato quem não tem progresso nenhum, e o lote só conhece a regra de `aguardando_usuario`. Ninguém resolve.
 - **Como resolver (futuro):** tratar `iniciando` com `claimedAt` mais antigo que um limite (proposta: 10 minutos) como livre,
   tanto na escolha de candidatos quanto no `UPDATE` do claim. Entra junto do PR dos freios, onde claim pendurado é o tema.
-- **Status:** aberta. Registrada em 29/10/2026.
+- **Status:** RESOLVIDA em 29/10/2026 no PR dos freios: `isStaleQueueClaim` e o `UPDATE` do claim tratam `iniciando` com mais de 10
+  minutos (`CLAIM_TTL_MINUTES`) como livre. Mantida aqui só como registro.
 
 ## DT-006 — Dois presets "gestor": o da tela e o do backend divergem, e o da tela vence
 

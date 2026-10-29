@@ -8,6 +8,18 @@
 
 const CLAIM_STATUS = "iniciando";
 
+// DT-004: claim de um processo que morreu entre o claim e a devolução (deploy, queda) não pode prender o lead para sempre.
+// 10 minutos é muito mais que um envio (segundos); passado isso o claim é tratado como livre.
+export const CLAIM_TTL_MINUTES = 10;
+
+/** O progresso é um claim provisório da fila, velho demais para ser de um envio ainda em andamento? */
+export function isStaleQueueClaim(progress, now = Date.now()) {
+  if (!progress || progress.status !== CLAIM_STATUS) return false;
+  const claimedAt = Date.parse(progress.claimedAt);
+  if (!Number.isFinite(claimedAt)) return true; // claim sem carimbo legível: não há como saber que está vivo
+  return now - claimedAt > CLAIM_TTL_MINUTES * 60_000;
+}
+
 /**
  * Tenta reivindicar o lead para a fila. Devolve true se esta execução ganhou o claim.
  * Sem pool (ambiente sem Postgres direto) devolve true: não há como arbitrar, e o comportamento é o de antes.
@@ -24,7 +36,14 @@ export async function claimQueueLead(pool, { clientId, campaignId, leadImportIte
                 || jsonb_build_object($3::text, jsonb_build_object('status', $5::text, 'claimedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))))
       WHERE i.id = $1
         AND i.client_id = $2
-        AND coalesce(i.normalized_data->'campaign_progress'->$3::text, '{}'::jsonb) = '{}'::jsonb
+        AND (
+          coalesce(i.normalized_data->'campaign_progress'->$3::text, '{}'::jsonb) = '{}'::jsonb
+          OR (
+            i.normalized_data->'campaign_progress'->$3::text->>'status' = $5::text
+            AND coalesce((i.normalized_data->'campaign_progress'->$3::text->>'claimedAt')::timestamptz, '-infinity'::timestamptz)
+                < now() - make_interval(mins => ${CLAIM_TTL_MINUTES})
+          )
+        )
         AND NOT EXISTS (
           SELECT 1 FROM public.campaign_dispatch_runs r
            WHERE r.campaign_id::text = $4

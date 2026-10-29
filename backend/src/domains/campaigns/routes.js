@@ -103,7 +103,13 @@ export function normalizeDispatchPhone(phone, lead = null) {
   return normalizeString(raw).replace(/\D/g, "");
 }
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
-import { QUOTA_PAUSE_MARKER, createChipQuotaGate, findInstanceByWebhookUrl } from "../../services/campaignQuotaGate.js";
+import { resumeDeferredQueues } from "../../campaign/queueResume.js";
+import {
+  QUOTA_PAUSE_MARKER,
+  buildQuotaGateForWebhook as buildQuotaGateForWebhookShared,
+  createChipQuotaGate,
+  findInstanceByWebhookUrl,
+} from "../../services/campaignQuotaGate.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
@@ -2578,6 +2584,14 @@ export function registerCampaignsRoutes(app, deps) {
       console.error("[campaign-recurrence] falha ao materializar ocorrencias:", err);
     }
 
+    // Filas de resposta adiadas por um freio (janela fechada, cota do chip esgotada): retoma as que já podem tentar de novo.
+    // Falha aqui nunca derruba o agendador de lotes.
+    try {
+      await resumeDeferredQueues({ pool: pgDatabasePool });
+    } catch (err) {
+      console.error("[campaign-queue] falha ao retomar filas adiadas:", err);
+    }
+
     const now = new Date().toISOString();
 
     try {
@@ -3079,15 +3093,13 @@ export function registerCampaignsRoutes(app, deps) {
   // Portão de cota para os disparos que só têm a URL do webhook (envio manual e direto): o chip é a instância
   // cadastrada cujo webhook é EXATAMENTE essa URL; sem correspondência, não identificado (segue sem cota, registrado).
   async function buildQuotaGateForWebhook(clientId, webhookUrl) {
-    let chip = null;
-    let timezone = "America/Sao_Paulo";
-    try {
-      chip = findInstanceByWebhookUrl(await getLeadClientEvolutionInstances(clientId), webhookUrl);
-      timezone = resolveSendWindowConfig((await getLeadClientN8nSettings(clientId)) || {}).timezone || timezone;
-    } catch (err) {
-      console.warn("[campaign-quota] não foi possível resolver o chip do webhook:", err?.message || err);
-    }
-    return createChipQuotaGate({ chip, timezone, pool: pgDatabasePool });
+    return buildQuotaGateForWebhookShared({
+      clientId,
+      webhookUrl,
+      pool: pgDatabasePool,
+      getInstances: getLeadClientEvolutionInstances,
+      getSettings: getLeadClientN8nSettings,
+    });
   }
 
   // ── Defeito A: elegibilidade idempotente por disparo ────────────────────────

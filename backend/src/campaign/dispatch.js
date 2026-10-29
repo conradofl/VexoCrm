@@ -54,7 +54,12 @@ import {
   resolveEnvCampaignQualificationWebhookSettings,
 } from "./settings.js";
 import { createLeadMessaging } from "../domains/shared/leadMessaging.js";
-import { claimQueueLead, releaseQueueLead } from "./queueClaim.js";
+import { claimQueueLead, isStaleQueueClaim, releaseQueueLead } from "./queueClaim.js";
+import { evaluateQueueSendWindow, nextDayWindowOpening } from "./queueBrakes.js";
+import { DEFERRAL_REASON, clearQueueDeferral, deferQueue, hasQueueDeferral } from "./queueDeferral.js";
+import { isPhoneOptedOut } from "./queueOptOut.js";
+import { buildQuotaGateForWebhook } from "../services/campaignQuotaGate.js";
+import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 
 const { appendLeadMessage } = createLeadMessaging({
   supabase,
@@ -911,6 +916,26 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
     return { started: false, reason: "campaign_without_source" };
   }
 
+  // FREIO 1 — janela de envio. Iniciar o próximo lead é uma mensagem fria para quem nunca falou com a gente: fora do
+  // horário do tenant ela não sai (29/10/2026: 15 de 47 leads iniciados pela fila em 7 dias saíram fora da janela). O
+  // bloqueio NÃO perde o lead e NÃO deixa a campanha parada em silêncio: grava o adiamento (campaign_queue_deferrals) e o
+  // agendador retoma quando a janela abrir. Nada foi reivindicado ainda, então não há claim a devolver.
+  const janela = await evaluateQueueSendWindow(clientId);
+  if (!janela.open) {
+    await deferQueue(pgDatabasePool, {
+      campaignId: campaign.id,
+      clientId,
+      reason: DEFERRAL_REASON.WINDOW,
+      retryAfter: janela.retryAfter,
+    });
+    logCampaignReplyFlow("info", "queue_deferred_send_window", {
+      clientId,
+      campaignId: campaign.id,
+      retryAfter: janela.retryAfter.toISOString(),
+    });
+    return { started: false, reason: "outside_send_window", deferred: true };
+  }
+
   // CERCA INTENCIONAL — NÃO REMOVER NEM TORNAR NULA ACHANDO QUE É RESÍDUO (SPEC 17, dívida DT-001 em
   // docs/DIVIDAS-TECNICAS.md). O limit_per_run da CAMPANHA (o 50 padrão, ou o tamanho do lote) limita aqui quais leads a
   // fila pode iniciar. Esta fila inicia o próximo lead quando uma resposta conclui o anterior, FORA do agendador de
@@ -940,7 +965,7 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
     const phone = sanitizePhone(lead.telefone);
     const item = itemByPhone.get(phone);
     const progress = extractCampaignProgress(item?.normalized_data || {}, campaign.id);
-    return Object.keys(progress).length === 0;
+    return Object.keys(progress).length === 0 || isStaleQueueClaim(progress);
   });
 
   if (candidates.length === 0) {
@@ -982,6 +1007,19 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
   let targetItem = null;
   let claimed = false;
   for (const candidate of candidates) {
+    // FREIO 3 — opt-out, ANTES do claim: quem saiu da lista nunca é reivindicado nem enviado, e a fila segue para o próximo.
+    // Não é adiamento: o lead não volta (a próxima rodada o pula de novo). Erro de leitura = pula nesta rodada (nunca libera).
+    let optOut = false;
+    try {
+      optOut = await isPhoneOptedOut(pgDatabasePool, { clientId, phone: candidate.telefone });
+    } catch (err) {
+      optOut = true;
+      console.error("[campaigns] falha ao checar opt-out do candidato da fila; pulado nesta rodada:", err?.message || err);
+    }
+    if (optOut) {
+      logCampaignReplyFlow("info", "queue_skipped_opt_out", { clientId, campaignId: campaign.id, phone: maskPhoneForLog(candidate.telefone) });
+      continue;
+    }
     const item = itemByPhone.get(sanitizePhone(candidate.telefone)) || null;
     if (!item?.id) {
       nextLead = candidate;
@@ -1028,11 +1066,23 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
 
   const clientName = await getClientName(clientId);
 
+  // FREIO 2 — cota diária do chip que envia, a MESMA do lote (campaignQuotaGate). Reserva 1 mensagem antes de enviar; se
+  // esgotou, o dispatchCampaignSequence não envia e devolve allChipsExhausted. A fila para no chip da campanha (o rodízio
+  // entre chips do lote é PR 3, depois de extraído para um módulo compartilhado).
+  const quotaGate = await buildQuotaGateForWebhook({
+    clientId,
+    webhookUrl,
+    pool: pgDatabasePool,
+    getInstances: getLeadClientEvolutionInstances,
+    getSettings: getLeadClientN8nSettings,
+  });
+
   let summary;
   try {
     ({ summary } = await dispatchCampaignSequence({
     webhookUrl,
     webhookToken,
+    quotaGate,
     leads: [nextLead],
     analyticsMeta: {
       ...analyticsMeta,
@@ -1093,8 +1143,22 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
     throw error;
   }
 
+  // Cota esgotada: nada foi enviado. Devolve o claim (o lead continua elegível) e adia até o dia seguinte.
+  if (summary.allChipsExhausted) {
+    await releaseClaim();
+    await deferQueue(pgDatabasePool, {
+      campaignId: campaign.id,
+      clientId,
+      reason: DEFERRAL_REASON.QUOTA,
+      retryAfter: nextDayWindowOpening(new Date(), janela.config),
+    });
+    logCampaignReplyFlow("info", "queue_deferred_chip_quota", { clientId, campaignId: campaign.id, chip: summary.exhaustedChipName || null });
+    return { started: false, reason: "chip_quota_exhausted", deferred: true, summary };
+  }
+
   // Nada entregue: devolve o claim, o lead continua elegível. Entregue: o progresso real sobrescreve o provisório.
   if (summary.successCount === 0) await releaseClaim();
+  if (summary.successCount > 0) await clearQueueDeferral(pgDatabasePool, campaign.id);
 
   if (summary.successCount > 0 && targetItem?.id) {
     logCampaignReplyFlow("info", "queue_next_lead_started", {
@@ -2854,6 +2918,10 @@ export async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, tr
   if (campaignError) throw campaignError;
   if (!campaign) return { finalized: false, reason: "campaign_not_found" };
   if (campaign.status !== "processing") return { finalized: false, reason: "campaign_not_processing" };
+
+  // Fila adiada por um freio (janela, cota): há leads ainda não iniciados que o fechamento não enxerga (ele só conta quem
+  // já tem progresso de espera). Encerrar aqui daria a campanha por concluída com a fila parada no meio.
+  if (await hasQueueDeferral(pgDatabasePool, campaign.id)) return { finalized: false, reason: "queue_deferred" };
 
   let query = supabase
     .from("lead_import_items")
