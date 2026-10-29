@@ -37,6 +37,17 @@ const BASE_SCHEMA = `
     dados JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+  CREATE TABLE public.lead_import_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    import_id UUID NOT NULL,
+    client_id TEXT NOT NULL,
+    lead_id UUID,
+    telefone TEXT,
+    imported BOOLEAN NOT NULL DEFAULT true,
+    normalized_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status_conversa TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
   CREATE TABLE public.campaigns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
@@ -436,7 +447,7 @@ beforeAll(() => {
 });
 afterAll(() => intervalSpy.mockRestore());
 
-async function agendador(pool, { findConcurrentOverride, app: appReal = null, settings = null, instancias = [] } = {}) {
+async function agendador(pool, { findConcurrentOverride, app: appReal = null, settings = null, instancias = [], buildLeads = buildDispatchLeads } = {}) {
   const entradas = [];
   let abrir;
   const portao = new Promise((resolve) => { abrir = resolve; });
@@ -459,7 +470,7 @@ async function agendador(pool, { findConcurrentOverride, app: appReal = null, se
   const noop = () => {};
   const deps = {
     CAMPAIGN_SCHEDULER_MAX_BATCH: 10,
-    buildDispatchLeads,
+    buildDispatchLeads: buildLeads,
     canCampaignBeDispatched: () => true,
     checkEvolutionInstanceHealth: async () => ({ state: "open" }),
     continueCampaignLeadFromReply: async () => {},
@@ -629,13 +640,13 @@ describe("[OBRIGATÓRIO] trava por campanha no agendador: duas ocorrências da m
 const CHIP = "11111111-2222-4333-8444-555555555555";
 const chipFrio = { id: CHIP, client_id: T, name: "Chip GD", chip_state: "cold", daily_limit_override: null, active: true };
 
-async function servidor(pool, { comChip = false } = {}) {
+async function servidor(pool, { comChip = false, buildLeads } = {}) {
   const app = express();
   app.use(express.json());
   // salvar não pode ficar preso no portão do teste de trava; com chip, o envio sai pelo "Chip GD" (cota de chip frio: 50/dia)
   await agendador(pool, comChip
-    ? { app, settings: { webhookUrl: "https://evo.teste/message/sendText/gd", source: "campaign_evolution_instance", selectedEvolutionInstanceId: CHIP }, instancias: [chipFrio] }
-    : { app, settings: { webhookUrl: null } });
+    ? { app, settings: { webhookUrl: "https://evo.teste/message/sendText/gd", source: "campaign_evolution_instance", selectedEvolutionInstanceId: CHIP }, instancias: [chipFrio], buildLeads }
+    : { app, settings: { webhookUrl: null }, buildLeads });
   const server = http.createServer(app);
   await new Promise((r) => server.listen(0, r));
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -907,5 +918,127 @@ describe("[OBRIGATÓRIO] cada ocorrência usa outra variação do texto", () => 
     const variacaoDe = (t) => t.slice(0, "Variação X".length);
     expect(new Set([...primeira.values()].map(variacaoDe)).size).toBeGreaterThan(1);
     expect(new Set([...segunda.values()].map(variacaoDe)).size).toBeGreaterThan(1);
+  }, SLOW);
+});
+
+// ── Origem da ocorrência: o público contado é o da origem da campanha, nunca a base inteira do tenant ──────────────
+// Mesmo defeito do lote 3edb7b73 (alvo 504 para público de 2, 22/10/2026), agora pela porta da recorrência: campanha de
+// público do Banco sem origem passava pela materialização, o countCampaignAudience resolvia a origem pelo caminho
+// PERMISSIVO (nulo = todas as planilhas) e o lote nascia com target_count = base do tenant. A trava do envio barrava a
+// saída depois, mas o lote e a métrica já estavam errados. Aqui o tenant tem planilhas MAIORES que a da campanha: se a
+// origem se perder, o número muda e o teste pega.
+const PLANILHA_A = "00000000-0000-4000-8000-00000000000a"; // 2 contatos
+const PLANILHA_B = "00000000-0000-4000-8000-00000000000b"; // 6 contatos
+const PLANILHA_C = "00000000-0000-4000-8000-00000000000c"; // 4 contatos
+const BANCO_CRITERIOS = { temperature: ["quente"] }; // público do Banco: o que marca a campanha como "do Banco"
+
+async function inserirPlanilha(db, importId, n, prefixo) {
+  for (let i = 0; i < n; i += 1) {
+    await db.query(
+      "INSERT INTO lead_import_items (import_id, client_id, telefone, normalized_data) VALUES ($1, $2, $3, $4::jsonb)",
+      [importId, T, `${prefixo}${String(10000 + i)}`, JSON.stringify({ nome: `Contato ${prefixo}-${i}` })]
+    );
+  }
+}
+
+async function tenantComPlanilhas(db) {
+  await inserirPlanilha(db, PLANILHA_A, 2, "5511970");
+  await inserirPlanilha(db, PLANILHA_B, 6, "5511971");
+  await inserirPlanilha(db, PLANILHA_C, 4, "5511972");
+}
+
+async function definirOrigem(db, id, { importId = null, meta = {} } = {}) {
+  await db.query("UPDATE campaigns SET import_id = $2, analytics_meta = $3::jsonb WHERE id = $1", [
+    id,
+    importId,
+    JSON.stringify({ sequence: SEQUENCIA, ...meta }),
+  ]);
+}
+
+const MOTIVO_SEM_ORIGEM = /^Pulado: campanha sem origem definida/;
+
+describe("[OBRIGATÓRIO] ocorrência de campanha do Banco sem origem é pulada, sem lote e sem contar a base inteira", () => {
+  it("materialização: vira 'skipped' com motivo legível, não cria lote, não conta público e avança a próxima data", async () => {
+    const { db, pool } = await banco();
+    await tenantComPlanilhas(db);
+    const id = await campanhaRecorrente(db);
+    await definirOrigem(db, id, { importId: null, meta: { audienceCriteria: BANCO_CRITERIOS } });
+    const countAudience = vi.fn(async () => ({ total: 12, toSend: 12, limitPerRun: null }));
+
+    const r = await materializeDueRecurringOccurrences({ ...deps(pool), countAudience, now: new Date("2026-11-15T12:00:10Z") });
+
+    expect(r.items.map((i) => i.status)).toEqual(["skipped"]);
+    expect(r.items[0].reason).toMatch(MOTIVO_SEM_ORIGEM);
+    expect(r.items[0].dispatchId).toBeNull();
+    expect(countAudience).not.toHaveBeenCalled(); // a contagem inflada nem chega a acontecer
+    expect(await lotes(db, id)).toHaveLength(0);
+    const [occ] = await ocorrencias(db, id);
+    expect(occ).toMatchObject({ outcome: "skipped", dispatch_id: null, audience_count: null });
+    expect(occ.reason).toMatch(MOTIVO_SEM_ORIGEM);
+    const c = await campanha(db, id);
+    expect(iso(c.next_run_at)).toBe("2026-12-15T12:00:00.000Z"); // a agenda segue: o dono corrige e o mês seguinte sai
+    expect(c.recurrence_occurrences_count).toBe(0); // pulada não conta para o fim por contagem
+  }, SLOW);
+
+  it("agendador de verdade (contagem do produto): nenhum lote nasce e o buildDispatchLeads nunca é chamado sem origem", async () => {
+    const { db, pool } = await banco();
+    await tenantComPlanilhas(db);
+    const id = await campanhaRecorrente(db, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+    await definirOrigem(db, id, { importId: null, meta: { audienceCriteria: BANCO_CRITERIOS } });
+    const chamadas = [];
+    const buildLeads = async (args) => {
+      chamadas.push(args);
+      return buildDispatchLeads(args);
+    };
+    const w = await agendador(pool, { settings: { webhookUrl: null }, buildLeads });
+
+    const r = await w.routes.runDueIndependentDispatches({ limit: 10 });
+
+    expect(r.recurrence.items.map((i) => i.status)).toEqual(["skipped"]);
+    expect(await lotes(db, id)).toHaveLength(0);
+    expect((await ocorrencias(db, id))[0].reason).toMatch(MOTIVO_SEM_ORIGEM);
+    expect(chamadas).toEqual([]);
+  }, SLOW);
+
+  it("histórico: o 'público de hoje' de campanha do Banco sem origem é zero com o aviso, não a base do tenant (12)", async () => {
+    const { db, pool } = await banco();
+    await tenantComPlanilhas(db);
+    const id = await campanhaRecorrente(db);
+    await definirOrigem(db, id, { importId: null, meta: { audienceCriteria: BANCO_CRITERIOS } });
+    const s = await servidor(pool);
+    try {
+      const r = await s.call("GET", `/api/campaigns/${id}/recurrence`);
+      expect(r.status).toBe(200);
+      expect(r.json.audienceToday).toEqual({ total: 0, toSend: 0, limitPerRun: null, missingOrigin: true });
+    } finally { await s.close(); }
+  }, SLOW);
+});
+
+describe("[OBRIGATÓRIO] ocorrência COM origem continua materializando com o público da origem (agendador de verdade)", () => {
+  // Cada caso: o tenant tem as planilhas A (2), B (6) e C (4) e 3 leads no CRM. O alvo do lote tem que ser o da origem.
+  const casos = [
+    ["uma planilha", { importId: PLANILHA_A }, 2],
+    ["campanha do Banco com planilha escolhida", { importId: PLANILHA_A, meta: { audienceCriteria: BANCO_CRITERIOS } }, 2],
+    ["origem CRM", { importId: null, meta: { importSource: "__crm__" } }, 3],
+    ["todas as planilhas (import_id nulo, campanha que não é do Banco)", { importId: null }, 12],
+    ["todas as planilhas (importSource '__all__')", { importId: null, meta: { importSource: "__all__" } }, 12],
+    ["várias planilhas (A e C)", { importId: PLANILHA_A, meta: { importIds: [PLANILHA_A, PLANILHA_C] } }, 6],
+  ];
+
+  it.each(casos)("%s → lote com alvo %#", async (_nome, origem, esperado) => {
+    const { db, pool } = await banco();
+    await tenantComPlanilhas(db);
+    await inserirLeads(db, 3);
+    const id = await campanhaRecorrente(db, { nextRunAt: new Date(Date.now() - 1000).toISOString() });
+    await definirOrigem(db, id, origem);
+    const w = await agendador(pool, { settings: { webhookUrl: null } });
+
+    const r = await w.routes.runDueIndependentDispatches({ limit: 10 });
+
+    expect(r.recurrence.items.map((i) => i.status)).toEqual(["created"]);
+    const [lote] = await lotes(db, id);
+    expect(lote.target_count).toBe(esperado);
+    const [occ] = await ocorrencias(db, id);
+    expect(occ).toMatchObject({ outcome: "created", reason: null, dispatch_id: lote.id, audience_count: esperado });
   }, SLOW);
 });

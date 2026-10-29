@@ -2292,12 +2292,16 @@ export function registerCampaignsRoutes(app, deps) {
 
   // Publico de HOJE com o mesmo criterio do envio (origem + segmentacao): o que a ocorrencia grava, o que a previa
   // mostra antes de salvar e o que o historico mostra sao o mesmo numero. Recorrente nao tem limite por envio.
+  // Origem pelo resolvedor ESTRITO, o mesmo do envio: campanha do Banco sem origem nao tem publico (missingOrigin), em
+  // vez de contar a base inteira do tenant como "todas as planilhas".
   async function countCampaignAudience(campaign) {
+    const importSelection = resolveCampaignImportSelectionStrict(campaign);
+    if (!importSelection) return { total: 0, toSend: 0, limitPerRun: null, missingOrigin: true };
     const meta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
     const validation = validateCampaignAnalyticsMeta(meta);
     const all = await buildDispatchLeads({
       clientId: campaign.client_id,
-      importId: resolveCampaignImportSelection(campaign),
+      importId: importSelection,
       limit: null,
       offset: null,
       segmentation: validation.analyticsMeta?.segmentation || null,
