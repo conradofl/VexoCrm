@@ -20,3 +20,18 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
 - **Como resolver (futuro):** ou a fila passa a criar/reaproveitar um lote (com claim, cota e janela), ou é desarmada
   para campanhas que usam lotes. Decisão do dono, com medição de quantas campanhas dependem dela.
 - **Status:** aberta, sem prioridade. Registrada em 28/10/2026.
+
+## DT-002 — A tela não usa `missingOrigin` da recorrência sem origem
+
+- **Onde:** `backend/src/domains/campaigns/routes.js`, rota `GET /:id/recurrence` (o selo `originKind`, em torno da linha
+  2508, e o campo `audienceToday`), e a tela que o consome (`RecurrenceHistoryDialog.tsx`, `formatAudienceToday` em
+  `frontend/src/lib/campaignRecurrence.ts`).
+- **O que acontece:** campanha recorrente de público do Banco **sem origem** agora é segura no backend: a ocorrência é
+  pulada com motivo e `countCampaignAudience` devolve `{ total: 0, missingOrigin: true }`. Mas a tela ainda mostra
+  "Hoje seriam 0 leads." sem dizer por quê, e o selo de origem continua calculado pelo resolvedor **permissivo**, então diz
+  "todas as planilhas" para uma campanha que não tem origem.
+- **Falta:** a tela ler `audienceToday.missingOrigin` e mostrar o aviso ("sem origem definida: escolha de onde vêm os
+  contatos"); o selo `originKind` usar o resolvedor estrito. O dado já existe no retorno.
+- **Por que não bloqueia:** não há campanha recorrente no banco (medição J5, 29/10/2026: 0 recorrentes) e nenhum envio
+  sai errado; é só informação enganosa na tela.
+- **Status:** aberta, sem prioridade. Registrada em 29/10/2026. Relacionada à correção `fix/recorrencia-sem-origem`.
