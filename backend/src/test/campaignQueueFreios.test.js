@@ -80,7 +80,7 @@ const SCHEMA = `
   );
   CREATE TABLE public.lead_optouts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, phone TEXT NOT NULL, reason TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (client_id, phone)
+    optout_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE (client_id, phone)
   );
   CREATE TABLE public.lead_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, lead_id UUID, campaign_id UUID, phone TEXT,
