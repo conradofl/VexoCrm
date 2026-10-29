@@ -1756,6 +1756,16 @@ export default function LeadImports({
       });
       const campaignId = savedCampaign.id;
 
+      // A edição removeu proteção anti-ban: o salvar respeita, mas nunca em silêncio.
+      const protecaoRemovida = savedCampaign.dispatchProtectionWarnings || [];
+      if (protecaoRemovida.length > 0) {
+        toast({
+          title: "Atenção: proteção contra bloqueio removida",
+          description: `Esta edição removeu: ${protecaoRemovida.map((w) => w.label).join(", ")}. Confira antes do próximo envio.`,
+          variant: "destructive",
+        });
+      }
+
       // Campanha que repete: os lotes nascem das ocorrências, no agendador. Nada de envio avulso aqui — ele somaria
       // um disparo extra ao primeiro envio da repetição.
       if (isRecurring) {

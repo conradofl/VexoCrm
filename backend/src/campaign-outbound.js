@@ -319,7 +319,14 @@ function normalizeDispatchOptions(rawOptions = {}, sequence = []) {
     ? rawOptions.replyAgent
     : null;
 
+  // Chave que esta funcao nao conhece passa intacta. Isto era uma lista branca e descartava o resto: ja apagou
+  // dispatchChipIds, dailyQuotaPerChip, minWaitSeconds, maxWaitSeconds e maxRepetitionsPerTemplate (a protecao
+  // anti-ban) em toda leitura e em todo salvar da edicao, alem de batchIntervalHours, trackLinks e
+  // multiAgendaEnabled. Abaixo ficam so as chaves que precisam de default ou de saneamento.
+  const { replyAgent: _rawReplyAgent, ...passthrough } = rawOptions;
+
   return {
+    ...passthrough,
     ...(replyAgent ? { replyAgent } : {}),
     leadDelaySeconds: normalizeNonNegativeInteger(
       rawOptions.leadDelaySeconds,
@@ -388,6 +395,75 @@ export function normalizeCampaignAnalyticsMeta(rawMeta = {}) {
     sequence,
     dispatchOptions: normalizeDispatchOptions(meta.dispatchOptions, sequence),
   };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Salvar da edicao: o corpo da tela e um PATCH sobre o analytics_meta salvo, nao um substituto dele. Chave ausente
+ * no corpo significa "nao mexer"; null significa "apagar". dispatchOptions mescla um nivel abaixo, porque a tela
+ * manda so o que o formulario conhece. Gravar o corpo cru apagava analytics_meta.dispatch (a tela nunca manda)
+ * e tudo que o formulario nao carregava.
+ *
+ * message e image sao resumos da sequencia: quando o corpo traz sequencia nova sem eles, o resumo antigo nao pode
+ * sobreviver (normalizeCampaignAnalyticsMeta recalcula a partir dos passos).
+ */
+export function mergeCampaignAnalyticsMetaForUpdate(currentMeta, patchMeta) {
+  const atual = isPlainObject(currentMeta) ? currentMeta : {};
+  const pedido = isPlainObject(patchMeta) ? patchMeta : {};
+  const merged = { ...atual, ...pedido };
+  if (Array.isArray(pedido.sequence)) {
+    if (!("message" in pedido)) delete merged.message;
+    if (!("image" in pedido)) delete merged.image;
+  }
+  if (isPlainObject(atual.dispatchOptions) || isPlainObject(pedido.dispatchOptions)) {
+    merged.dispatchOptions = {
+      ...(isPlainObject(atual.dispatchOptions) ? atual.dispatchOptions : {}),
+      ...(isPlainObject(pedido.dispatchOptions) ? pedido.dispatchOptions : {}),
+    };
+  }
+  return merged;
+}
+
+// Protecao anti-ban da campanha: rodizio de chip, cota diaria por chip, intervalo entre envios e repeticao de texto.
+const DISPATCH_PROTECTION_LABELS = {
+  dispatchChipIds: "rodízio de chips",
+  dailyQuotaPerChip: "cota diária por chip",
+  minWaitSeconds: "intervalo mínimo entre envios",
+  maxWaitSeconds: "intervalo máximo entre envios",
+  maxRepetitionsPerTemplate: "limite de repetição do texto",
+};
+
+/**
+ * Compara a protecao anti-ban antes e depois do salvar. Remover e permitido (o dono pode querer), mas nunca em
+ * silencio: cada campo que sumiu, zerou ou perdeu chips volta como aviso para a tela mostrar.
+ */
+export function detectDispatchProtectionLoss(beforeOptions, afterOptions) {
+  const antes = isPlainObject(beforeOptions) ? beforeOptions : {};
+  const depois = isPlainObject(afterOptions) ? afterOptions : {};
+  const warnings = [];
+  const chipsAntes = Array.isArray(antes.dispatchChipIds) ? antes.dispatchChipIds.filter(Boolean) : [];
+  const chipsDepois = Array.isArray(depois.dispatchChipIds) ? depois.dispatchChipIds.filter(Boolean) : [];
+  if (chipsDepois.length < chipsAntes.length) {
+    warnings.push({
+      field: "dispatchChipIds",
+      label: DISPATCH_PROTECTION_LABELS.dispatchChipIds,
+      before: chipsAntes.length,
+      after: chipsDepois.length,
+    });
+  }
+  for (const field of ["dailyQuotaPerChip", "minWaitSeconds", "maxWaitSeconds", "maxRepetitionsPerTemplate"]) {
+    const valorAntes = Number(antes[field]);
+    const valorDepois = Number(depois[field]);
+    const tinha = antes[field] !== null && antes[field] !== undefined && Number.isFinite(valorAntes) && valorAntes > 0;
+    const temAgora = depois[field] !== null && depois[field] !== undefined && Number.isFinite(valorDepois) && valorDepois > 0;
+    if (tinha && !temAgora) {
+      warnings.push({ field, label: DISPATCH_PROTECTION_LABELS[field], before: valorAntes, after: depois[field] ?? null });
+    }
+  }
+  return warnings;
 }
 
 export function getEnabledCampaignSteps(rawMeta = {}) {

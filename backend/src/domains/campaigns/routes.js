@@ -38,6 +38,8 @@ import {
   getCampaignStepPlan,
   normalizeCampaignAnalyticsMeta,
   validateCampaignAnalyticsMeta,
+  mergeCampaignAnalyticsMetaForUpdate,
+  detectDispatchProtectionLoss,
 } from "../../campaign-outbound.js";
 import { markCampaignLeadWaitingReply } from "../../campaign/dispatch.js";
 import {
@@ -1553,18 +1555,12 @@ export function registerCampaignsRoutes(app, deps) {
     if (["disparo", "agente"].includes(req.body?.mode)) updates.mode = req.body.mode;
     if (req.body?.archived === true) updates.archived_at = new Date().toISOString();
     if (req.body?.archived === false) updates.archived_at = null;
-    if (req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object") {
-      const validation = validateCampaignAnalyticsMeta(req.body.analyticsMeta);
-      if (!validation.valid) {
-        sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
-        return;
-      }
-      updates.analytics_meta = validation.analyticsMeta;
-    }
+    // analytics_meta e mesclado com o salvo dentro do try, com a linha atual em maos (mergeCampaignAnalyticsMetaForUpdate).
+    const analyticsMetaRequested = Boolean(req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object");
     // Recorrencia: resolvida abaixo, com a linha atual em maos (resolveRecurrenceSave).
     const recurrenceRequested = bodyTouchesRecurrence(req.body);
 
-    if (Object.keys(updates).length === 0 && !recurrenceRequested) {
+    if (Object.keys(updates).length === 0 && !recurrenceRequested && !analyticsMetaRequested) {
       sendError(res, 400, "INVALID_BODY", "No valid fields to update");
       return;
     }
@@ -1590,6 +1586,22 @@ export function registerCampaignsRoutes(app, deps) {
 
       const authorizedClientId = resolveAuthorizedClientId(req, res, current.client_id);
       if (!authorizedClientId) return;
+
+      let dispatchProtectionWarnings = [];
+      if (analyticsMetaRequested) {
+        const validation = validateCampaignAnalyticsMeta(
+          mergeCampaignAnalyticsMetaForUpdate(current.analytics_meta, req.body.analyticsMeta)
+        );
+        if (!validation.valid) {
+          sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
+          return;
+        }
+        updates.analytics_meta = validation.analyticsMeta;
+        dispatchProtectionWarnings = detectDispatchProtectionLoss(
+          normalizeCampaignAnalyticsMeta(current.analytics_meta || {}).dispatchOptions,
+          validation.analyticsMeta.dispatchOptions
+        );
+      }
 
       // Revalida a recorrencia quando o dono mexe nela, ou quando muda o texto/origem de uma campanha que ja repete
       // (trocar para planilha sem variacoes tem que ser recusado do mesmo jeito que na criacao).
@@ -1667,6 +1679,10 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
+      // Toda edicao carimba updated_at: sem isso a coluna ficava com o horario da criacao e escondia a edicao de
+      // qualquer auditoria.
+      updates.updated_at = new Date().toISOString();
+
       let { data, error } = await supabase
         .from("campaigns")
         .update(updates)
@@ -1678,6 +1694,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (error && updates.analytics_meta && isMissingSchemaError(error)) {
         const fallbackUpdates = { ...updates };
         delete fallbackUpdates.analytics_meta;
+        delete fallbackUpdates.updated_at;
         const fallback = await supabase
           .from("campaigns")
           .update(fallbackUpdates)
@@ -1733,6 +1750,7 @@ export function registerCampaignsRoutes(app, deps) {
         },
         recurrenceWarnings,
         recurrenceLoad,
+        dispatchProtectionWarnings,
       });
     } catch (error) {
       console.error("campaign update error:", error);
