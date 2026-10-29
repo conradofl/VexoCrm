@@ -35,3 +35,37 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
 - **Por que não bloqueia:** não há campanha recorrente no banco (medição J5, 29/10/2026: 0 recorrentes) e nenhum envio
   sai errado; é só informação enganosa na tela.
 - **Status:** aberta, sem prioridade. Registrada em 29/10/2026. Relacionada à correção `fix/recorrencia-sem-origem`.
+
+## DT-006 — Dois presets "gestor": o da tela e o do backend divergem, e o da tela vence
+
+- **Onde:** `frontend/src/lib/access.ts` (`PRESET_DEFAULTS.gestor`, linhas 263-310) e
+  `backend/src/access/claims.js` (`ACCESS_PRESET_DEFAULTS.gestor`, linhas 139-168).
+- **O que diverge:** o backend dá ao gestor `INTERNAL_PAGE_KEYS` inteiro menos `empresas` (34 páginas). A tela dá uma
+  lista fixa de 17 (de `dashboard` a `livpub`). Faltam no da tela, entre outras: `chatbot-docs`, `chatbot-kanban`,
+  `chatbot-config`, `inteligencia-comercial`, as subpáginas de follow-up, `integracoes`, `leads-parados`.
+  Os presets de cliente também divergem em `internalPages` (a tela grava páginas, o backend grava `[]`); hoje é inerte,
+  porque role `client` não passa por `requireInternalPageAccess`. O `operador` bate nos dois lados.
+- **Por que o da tela vence:** ao salvar um usuário, a tela manda `internalPages` no corpo, e a rota usa o corpo antes do
+  preset (`backend/src/domains/auth/routes.js:321`, `req.body?.internalPages ?? selectedProfile?.internalPages`).
+  O preset do backend só vale para quem nunca foi salvo pela tela.
+- **Por que é mais grave que parece:** enquanto os dois divergirem, **qualquer página nova que entrar em
+  `INTERNAL_PAGE_KEYS` não chega a quem foi salvo pela tela**. Re-salvar não conserta: a tela parte das claims atuais
+  (`UserAccessManagement.tsx:512`). Trocar o preset também não: aplica a lista da tela. E não existe checkbox por página
+  na edição de usuário (`AccessPagesTabs` só aparece dentro de `AccessProfileForm`, que não é renderizado).
+- **Prova (29/10/2026):** usuário gestor do container-led (uid `v0zP4gKY…`) tinha exatamente as 17 páginas do preset
+  da tela, na mesma ordem. As datas descartam "claims velhas": `chatbot-docs` existe desde 19/05 (cb317e48), `livpub`,
+  `eventos` e `relacionamento` desde 29/06 (149477cb). O usuário tem as de junho e não a de maio. Efeito visível: 403
+  no upload do RAG, que exigia `chatbot-docs`.
+- **Mesma família de:** a divergência de `approvalLevel` nas claims (a tela preserva o valor antigo ao trocar o preset).
+- **Como resolver (futuro):** uma fonte só. A tela já carrega os perfis do backend (`useAccessProfiles`, servido por
+  `GET /api/admin/access-profiles`, `routes.js:194`), mas usa `buildPresetDefaults` local nas linhas 476, 500, 652, 675,
+  718, 758, 2802 e 2830. Trocar essas chamadas pelo perfil vindo da API e apagar `PRESET_DEFAULTS` duplicado. Depois,
+  um backfill das claims dos usuários já salvos, com snapshot, dry-run e rollback (mesmo molde de
+  `migrate-user-claims-item4.mjs`).
+- **Decisão do dono antes:** qual lista é a certa para o gestor. A do backend é larga (inclui páginas GD, que são
+  barradas por tenant, além de `onboarding-agent` e `integracoes`). Unificar pela do backend **amplia** acesso a todos
+  os gestores.
+- **Tamanho:** o código são horas (meio dia, com testes). A decisão do conteúdo e o backfill medido das claims em
+  produção são o que leva para 1 a 2 dias.
+- **Status:** aberta. Registrada em 29/10/2026. O RAG deixou de depender disso com `fix/rag-gate-agente-rag` (gate pela
+  página `agente` + módulo do tenant), mas a dívida continua para qualquer página nova.
