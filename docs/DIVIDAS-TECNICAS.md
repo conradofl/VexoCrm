@@ -63,6 +63,18 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
 - **Status:** RESOLVIDA em 29/10/2026 no PR dos freios: `isStaleQueueClaim` e o `UPDATE` do claim tratam `iniciando` com mais de 10
   minutos (`CLAIM_TTL_MINUTES`) como livre. Mantida aqui só como registro.
 
+## DT-005 — Quem digita "parar" vira `lead_optouts`, mas não vira a flag `leads.opt_out`
+
+- **Onde:** `backend/src/domains/followup/routes.js` (webhook de resposta do follow-up, que reconhece "sair", "parar",
+  "cancelar" e "stop" e grava em `lead_optouts`) e `backend/src/campaign/queueOptOut.js` (a leitura única das duas fontes).
+- **O que acontece:** o opt-out por palavra grava só na tabela. A flag `leads.opt_out` (a que a tela de leads edita e que
+  `buildDispatchLeads` filtra na montagem da lista) não é gravada. Até 29/10/2026 NENHUM envio de campanha lia a tabela: o
+  `checkOptout` do lote existia e nunca foi passado ao envio. Agora a fila e o lote leem as duas fontes pelo mesmo helper
+  (`isPhoneOptedOut`), mas qualquer outra tela ou relatório que olhe só a flag continua sem enxergar quem digitou "parar".
+- **Como resolver (futuro):** gravar a flag `leads.opt_out` (e `metadata.opt_out`) no mesmo ponto em que se grava
+  `lead_optouts`; decidir se o opt-out por palavra também vale para o agente de IA e o follow-up.
+- **Status:** aberta. Registrada em 29/10/2026. Dívida nomeada do PR dos freios.
+
 ## DT-006 — Dois presets "gestor": o da tela e o do backend divergem, e o da tela vence
 
 - **Onde:** `frontend/src/lib/access.ts` (`PRESET_DEFAULTS.gestor`, linhas 263-310) e
