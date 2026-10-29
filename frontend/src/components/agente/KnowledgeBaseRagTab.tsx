@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import {
+  useRagAccess,
   useRagDocuments,
   useUploadRagDocument,
   useDeleteRagDocument,
@@ -61,7 +62,14 @@ export function KnowledgeBaseRagTab() {
   const crmClient = useOptionalCrmClient();
   const clientId = crmClient?.selectedClient?.id || crmClient?.selectedClientId || undefined;
 
-  const { data: documents = [], isLoading } = useRagDocuments(RAG_LIVE ? clientId : undefined);
+  // A tela obedece ao backend (GET /api/rag/access, mesma regra do gate):
+  // sem veredito positivo, o upload não aparece habilitado e a lista nem é
+  // buscada — quem o backend recusaria não vê um caminho que leva a 403.
+  const accessQuery = useRagAccess(RAG_LIVE ? clientId : undefined);
+  const canUse = RAG_LIVE && accessQuery.data?.allowed === true;
+  const accessDenied = RAG_LIVE && (accessQuery.isError || accessQuery.data?.allowed === false);
+
+  const { data: documents = [], isLoading } = useRagDocuments(canUse ? clientId : undefined);
   const uploadMutation = useUploadRagDocument(clientId);
   const deleteMutation = useDeleteRagDocument(clientId);
   const reprocessMutation = useReprocessRagDocument(clientId);
@@ -105,6 +113,23 @@ export function KnowledgeBaseRagTab() {
 
   const testResult = searchTestMutation.data;
 
+  if (accessDenied) {
+    const motivo =
+      accessQuery.data?.message ||
+      (accessQuery.error instanceof Error ? accessQuery.error.message : "Não foi possível verificar o acesso à base de conhecimento.");
+    return (
+      <Card className="border-border dark:border-zinc-800">
+        <CardContent className="flex items-start gap-3 p-6">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-foreground">Base de Conhecimento indisponível para você</p>
+            <p className="text-xs text-muted-foreground">{motivo}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6 animate-in fade-in-50">
       {/* Upload Zone */}
@@ -145,7 +170,7 @@ export function KnowledgeBaseRagTab() {
               type="file"
               accept=".pdf,.docx,.txt,.md"
               onChange={handleUpload}
-              disabled={!RAG_LIVE || uploadMutation.isPending}
+              disabled={!canUse || uploadMutation.isPending}
               className="absolute inset-0 opacity-0 w-full h-full disabled:cursor-not-allowed"
             />
             <div className="flex flex-col items-center gap-2">
@@ -154,9 +179,11 @@ export function KnowledgeBaseRagTab() {
               </div>
               <p className="text-sm font-semibold text-foreground">
                 {RAG_LIVE
-                  ? uploadMutation.isPending
-                    ? "Enviando..."
-                    : "Clique ou arraste seus arquivos aqui para indexar no RAG"
+                  ? !canUse
+                    ? "Verificando acesso..."
+                    : uploadMutation.isPending
+                      ? "Enviando..."
+                      : "Clique ou arraste seus arquivos aqui para indexar no RAG"
                   : "Upload de documentos disponível em breve"}
               </p>
               <p className="text-xs text-muted-foreground">Formatos suportados: PDF, DOCX, TXT, MD (até 20 MB por arquivo)</p>
@@ -287,13 +314,13 @@ export function KnowledgeBaseRagTab() {
               value={searchTest}
               onChange={(e) => setSearchTest(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleTestSearch()}
-              disabled={!RAG_LIVE || searchTestMutation.isPending}
+              disabled={!canUse || searchTestMutation.isPending}
               className="text-xs"
             />
             <Button
               size="sm"
               onClick={handleTestSearch}
-              disabled={!RAG_LIVE || searchTestMutation.isPending || !searchTest.trim()}
+              disabled={!canUse || searchTestMutation.isPending || !searchTest.trim()}
               className="text-xs bg-cyan-600 hover:bg-cyan-700 text-white gap-1.5"
             >
               {searchTestMutation.isPending ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}

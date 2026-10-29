@@ -31,10 +31,16 @@ vi.mock("../rag/queue.js", () => ({
   getRagQueue: () => ({ add: (...args) => queueAddMock(...args) }),
 }));
 
-// requireInternalPageAccess fica REAL — quero testar o gate de permissão de
-// verdade, não uma simulação do que ele deveria fazer. Só requireFirebaseAuth
-// é trocado por um passthrough (não dá pra verificar token Firebase de
-// verdade em teste).
+// Settings do tenant vêm do banco (sai do processo): é a única coisa dublada
+// no gate. Padrão = plano avançado; o teste da fresta do Agente Inbound troca.
+const settingsMock = vi.fn(async () => ({ plan_tier: "avancado", modulos_avulsos: [] }));
+vi.mock("../services/n8nSettings.js", () => ({
+  getLeadClientN8nSettings: (...args) => settingsMock(...args),
+}));
+
+// O gate (rag/access.js) fica REAL — quero testar a permissão de verdade, não
+// uma simulação do que ela deveria fazer. Só requireFirebaseAuth é trocado
+// por um passthrough (não dá pra verificar token Firebase de verdade em teste).
 vi.mock("../access/middlewares.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -567,10 +573,14 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
   });
 
   describe("Achado de revisão: a permissão agente_rag tem que gatear TODO o router, não só a tela", () => {
-    it("PROVA ESTRUTURAL: o gate está em router.use (uma linha, todo o router), não espalhado rota a rota — e é chatbot-docs, não agente", () => {
+    it("PROVA ESTRUTURAL: o gate do usuário está em router.use (uma linha, todo o router), e não é mais a página chatbot-docs", () => {
       const fonte = readFileSync(resolve("src/rag/routes.js"), "utf8");
-      expect(fonte).toContain('router.use(requireFirebaseAuth, requireInternalPageAccess("chatbot-docs"))');
-      // "agente" é ambíguo (agente_inbound E agente_rag apontam pra ela) — não pode ser o gate.
+      expect(fonte).toContain("router.use(requireFirebaseAuth, requireRagUser)");
+      // chatbot-docs é a aba de Documentação do chatbot (admin), não o RAG — e o
+      // preset gestor da tela nem tem essa página (DT-006).
+      expect(fonte).not.toContain('requireInternalPageAccess("chatbot-docs")');
+      // "agente" sozinho continua NÃO sendo o gate inteiro: a ambiguidade com
+      // agente_inbound é resolvida pelo módulo do tenant (teste da fresta abaixo).
       expect(fonte).not.toContain('requireInternalPageAccess("agente")');
     });
 
@@ -584,7 +594,7 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
       await runMiddlewareChain(middlewares, req, res);
 
       expect(res.statusCode).toBe(403);
-      expect(res.body.error.code).toBe("FORBIDDEN");
+      expect(res.body.error.code).toBe("RAG_USER_NOT_ALLOWED");
     });
 
     it("com a permissão de RAG (\"chatbot-docs\" nas internalPages): o gate deixa passar", async () => {
@@ -601,26 +611,31 @@ describe("Rotas RAG (Etapa 5, Leva 2, Commit 2)", () => {
       expect(res.statusCode).toBe(200); // res nunca foi tocado pelo gate
     });
 
-    it("TESTE OBRIGATÓRIO: usuário com Agente Inbound (\"agente\" nas internalPages) mas SEM RAG recebe 403 — módulo diferente, preço diferente, não passa mais pela fresta", async () => {
-      const middlewares = getRouterLevelMiddlewares();
-      const req = {
-        // Exatamente o que agente_inbound concede (permissionsRegistry.js): "agente" está
-        // aqui, "chatbot-docs" não. Contra o código de antes desta correção, isso passava.
-        authAccess: {
-          role: "internal",
-          isAdmin: false,
-          scopeMode: "assigned_clients",
-          internalPages: ["agente", "chatbot-kanban", "chatbot-config", "inbound-agents"],
-          permissions: [],
-          clientIds: ["geracao-digital"],
-        },
+    it("TESTE OBRIGATÓRIO: usuário com Agente Inbound (\"agente\" nas internalPages) num tenant que NÃO contratou o RAG recebe 403 — módulo diferente, preço diferente, a fresta continua fechada", async () => {
+      // Exatamente o que agente_inbound concede (permissionsRegistry.js). A página
+      // "agente" agora passa o gate do usuário (opção A da SPEC-RAG-GATE) — quem
+      // fecha a fresta é o módulo do TENANT, conferido na rota.
+      settingsMock.mockResolvedValueOnce({ plan_tier: "modular", modulos_avulsos: ["agente_inbound"] });
+      const access = {
+        role: "internal",
+        isAdmin: false,
+        scopeMode: "assigned_clients",
+        internalPages: ["agente", "chatbot-kanban", "chatbot-config", "inbound-agents"],
+        permissions: [],
+        clientIds: ["geracao-digital"],
       };
-      const res = fakeRes();
 
-      await runMiddlewareChain(middlewares, req, res);
+      const handler = getRouteHandler("/documents", "post");
+      const res = fakeRes();
+      await handler(
+        { query: { clientId: "geracao-digital" }, headers: { "x-file-name": "a.pdf" }, body: PDF_BUFFER, authAccess: access },
+        res
+      );
 
       expect(res.statusCode).toBe(403);
-      expect(res.body.error.code).toBe("FORBIDDEN");
+      expect(res.body.error.code).toBe("RAG_MODULE_NOT_CONTRACTED");
+      expect(saveRagDocumentBufferMock).not.toHaveBeenCalled();
+      expect(queueAddMock).not.toHaveBeenCalled();
     });
 
     it("prova de ponta a ponta: sem a permissão, nada é gravado nem enfileirado — nem no upload, nem no reprocessar (gate compartilhado, uma vez, pro router inteiro)", async () => {

@@ -37,6 +37,7 @@ describe("KnowledgeBaseRagTab — 'Em breve' quando a leva não está ligada", (
   it("mostra badge 'Em breve', upload desabilitado, e useRagDocuments chamado com clientId undefined (nunca busca de verdade)", async () => {
     const useRagDocumentsMock = vi.fn(() => ({ data: [], isLoading: false }));
     vi.doMock("@/hooks/useRagDocuments", () => ({
+      useRagAccess: () => ({ data: { allowed: true, reason: null, message: null }, isLoading: false, isError: false }),
       useRagDocuments: useRagDocumentsMock,
       useUploadRagDocument: () => ({ mutate: vi.fn(), isPending: false }),
       useDeleteRagDocument: () => ({ mutate: vi.fn(), isPending: false }),
@@ -76,6 +77,7 @@ describe("KnowledgeBaseRagTab — ligada (VITE_RAG_TAB_LIVE=true)", () => {
     const deleteMutate = vi.fn();
     const reprocessMutate = vi.fn();
     vi.doMock("@/hooks/useRagDocuments", () => ({
+      useRagAccess: () => ({ data: { allowed: true, reason: null, message: null }, isLoading: false, isError: false }),
       useRagDocuments: () => ({
         data: [
           {
@@ -125,6 +127,7 @@ describe("KnowledgeBaseRagTab — ligada (VITE_RAG_TAB_LIVE=true)", () => {
 
   it("documento 'failed' também mostra o botão de reprocessar (a maquete prometia e não tinha)", async () => {
     vi.doMock("@/hooks/useRagDocuments", () => ({
+      useRagAccess: () => ({ data: { allowed: true, reason: null, message: null }, isLoading: false, isError: false }),
       useRagDocuments: () => ({
         data: [
           {
@@ -162,6 +165,7 @@ describe("KnowledgeBaseRagTab — ligada (VITE_RAG_TAB_LIVE=true)", () => {
       opts?.onSuccess?.();
     });
     vi.doMock("@/hooks/useRagDocuments", () => ({
+      useRagAccess: () => ({ data: { allowed: true, reason: null, message: null }, isLoading: false, isError: false }),
       useRagDocuments: () => ({ data: [], isLoading: false }),
       useUploadRagDocument: () => ({ mutate: vi.fn(), isPending: false }),
       useDeleteRagDocument: () => ({ mutate: vi.fn(), isPending: false }),
