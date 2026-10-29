@@ -9,6 +9,8 @@
 //   - nunca empilhar: se a campanha tem lote em andamento quando a ocorrência vence, a ocorrência é PULADA e o
 //     motivo fica em campaign_recurrence_occurrences (visível ao dono). O agendador ainda trava a campanha no claim
 //     (findConcurrentRunningDispatch + índice único parcial) — esta é a primeira barreira, aquela a última.
+//   - sem origem, sem lote: campanha do Banco sem origem (resolveCampaignImportSelectionStrict nulo) é PULADA com
+//     motivo, antes de contar o público e antes do INSERT. A agenda avança; o dono corrige a origem e a próxima sai.
 //   - uma ocorrência por horário: o avanço de next_run_at, o lote e o registro saem num ÚNICO comando SQL, condicionado
 //     a next_run_at ainda ser o horário vencido. Dois ticks concorrentes: um cria, o outro não acha a linha.
 //   - fim declarado: por data (nenhuma ocorrência depois de recurrence_ends_at), por contagem (puladas não contam) ou
@@ -24,6 +26,7 @@
 
 import { computeNextRecurrenceDate } from "./campaignRecurrence.js";
 import { getPartsInTimezone } from "./sendWindow.js";
+import { resolveCampaignImportSelectionStrict } from "../campaign/dispatch.js";
 
 const MISSING_SCHEMA_CODES = new Set(["42703", "42P01"]); // undefined_column, undefined_table
 
@@ -45,6 +48,9 @@ function formatSlot(date, timezone) {
   const mi = String(p.minute).padStart(2, "0");
   return `${dd}/${mm} às ${hh}:${mi}`;
 }
+
+export const SKIPPED_WITHOUT_SOURCE_REASON =
+  "Pulado: campanha sem origem definida. Escolha de onde vêm os contatos (planilha ou CRM) e salve a campanha de novo.";
 
 export function buildSkippedBecauseRunningReason(activeDispatch) {
   const nome = activeDispatch?.name ? `"${activeDispatch.name}"` : "anterior";
@@ -208,8 +214,14 @@ async function materializeOne({ pool, now, campaign, resolveTimezone, buildSteps
   let steps = null;
   let audience = null;
 
-  const active = await findActiveDispatchOfCampaign(pool, campaign.id, slot.toISOString());
-  if (active) {
+  // Origem ANTES de contar e de criar o lote: campanha do Banco sem origem contaria a base inteira do tenant (o 504
+  // do lote 3edb7b73, 22/10/2026). Mesma regra dos outros pontos que montam lote (resolveCampaignImportSelectionStrict).
+  const hasSource = Boolean(resolveCampaignImportSelectionStrict(campaign));
+  const active = hasSource ? await findActiveDispatchOfCampaign(pool, campaign.id, slot.toISOString()) : null;
+  if (!hasSource) {
+    outcome = "skipped";
+    reason = SKIPPED_WITHOUT_SOURCE_REASON;
+  } else if (active) {
     outcome = "skipped";
     reason = buildSkippedBecauseRunningReason(active);
   } else {
