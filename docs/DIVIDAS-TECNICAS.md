@@ -126,3 +126,42 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
 - **Como resolver (futuro):** decisão do dono. Ou retomada automática dos lotes pausados por reinício (respeitando janela de
   envio e cota do chip, e tratando os leads de envio não confirmado), ou drenagem do que está em voo antes do deploy.
 - **Status:** aberta. Registrada em 29/10/2026.
+
+## DT-008 — O pedido de saída só é capturado na resposta ao follow-up; resposta de campanha não é registrada em lugar nenhum
+
+- **Medição (29/10/2026, dono, 23:41Z):** `lead_optouts` existe (colunas `id`, `client_id`, `phone`, `optout_at`, `reason`) e tem
+  **zero registros em todos os tenants**, com cerca de 12 mil telefones importados e meses de campanha. Ninguém nunca ter pedido
+  para sair não é verdade: o problema está **antes da tabela**.
+- **Único ponto que escreve:** `backend/src/followup/routes.js`, webhook `POST /webhooks/whatsapp/:companyId` (linha 147), detecção
+  na **linha 211** (`messageText.match(/^(sair|parar|cancelar|stop)$/i)`) e `INSERT` na linha 213. Só vale para quem responde a
+  uma mensagem de **follow-up**, e a regex é ancorada: a mensagem inteira tem de ser uma das quatro palavras. "Parar!", "parar.",
+  "pare de me mandar mensagem", "não quero mais", "me tira da lista" e "descadastrar" **não casam**. O `.catch` do `INSERT`
+  (linha 217) só escreve no log.
+- **As três fontes de opt-out:** `leads.opt_out` (coluna), `leads.metadata.opt_out` / `leads.dados.opt_out` (JSON) e a tabela
+  `lead_optouts`. A coluna e o JSON só são gravados à mão, pelo PATCH de lead (`backend/src/domains/leads/routes.js:3087-3101`).
+  Nenhum código grava as três a partir de uma mensagem do lead numa campanha.
+- **Caminho que a resposta de uma CAMPANHA percorre hoje (nenhuma etapa procura pedido de saída):**
+  1. `backend/src/domains/chatbot/routes.js`, `POST /api/hardcoded-chat-webhook` (linha 2802), o webhook por instância. Descarta eco
+     e mensagem nossa (2823-2880) e resolve o conteúdo (2881).
+  2. **ETAPA 3, gravação da mensagem** (2901-2930, `appendLeadMessage` na 2906): a mensagem é gravada como inbound. Nada de
+     opt-out aqui.
+  3. `reclassifyLeadFromMessages` (2931) muda o estágio do funil; `classifyConversation` (2968,
+     `services/whatsappChatClassifier.js`) só separa humano de robô/URA. Nenhum dos dois entende "pare".
+  4. **ETAPA 4, roteamento de campanha** (3022): `findCampaignReplyMatches` (3033).
+  5. **CAMINHO 1** (3130): `continueCampaignLeadFromReply` (3175, definida em `backend/src/campaign/dispatch.js:2228`) **envia o
+     próximo passo da sequência** para o lead que acabou de pedir para sair.
+  6. **CAMINHO 2** (3212): o agente de IA responde a mensagem.
+  - Variante n8n: `backend/src/domains/campaigns/routes.js`, `POST /api/campaigns/reply-webhook` (6484), com
+    `findCampaignReplyMatches` (6533), `continueCampaignLeadFromReply` (6546) e a gravação do inbound (6631 e 6729). Mesma falta.
+- **Onde faltaria o gancho:** um único ponto, **logo depois da ETAPA 3** (a mensagem já gravada, 2930) e **antes** da
+  reclassificação (2931), da ETAPA 4 (3022), do CAMINHO 1 (3130) e do CAMINHO 2 (3212), com retorno antecipado: quem pediu para
+  sair não pode receber o próximo passo da campanha nem resposta do agente. O mesmo gancho na variante n8n, antes da linha 6546.
+  O gancho tem de gravar `lead_optouts` **e** a flag `leads.opt_out` (ver DT-005), cancelar a cadência de follow-up
+  (`cancelFollowupCadenceOnReply`, já usada no mesmo arquivo) e tirar o lead da fila e do lote, que já leem as duas fontes
+  (`campaign/queueOptOut.js`, lote em `routes.js` `checkOptout`, `campaign-outbound.js:1013`).
+- **Por que o commit que liga o opt-out ao lote não resolve sozinho:** ele faz o lote respeitar uma lista que continua vazia.
+  Passa a valer quando a captura existir.
+- **O que a captura exige decidir (peso jurídico, fora do escopo dos PRs de fila):** quais frases valem (palavra exata ou
+  intenção em linguagem natural), o risco de falso positivo ("pode parar de ligar às 18h?"), se há mensagem de confirmação, e
+  o que fazer com quem já está em sequência no meio.
+- **Status:** aberta, **sem correção em andamento**; o dono abrirá frente própria. Registrada em 29/10/2026.
