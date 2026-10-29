@@ -54,6 +54,7 @@ import {
   resolveEnvCampaignQualificationWebhookSettings,
 } from "./settings.js";
 import { createLeadMessaging } from "../domains/shared/leadMessaging.js";
+import { claimQueueLead, releaseQueueLead } from "./queueClaim.js";
 
 const { appendLeadMessage } = createLeadMessaging({
   supabase,
@@ -935,14 +936,14 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
       .filter(([phone]) => Boolean(phone))
   );
 
-  const nextLead = allLeads.find((lead) => {
+  const candidates = allLeads.filter((lead) => {
     const phone = sanitizePhone(lead.telefone);
     const item = itemByPhone.get(phone);
     const progress = extractCampaignProgress(item?.normalized_data || {}, campaign.id);
     return Object.keys(progress).length === 0;
   });
 
-  if (!nextLead) {
+  if (candidates.length === 0) {
     logCampaignReplyFlow("info", "queue_no_next_lead", {
       clientId,
       campaignId: campaign.id,
@@ -972,10 +973,64 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
   });
 
   const firstStep = steps[0];
-  const targetItem = itemByPhone.get(sanitizePhone(nextLead.telefone)) || null;
+
+  // CLAIM ANTES DE ENVIAR (29/10/2026, campanha a1df2aa2: mesmo passo, mesmo telefone, duas respostas 201). O progresso só
+  // era gravado depois do envio; duas execuções concorrentes escolhiam o mesmo lead e as duas enviavam. O claim grava um
+  // progresso provisório num UPDATE condicional (queueClaim.js): só uma execução ganha, a outra cai no próximo candidato.
+  // Lead sem item na planilha (fila de CRM) não tem onde guardar o claim: segue como antes.
+  let nextLead = null;
+  let targetItem = null;
+  let claimed = false;
+  for (const candidate of candidates) {
+    const item = itemByPhone.get(sanitizePhone(candidate.telefone)) || null;
+    if (!item?.id) {
+      nextLead = candidate;
+      break;
+    }
+    const won = await claimQueueLead(pgDatabasePool, {
+      clientId,
+      campaignId: campaign.id,
+      leadImportItemId: item.id,
+      phone: candidate.telefone,
+    });
+    if (won) {
+      nextLead = candidate;
+      targetItem = item;
+      claimed = true;
+      break;
+    }
+    logCampaignReplyFlow("info", "queue_claim_lost", {
+      clientId,
+      campaignId: campaign.id,
+      phone: maskPhoneForLog(candidate.telefone),
+    });
+  }
+
+  if (!nextLead) {
+    logCampaignReplyFlow("info", "queue_no_next_lead", {
+      clientId,
+      campaignId: campaign.id,
+    });
+    return { started: false, reason: "no_next_lead" };
+  }
+
+  const releaseClaim = async () => {
+    if (!claimed) return;
+    claimed = false;
+    await releaseQueueLead(pgDatabasePool, {
+      clientId,
+      campaignId: campaign.id,
+      leadImportItemId: targetItem.id,
+    }).catch((err) => {
+      console.error("[campaigns] falha ao devolver o claim da fila:", err?.message || err);
+    });
+  };
+
   const clientName = await getClientName(clientId);
 
-  const { summary } = await dispatchCampaignSequence({
+  let summary;
+  try {
+    ({ summary } = await dispatchCampaignSequence({
     webhookUrl,
     webhookToken,
     leads: [nextLead],
@@ -1007,7 +1062,39 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
       client: { id: clientId, name: clientName },
     },
     waitForReplyMode: "block_next_lead",
-  });
+    // Este caminho nao cria run (nao ha lote): sem isto o envio ficava sem nenhum registro.
+    onStepDispatched: async ({ phone, step, stepIndex, sentAt, instanceName }) => {
+      try {
+        await appendLeadMessage({
+          clientId,
+          campaignId: campaign.id,
+          leadId: null,
+          phone,
+          senderType: "bot",
+          direction: "outbound",
+          messageText: step.text || step.message || step.caption || "",
+          deliveredAt: sentAt || new Date().toISOString(),
+          messageTimestamp: sentAt || new Date().toISOString(),
+          instanceName: instanceName || null,
+          meta: {
+            source: "campaign_queue",
+            stepId: step.id,
+            stepType: step.type,
+            stepOrder: step.order ?? stepIndex + 1,
+          },
+        });
+      } catch (err) {
+        console.warn("[campaign-queue] falha ao gravar lead_messages do passo:", err?.message || err);
+      }
+    },
+    }));
+  } catch (error) {
+    await releaseClaim();
+    throw error;
+  }
+
+  // Nada entregue: devolve o claim, o lead continua elegível. Entregue: o progresso real sobrescreve o provisório.
+  if (summary.successCount === 0) await releaseClaim();
 
   if (summary.successCount > 0 && targetItem?.id) {
     logCampaignReplyFlow("info", "queue_next_lead_started", {
