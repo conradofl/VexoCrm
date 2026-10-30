@@ -25,7 +25,7 @@ import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { getAnalytics } from "./analyticsService.js";
 import { getFollowupQueue } from "./queue.js";
 import { triggerAutomationRun } from "./automationEngine.js";
-import { defaultGroqModel } from "../services/llmModels.js";
+import { defaultLlmModel } from "../services/llmModels.js";
 import { adjustDateToSendWindow, resolveSendWindowConfig, createDateInTimezone } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { isFromMe, isGroupJid } from "../services/inboundGuard.js";
@@ -460,7 +460,7 @@ function normalizeInstanceList(list, fallback) {
           calendly_webhook_secret: str(calendly_webhook_secret),
           panel_access: Boolean(panel_access),
           inbound_enabled: Boolean(inbound_enabled),
-          inbound_model: str(inbound_model) || defaultGroqModel(),
+          inbound_model: str(inbound_model) || defaultLlmModel(),
           inbound_prompt: str(inbound_prompt),
           inbound_spin_fields: Array.isArray(inbound_spin_fields) ? inbound_spin_fields : [],
           inbound_webhook_url: str(inbound_webhook_url),
@@ -725,7 +725,7 @@ function normalizeInstanceList(list, fallback) {
         agentRow,
         tenantPromptContent,
         template,
-        defaultLlmModel: defaultGroqModel(),
+        defaultLlmModel: defaultLlmModel(),
       });
 
       return res.json({
@@ -781,7 +781,7 @@ function normalizeInstanceList(list, fallback) {
         fetchTemplate(supabase, agentRow.tenant_id, templateKey),
       ]);
 
-      const audit = auditAgentInstructionSources({ agentRow, tenantPromptContent, template, defaultLlmModel: defaultGroqModel() });
+      const audit = auditAgentInstructionSources({ agentRow, tenantPromptContent, template, defaultLlmModel: defaultLlmModel() });
 
       // Consolidar nunca pode fazer o lead parar de ser perguntado algo que já
       // era perguntado: a coleta gravada é a UNIÃO, não só a do agente.

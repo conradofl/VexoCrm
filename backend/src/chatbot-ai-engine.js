@@ -1,10 +1,10 @@
 import {
   resolveLlmLadder,
-  defaultGroqModel,
   defaultLlmModel,
   providerOfModelId,
   classifyLlmHttpError,
   mensagemDeCotaEstourada,
+  mensagemDePedidoMaiorQueOTeto,
   dropOnRequestTooLarge,
 } from "./services/llmModels.js";
 import {
@@ -37,31 +37,28 @@ const BUFFER_DELAY_MS = 3000;
 
 // ─── Configuração de Provedores e Modelos de LLM ────────────────────────────
 export const LLM_MODELS = [
-  // Groq — lista real da conta, conferida em /openai/v1/models em 24/08/2026.
-  // Os dois Llama sairam: a Groq descontinuou os dois e as chamadas voltavam 404.
-  // Ficavam selecionaveis na tela do tenant e derrubavam o agente em producao.
+  // Gemini / Google — o padrao desde 30/10/2026. So APELIDOS (-latest): apelido
+  // nao morre por rotacao de versao. gemini-2.0-flash, 1.5-flash e 1.5-pro
+  // estavam aqui como versao fixa, morreram, e o primeiro derrubou o agente.
+  { id: "gemini-flash-latest", name: "Gemini Flash (padrão)", provider: "gemini", providerName: "Gemini / Google" },
+  { id: "gemini-flash-lite-latest", name: "Gemini Flash Lite", provider: "gemini", providerName: "Gemini / Google" },
+  { id: "gemini-pro-latest", name: "Gemini Pro", provider: "gemini", providerName: "Gemini / Google" },
+
+  // Groq — alternativa, nao padrao. Lista real da conta, conferida em
+  // /openai/v1/models em 30/10/2026: nenhum modelo de conversa passa de 8.000
+  // TPM, e prompt de tenant com RAG estoura esse teto sozinho (HTTP 413).
+  // Em agosto os dois Llama ficavam selecionaveis na tela do tenant e derrubavam
+  // o agente em producao; groq/compound e qwen3.6 sairam pelo mesmo motivo.
   { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B (Groq)", provider: "groq", providerName: "Groq" },
   { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B (Groq)", provider: "groq", providerName: "Groq" },
-  { id: "qwen/qwen3.6-27b", name: "Qwen 3.6 27B", provider: "groq", providerName: "Groq" },
-  // 70.000 TPM contra 8.000 dos de cima — a folga real quando a cota aperta.
-  { id: "groq/compound", name: "Groq Compound (cota alta)", provider: "groq", providerName: "Groq" },
-  { id: "groq/compound-mini", name: "Groq Compound Mini (cota alta)", provider: "groq", providerName: "Groq" },
+  { id: "qwen/qwen3.8-27b", name: "Qwen 3.8 27B (Groq)", provider: "groq", providerName: "Groq" },
 
-  // ChatGPT / OpenAI
-  { id: "gpt-4o", name: "GPT-4o (Omni)", provider: "openai", providerName: "ChatGPT / OpenAI" },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", providerName: "ChatGPT / OpenAI" },
-  { id: "gpt-4-turbo", name: "GPT-4 Turbo", provider: "openai", providerName: "ChatGPT / OpenAI" },
-  { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", provider: "openai", providerName: "ChatGPT / OpenAI" },
+  // OpenAI saiu: nao ha chave no servidor (medido em 30/10/2026).
 
   // Claude / Anthropic
   { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", provider: "anthropic", providerName: "Claude / Anthropic" },
   { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", provider: "anthropic", providerName: "Claude / Anthropic" },
   { id: "claude-3-opus-20240229", name: "Claude 3 Opus", provider: "anthropic", providerName: "Claude / Anthropic" },
-
-  // Gemini / Google
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", provider: "gemini", providerName: "Gemini / Google" },
-  { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", provider: "gemini", providerName: "Gemini / Google" },
-  { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", provider: "gemini", providerName: "Gemini / Google" },
 ];
 
 export function getLlmProviderStatus() {
@@ -73,14 +70,14 @@ export function getLlmProviderStatus() {
   };
 }
 
-// Vem da escada configuravel, nao de um nome fixo que a Groq pode aposentar.
-export const DEFAULT_LLM_MODEL = defaultGroqModel();
+// Vem da escada configuravel, nao de um nome fixo que o provedor pode aposentar.
+export const DEFAULT_LLM_MODEL = defaultLlmModel();
 
 // Modelo salvo pode ter sido descontinuado pelo provedor depois de escolhido.
 // Sem isso a chamada seguia com um id morto e falhava no provedor, sem pista.
 export function resolveLlmModel(modelId) {
   const normalized = typeof modelId === "string" ? modelId.trim() : "";
-  const defaultModel = defaultGroqModel();
+  const defaultModel = defaultLlmModel();
   if (normalized && LLM_MODELS.some((m) => m.id === normalized)) return normalized;
   if (normalized) {
     console.warn(`[chatbot-ai] modelo "${normalized}" nao esta disponivel; usando ${defaultModel}.`);
@@ -214,14 +211,14 @@ function erroDeCredencial(provedores, ultimoErro) {
 }
 
 export async function callLlmChatCompletion({
-  model = defaultGroqModel(),
+  model = defaultLlmModel(),
   messages = [],
   temperature = 0.4,
   max_tokens = 600,
   response_format = null,
   singleModelOnly = false,
 }) {
-  const chosenModel = model || defaultGroqModel();
+  const chosenModel = model || defaultLlmModel();
 
   // Escada vinda de services/llmModels.js — configuravel por LLM_MODEL_LADDER,
   // com os modelos descontinuados descartados antes de gastar uma chamada neles
@@ -282,8 +279,8 @@ export async function callLlmChatCompletion({
     if (diagnostico.tipo === "PEDIDO_GRANDE_DEMAIS") {
       ultimaCota = { modelo: m, ...diagnostico };
       console.warn(
-        `[chatbot-ai-engine] COTA ESTOURADA no modelo "${m}" (HTTP 413, pedido maior que o teto` +
-          `${diagnostico.limiteTpm ? ` de ${diagnostico.limiteTpm} TPM` : ""}). ` +
+        `[chatbot-ai-engine] PEDIDO MAIOR QUE O TETO do modelo "${m}" (HTTP 413` +
+          `${diagnostico.limiteTpm ? `, limite ${diagnostico.limiteTpm} TPM` : ""}). ` +
           "Pulando os modelos do mesmo provedor com teto igual ou menor."
       );
       modelsToTry = [...modelsToTry.slice(0, cursor), ...dropOnRequestTooLarge(m, modelsToTry.slice(cursor))];
@@ -360,7 +357,14 @@ export async function callLlmChatCompletion({
   // "sua cota de IA acabou", nao um generico. E informacao de negocio — o dono
   // decide se esta na hora de subir o plano.
   if (ultimaCota) {
-    const erroDeCota = new Error(mensagemDeCotaEstourada(ultimaCota));
+    // O 413 nao e cota acabando: e o pedido maior que o teto do modelo. A frase
+    // errada ja fez cacar cota por tres camadas quando o problema era o tamanho
+    // do prompt. O code fica o mesmo para a tela continuar funcionando.
+    const erroDeCota = new Error(
+      ultimaCota.tipo === "PEDIDO_GRANDE_DEMAIS"
+        ? mensagemDePedidoMaiorQueOTeto(ultimaCota)
+        : mensagemDeCotaEstourada(ultimaCota)
+    );
     erroDeCota.code = "LLM_QUOTA_EXCEEDED";
     erroDeCota.modelo = ultimaCota.modelo;
     erroDeCota.limiteTpm = ultimaCota.limiteTpm ?? null;
@@ -1323,7 +1327,7 @@ export async function extractBriefingWithAI({
   history,
   collectedData,
   classificacao,
-  llmModel = defaultGroqModel(),
+  llmModel = defaultLlmModel(),
   agentConfig = null,
   customPrompt = null,
   extractionEnabled = true,
@@ -1375,7 +1379,7 @@ export async function extractBriefingWithAI({
   }
 }
 
-export async function runChatbotAI({ systemPrompt, history, newMessages, existingData, llmModel = defaultGroqModel() }) {
+export async function runChatbotAI({ systemPrompt, history, newMessages, existingData, llmModel = defaultLlmModel() }) {
   // Mesclar dados existentes no contexto do sistema
   const dataContext = existingData && Object.keys(existingData).length > 0
     ? `\n\nDADOS JÁ COLETADOS ATÉ AGORA:\n${JSON.stringify(existingData, null, 2)}`

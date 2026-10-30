@@ -211,6 +211,23 @@ describe("provedor sem chave sai da escada, com aviso", () => {
   });
 });
 
+describe("413 nao e cota acabando", () => {
+  it("a mensagem final diz que o pedido e maior que o teto, nao que a cota acabou", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.LLM_MODEL_LADDER = "openai/gpt-oss-120b,openai/gpt-oss-20b";
+    provedores({
+      "openai/gpt-oss-120b": falha(413, "Request too large on tokens per minute (TPM): Limit 8000, Requested 9431"),
+    });
+
+    const erro = await callLlmChatCompletion({ model: "openai/gpt-oss-120b", messages: OI }).catch((e) => e);
+
+    // O code fica o mesmo para a tela continuar funcionando; a frase deixa de mentir.
+    expect(erro.code).toBe("LLM_QUOTA_EXCEEDED");
+    expect(erro.message).toMatch(/o pedido e maior que o teto do modelo openai\/gpt-oss-120b \(limite 8\.000 tokens\)/i);
+    expect(erro.message).not.toMatch(/cota de IA .* acabou/i);
+  });
+});
+
 describe("singleModelOnly faz uma chamada so", () => {
   it("nao dispara fallback cruzado escondido", async () => {
     provedores({ "openai/gpt-oss-120b": falha(413, "Request too large: Limit 8000, Requested 9431") });

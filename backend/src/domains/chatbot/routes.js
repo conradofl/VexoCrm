@@ -50,7 +50,7 @@ const SQL_AUTOMATION_MATCH = (col) => `(
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
-import { defaultGroqModel } from "../../services/llmModels.js";
+import { defaultLlmModel } from "../../services/llmModels.js";
 import {
   bufferMessage,
   resolveMessageContent,
@@ -2570,7 +2570,7 @@ export function registerChatbotRoutes(app, deps) {
   app.get("/api/chatbot-llm-models", requireFirebaseAuth, async (req, res) => {
     return res.json({
       models: LLM_MODELS,
-      defaultModel: defaultGroqModel(),
+      defaultModel: defaultLlmModel(),
       providerStatus: getLlmProviderStatus(),
     });
   });

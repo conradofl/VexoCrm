@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { resolveLlmModel, LLM_MODELS } from "../chatbot-ai-engine.js";
-import { defaultGroqModel } from "../services/llmModels.js";
+import { defaultLlmModel } from "../services/llmModels.js";
 import { maskN8nSettings, resolveSingleLeadClientSettings } from "../services/n8nSettings.js";
 
 describe("Persistência e Fallback do Modelo de IA (LLM)", () => {
@@ -19,7 +19,7 @@ describe("Persistência e Fallback do Modelo de IA (LLM)", () => {
 
   describe("DEFEITO 1: campo vazio ou modelo morto NUNCA cala o agente", () => {
     it("tenant sem modelo configurado (null) usa o primeiro modelo da escada e loga o fallback", () => {
-      const padrao = defaultGroqModel();
+      const padrao = defaultLlmModel();
       const modelo = resolveLlmModel(null);
       expect(modelo).toBe(padrao);
       expect(modelo).toBeTruthy();
@@ -29,14 +29,14 @@ describe("Persistência e Fallback do Modelo de IA (LLM)", () => {
     });
 
     it("tenant com string vazia ou espaços usa o primeiro modelo da escada e loga o fallback", () => {
-      const padrao = defaultGroqModel();
+      const padrao = defaultLlmModel();
       expect(resolveLlmModel("")).toBe(padrao);
       expect(resolveLlmModel("   ")).toBe(padrao);
       expect(resolveLlmModel(undefined)).toBe(padrao);
     });
 
     it("tenant com modelo morto (ex: llama-3.3-70b-versatile) usa o primeiro da escada com warning", () => {
-      const padrao = defaultGroqModel();
+      const padrao = defaultLlmModel();
       const modelo = resolveLlmModel("llama-3.3-70b-versatile");
       expect(modelo).toBe(padrao);
       expect(warnSpy).toHaveBeenCalledWith(
@@ -48,6 +48,31 @@ describe("Persistência e Fallback do Modelo de IA (LLM)", () => {
       const escolhido = "openai/gpt-oss-120b";
       expect(resolveLlmModel(escolhido)).toBe(escolhido);
       expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("o padrao de quem nao escolheu modelo e o Gemini, por apelido", () => {
+      expect(resolveLlmModel(null)).toBe("gemini-flash-latest");
+    });
+
+    it("tenant com versao fixa do Gemini que morreu (gemini-2.0-flash) cai no padrao vivo", () => {
+      // Caso da Container Led em 30/10/2026: o id salvo voltava 404 no Google.
+      expect(resolveLlmModel("gemini-2.0-flash")).toBe(defaultLlmModel());
+      expect(resolveLlmModel("gemini-1.5-pro")).toBe(defaultLlmModel());
+    });
+
+    it("tenant com modelo da Groq salvo continua na Groq", () => {
+      for (const id of ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]) {
+        expect(resolveLlmModel(id)).toBe(id);
+      }
+    });
+
+    it("a lista nao oferece modelo sem chave nem modelo que a conta nao tem mais", () => {
+      const ids = LLM_MODELS.map((m) => m.id);
+      expect(LLM_MODELS.some((m) => m.provider === "openai")).toBe(false);
+      for (const morto of ["groq/compound", "groq/compound-mini", "qwen/qwen3.6-27b", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]) {
+        expect(ids, `${morto} ainda selecionavel`).not.toContain(morto);
+      }
+      expect(LLM_MODELS[0].provider).toBe("gemini");
     });
 
     it("todos os modelos em LLM_MODELS resolvem para si mesmos", () => {
@@ -82,9 +107,9 @@ describe("Persistência e Fallback do Modelo de IA (LLM)", () => {
       expect(masked.chatbot_llm_model).toBeNull();
     });
 
-    it("maskN8nSettings para row nula devolve defaultGroqModel", () => {
+    it("maskN8nSettings para row nula devolve defaultLlmModel", () => {
       const masked = maskN8nSettings(null);
-      expect(masked.chatbot_llm_model).toBe(defaultGroqModel());
+      expect(masked.chatbot_llm_model).toBe(defaultLlmModel());
     });
 
     it("resolveSingleLeadClientSettings preserva chatbot_llm_model", () => {
@@ -93,10 +118,10 @@ describe("Persistência e Fallback do Modelo de IA (LLM)", () => {
         active: true,
         chatbot_enabled: true,
         chatbot_model: "generico",
-        chatbot_llm_model: "qwen/qwen3.6-27b",
+        chatbot_llm_model: "qwen/qwen3.8-27b",
       };
       const resolved = resolveSingleLeadClientSettings(rawRow, []);
-      expect(resolved.chatbot_llm_model).toBe("qwen/qwen3.6-27b");
+      expect(resolved.chatbot_llm_model).toBe("qwen/qwen3.8-27b");
     });
   });
 

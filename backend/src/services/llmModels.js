@@ -198,6 +198,18 @@ export function parseRateLimit(texto) {
   };
 }
 
+/**
+ * Frase do 413: o pedido nao cabe no teto do modelo. Esperar ou subir plano de
+ * cota nao resolve; o que resolve e prompt menor ou modelo de teto maior.
+ */
+export function mensagemDePedidoMaiorQueOTeto({ modelo, limiteTpm }) {
+  return (
+    `O pedido e maior que o teto do modelo ${modelo}` +
+    `${limiteTpm ? ` (limite ${limiteTpm.toLocaleString("pt-BR")} tokens)` : ""}. ` +
+    "Nao e cota acabando: o prompt precisa caber no teto, ou o pedido precisa ir para um modelo de teto maior."
+  );
+}
+
 /** Frase que o dono le na tela quando a cota acaba. E informacao de negocio. */
 export function mensagemDeCotaEstourada({ modelo, limiteTpm, usadoTpm, esperarSegundos }) {
   const partes = [`A cota de IA do modelo ${modelo} acabou.`];

@@ -20,7 +20,7 @@
 
 import { supabase } from "./database.js";
 import { normalizeString } from "../textNormalize.js";
-import { defaultGroqModel } from "./llmModels.js";
+import { defaultLlmModel } from "./llmModels.js";
 import { ensureModuleTabs } from "../access/permissionsRegistry.js";
 import { normalizeHttpUrl } from "./tenant.js";
 import { buildDefaultSegmentationConfig, sanitizeSegmentationConfig } from "../segmentation.js";
@@ -86,7 +86,7 @@ export function maskN8nSettings(row) {
       active: false,
       chatbot_enabled: false,
       chatbot_model: "generico",
-      chatbot_llm_model: defaultGroqModel(),
+      chatbot_llm_model: defaultLlmModel(),
       chatbot_instances: [],
       chatbot_inbound_scope: "all",
       recontact_message: null,
@@ -291,10 +291,10 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
     chatbot_model: chatbotModelProvided ? (body.chatbotModel || "generico") : existing?.chatbot_model ?? "generico",
     // Era "llama-3.3-70b-versatile" chumbado nos dois lados: TODO tenant salvo
     // gravava no banco um modelo que a Groq descontinuou. Agora sai da escada
-    // configuravel — e resolveGroqLadder descarta o valor morto de quem ja tem.
+    // configuravel — e resolveLlmLadder descarta o valor morto de quem ja tem.
     chatbot_llm_model: chatbotLlmModelProvided
-      ? (body.chatbotLlmModel || body.chatbot_llm_model || defaultGroqModel())
-      : existing?.chatbot_llm_model ?? defaultGroqModel(),
+      ? (body.chatbotLlmModel || body.chatbot_llm_model || defaultLlmModel())
+      : existing?.chatbot_llm_model ?? defaultLlmModel(),
     plan_tier: planTierProvided
       ? (() => {
           const pt = String(body.planTier ?? body.plan_tier).toLowerCase().trim();
