@@ -36,6 +36,30 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   sai errado; é só informação enganosa na tela.
 - **Status:** aberta, sem prioridade. Registrada em 29/10/2026. Relacionada à correção `fix/recorrencia-sem-origem`.
 
+## DT-003 — Fila e lote não se excluem de forma atômica por item
+
+- **Onde:** `claimQueueLead` (`backend/src/campaign/queueClaim.js`, grava o progresso e confere os runs num único `UPDATE`)
+  e o `claimLead` do lote (`backend/src/domains/campaigns/routes.js`, grava o run e, desde o PR 1b, relê o progresso).
+- **O que sobra:** os dois claims escrevem em tabelas diferentes (`lead_import_items` e `campaign_dispatch_runs`). Se a fila
+  e o lote reivindicarem o MESMO lead no mesmo instante (janela de milissegundos), cada um pode não enxergar a escrita do
+  outro, e o lead recebe duas vezes. O caso medido de 29/10/2026 (6 segundos de distância) está fechado; esta janela não.
+- **Segundo buraco, de cerca de um segundo:** a trava por ciclo (`isLeadBlockedByActiveCycleProgress`) só reconhece
+  progresso com `waitForReply` e status `aguardando_usuario` ou `pendente`. O claim provisório da fila grava `iniciando`,
+  que ela não reconhece. Um lote que reivindique o lead durante o envio da fila (cerca de um segundo) ainda passa.
+- **Como resolver (futuro):** `pg_advisory_xact_lock` por item de planilha nos dois caminhos (fila e lote), tomado antes de
+  ler e escrever. É uma mudança maior e arriscada: decisão do dono, com medição do tamanho real da janela.
+- **Status:** aberta, sem prioridade. Registrada em 29/10/2026.
+
+## DT-004 — Claim da fila com status `iniciando` não expira
+
+- **Onde:** `claimQueueLead` e a escolha de candidatos em `startNextCampaignLeadInQueue` (`backend/src/campaign/`).
+- **O que acontece:** o claim grava `status: "iniciando"` e `claimedAt` e é devolvido quando o envio falha ou não entrega.
+  Se o processo morrer entre o claim e a devolução (deploy, queda), o lead fica com `iniciando` para sempre: a fila só
+  considera candidato quem não tem progresso nenhum, e o lote só conhece a regra de `aguardando_usuario`. Ninguém resolve.
+- **Como resolver (futuro):** tratar `iniciando` com `claimedAt` mais antigo que um limite (proposta: 10 minutos) como livre,
+  tanto na escolha de candidatos quanto no `UPDATE` do claim. Entra junto do PR dos freios, onde claim pendurado é o tema.
+- **Status:** aberta. Registrada em 29/10/2026.
+
 ## DT-006 — Dois presets "gestor": o da tela e o do backend divergem, e o da tela vence
 
 - **Onde:** `frontend/src/lib/access.ts` (`PRESET_DEFAULTS.gestor`, linhas 263-310) e
