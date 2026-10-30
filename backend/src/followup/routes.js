@@ -33,7 +33,7 @@ import { resolveEvolutionInstanceForFollowup } from "./worker.js";
 import { getLeadClientEvolutionInstances } from "../services/evolution.js";
 import { resolveChipDailyLimit } from "../services/chipQuota.js";
 import { fetchDynamicPrompt, fetchTemplate } from "../chatbot-ai-engine.js";
-import { auditAgentInstructionSources, validateAutonomousPrompt } from "../services/agentInstructionAudit.js";
+import { auditAgentInstructionSources, validateAutonomousPrompt, checkAgentEnableGuard } from "../services/agentInstructionAudit.js";
 import { findChipExclusivityConflict } from "../services/chipExclusivity.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -45,6 +45,17 @@ function sendErr(res, status, code, message) {
 
 function str(v) {
   return typeof v === "string" ? v.trim() || null : null;
+}
+
+// Recusa da trava "agente de atendimento não liga sem prompt". Além do código e
+// da mensagem, devolve o motivo e a saída (Função = Disparo) para a tela montar
+// o botão sem adivinhar.
+function sendAgentGuardErr(res, trava) {
+  console.error(`[followup/routes][${trava.code}]`, trava.motivo);
+  return res.status(422).json({
+    success: false,
+    error: { code: trava.code, message: trava.message, motivo: trava.motivo, saida: trava.saida },
+  });
 }
 
 // Escopo de tenant do usuário logado. NUNCA confiar no tenantId da query para decidir o
@@ -344,32 +355,42 @@ function normalizeInstanceList(list, fallback) {
         if (conflitoMsg) return sendErr(res, 409, "CHIP_ALREADY_OWNED", conflitoMsg);
       }
 
+      const novaLinha = {
+        tenant_id: boundTenantId,
+        name: str(name),
+        evolution_instance: validInstances[0] || null,
+        evolution_instances: validInstances,
+        inbound_role: inbound_role === "qualificador" ? "qualificador" : "atendimento",
+        agent_kind: agent_kind === "campanha" ? "campanha" : "atendimento",
+        webhook_url: str(webhook_url),
+        calendly_webhook_secret: str(calendly_webhook_secret),
+        panel_access: Boolean(panel_access),
+        inbound_enabled: Boolean(inbound_enabled),
+        inbound_model: str(inbound_model) || defaultLlmModel(),
+        inbound_prompt: str(inbound_prompt),
+        inbound_spin_fields: Array.isArray(inbound_spin_fields) ? inbound_spin_fields : [],
+        inbound_webhook_url: str(inbound_webhook_url),
+        sdr_whatsapp_number: str(sdr_whatsapp_number),
+        sdr_transfer_enabled: Boolean(sdr_transfer_enabled),
+        inbound_extraction_prompt: str(inbound_extraction_prompt),
+        inbound_extraction_enabled: inbound_extraction_enabled !== false,
+        engine_scan_interval_hours: typeof engine_scan_interval_hours === "number" ? engine_scan_interval_hours : 6,
+        never_contacted_delay_hours: typeof never_contacted_delay_hours === "number" ? never_contacted_delay_hours : 2,
+        no_reply_delay_hours: typeof no_reply_delay_hours === "number" ? no_reply_delay_hours : 48,
+        livpub_inactive_delay_months: typeof livpub_inactive_delay_months === "number" ? livpub_inactive_delay_months : 6,
+      };
+
+      // Agente de atendimento não nasce ligado sem prompt.
+      const trava = await checkAgentEnableGuard({
+        antes: null,
+        depois: novaLinha,
+        loadTenantPrompt: () => fetchDynamicPrompt(supabase, boundTenantId, "padrao"),
+      });
+      if (trava) return sendAgentGuardErr(res, trava);
+
       const { data, error } = await supabase
         .from("followup_companies")
-        .insert({
-          tenant_id: boundTenantId,
-          name: str(name),
-          evolution_instance: validInstances[0] || null,
-          evolution_instances: validInstances,
-          inbound_role: inbound_role === "qualificador" ? "qualificador" : "atendimento",
-          agent_kind: agent_kind === "campanha" ? "campanha" : "atendimento",
-          webhook_url: str(webhook_url),
-          calendly_webhook_secret: str(calendly_webhook_secret),
-          panel_access: Boolean(panel_access),
-          inbound_enabled: Boolean(inbound_enabled),
-          inbound_model: str(inbound_model) || defaultLlmModel(),
-          inbound_prompt: str(inbound_prompt),
-          inbound_spin_fields: Array.isArray(inbound_spin_fields) ? inbound_spin_fields : [],
-          inbound_webhook_url: str(inbound_webhook_url),
-          sdr_whatsapp_number: str(sdr_whatsapp_number),
-          sdr_transfer_enabled: Boolean(sdr_transfer_enabled),
-          inbound_extraction_prompt: str(inbound_extraction_prompt),
-          inbound_extraction_enabled: inbound_extraction_enabled !== false,
-          engine_scan_interval_hours: typeof engine_scan_interval_hours === "number" ? engine_scan_interval_hours : 6,
-          never_contacted_delay_hours: typeof never_contacted_delay_hours === "number" ? never_contacted_delay_hours : 2,
-          no_reply_delay_hours: typeof no_reply_delay_hours === "number" ? no_reply_delay_hours : 48,
-          livpub_inactive_delay_months: typeof livpub_inactive_delay_months === "number" ? livpub_inactive_delay_months : 6,
-        })
+        .insert(novaLinha)
         .select()
         .maybeSingle();
       if (error) throw error;
@@ -413,7 +434,7 @@ function normalizeInstanceList(list, fallback) {
       const supabase = getSupabase();
       const { data: existing, error: fetchError } = await supabase
         .from("followup_companies")
-        .select("id, name, tenant_id")
+        .select("id, name, tenant_id, inbound_enabled, agent_kind, inbound_prompt, instructions_consolidated_at")
         .eq("id", id)
         .maybeSingle();
       if (fetchError) throw fetchError;
@@ -534,6 +555,19 @@ function normalizeInstanceList(list, fallback) {
           agentIdBeingSaved: id,
         });
         if (conflitoMsg) return sendErr(res, 409, "CHIP_ALREADY_OWNED", conflitoMsg);
+      }
+
+      // Agente de atendimento não fica ligado sem prompt. Só avalia quando a
+      // escrita mexe no que decide isso: renomear um agente que já estava mudo
+      // não piora nada e não é barrado (ele aparece vermelho na tela, sem
+      // desligamento automático).
+      if ("inbound_enabled" in patch || "inbound_prompt" in patch || "agent_kind" in patch) {
+        const trava = await checkAgentEnableGuard({
+          antes: existing,
+          depois: { ...existing, ...patch },
+          loadTenantPrompt: () => fetchDynamicPrompt(supabase, existing.tenant_id, "padrao"),
+        });
+        if (trava) return sendAgentGuardErr(res, trava);
       }
 
       const { data, error } = await supabase

@@ -124,3 +124,66 @@ export function validateAutonomousPrompt({ promptText, collectionFields = [] } =
   };
 }
 
+// "Agente de atendimento não liga sem prompt". A tela gravava inbound_enabled
+// direto num PATCH que não olhava nada, e o agente ficava "ligado" recebendo
+// mensagens sem responder ninguém (PROMPT NOT FOUND no motor). A regra mora no
+// servidor e olha o estado FINAL da linha, para fechar as três portas de uma
+// vez: ligar sem prompt, apagar o prompt de um agente ligado e trocar a Função
+// de Disparo para Atendimento sem prompt.
+//
+// Agente de Disparo (agent_kind "campanha") não é barrado: ele só fala com quem
+// responde campanha, e o roteiro da campanha vira a base do prompt no motor.
+// Os passos da campanha não dependem do agente (caminho 1 do webhook roda antes
+// do portão do agente — provado em campaignStepIndependsOfAgent.test.js).
+//
+// Todo texto nomeia a saída "mude a Função para Disparo": bloquear sem ensinar
+// o caminho foi o que fez a tela mandar cliente para outra tela à toa.
+export const AGENT_WITHOUT_PROMPT = "AGENT_WITHOUT_PROMPT";
+
+const MENSAGEM_TRAVA = {
+  ligar:
+    "Um agente de atendimento precisa de prompt para ser ligado. Sem ele, recebe as mensagens e não responde ninguém. Se este agente serve só para continuar campanha e não para atender, mude a Função para Disparo em vez de escrever um prompt.",
+  apagar_prompt:
+    "Este agente está ligado. Sem prompt, ele para de responder. Desligue antes de apagar, ou mude a Função para Disparo se ele serve só para campanha.",
+  mudar_para_atendimento:
+    "Para atender, este agente precisa de prompt. Escreva como ele deve conversar antes de mudar a Função para Atendimento.",
+};
+
+/**
+ * Decide se uma escrita em followup_companies deixaria um agente de
+ * atendimento ligado sem prompt efetivo. O prompt efetivo é o mesmo que o motor
+ * usa (chatbot-ai-engine.js): agente consolidado só conta o próprio; os demais
+ * caem no prompt padrão da empresa quando o próprio está vazio. O mínimo é o de
+ * validateAutonomousPrompt.
+ *
+ * @param {object} params
+ * @param {object|null} params.antes - linha gravada antes da escrita (null na criação)
+ * @param {object} params.depois - linha como fica depois da escrita
+ * @param {() => Promise<string|null>} params.loadTenantPrompt - busca o prompt
+ *   padrão da empresa; só é chamada quando ele decide o resultado
+ * @returns {Promise<null | { code: string, motivo: string, message: string, saida: { agent_kind: "campanha" } }>}
+ */
+export async function checkAgentEnableGuard({ antes = null, depois, loadTenantPrompt }) {
+  if (depois?.inbound_enabled !== true) return null;
+  if (depois?.agent_kind === "campanha") return null;
+
+  const consolidado = Boolean(depois.instructions_consolidated_at);
+  const temPromptProprio = Boolean(normalizeText(depois.inbound_prompt));
+  const tenantPromptContent =
+    consolidado || temPromptProprio || typeof loadTenantPrompt !== "function" ? null : await loadTenantPrompt();
+
+  const { prompt } = auditAgentInstructionSources({ agentRow: depois, tenantPromptContent });
+  if (validateAutonomousPrompt({ promptText: prompt.value }).valid) return null;
+
+  let motivo = "apagar_prompt";
+  if (antes?.inbound_enabled !== true) motivo = "ligar";
+  else if (antes?.agent_kind === "campanha") motivo = "mudar_para_atendimento";
+
+  return {
+    code: AGENT_WITHOUT_PROMPT,
+    motivo,
+    message: MENSAGEM_TRAVA[motivo],
+    saida: { agent_kind: "campanha" },
+  };
+}
+
