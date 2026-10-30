@@ -2005,7 +2005,18 @@ export async function processBatch({
   instructionsConsolidated = false,
   isSimulation = false,
   noPersist = false,
+  simulationState = null,
 }) {
+  // Simulador ("Testar antes de soltar"): a memória da conversa vem do
+  // chamador ({ historico, dados }) e nada é lido nem gravado na tabela leads.
+  // Antes o teste vivia no lead de telefone fixo 5500000000000 (fantasma no
+  // Banco, igual para todos os agentes e usuários do tenant).
+  const memoriaDaTela = simulationState && Array.isArray(simulationState.historico) ? simulationState : null;
+  if (memoriaDaTela) {
+    isSimulation = true;
+    noPersist = true;
+  }
+
   const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
   const effectivePersonaModel = model || tenantSettings?.chatbot_model || "generico";
   let activeLlmModel = resolveLlmModel(llmModel || tenantSettings?.chatbot_llm_model);
@@ -2013,18 +2024,21 @@ export async function processBatch({
   const modelConfig = getChatbotModel(effectivePersonaModel);
   const leadsTable = chatbotLeadsTable(clientId);
 
-  // Carregar estado atual do banco
-  const { data: existingArray } = await supabase
-    .from(leadsTable)
-    // status e lead_source ENTRAM aqui porque o payload os preserva quando o
-    // modelo nao classifica no turno. Sem estar no SELECT, existing.status era
-    // sempre undefined e a "preservacao" gravava null — a classificacao anterior
-    // era apagada justamente no turno em que se queria protege-la.
-    .select("id, dados, historico, status, lead_source, status_conversa, finalizado, updated_at, lead_temperature, stage, stage_source, raw_chat_summary")
-    .eq("client_id", clientId)
-    .eq("telefone", phone)
-    .order("created_at", { ascending: false })
-    .limit(1);
+  // Carregar estado atual do banco (ou da tela, no simulador). updated_at = agora
+  // porque o teste é ao vivo: sem ele a conversa cairia no "reengajamento".
+  const { data: existingArray } = memoriaDaTela
+    ? { data: [{ historico: memoriaDaTela.historico, dados: memoriaDaTela.dados || {}, updated_at: new Date().toISOString() }] }
+    : await supabase
+        .from(leadsTable)
+        // status e lead_source ENTRAM aqui porque o payload os preserva quando o
+        // modelo nao classifica no turno. Sem estar no SELECT, existing.status era
+        // sempre undefined e a "preservacao" gravava null — a classificacao anterior
+        // era apagada justamente no turno em que se queria protege-la.
+        .select("id, dados, historico, status, lead_source, status_conversa, finalizado, updated_at, lead_temperature, stage, stage_source, raw_chat_summary")
+        .eq("client_id", clientId)
+        .eq("telefone", phone)
+        .order("created_at", { ascending: false })
+        .limit(1);
 
   const existing = existingArray?.[0] || null;
 

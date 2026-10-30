@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bot,
@@ -22,6 +22,7 @@ import {
   Archive,
   Users,
   UserCheck,
+  RotateCcw,
 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Button } from "@/components/ui/button";
@@ -139,6 +140,10 @@ ${perguntas}
 
 Não repita perguntas já respondidas. Quando tiver o suficiente, resuma o que entendeu e encaminhe para o próximo passo.`;
 }
+
+type SimMemoria = { historico: { role: "user" | "assistant"; content: string }[]; dados: Record<string, unknown> };
+const SIM_SAUDACAO = { role: "bot" as const, text: "Olá! Como posso ajudar?" };
+const simMemoriaVazia = (): SimMemoria => ({ historico: [], dados: {} });
 
 export default function InboundAgentConfig() {
   const navigate = useNavigate();
@@ -290,10 +295,14 @@ export default function InboundAgentConfig() {
 
   const rotationNext = useSdrRotationNext(selectedClientId || null, sdrDistribution === "rodizio");
 
-  const [simMessages, setSimMessages] = useState<{ role: "user" | "bot"; text: string }[]>([
-    { role: "bot", text: "Olá! Como posso ajudar?" }
-  ]);
+  const [simMessages, setSimMessages] = useState<{ role: "user" | "bot"; text: string }[]>([SIM_SAUDACAO]);
   const [simInput, setSimInput] = useState("");
+  // Memória do teste mora AQUI, não num lead do banco: o servidor devolve a
+  // memória do próximo turno e a tela manda de volta. Limpar = zerar isto.
+  const simMemoriaRef = useRef<SimMemoria>(simMemoriaVazia());
+  // Cada limpeza abre uma "geração" nova. Resposta de geração anterior que
+  // chega depois do clique é descartada — não suja a conversa nova.
+  const simGeracaoRef = useRef(0);
   const simScroll = useStickToBottom<HTMLDivElement>(simMessages.length);
 
   // Depende do ID e dos chips do tenant:
@@ -489,6 +498,7 @@ export default function InboundAgentConfig() {
   const handleSimulate = async () => {
     const texto = simInput.trim();
     if (!texto || simulando || isPlaceholderCompany || !activeCompany) return;
+    const geracao = simGeracaoRef.current;
     simScroll.scrollOnNextChange();
     setSimMessages((prev) => [...prev, { role: "user", text: texto }]);
     setSimInput("");
@@ -505,21 +515,34 @@ export default function InboundAgentConfig() {
           clientId: selectedClientId,
           message: texto,
           agentId: activeCompany.id,
+          simulacao: simMemoriaRef.current,
         }),
       });
       const data = await res.json().catch(() => null);
+      if (geracao !== simGeracaoRef.current) return;
       if (!res.ok || !data?.response) {
         const motivo = data?.error?.message || data?.reason || `HTTP ${res.status}`;
         setSimMessages((prev) => [...prev, { role: "bot", text: `[falha] ${motivo}` }]);
         return;
       }
+      if (data.simulacao) simMemoriaRef.current = data.simulacao;
       const origem = data?.meta?.agente === "inbound" ? "este agente" : "chatbot do tenant";
       setSimMessages((prev) => [...prev, { role: "bot", text: `${data.response}\n\n— respondido pelo ${origem}` }]);
     } catch (e: any) {
+      if (geracao !== simGeracaoRef.current) return;
       setSimMessages((prev) => [...prev, { role: "bot", text: `[erro] ${e?.message || "falha na simulação"}` }]);
     } finally {
-      setSimulando(false);
+      // Só a geração atual destrava o envio: a resposta antiga que cai depois
+      // da limpeza não pode liberar um envio paralelo ao da conversa nova.
+      if (geracao === simGeracaoRef.current) setSimulando(false);
     }
+  };
+
+  const limparSimulacao = () => {
+    simGeracaoRef.current += 1;
+    simMemoriaRef.current = simMemoriaVazia();
+    setSimMessages([SIM_SAUDACAO]);
+    setSimulando(false);
   };
 
   if (loadingCompanies) {
@@ -1105,6 +1128,38 @@ export default function InboundAgentConfig() {
                   </p>
                 ) : (
                   <div className="flex flex-col h-[420px] border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-end px-2 py-1 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={simMessages.length <= 1}
+                            className="h-7 gap-1.5 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Limpar conversa
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Limpar a conversa de teste?</AlertDialogTitle>
+                            <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+                              <span className="block">O agente esquece tudo o que foi dito aqui e a próxima mensagem começa do zero. Não dá para desfazer.</span>
+                              {simulando && (
+                                <span className="block">A resposta que ainda está chegando será descartada.</span>
+                              )}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={limparSimulacao} className="h-8 text-xs">
+                              Limpar
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                     <div
                       ref={simScroll.containerRef}
                       onScroll={simScroll.onScroll}

@@ -240,6 +240,9 @@ export function TabGeral({ clientId, clientName, client }: { clientId: string; c
           message: "Olá, teste de conexão do chatbot",
           // Testa o agente do chip marcado; sem chip, testa o chatbot do tenant.
           instanceName: chipsDoChatbot[0] ?? undefined,
+          // Simulação com memória vazia: sem isto o motor gravava o lead
+          // fantasma 5500000000000 (visível no Banco) a cada teste.
+          simulacao: { historico: [], dados: {} },
         }),
       });
 

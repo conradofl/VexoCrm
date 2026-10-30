@@ -883,3 +883,169 @@ describe("InboundAgentConfig — Passo 6: rolagem do simulador", () => {
     ]);
   });
 });
+
+// Memória do teste mora na tela e "Limpar conversa" zera tela E memória.
+// A resposta que estava em voo na hora da limpeza é descartada: nada que
+// chega depois do clique pode sujar a conversa nova.
+describe("InboundAgentConfig — Passo 6: limpar conversa do simulador", () => {
+  let pendentes: Array<(texto: string) => void>;
+  let quedas: Array<() => void>;
+  let corpos: any[];
+
+  beforeEach(() => {
+    vi.resetModules();
+    pendentes = [];
+    quedas = [];
+    corpos = [];
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: [] },
+    ]);
+    // Cada envio fica pendurado até o teste responder; a "memória" devolvida
+    // pelo servidor é o histórico recebido mais o turno novo, como o motor faz.
+    vi.doMock("@/lib/api", () => ({
+      fetchApi: vi.fn((_url: string, options: RequestInit) => {
+        const body = JSON.parse(options.body as string);
+        corpos.push(body);
+        return new Promise((resolve, reject) => {
+          quedas.push(() => reject(new TypeError("Failed to fetch")));
+          pendentes.push((texto: string) =>
+            resolve({
+              ok: true,
+              json: async () => ({
+                response: texto,
+                meta: { agente: "inbound" },
+                simulacao: {
+                  historico: [
+                    ...(body.simulacao?.historico || []),
+                    { role: "user", content: body.message },
+                    { role: "assistant", content: texto },
+                  ],
+                  dados: { turnos: (body.simulacao?.historico?.length || 0) / 2 + 1 },
+                },
+              }),
+            })
+          );
+        });
+      }),
+    }));
+  });
+
+  async function abrir() {
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+    const input = screen.getByPlaceholderText("Digite sua mensagem...") as HTMLInputElement;
+    const botaoLimpar = () => screen.getByRole("button", { name: /Limpar conversa/ });
+    return { input, botaoLimpar };
+  }
+
+  async function enviar(input: HTMLInputElement, texto: string) {
+    fireEvent.change(input, { target: { value: texto } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByText(texto);
+  }
+
+  async function responder(texto: string) {
+    pendentes.shift()!(texto);
+    await screen.findByText(new RegExp(texto));
+  }
+
+  async function confirmarLimpeza(botaoLimpar: () => HTMLElement) {
+    fireEvent.click(botaoLimpar());
+    const dialogo = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Limpar" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  }
+
+  it("[TESTE OBRIGATÓRIO] L1 conversa vazia (só a saudação): botão desabilitado", async () => {
+    const { botaoLimpar } = await abrir();
+    expect(botaoLimpar()).toBeDisabled();
+  });
+
+  it("[TESTE OBRIGATÓRIO] L2 a memória vai e volta pela tela: 1º envio sai vazio, 2º leva o que o servidor devolveu", async () => {
+    const { input } = await abrir();
+    await enviar(input, "oi, sou a Ana");
+    expect(corpos[0].simulacao).toEqual({ historico: [], dados: {} });
+    await responder("Olá Ana");
+    await enviar(input, "quero sofá");
+    expect(corpos[1].simulacao.historico).toEqual([
+      { role: "user", content: "oi, sou a Ana" },
+      { role: "assistant", content: "Olá Ana" },
+    ]);
+    expect(corpos[1].simulacao.dados).toEqual({ turnos: 1 });
+  });
+
+  it("[TESTE OBRIGATÓRIO] L3 cancelar na confirmação não apaga nada", async () => {
+    const { input, botaoLimpar } = await abrir();
+    await enviar(input, "oi, sou a Ana");
+    await responder("Olá Ana");
+    fireEvent.click(botaoLimpar());
+    const dialogo = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.getByText("oi, sou a Ana")).toBeTruthy();
+    expect(screen.getByText(/Olá Ana/)).toBeTruthy();
+  });
+
+  it("[TESTE OBRIGATÓRIO] L4 confirmar limpa a tela E a memória: o envio seguinte sai sem histórico", async () => {
+    const { input, botaoLimpar } = await abrir();
+    await enviar(input, "oi, sou a Ana");
+    await responder("Olá Ana");
+    await confirmarLimpeza(botaoLimpar);
+
+    expect(screen.queryByText("oi, sou a Ana")).toBeNull();
+    expect(screen.queryByText(/Olá Ana/)).toBeNull();
+    expect(botaoLimpar()).toBeDisabled();
+
+    await enviar(input, "assunto novo");
+    expect(corpos.at(-1).simulacao).toEqual({ historico: [], dados: {} });
+  });
+
+  it("[TESTE OBRIGATÓRIO] L5 resposta em voo na hora da limpeza é descartada e não volta para a memória", async () => {
+    const { input, botaoLimpar } = await abrir();
+    await enviar(input, "pergunta antiga");
+    // A resposta ainda não chegou; limpa no meio do voo.
+    await confirmarLimpeza(botaoLimpar);
+
+    // Dá para enviar de novo na hora, sem esperar a resposta antiga.
+    await enviar(input, "pergunta nova");
+    expect(corpos.at(-1).simulacao).toEqual({ historico: [], dados: {} });
+
+    // A resposta antiga chega DEPOIS do clique: não pode aparecer.
+    pendentes.shift()!("RESPOSTA ANTIGA");
+    await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => expect(screen.queryByText(/RESPOSTA ANTIGA/)).toBeNull());
+
+    // A nova chega normalmente, e a memória seguinte não carrega a antiga.
+    await responder("resposta nova");
+    await enviar(input, "e mais?");
+    const historico = corpos.at(-1).simulacao.historico.map((h: any) => h.content);
+    expect(historico).toEqual(["pergunta nova", "resposta nova"]);
+  });
+
+  it("L6 resposta antiga que chega depois da limpeza não destrava o envio da conversa nova no meio do voo", async () => {
+    const { input, botaoLimpar } = await abrir();
+    await enviar(input, "pergunta antiga");
+    await confirmarLimpeza(botaoLimpar);
+    await enviar(input, "pergunta nova");
+
+    pendentes.shift()!("RESPOSTA ANTIGA");
+    await new Promise((r) => setTimeout(r, 0));
+
+    // "pergunta nova" ainda está esperando resposta: outro envio é recusado
+    // (mesma trava de antes), em vez de sair em paralelo.
+    fireEvent.change(input, { target: { value: "atropelo" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(corpos.map((c) => c.message)).toEqual(["pergunta antiga", "pergunta nova"]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] L7 falha de rede da conversa antiga que chega depois da limpeza não aparece na nova", async () => {
+    const { input, botaoLimpar } = await abrir();
+    await enviar(input, "pergunta antiga");
+    await confirmarLimpeza(botaoLimpar);
+    await enviar(input, "pergunta nova");
+    quedas.shift()!();
+    await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => expect(screen.queryByText(/\[erro\]/)).toBeNull());
+  });
+});

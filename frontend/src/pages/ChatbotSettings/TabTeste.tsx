@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,16 +23,27 @@ function describeRequestFailure(e: unknown): string {
   return msg || "erro desconhecido";
 }
 
+type SimMemoria = { historico: { role: "user" | "assistant"; content: string }[]; dados: Record<string, unknown> };
+const memoriaVazia = (): SimMemoria => ({ historico: [], dados: {} });
+
 export function TabTeste({ clientId }: { clientId: string }) {
   const { getIdToken } = useAuth();
-  const [phone] = useState("5511999999999");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [conversation, setConversation] = useState<{ role: "user" | "bot"; text: string }[]>([]);
+  // Memória do teste mora AQUI, não num lead do banco (antes: telefone fixo
+  // 5511999999999 gravado em public.leads). O servidor devolve a memória do
+  // próximo turno e a tela manda de volta.
+  const memoriaRef = useRef<SimMemoria>(memoriaVazia());
+  // Cada limpeza abre uma geração nova: resposta antiga que chega depois do
+  // clique é descartada e não destrava o envio da conversa nova.
+  const geracaoRef = useRef(0);
 
   async function handleSend() {
     if (!message.trim()) return;
     const userMsg = message.trim();
+    const geracao = geracaoRef.current;
+    const atual = () => geracao === geracaoRef.current;
     setMessage("");
     setConversation((c) => [...c, { role: "user", text: userMsg }]);
     setLoading(true);
@@ -41,14 +52,17 @@ export function TabTeste({ clientId }: { clientId: string }) {
       const res = await fetchApi("/api/chatbot-test", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ clientId, phone, message: userMsg }),
+        body: JSON.stringify({ clientId, message: userMsg, simulacao: memoriaRef.current }),
         // Um turno do agente é uma chamada de LLM com rotação de modelos: passa
         // dos 15s padrão com facilidade. No timeout o fetch é abortado e a tela
         // mostrava "Falha: Failed to fetch", como se a API estivesse fora.
         timeoutMs: 90000,
       });
+      if (!atual()) return;
       if (res.ok) {
-        const data = await readApiJson<{ response?: string | null; reason?: string; avisos?: string[] }>(res, "chatbot_test");
+        const data = await readApiJson<{ response?: string | null; reason?: string; avisos?: string[]; simulacao?: SimMemoria }>(res, "chatbot_test");
+        if (!atual()) return;
+        if (data?.simulacao) memoriaRef.current = data.simulacao;
         const botMsg = data?.response;
         if (botMsg) setConversation((c) => [...c, { role: "bot", text: botMsg }]);
         else setConversation((c) => [...c, { role: "bot", text: `⚠️ ${data?.reason ?? "Sem resposta — verifique se o prompt padrão está configurado."}` }]);
@@ -68,16 +82,24 @@ export function TabTeste({ clientId }: { clientId: string }) {
         setConversation((c) => [...c, { role: "bot", text: `Erro: ${err}` }]);
       }
     } catch (e) {
+      if (!atual()) return;
       setConversation((c) => [...c, { role: "bot", text: `Falha: ${describeRequestFailure(e)}` }]);
     } finally {
-      setLoading(false);
+      if (atual()) setLoading(false);
     }
+  }
+
+  function limparConversa() {
+    geracaoRef.current += 1;
+    memoriaRef.current = memoriaVazia();
+    setConversation([]);
+    setLoading(false);
   }
 
   return (
     <div className="max-w-xl space-y-4">
       <p className="text-sm text-slate-500">
-        Simule uma conversa com o chatbot desta empresa. As mensagens usam um número fictício e não chegam ao WhatsApp real.
+        Simule uma conversa com o chatbot desta empresa. As mensagens não chegam ao WhatsApp real e não criam lead no Banco.
       </p>
 
       <Card>
@@ -121,7 +143,7 @@ export function TabTeste({ clientId }: { clientId: string }) {
           </div>
 
           {conversation.length > 0 && (
-            <Button variant="ghost" size="sm" className="w-full text-xs text-slate-400" onClick={() => setConversation([])}>
+            <Button variant="ghost" size="sm" className="w-full text-xs text-slate-400" onClick={limparConversa}>
               Limpar conversa
             </Button>
           )}

@@ -86,6 +86,7 @@ import { resolveCampaignAgent, AGENTE_CAMPANHA, AGENTE_NENHUM } from "../../serv
 import { validateOutboundMessage } from "../../services/jsonExtractor.js";
 import { getCampaignStepPlan, normalizeCampaignAnalyticsMeta } from "../../campaign-outbound.js";
 import { normalizeCampaignPendingStepIndex } from "../../campaign/dispatch.js";
+import { parseSimulationState } from "./simulationState.js";
 
 export async function resolvePendingCampaignRunForPhone({
   clientId,
@@ -3945,7 +3946,13 @@ export function registerChatbotRoutes(app, deps) {
     // instanceName (que sem casamento cai pro chatbot do tenant em silêncio),
     // um agentId que não resolve é erro do chamador — 404 sem rodar nada.
     const agentId = normalizeString(body.agentId) || null;
-    const isSimulation = body.isSimulation === true || body.noPersist === true || body.simulation === true;
+    // Memória do simulador vinda da tela. Com ela o motor roda em simulação e
+    // não toca a tabela leads (antes: lead fantasma 5500000000000 por tenant).
+    const memoria = parseSimulationState(body.simulacao);
+    if (!memoria.ok) return sendError(res, 400, "INVALID_SIMULATION_STATE", memoria.problem);
+    const simulationState = memoria.state;
+    const isSimulation =
+      simulationState !== null || body.isSimulation === true || body.noPersist === true || body.simulation === true;
 
     try {
       const tenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
@@ -3977,6 +3984,7 @@ export function registerChatbotRoutes(app, deps) {
         instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
         isSimulation,
         noPersist: isSimulation,
+        simulationState,
       });
 
       if (!aiResponse?.mensagem) {
@@ -4022,6 +4030,8 @@ export function registerChatbotRoutes(app, deps) {
           dados: aiResponse.dados || {},
           contratoQuebrado: aiResponse.contratoQuebrado === true,
         },
+        // Memória do próximo turno: a tela guarda e manda de volta.
+        ...(simulationState ? { simulacao: { historico: aiResponse._history || [], dados: aiResponse._dados || {} } } : {}),
       });
     } catch (err) {
       console.error("[chatbot-test] Erro no simulador:", {
