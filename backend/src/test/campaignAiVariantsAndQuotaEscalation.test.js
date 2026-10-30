@@ -3,11 +3,7 @@ import {
   extractJsonFromLlmText,
   generateCampaignTemplateVariants,
 } from "../campaign-ai.js";
-import {
-  isHighQuotaModel,
-  filterLadderOnQuotaExceeded,
-  resolveGroqLadder,
-} from "../services/llmModels.js";
+import { dropOnRequestTooLarge } from "../services/llmModels.js";
 import * as chatbotEngine from "../chatbot-ai-engine.js";
 
 describe("Defeito 1 — Extração Resiliente de JSON e Erro Honesto", () => {
@@ -89,75 +85,63 @@ Preciso manter as variáveis.
   });
 });
 
-describe("Defeito 2 — Escada de Modelos e Escalada no HTTP 429", () => {
-  it("isHighQuotaModel identifica corretamente modelos com >= 70.000 TPM", () => {
-    expect(isHighQuotaModel("openai/gpt-oss-120b")).toBe(false);
-    expect(isHighQuotaModel("openai/gpt-oss-20b")).toBe(false);
-    expect(isHighQuotaModel("qwen/qwen3.6-27b")).toBe(false);
-    expect(isHighQuotaModel("groq/compound")).toBe(true);
-    expect(isHighQuotaModel("groq/compound-mini")).toBe(true);
+const CHAVES_DE_AMBIENTE = [
+  "GROQ_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "LLM_MODEL_LADDER",
+  "GROQ_CAMPAIGN_AI_MODEL",
+];
+
+function salvarEnv() {
+  const salvo = Object.fromEntries(CHAVES_DE_AMBIENTE.map((k) => [k, process.env[k]]));
+  return () => {
+    for (const k of CHAVES_DE_AMBIENTE) {
+      if (salvo[k] === undefined) delete process.env[k];
+      else process.env[k] = salvo[k];
+    }
+  };
+}
+
+describe("Defeito 2 — Escada de Modelos e Escalada no HTTP 413/429", () => {
+  it("413 descarta os modelos do mesmo provedor com teto igual ou menor e mantem os outros provedores", () => {
+    const restantes = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "gemini-flash-latest", "gemini-flash-lite-latest"];
+    expect(dropOnRequestTooLarge("openai/gpt-oss-120b", restantes)).toEqual([
+      "gemini-flash-latest",
+      "gemini-flash-lite-latest",
+    ]);
   });
 
-  it("filterLadderOnQuotaExceeded descarta modelos de 8.000 TPM e pula direto para modelos de alta cota", () => {
-    const escadaOriginal = [
-      "openai/gpt-oss-120b",
+  it("413 em modelo de teto desconhecido so descarta o proprio modelo", () => {
+    const restantes = ["gemini-flash-latest", "gemini-flash-lite-latest", "openai/gpt-oss-20b"];
+    expect(dropOnRequestTooLarge("gemini-flash-latest", restantes)).toEqual([
+      "gemini-flash-lite-latest",
       "openai/gpt-oss-20b",
-      "qwen/qwen3.6-27b",
-      "groq/compound",
-      "groq/compound-mini",
-    ];
-
-    // Quando gpt-oss-120b estoura a cota, os restantes são [gpt-oss-20b, qwen, compound, compound-mini]
-    const remaining = escadaOriginal.slice(1);
-    const escalados = filterLadderOnQuotaExceeded("openai/gpt-oss-120b", remaining);
-
-    // Deve conter APENAS compound e compound-mini, pulando gpt-oss-20b e qwen3.6-27b
-    expect(escalados).toEqual(["groq/compound", "groq/compound-mini"]);
-    expect(escalados).not.toContain("openai/gpt-oss-20b");
-    expect(escalados).not.toContain("qwen/qwen3.6-27b");
+    ]);
   });
 
-  it("callLlmChatCompletion pula modelos de 8.000 TPM no 429 e tenta modelo de alta cota", async () => {
-    const prevKey = process.env.GROQ_API_KEY;
+  it("callLlmChatCompletion no 413 da Groq pula os outros de 8.000 TPM e cai no Gemini", async () => {
+    const restaurarEnv = salvarEnv();
     process.env.GROQ_API_KEY = "gsk_fake_key_for_test";
+    process.env.GEMINI_API_KEY = "gemini_fake_key_for_test";
+    process.env.LLM_MODEL_LADDER = "openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-flash-latest";
+    delete process.env.GROQ_CAMPAIGN_AI_MODEL;
 
     const modelosChamados = [];
-    const originalFetch = globalThis.fetch;
-
-    globalThis.fetch = vi.fn().mockImplementation(async (url, options) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, options) => {
       const body = JSON.parse(options.body);
       modelosChamados.push(body.model);
-
-      if (body.model === "openai/gpt-oss-120b") {
+      if (String(url).includes("api.groq.com")) {
         return {
           ok: false,
-          status: 429,
+          status: 413,
           text: async () =>
-            JSON.stringify({
-              error: {
-                message: "Rate limit reached on tokens per minute (TPM): Limit 8000, Used 7070",
-                type: "tokens",
-                code: "rate_limit_exceeded",
-              },
-            }),
+            "Request too large for model `openai/gpt-oss-120b` on tokens per minute (TPM): Limit 8000, Requested 9431",
         };
       }
-
-      if (body.model === "groq/compound") {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            choices: [{ message: { content: '{"status":"ok"}' } }],
-          }),
-        };
-      }
-
-      return {
-        ok: false,
-        status: 500,
-        text: async () => "Internal Error",
-      };
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"status":"ok"}' } }] }) };
     });
 
     try {
@@ -165,47 +149,44 @@ describe("Defeito 2 — Escada de Modelos e Escalada no HTTP 429", () => {
         model: "openai/gpt-oss-120b",
         messages: [{ role: "user", content: "oi" }],
       });
-
       expect(res).toBe('{"status":"ok"}');
-      // Verificação crítica: chamou 120b, estourou 429, pulou 20b e qwen, foi direto para groq/compound
-      expect(modelosChamados).toEqual(["openai/gpt-oss-120b", "groq/compound"]);
-      expect(modelosChamados).not.toContain("openai/gpt-oss-20b");
-      expect(modelosChamados).not.toContain("qwen/qwen3.6-27b");
+      expect(modelosChamados).toEqual(["openai/gpt-oss-120b", "gemini-flash-latest"]);
     } finally {
-      globalThis.fetch = originalFetch;
-      process.env.GROQ_API_KEY = prevKey;
+      fetchSpy.mockRestore();
+      restaurarEnv();
     }
   });
 
-  it("se todos os modelos (incluindo alta cota) retornarem 429, lança erro LLM_QUOTA_EXCEEDED", async () => {
-    const prevKey = process.env.GROQ_API_KEY;
+  it("se todos os modelos retornarem 429, lança erro LLM_QUOTA_EXCEEDED", async () => {
+    const restaurarEnv = salvarEnv();
     process.env.GROQ_API_KEY = "gsk_fake_key_for_test";
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.LLM_MODEL_LADDER;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockImplementation(async (url, options) => {
-      return {
-        ok: false,
-        status: 429,
-        text: async () =>
-          JSON.stringify({
-            error: {
-              message: "Rate limit reached on tokens per minute (TPM): Limit 8000, Used 8000",
-              code: "rate_limit_exceeded",
-            },
-          }),
-      };
-    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+      ok: false,
+      status: 429,
+      text: async () =>
+        JSON.stringify({
+          error: {
+            message: "Rate limit reached on tokens per minute (TPM): Limit 8000, Used 8000",
+            code: "rate_limit_exceeded",
+          },
+        }),
+    }));
 
     try {
-      await expect(
-        chatbotEngine.callLlmChatCompletion({
-          model: "openai/gpt-oss-120b",
-          messages: [{ role: "user", content: "oi" }],
-        })
-      ).rejects.toThrow(/cota de IA/i);
+      const erro = await chatbotEngine
+        .callLlmChatCompletion({ model: "openai/gpt-oss-120b", messages: [{ role: "user", content: "oi" }] })
+        .catch((e) => e);
+      expect(erro.code).toBe("LLM_QUOTA_EXCEEDED");
+      expect(erro.message).toMatch(/cota de IA/i);
     } finally {
-      globalThis.fetch = originalFetch;
-      process.env.GROQ_API_KEY = prevKey;
+      fetchSpy.mockRestore();
+      restaurarEnv();
     }
   });
 });
