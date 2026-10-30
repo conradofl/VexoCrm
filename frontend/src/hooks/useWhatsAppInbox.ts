@@ -353,6 +353,32 @@ export function useUnmuteChat(clientId: string | null) {
   });
 }
 
+export function useMuteChat(clientId: string | null) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ phone }: { phone: string }) => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/chats/mute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ clientId, phone }),
+      });
+
+      return parseApiResponse<{ success: boolean; phone: string }>(res);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats"] });
+    },
+  });
+}
+
 export function useCreateLeadFromChat(clientId: string | null) {
   const { getIdToken } = useAuth();
   const queryClient = useQueryClient();

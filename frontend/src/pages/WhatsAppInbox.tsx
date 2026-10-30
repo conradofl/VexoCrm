@@ -102,6 +102,7 @@ import {
   useBulkUpdateChatState,
   useAttendChat,
   useUnmuteChat,
+  useMuteChat,
   useCreateLeadFromChat,
   useBulkCreateLeadsFromChats,
   useDeleteWhatsAppMessage,
@@ -420,6 +421,7 @@ export default function WhatsAppInbox({
   const bulkUpdateChatState = useBulkUpdateChatState(clientId);
   const attendChat = useAttendChat(clientId);
   const unmuteChat = useUnmuteChat(clientId);
+  const muteChat = useMuteChat(clientId);
   const createLeadMutation = useCreateLeadFromChat(clientId);
   const bulkCreateLeadsMutation = useBulkCreateLeadsFromChats(clientId);
   const messagesQuery = useWhatsAppMessages(clientId, instanceFilter, selectedChatId, canLoadInbox);
@@ -879,6 +881,19 @@ export default function WhatsAppInbox({
       chatsQuery.refetch?.();
     } catch (err: any) {
       toast.error(err?.message || "Erro ao reativar agente.");
+    }
+  };
+
+  const handleMuteAgent = async () => {
+    if (!selectedChat) return;
+    try {
+      await muteChat.mutateAsync({
+        phone: selectedChat.id,
+      });
+      toast.success("Agente pausado nesta conversa. Ele só volta pelo \"Reativar agente\".");
+      chatsQuery.refetch?.();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao pausar agente.");
     }
   };
 
@@ -2268,6 +2283,18 @@ export default function WhatsAppInbox({
                             >
                               <Bot className="h-3.5 w-3.5 text-emerald-600" />
                               <span>Reativar Agente IA</span>
+                            </DropdownMenuItem>
+                          )}
+
+                          {/* Pausar agente na mão (atendimento humano) */}
+                          {!selectedChat.agentMutedAt && !selectedChat.isGroup && (
+                            <DropdownMenuItem
+                              onClick={handleMuteAgent}
+                              disabled={muteChat.isPending}
+                              className="gap-2 cursor-pointer text-amber-700 dark:text-amber-300 font-semibold"
+                            >
+                              <Bot className="h-3.5 w-3.5 text-amber-600" />
+                              <span>{muteChat.isPending ? "Pausando..." : "Pausar Agente IA"}</span>
                             </DropdownMenuItem>
                           )}
 

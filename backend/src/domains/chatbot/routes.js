@@ -231,6 +231,7 @@ import {
   countTenantMutedToday,
   recordAgentMute,
   clearAgentMute,
+  MUTE_SOURCE_MANUAL,
 } from "../../services/agentMuteGuard.js";
 
 export function registerChatbotRoutes(app, deps) {
@@ -1136,6 +1137,34 @@ export function registerChatbotRoutes(app, deps) {
     } catch (err) {
       console.error("[whatsapp/chats/unmute] erro:", err?.message || err);
       sendError(res, 500, "UNMUTE_ERROR", err?.message || "Erro ao reativar agente na conversa");
+    }
+  });
+
+  // POST /api/whatsapp/chats/mute — pausa o agente na conversa por decisão de gente.
+  // Não passa pelas travas do classificador nem conta no freio diário, e só sai pelo
+  // "Reativar agente" (resposta fromMe não desfaz pausa manual).
+  app.post("/api/whatsapp/chats/mute", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = resolveAuthorizedClientId(req, res, req.body?.clientId);
+    if (!clientId) return;
+
+    const phone = sanitizePhone(req.body?.phone);
+    if (!phone) {
+      sendError(res, 400, "INVALID_PHONE", "Telefone é obrigatório");
+      return;
+    }
+
+    try {
+      await recordAgentMute(pgDatabasePool, {
+        clientId,
+        phone,
+        reason: "Atendimento humano",
+        source: MUTE_SOURCE_MANUAL,
+      });
+      res.json({ success: true, phone });
+    } catch (err) {
+      console.error("[whatsapp/chats/mute] erro:", err?.message || err);
+      sendError(res, 500, "MUTE_ERROR", err?.message || "Erro ao pausar agente na conversa");
     }
   });
 
@@ -3012,9 +3041,10 @@ export function registerChatbotRoutes(app, deps) {
           );
         }
 
-        // 3. Se um humano responder manualmente pelo celular (fromMe), o silenciamento do robô se desfaz sozinho
+        // 3. Se um humano responder manualmente pelo celular (fromMe), o silenciamento DO CLASSIFICADOR
+        //    se desfaz sozinho. Pausa manual (botão) só sai pelo "Reativar agente".
         if (fromMe) {
-          await clearAgentMute(pgDatabasePool, { clientId, phone }).catch((err) => {
+          await clearAgentMute(pgDatabasePool, { clientId, phone, onlyClassifier: true }).catch((err) => {
             console.warn("[chatbot-webhook] erro ao limpar silenciamento do agente com resposta manual (fromMe):", err?.message || err);
           });
         }
