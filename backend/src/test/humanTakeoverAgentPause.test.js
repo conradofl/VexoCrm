@@ -340,3 +340,55 @@ describe("Resposta pela tela de Conversas (D3)", () => {
     expect(await countTenantMutedToday(pool, TENANT)).toBe(0);
   });
 });
+
+describe("Aba Pausadas (D5)", () => {
+  async function conversaCom(phone, text) {
+    await db.query(
+      `INSERT INTO public.lead_messages (client_id, phone, sender_type, direction, message_text, message_timestamp)
+       VALUES ($1, $2, 'lead', 'inbound', $3, now())`,
+      [TENANT, phone, text]
+    );
+  }
+
+  it("lista só as conversas com o agente pausado, de qualquer origem, e o contador bate", async () => {
+    const t = setup();
+    await conversaCom("5534999990011", "Quero orçamento");
+    await conversaCom("5534999990012", "Oi tudo bem");
+    await conversaCom("5534999990013", "Bom dia");
+    await t.mute("5534999990011");
+    await recordAgentMute(pool, { clientId: TENANT, phone: "5534999990012", reason: "Conversa pessoal" });
+
+    const lista = await t.listChats({ tab: "pausadas" });
+    expect(lista.items.map((c) => c.id).sort()).toEqual(["5534999990011", "5534999990012"]);
+    expect(lista.total).toBe(2);
+    expect(lista.counts.paused).toBe(2);
+
+    // Na Fila as três continuam aparecendo: pausar não esconde a conversa.
+    const fila = await t.listChats({ tab: "fila" });
+    expect(fila.items).toHaveLength(3);
+  });
+
+  it("conversa arquivada com o agente pausado continua na aba Pausadas", async () => {
+    const t = setup();
+    await conversaCom("5534999990021", "Oi");
+    await t.mute("5534999990021");
+    await db.query(
+      "UPDATE public.whatsapp_chat_states SET state = 'arquivada' WHERE client_id = $1 AND phone = $2",
+      [TENANT, "5534999990021"]
+    );
+
+    const lista = await t.listChats({ tab: "pausadas" });
+    expect(lista.items.map((c) => c.id)).toEqual(["5534999990021"]);
+  });
+
+  it("reativar tira a conversa da aba Pausadas", async () => {
+    const t = setup();
+    await conversaCom("5534999990031", "Oi");
+    await t.mute("5534999990031");
+    await t.unmute("5534999990031");
+
+    const lista = await t.listChats({ tab: "pausadas" });
+    expect(lista.items).toEqual([]);
+    expect(lista.counts.paused).toBe(0);
+  });
+});

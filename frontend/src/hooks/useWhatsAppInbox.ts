@@ -45,6 +45,7 @@ export interface WhatsAppCounts {
   automations: number;
   groups: number;
   archived: number;
+  paused?: number;
   myUnopened?: number;
 }
 

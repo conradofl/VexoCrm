@@ -667,6 +667,10 @@ export function registerChatbotRoutes(app, deps) {
           tabCondition = "AND m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira'";
         } else if (rawTab === "arquivada" || rawTab === "arquivadas") {
           tabCondition = "AND (m.is_group IS NOT TRUE) AND cs.state = 'arquivada'";
+        } else if (rawTab === "pausadas") {
+          // Toda conversa com o agente pausado, em qualquer estado menos lixeira: a pausa
+          // não expira sozinha, então esta aba é onde a conversa esquecida aparece.
+          tabCondition = "AND (m.is_group IS NOT TRUE) AND cs.agent_muted_at IS NOT NULL AND COALESCE(cs.state, 'ativa') != 'lixeira'";
         } else if (rawTab === "automacao" || rawTab === "automacoes") {
           tabCondition = `AND (m.is_group IS NOT TRUE) AND (
             cs.state = 'automacao' OR (cs.state IS NULL AND ${SQL_AUTOMATION_MATCH("m.message_text")})
@@ -713,7 +717,7 @@ export function registerChatbotRoutes(app, deps) {
 
       let total = 0;
       let items = [];
-      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, myUnopened: 0 };
+      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0, myUnopened: 0 };
       let lastQueryInfo = { step: "init", sql: null, params: null };
 
       try {
@@ -748,6 +752,9 @@ export function registerChatbotRoutes(app, deps) {
           SELECT
             COUNT(*) FILTER (WHERE m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira')::integer as groups_count,
             COUNT(*) FILTER (WHERE m.is_group IS NOT TRUE AND cs.state = 'arquivada')::integer as archived_count,
+            COUNT(*) FILTER (
+              WHERE m.is_group IS NOT TRUE AND cs.agent_muted_at IS NOT NULL AND COALESCE(cs.state, 'ativa') != 'lixeira'
+            )::integer as paused_count,
             COUNT(*) FILTER (
               WHERE m.is_group IS NOT TRUE
                 AND (cs.state = 'automacao' OR (cs.state IS NULL AND ${SQL_AUTOMATION_MATCH("m.message_text")}))
@@ -787,6 +794,7 @@ export function registerChatbotRoutes(app, deps) {
             automations: countsRow.automations_count || 0,
             groups: countsRow.groups_count || 0,
             archived: countsRow.archived_count || 0,
+            paused: countsRow.paused_count || 0,
             myUnopened: countsRow.my_unopened_count || 0,
           };
         }
@@ -1003,7 +1011,7 @@ export function registerChatbotRoutes(app, deps) {
         query: _req.query,
         stack: error?.stack,
       });
-      res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0 }, nextOffset: 0, hasMore: false });
+      res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0 }, nextOffset: 0, hasMore: false });
     }
   });
 
