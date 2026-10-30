@@ -227,7 +227,7 @@ import {
 } from "../../services/sendWindow.js";
 import {
   evaluateAgentMuteGuards,
-  isChatAgentMuted,
+  getChatAgentMuteSource,
   countTenantMutedToday,
   recordAgentMute,
   clearAgentMute,
@@ -3437,7 +3437,8 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // Quem o chatbot pode atender. Escopo padrão ('leads_only') só engaja lead conhecido do tenant ou campanha.
-    const isAgentMuted = await isChatAgentMuted(pgDatabasePool, clientId, phone);
+    const agentMutedSource = await getChatAgentMuteSource(pgDatabasePool, clientId, phone);
+    const isAgentMuted = agentMutedSource !== null;
     const escopoInbound = resolveInboundScope(tenantSettings);
     const telefoneEhSdr = resolveTenantSdrNumbers(tenantSettings).includes(normalizeSdrNumber(phone));
     if (isAgentMuted || escopoInbound !== INBOUND_SCOPE_ALL || telefoneEhSdr) {
@@ -3448,6 +3449,7 @@ export function registerChatbotRoutes(app, deps) {
         hasCampaignMatch: temCampanhaParaEsteTelefone,
         isSdrNumber: telefoneEhSdr,
         isAgentMuted,
+        agentMutedSource,
       });
       if (!decisao.engage) {
         descartar(decisao.reason, {
@@ -3458,6 +3460,7 @@ export function registerChatbotRoutes(app, deps) {
           hasCampaignMatch: temCampanhaParaEsteTelefone,
           isSdrNumber: telefoneEhSdr,
           isAgentMuted,
+          agentMutedSource,
         });
         return;
       }

@@ -205,7 +205,7 @@ describe("Pausa manual do agente (botão na tela de Conversas)", () => {
     expect(estado.agent_muted_reason).toBe("Atendimento humano");
     expect(estado.state).toBe("ativa");
 
-    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
   });
 
   it("reativar limpa a etiqueta e o agente volta a atender", async () => {
@@ -286,7 +286,7 @@ describe("Resposta fromMe (celular/Desktop) e a pausa", () => {
     const estado = await estadoDaConversa();
     expect(estado.agent_muted_at).toBeTruthy();
     expect(estado.agent_muted_source).toBe("manual");
-    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
   });
 });
 
@@ -314,7 +314,7 @@ describe("Resposta pela tela de Conversas (D3)", () => {
     const estado = await estadoDaConversa();
     expect(estado.agent_muted_at).toBeTruthy();
     expect(estado.agent_muted_source).toBe("manual");
-    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
   });
 
   it("D3 desligado: responder pela tela não pausa o agente", async () => {
@@ -338,6 +338,30 @@ describe("Resposta pela tela de Conversas (D3)", () => {
     const t = setup({ pauseOnDeviceReply: true });
     await t.replyFromScreen("Oi");
     expect(await countTenantMutedToday(pool, TENANT)).toBe(0);
+  });
+});
+
+describe("Motivo do descarte no log", () => {
+  it("pausa do classificador continua descartando como conversa_nao_comercial", async () => {
+    const t = setup();
+    await recordAgentMute(pool, { clientId: TENANT, phone: LEAD, reason: "Conversa pessoal" });
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+  });
+
+  it("linha antiga sem origem descarta como conversa_nao_comercial", async () => {
+    const t = setup();
+    await db.query(
+      `INSERT INTO public.whatsapp_chat_states (client_id, phone, agent_muted_at, agent_muted_reason)
+       VALUES ($1, $2, now(), $3)`,
+      [TENANT, LEAD, "Engano"]
+    );
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+  });
+
+  it("pausa manual descarta com motivo próprio, não como conversa não-comercial", async () => {
+    const t = setup();
+    await t.mute(LEAD);
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
   });
 });
 

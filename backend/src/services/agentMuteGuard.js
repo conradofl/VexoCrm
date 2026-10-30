@@ -91,6 +91,30 @@ export async function isChatAgentMuted(pool, clientId, phone) {
 }
 
 /**
+ * Quem pausou o agente nesta conversa: null se não está pausado, senão a origem
+ * (MUTE_SOURCE_MANUAL ou MUTE_SOURCE_CLASSIFIER; linha antiga sem origem = classificador).
+ * Existe para o descarte dizer o motivo certo no log.
+ */
+export async function getChatAgentMuteSource(pool, clientId, phone) {
+  if (!pool || !clientId || !phone) return null;
+  try {
+    const res = await pool.query(
+      `SELECT agent_muted_at, agent_muted_source
+         FROM public.whatsapp_chat_states
+        WHERE client_id = $1 AND phone = $2
+        LIMIT 1`,
+      [clientId, phone]
+    );
+    const row = res.rows[0];
+    if (!row?.agent_muted_at) return null;
+    return row.agent_muted_source === MUTE_SOURCE_MANUAL ? MUTE_SOURCE_MANUAL : MUTE_SOURCE_CLASSIFIER;
+  } catch (err) {
+    console.warn("[agentMuteGuard] erro ao consultar getChatAgentMuteSource:", err?.message || err);
+    return null;
+  }
+}
+
+/**
  * Conta quantas conversas foram silenciadas PELO CLASSIFICADOR no dia atual (para o freio de
  * emergência). Pausa manual não entra: o freio protege contra a IA errar, não contra decisão de gente.
  */

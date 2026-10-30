@@ -33,9 +33,10 @@ export function resolveInboundScope(tenantSettings) {
  * @param {boolean} params.isKnownLead     existe registro de lead com esse telefone
  * @param {boolean} params.hasCampaignMatch telefone casa com alguma campanha
  * @param {boolean} [params.isSdrNumber=false] número pertence à equipe SDR
- * @param {boolean} [params.isAgentMuted=false] conversa silenciada por detecção de não-comercial
+ * @param {boolean} [params.isAgentMuted=false] agente pausado na conversa (classificador ou gente)
+ * @param {string|null} [params.agentMutedSource=null] quem pausou: "manual" ou "classificador"
  */
-export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSdrNumber = false, isAgentMuted = false }) {
+export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSdrNumber = false, isAgentMuted = false, agentMutedSource = null }) {
   // O SDR e equipe, nao lead. Ele RECEBE o briefing; se a chegada desse briefing
   // fosse tratada como mensagem de lead, o chatbot responderia, qualificaria e
   // mandaria outro briefing — o loop que voltou quando o destino virou lista.
@@ -46,7 +47,14 @@ export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSd
   // Conversa sem intenção comercial (pessoal, família, pedido de comida, engano):
   // o robô fica silenciado para evitar constrangimento e cortar custo de LLM.
   // A conversa continua ativa na tela de Conversas para atendimento humano.
-  if (isAgentMuted) return { engage: false, reason: "conversa_nao_comercial" };
+  // Pausa feita por gente tem motivo próprio: quem depura agente mudo não pode ser
+  // mandado atrás do classificador quando foi um consultor que pausou.
+  if (isAgentMuted) {
+    return {
+      engage: false,
+      reason: agentMutedSource === "manual" ? "agente_pausado_atendimento_humano" : "conversa_nao_comercial",
+    };
+  }
 
   if (scope === INBOUND_SCOPE_ALL) return { engage: true, reason: null };
   if (isKnownLead) return { engage: true, reason: null };
