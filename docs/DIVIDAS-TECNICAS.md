@@ -227,3 +227,37 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   `public.llm_usage`, que já registra o total da API, raciocínio incluído).
 - **Até lá:** a ordem fica a do commit que pôs o Gemini como padrão, e o `none` fica. Nenhum dos dois muda por esta medição de "oi".
 - **Status:** aberta, para depois do merge de `fix/migracao-gemini`. Registrada em 30/10/2026.
+
+## DT-013 — O resgate de passo de campanha some quando o chip ganha um agente, mesmo desligado
+
+- **Onde:** `backend/src/domains/chatbot/routes.js`, bypass de `chatbot_disabled` (`:3268-3328`), que chama
+  `resolvePendingCampaignRunForPhone` (`:90`) e `continueCampaignLeadFromReply` (`:3308`).
+- **O que faz:** é o segundo dos dois pontos que avançam passo de campanha a partir de uma resposta. O primeiro (`:3145-3221`)
+  roda antes de qualquer leitura do agente. Este só é alcançado dentro do `else` de "chip sem agente próprio": exige
+  `inboundConfig === null` e `chatbot_enabled === false`. Se o chip tem qualquer linha ativa em `followup_companies`,
+  ligada ou desligada, a resposta para no portão `inbound_disabled` (`:3253`) ou vai para a IA, e o resgate nunca roda.
+- **Pegadinha:** tenant com exatamente um agente ativo aplica esse agente a qualquer chip dele, inclusive os não vinculados
+  (`backend/src/services/inboundAgent.js:146`, `data.length === 1`). Nesse tenant o resgate não roda em chip nenhum.
+- **Quem perde:** respostas que o primeiro caminho não pega. São as de campanha com fluxo de resposta cujo progresso no item
+  da importação não está `aguardando_usuario` (Prioridade A) e as que só existem em `campaign_dispatch_runs`, do segundo
+  sistema de disparo (Prioridade B).
+- **Por que é uma dívida:** a continuação de campanha depende da AUSÊNCIA de agente no chip. Criar um agente, mesmo desligado,
+  muda o disparo sem nenhum aviso. Foi daí que veio a crença "o agente precisa estar ligado para a campanha seguir": ligado
+  ou desligado, com agente o resgate não roda.
+- **Status:** aberta, sem medição de raio. Registrada em 30/10/2026.
+
+## DT-014 — A Prioridade B do resgate força `nextStepIndex: 1` e pode reenviar o passo 2 ao mesmo lead
+
+- **Onde:** `backend/src/domains/chatbot/routes.js`, `resolvePendingCampaignRunForPhone`, Prioridade B (`:125-221`), que
+  monta o progresso com `nextStepIndex: 1` fixo (`:213`). `continueCampaignLeadFromReply`
+  (`backend/src/campaign/dispatch.js:2228`) confia nesse progresso como veio (`:2253-2263`) e não relê o progresso gravado.
+- **O que faz:** a Prioridade B acha o run `sent` mais recente do telefone em `campaign_dispatch_runs` e, se a campanha tem
+  fluxo de resposta e mais de um passo, devolve "aguardando o passo de índice 1" sem olhar o que já foi enviado.
+- **O risco:** se a próxima resposta do mesmo lead cair de novo na Prioridade B (sem item da importação, ou com o progresso
+  gravado num lugar que `findCampaignReplyMatches` não acha), o passo 2 sai de novo. É disparo repetido para o mesmo lead
+  pelo mesmo chip.
+- **Alcance:** só existe onde a DT-013 deixa o resgate rodar: chip sem agente e `chatbot_enabled === false`.
+- **Como medir (antes de consertar):** a assinatura no log do `bk-vexo` é `[campaign-routing] bypass chatbot_disabled`
+  repetido para o mesmo telefone e a mesma campanha. No banco, o mesmo texto de passo enviado duas ou mais vezes ao mesmo
+  telefone, depois de conferir no `information_schema` onde o envio do passo fica registrado.
+- **Status:** aberta, sem medição. Registrada em 30/10/2026. Não consertar junto com outra frente.
