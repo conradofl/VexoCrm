@@ -12,7 +12,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useFupCompanies, useCreateFupCompany, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
-import { FollowUpJourneys } from "@/components/followup/FollowUpJourneys";
 import CadenceEditor from "@/components/followup/CadenceEditor";
 import { FollowupQueueTable } from "@/components/followup/FollowupQueueTable";
 import { LeadReactivationCard } from "@/components/followup/LeadReactivationCard";
@@ -135,13 +134,7 @@ export default function FollowupDashboard() {
           evolution_instance: connectedInstances[0].name,
           evolution_instances: connectedInstances.map((i: any) => i.name),
           tenant_id: tenantId,
-          webhook_url: "https://api.vexoia.com/webhooks/followup",
           panel_access: true,
-          auto_pause_on_reply: true,
-          auto_pause_on_calendly: false,
-          sending_window_start: "08:00",
-          sending_window_end: "18:00",
-          sending_days: "1,2,3,4,5",
           engine_scan_interval_hours: 6,
           never_contacted_delay_hours: 2,
           no_reply_delay_hours: 48,
@@ -200,7 +193,6 @@ export default function FollowupDashboard() {
     hasFeatureUnlocked(selectedCrmClient, "followup") ||
     hasFeatureUnlocked(selectedCrmClient, "followup_automations");
 
-  const isAutomationsUnlocked = hasFeatureUnlocked(selectedCrmClient, "followup_automations");
 
   if (!isFollowupUnlocked) {
     return (
@@ -352,37 +344,6 @@ export default function FollowupDashboard() {
           {/* Passo 3 — Reativação Automática de Leads Parados (Pilar 2) */}
           {tenantId && (
             <LeadReactivationCard clientId={tenantId} />
-          )}
-
-          {/* Passo 3 — Automações por evento (Ocultado até os emissores de eventos serem conectados no CRM) */}
-          {false as boolean && isSectionAllowed("journeys") && hasCompany && (
-            <StepSection
-              step={3}
-              icon={<Zap className="h-4 w-4" />}
-              title="Automações por evento (opcional)"
-              subtitle="Mensagens disparadas automaticamente por gatilhos: novo lead, agendamento, proposta enviada, no-show."
-              collapsible
-              defaultOpen={isAutomationsUnlocked}
-            >
-              {isAutomationsUnlocked ? (
-                <FollowUpJourneys companyId={companyId} />
-              ) : (
-                <UpsellCard
-                  title="Automações por Evento"
-                  subtitle="Exclusivo do Plano Avançado"
-                  description="Gatilhos automáticos de Novo Lead, Agendamento e No-Show são exclusivos do Plano Avançado. Automatize 100% do seu pós-venda!"
-                  moduleName="Automações por Evento (Follow-up)"
-                  benefits={[
-                    "Disparo imediato de boas-vindas para novos leads cadastrados",
-                    "Lembretes automáticos antes e depois de reuniões (Agendamento & No-Show)",
-                    "Reengajamento automático de propostas comerciais sem resposta",
-                    "Reciclagem e reativação contínua de leads inativos ou perdidos",
-                  ]}
-                >
-                  <FollowUpJourneys companyId={companyId} />
-                </UpsellCard>
-              )}
-            </StepSection>
           )}
         </div>
       )}

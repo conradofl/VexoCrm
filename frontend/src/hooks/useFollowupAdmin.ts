@@ -18,11 +18,6 @@ export interface FupCompany {
   instructions_consolidated_at?: string | null;
   webhook_url: string | null;
   panel_access: boolean;
-  auto_pause_on_reply?: boolean;
-  auto_pause_on_calendly?: boolean;
-  sending_window_start?: string;
-  sending_window_end?: string;
-  sending_days?: string;
   calendly_webhook_secret?: string;
   livpub_aniversario_prompt?: string;
   livpub_inativo_prompt?: string;
@@ -41,18 +36,6 @@ export interface FupCompany {
   activeCampaigns: number;
   created_at: string;
   tenant_id?: string;
-}
-
-export interface FupJourney {
-  id: string;
-  company_id: string;
-  trigger_event: string;
-  is_active: boolean;
-  channel: "whatsapp" | "email";
-  delay_value: number;
-  delay_unit: "minutes" | "hours" | "days";
-  ai_prompt: string | null;
-  created_at: string;
 }
 
 export interface FupCampaign {
@@ -640,37 +623,6 @@ export function useFupAnalytics(filters: AnalyticsFilters) {
     staleTime: 60_000,
   });
 }
-
-// ─── Journeys ─────────────────────────────────────────────────────────────────
-
-export function useFupJourneys(companyId?: string) {
-  const { isAuthenticated, getIdToken } = useAuth();
-  return useQuery({
-    queryKey: ["fup-journeys", companyId],
-    enabled: isAuthenticated && !!companyId && companyId !== "all",
-    queryFn: () =>
-      apiCall<{ journeys: FupJourney[] }>(
-        `/api/followup/journeys?companyId=${companyId}`,
-        getIdToken
-      ).then((r) => r.journeys),
-    staleTime: 30_000,
-  });
-}
-
-export function useUpsertFupJourney() {
-  const { getIdToken } = useAuth();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: Partial<FupJourney> & { company_id: string; trigger_event: string }) =>
-      apiCall<{ journey: FupJourney }>("/api/followup/journeys", getIdToken, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }).then((r) => r.journey),
-    onSuccess: (_, vars) =>
-      qc.invalidateQueries({ queryKey: ["fup-journeys", vars.company_id] }),
-  });
-}
-
 
 export function useLivpubHistory(companyId: string) {
   const { getIdToken } = useAuth();

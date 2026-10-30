@@ -28,10 +28,6 @@ import { triggerAutomationRun } from "./automationEngine.js";
 import { defaultGroqModel } from "../services/llmModels.js";
 import { adjustDateToSendWindow, resolveSendWindowConfig, createDateInTimezone } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
-import { isFromMe, isGroupJid } from "../services/inboundGuard.js";
-import { sanitizePhone } from "../services/leadImport.js";
-import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
-import { cancelFollowupCadenceOnReply } from "../services/followupExitGuard.js";
 import { hasTenantAccess } from "./queueRoutes.js";
 import { resolveEvolutionInstanceForFollowup } from "./worker.js";
 import { getLeadClientEvolutionInstances } from "../services/evolution.js";
@@ -139,105 +135,6 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       return res.json({ success: true, ...result });
     } catch (err) {
       console.error("[followup/webhook-in]", err.message);
-      return res.status(200).json({ ok: true });
-    }
-  });
-
-  // POST /webhooks/whatsapp/:companyId — resposta do lead (UNIDIRECIONAL)
-  app.post("/webhooks/whatsapp/:companyId", async (req, res) => {
-    const companyId = str(req.params.companyId);
-
-    try {
-      const supabase = getSupabase();
-      const { data: company } = await supabase
-        .from("followup_companies")
-        .select("id, webhook_url, tenant_id")
-        .eq("id", companyId || "")
-        .maybeSingle();
-
-      const body = req.body || {};
-      const rawJid = body.data?.key?.remoteJid || body.key?.remoteJid || body.remoteJid || "";
-
-      // Guarda de fromMe: eventos de mensagens enviadas por nós mesmos NUNCA devem ser interpretados
-      // como resposta de lead nem cancelar jobs futuros.
-      if (isFromMe(body)) {
-        console.log(`[followup/webhook-reply][company:${companyId}] Mensagem de saída ignorada (fromMe: true)`);
-        return res.status(200).json({ ok: true, ignored: "fromMe" });
-      }
-
-      // Guarda de grupo / broadcast: resposta legítima de lead nunca vem de grupo
-      if (isGroupJid(rawJid)) {
-        console.log(`[followup/webhook-reply][company:${companyId}] Mensagem de grupo/broadcast ignorada`);
-        return res.status(200).json({ ok: true, ignored: "group_or_broadcast" });
-      }
-
-      const rawPhone =
-        str(rawJid.split("@")[0]) ||
-        str(body.phone) ||
-        null;
-      const phone = sanitizePhone(rawPhone) || rawPhone;
-
-      // Identificar campanha pelo telefone usando casamento canônico
-      let campaign_id = null;
-      if (phone) {
-        const { rows } = await query(
-          `SELECT campaign_id FROM followup_schedules
-            WHERE company_id = $1
-              AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-            ORDER BY created_at DESC LIMIT 1`,
-          [companyId, phone]
-        );
-        campaign_id = rows[0]?.campaign_id || null;
-      }
-
-      // Cancelar cadência em andamento quando o lead responde (exit_on_reply)
-      if (phone) {
-        await cancelFollowupCadenceOnReply({
-          tenantId: company?.tenant_id || null,
-          phone,
-          queryFn: query,
-        }).catch((err) => {
-          console.error("[followup/webhook-reply] erro ao cancelar cadência on reply:", err?.message || err);
-        });
-      }
-
-      // Opt-out detection
-      const messageText = str(
-        body.data?.message?.conversation ||
-        body.data?.message?.extendedTextMessage?.text ||
-        ""
-      ).toLowerCase().trim();
-
-      if (phone && messageText.match(/^(sair|parar|cancelar|stop)$/i)) {
-        await query(
-          `INSERT INTO public.lead_optouts (client_id, phone, reason)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (client_id, phone) DO NOTHING`,
-          [companyId, phone, `Opt-out via WhatsApp: ${messageText}`]
-        ).catch((err) => {
-          console.error("[opt-out insertion error]", err);
-        });
-      }
-
-      await query(
-        `INSERT INTO followup_replies (company_id, campaign_id, phone, payload)
-         VALUES ($1,$2,$3,$4)`,
-        [companyId, campaign_id, phone, JSON.stringify(body)]
-      );
-
-      // Repassar ao CRM interno se configurado
-      if (company?.webhook_url) {
-        fetch(company.webhook_url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(5000),
-        }).catch(() => {});
-      }
-
-      return res.status(200).json({ ok: true });
-    } catch (err) {
-      console.error("[followup/webhook-reply]", err.message);
       return res.status(200).json({ ok: true });
     }
   });

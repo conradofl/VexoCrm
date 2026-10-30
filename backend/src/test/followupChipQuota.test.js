@@ -241,7 +241,6 @@ vi.mock("../services/n8nSettings.js", () => ({
 
 import {
   processJob,
-  processEventJourneyJob,
   resolveEvolutionInstanceForFollowup,
   getFollowupWorkerDbPool,
 } from "../followup/worker.js";
@@ -472,123 +471,6 @@ describe("PARTE 2C — Teto Diário no Follow-up e Auditoria de Limites", () => 
     expect(saved.client_id).toBe("geracao-digital");
     expect(saved.name).toBe("Chip Sem Auditoria");
     expect(saved.daily_limit_override).toBe(250);
-  });
-
-  it("6. Falha fechada na Jornada: Pool nulo lança erro descritivo e impede envio", async () => {
-    currentWorkerPool = null;
-
-    mockEvolutionInstances.push({
-      id: "chip-1",
-      name: "Chip 1",
-      active: true,
-      is_default: true,
-      dispatch_webhook_url: "https://evolution.example.com/chip-1",
-    });
-
-    mockDb.leads.set("lead-fail-pool", {
-      id: "lead-fail-pool",
-      name: "Lead Sem Pool",
-      phone: "5534991090001",
-      status: "open",
-    });
-    mockDb.companies.set("comp-fail-pool", {
-      id: "comp-fail-pool",
-      name: "Empresa Teste",
-      tenant_id: "geracao-digital",
-      evolution_instance: "chip-1",
-    });
-
-    const journeyJob = {
-      name: "process-event-journey",
-      data: {
-        companyId: "comp-fail-pool",
-        leadId: "lead-fail-pool",
-        eventName: "lead_created",
-        journeyId: "j-1",
-        channel: "whatsapp",
-        aiPrompt: null,
-      },
-    };
-
-    await expect(processEventJourneyJob(journeyJob)).rejects.toThrow(
-      "Pool de banco de dados indisponível para validação de cota."
-    );
-  });
-
-  it("7. Adiantamento na Jornada: Cota atingida -> cota liberada, job reagendado para próxima janela com error_log e scheduled_for, sem envio", async () => {
-    const testChip = {
-      id: "chip-journey-limit",
-      name: "Chip Jornada",
-      active: true,
-      is_default: true,
-      chip_state: "cold",
-      daily_limit_override: 1, // cota de apenas 1 envio por dia
-      dispatch_webhook_url: "https://evolution.example.com/message/sendText/chip-journey-limit",
-      dispatch_webhook_token: "token-123",
-    };
-    mockEvolutionInstances.push(testChip);
-
-    const evolutionCalls = [];
-    globalThis.fetch = vi.fn(async (url, opts) => {
-      evolutionCalls.push({ url, body: JSON.parse(opts.body) });
-      return {
-        ok: true,
-        status: 200,
-        headers: new Headers({ "content-type": "application/json" }),
-        text: async () => JSON.stringify({ success: true }),
-        json: async () => ({ success: true }),
-      };
-    });
-
-    mockDb.leads.set("lead-j1", { id: "lead-j1", name: "Lead J1", phone: "5534991091111", status: "open" });
-    mockDb.leads.set("lead-j2", { id: "lead-j2", name: "Lead J2", phone: "5534991092222", status: "open" });
-    mockDb.companies.set("comp-1", { id: "comp-1", name: "Empresa 1", tenant_id: "geracao-digital", evolution_instance: "chip-journey-limit" });
-
-    const job1 = {
-      name: "process-event-journey",
-      data: {
-        companyId: "comp-1",
-        leadId: "lead-j1",
-        eventName: "lead_created",
-        journeyId: "j-1",
-        channel: "whatsapp",
-        aiPrompt: null,
-      },
-    };
-    const job2 = {
-      name: "process-event-journey",
-      data: {
-        companyId: "comp-1",
-        leadId: "lead-j2",
-        eventName: "lead_created",
-        journeyId: "j-1",
-        channel: "whatsapp",
-        aiPrompt: null,
-      },
-    };
-
-    // 1º envio da jornada: consome a cota (1/1)
-    await processEventJourneyJob(job1);
-    expect(evolutionCalls).toHaveLength(1);
-    expect(evolutionCalls[0].body.number).toBe("5534991091111");
-
-    // 2º envio da jornada: cota estourada (2 > 1) -> deve adiar, liberar cota e NÃO chamar Evolution
-    await processEventJourneyJob(job2);
-
-    // Prova 1: Evolution NÃO foi chamada pela 2ª vez
-    expect(evolutionCalls).toHaveLength(1);
-
-    // Prova 2: Job foi reagendado no BullMQ com status pending, scheduled_for e error_log
-    const reEnqueuedJourneyJob = queueAddedJobs.find((j) => j.name === "process-event-journey");
-    expect(reEnqueuedJourneyJob).toBeDefined();
-    expect(reEnqueuedJourneyJob.data.scheduled_for).toBeDefined();
-    expect(reEnqueuedJourneyJob.data.error_log).toContain("Cota diária do chip atingida (1/1)");
-    expect(reEnqueuedJourneyJob.data.status).toBe("pending");
-    expect(reEnqueuedJourneyJob.opts.delay).toBeGreaterThanOrEqual(1000);
-
-    // Prova 3: Cota em excesso foi liberada (sent_count gravado permanece em 1)
-    const usage = await getChipDailyUsage("chip-journey-limit", null, mockPool);
-    expect(usage).toBe(1);
   });
 
   it("8. Prova do mecanismo Postgres: Se a auditoria rodasse antes do COMMIT com tabela ausente, COMMIT falharia com 'current transaction is aborted'", async () => {

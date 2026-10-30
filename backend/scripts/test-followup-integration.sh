@@ -95,18 +95,6 @@ BODY=$(echo "$RESP" | head -n -1); STATUS=$(echo "$RESP" | tail -1)
 check "GET /api/followup/analytics" "$STATUS" "$BODY"
 echo "   KPIs: $(echo "$BODY" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('kpis',{}))")"
 
-echo -e "\n${CYAN}═══ ETAPA H: Webhook resposta do lead ═════════${RESET}"
-RESP=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE/webhooks/whatsapp/$COMPANY_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"data":{"key":{"remoteJid":"5511999998888@s.whatsapp.net"},"message":{"conversation":"Oi, obrigado!"}},"event":"messages.upsert"}')
-BODY=$(echo "$RESP" | head -n -1); STATUS=$(echo "$RESP" | tail -1)
-if [ "$STATUS" = "200" ]; then
-  echo -e "${GREEN}✅ POST /webhooks/whatsapp/:companyId (HTTP 200)${RESET}"
-else
-  echo -e "${RED}❌ POST /webhooks/whatsapp/:companyId (HTTP $STATUS)${RESET}"
-  exit 1
-fi
-
 echo -e "\n${CYAN}═══ ETAPA I: Teste campanha pausada ════════════${RESET}"
 RESP=$(curl -s -w "\n%{http_code}" -X PATCH "$API_BASE/api/followup/campaigns/$CAMPAIGN_ID" \
   -H "Authorization: Bearer $TOKEN" \

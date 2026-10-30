@@ -266,11 +266,11 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route path="followup-empresas" element={<Navigate to="/crm/followup?tab=config" replace />} />
-              <Route path="followup-campanhas" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
-              <Route path="followup-templates" element={<Navigate to="/crm/followup?tab=campanhas" replace />} />
-              <Route path="followup-analytics" element={<Navigate to="/crm/followup?tab=metrics" replace />} />
-              <Route path="followup-sugestoes" element={<Navigate to="/crm/followup?tab=sugestoes" replace />} />
+              <Route path="followup-empresas" element={<Navigate to="/crm/followup" replace />} />
+              <Route path="followup-campanhas" element={<Navigate to="/crm/followup" replace />} />
+              <Route path="followup-templates" element={<Navigate to="/crm/followup" replace />} />
+              <Route path="followup-analytics" element={<Navigate to="/crm/followup" replace />} />
+              <Route path="followup-sugestoes" element={<Navigate to="/crm/followup" replace />} />
               <Route
                 path="calendario"
                 element={
