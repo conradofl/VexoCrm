@@ -1,4 +1,5 @@
-// Escada de modelos da Groq — CONFIGURACAO, nao constante chumbada.
+// Escada de modelos de LLM — CONFIGURACAO, nao constante chumbada, e de
+// QUALQUER provedor: cada degrau e roteado pelo provedor do proprio id.
 //
 // Em 24/08/2026 o boot cbcd317e6d503485 mostrou a lista antiga inteira morta:
 //   llama-3.3-70b-versatile       404  (descontinuado)
@@ -8,61 +9,63 @@
 //   qwen-2.5-32b                  400
 //   openai/gpt-oss-20b            429  (unico vivo, e com a cota estourada)
 //
-// Os nomes estavam repetidos em nove arquivos. Aqui ficam em um lugar so, e o
-// dono troca por variavel de ambiente sem deploy de codigo:
+// Em 30/10/2026 o agente da Container Led emudeceu: os tres modelos vivos da
+// Groq tomaram 413 (o prompt com RAG passa do teto de 8.000 TPM da conta) e o
+// fallback para o Gemini apontava para gemini-2.0-flash, ja descontinuado. A
+// escada era "da Groq": o Gemini so entrava como uma chamada avulsa no fim, sem
+// rede propria. Agora a conversa roda no Gemini e a Groq fica na cauda.
 //
-//   GROQ_MODEL_LADDER="openai/gpt-oss-120b,groq/compound"
+// O dono troca a escada por variavel de ambiente sem deploy de codigo:
 //
-// Lista real da conta em 24/08/2026, consultada em /openai/v1/models, com os
-// tetos lidos dos cabecalhos x-ratelimit-* de uma chamada real:
+//   LLM_MODEL_LADDER="gemini-flash-latest,openai/gpt-oss-120b"
 //
-//   modelo                 contexto   saida    TPM      RPM
-//   openai/gpt-oss-120b     131072    65536    8.000    1000
-//   openai/gpt-oss-20b      131072    65536    8.000    1000
-//   qwen/qwen3.6-27b        131072    16384    8.000    1000
-//   groq/compound           131072     8192   70.000     250
-//   groq/compound-mini      131072     8192   70.000     250
-//   allam-2-7b                4096     4096    6.000    7000   (fora: contexto curto)
+// GROQ_MODEL_LADDER, a variavel antiga, e IGNORADA: duas variaveis mandando na
+// mesma decisao ja custaram caro neste projeto.
 //
-// Ordem: capacidade primeiro, teto de TPM como desempate — que e o pedido do
-// dono. groq/compound entra depois dos modelos de chat puro porque e um sistema
-// agentico com ferramentas embutidas, menos previsivel para saida em JSON; mas
-// entra, porque os 70.000 TPM sao a unica folga real quando o pool de 8.000 do
-// gpt-oss acaba.
+// Gemini por APELIDO (-latest): apelido nao morre por rotacao de versao, que e
+// exatamente o que derrubou o agente tres vezes.
 
-export const GROQ_MODEL_LADDER_PADRAO = [
+export const LLM_MODEL_LADDER_PADRAO = [
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
   "openai/gpt-oss-120b",
   "openai/gpt-oss-20b",
-  "qwen/qwen3.6-27b",
-  "groq/compound",
-  "groq/compound-mini",
+  "qwen/qwen3.8-27b",
 ];
 
-export const GROQ_MODEL_LIMITS = {
+// Teto de TPM medido na conta, por id. Lista real da Groq em 30/10/2026: nenhum
+// modelo de conversa acima de 8.000 TPM. Modelo fora desta tabela tem teto
+// desconhecido e nunca e descartado por causa do 413 de outro.
+export const MODEL_LIMITS = {
   "openai/gpt-oss-120b": { tpm: 8000, rpm: 1000 },
   "openai/gpt-oss-20b": { tpm: 8000, rpm: 1000 },
-  "qwen/qwen3.6-27b": { tpm: 8000, rpm: 1000 },
   "qwen/qwen3.8-27b": { tpm: 8000, rpm: 1000 },
-  "groq/compound": { tpm: 70000, rpm: 250 },
-  "groq/compound-mini": { tpm: 70000, rpm: 250 },
 };
 
-export function isHighQuotaModel(modelName) {
-  const name = String(modelName || "").trim().toLowerCase();
-  return name.includes("compound") || (GROQ_MODEL_LIMITS[name]?.tpm ?? 0) >= 50000;
+/** Provedor de um id pelo prefixo. O que nao e de outro provedor e da Groq. */
+export function providerOfModelId(modelId) {
+  const id = String(modelId || "").trim();
+  if (id.startsWith("gemini-")) return "gemini";
+  if (id.startsWith("gpt-")) return "openai";
+  if (id.startsWith("claude-")) return "anthropic";
+  return "groq";
 }
 
 /**
- * Quando a falha for 429 (cota estourada) em modelo de teto baixo (8.000 TPM),
- * descarta os outros modelos de 8.000 TPM restantes e pula direto para os de alta cota (>= 70.000 TPM).
- * Se o modelo já for de alta cota, tenta apenas outros de alta cota ainda não tentados.
+ * 413 = o pedido e maior que o teto de TPM do modelo. E deterministico: o mesmo
+ * prompt toma 413 em qualquer modelo do mesmo provedor com teto igual ou menor.
+ * Esses saem da escada; os de outro provedor, ou de teto desconhecido, ficam.
  */
-export function filterLadderOnQuotaExceeded(exhaustedModel, remainingLadder) {
-  const exhausted = String(exhaustedModel || "").trim().toLowerCase();
-  if (!isHighQuotaModel(exhausted)) {
-    return remainingLadder.filter((m) => isHighQuotaModel(m) && m !== exhausted);
-  }
-  return remainingLadder.filter((m) => m !== exhausted);
+export function dropOnRequestTooLarge(exhaustedModel, remainingLadder) {
+  const exhausted = String(exhaustedModel || "").trim();
+  const provider = providerOfModelId(exhausted);
+  const teto = MODEL_LIMITS[exhausted]?.tpm;
+  return remainingLadder.filter((m) => {
+    if (m === exhausted) return false;
+    if (!teto || providerOfModelId(m) !== provider) return true;
+    const tetoDoOutro = MODEL_LIMITS[m]?.tpm;
+    return !tetoDoOutro || tetoDoOutro > teto;
+  });
 }
 
 /** Modelos que a conta NAO tem mais. Usados so para avisar, nunca para chamar. */
@@ -78,27 +81,46 @@ export const GROQ_MODELOS_MORTOS = new Set([
   "qwen-2.5-32b",
 ]);
 
+let avisoLadderAntigaEmitido = false;
+
 function lerLadderDoAmbiente() {
-  const bruto = String(process.env.GROQ_MODEL_LADDER || "").trim();
+  if (!avisoLadderAntigaEmitido && String(process.env.GROQ_MODEL_LADDER || "").trim()) {
+    avisoLadderAntigaEmitido = true;
+    console.error(
+      "[llm-models] VARIAVEL OBSOLETA: GROQ_MODEL_LADDER esta setada e foi IGNORADA. " +
+        "A escada agora e LLM_MODEL_LADDER (qualquer provedor). Pode apagar GROQ_MODEL_LADDER do EasyPanel."
+    );
+  }
+  const bruto = String(process.env.LLM_MODEL_LADDER || "").trim();
   if (!bruto) return null;
   const lista = bruto.split(",").map((m) => m.trim()).filter(Boolean);
   return lista.length > 0 ? lista : null;
 }
 
-export function groqModelLadder() {
-  return lerLadderDoAmbiente() || GROQ_MODEL_LADDER_PADRAO;
+export function llmModelLadder() {
+  return lerLadderDoAmbiente() || LLM_MODEL_LADDER_PADRAO;
 }
 
 /** Primeiro degrau da escada: o padrao de quem nao escolheu modelo. */
+export function defaultLlmModel() {
+  return llmModelLadder()[0];
+}
+
+/**
+ * Primeiro modelo da GROQ na escada. So para quem posta direto em api.groq.com
+ * (helpdesk, extracao de contrato/briefing, fallbacks diretos): um id do Gemini
+ * ali voltaria 404.
+ */
 export function defaultGroqModel() {
-  return groqModelLadder()[0];
+  const daEscada = llmModelLadder().find((m) => providerOfModelId(m) === "groq");
+  return daEscada || LLM_MODEL_LADDER_PADRAO.find((m) => providerOfModelId(m) === "groq");
 }
 
 /**
  * Escada efetiva para uma chamada: o modelo pedido primeiro (se vivo), depois o
  * resto. Modelo morto e DESCARTADO com aviso — tentar um 404 so queima tempo.
  */
-export function resolveGroqLadder(modeloPedido) {
+export function resolveLlmLadder(modeloPedido) {
   const escada = [];
   const preferidos = [modeloPedido, process.env.GROQ_CAMPAIGN_AI_MODEL].filter(Boolean);
 
@@ -107,19 +129,24 @@ export function resolveGroqLadder(modeloPedido) {
     if (!nome) continue;
     if (GROQ_MODELOS_MORTOS.has(nome)) {
       console.warn(
-        `[llm-models] modelo "${nome}" foi descontinuado pela Groq e esta sendo ignorado. ` +
-          `Atualize a configuracao (GROQ_MODEL_LADDER) ou o modelo do tenant.`
+        `[llm-models] modelo "${nome}" foi descontinuado pelo provedor e esta sendo ignorado. ` +
+          `Atualize a configuracao (LLM_MODEL_LADDER) ou o modelo do tenant.`
       );
       continue;
     }
     escada.push(nome);
   }
 
-  for (const m of groqModelLadder()) {
+  for (const m of llmModelLadder()) {
     if (!GROQ_MODELOS_MORTOS.has(m)) escada.push(m);
   }
 
   return Array.from(new Set(escada));
+}
+
+/** A mesma escada, so com ids da Groq — para quem chama api.groq.com direto. */
+export function resolveGroqLadder(modeloPedido) {
+  return resolveLlmLadder(modeloPedido).filter((m) => providerOfModelId(m) === "groq");
 }
 
 /**
@@ -131,13 +158,19 @@ export function resolveGroqLadder(modeloPedido) {
 export function classifyLlmHttpError(status, corpo = "") {
   const texto = String(corpo || "");
 
+  // Antes do 429: o corpo do 413 da Groq tambem fala em "tokens per minute",
+  // mas o pedido nao cabe no teto — esperar o minuto virar nao resolve.
+  if (status === 413) {
+    return { tipo: "PEDIDO_GRANDE_DEMAIS", tentarProximo: true, ...parseRateLimit(texto) };
+  }
   if (status === 429 || /rate.?limit|Too Many Requests|tokens per minute|\bTPM\b/i.test(texto)) {
     return { tipo: "COTA_ESTOURADA", tentarProximo: true, ...parseRateLimit(texto) };
   }
   if (status === 404 || /model_not_found|does not exist|decommissioned|deprecated/i.test(texto)) {
     return { tipo: "MODELO_INEXISTENTE", tentarProximo: true };
   }
-  if (status === 401 || status === 403) {
+  // O Gemini responde chave invalida com 400, nao 401.
+  if (status === 401 || status === 403 || (status === 400 && /API_KEY_INVALID|valid API key/i.test(texto))) {
     return { tipo: "CREDENCIAL", tentarProximo: false };
   }
   if (status === 400 && /json_validate_failed|Failed to validate JSON/i.test(texto)) {
@@ -145,6 +178,10 @@ export function classifyLlmHttpError(status, corpo = "") {
   }
   if (status === 400) {
     return { tipo: "PEDIDO_INVALIDO", tentarProximo: true };
+  }
+  // Provedor fora do ar ou sobrecarregado: o proximo degrau pode estar de pe.
+  if (status >= 500) {
+    return { tipo: "INDISPONIVEL", tentarProximo: true };
   }
   return { tipo: "DESCONHECIDO", tentarProximo: false };
 }
@@ -168,6 +205,6 @@ export function mensagemDeCotaEstourada({ modelo, limiteTpm, usadoTpm, esperarSe
     partes.push(`Teto de ${limiteTpm.toLocaleString("pt-BR")} tokens por minuto${usadoTpm ? `, ${usadoTpm.toLocaleString("pt-BR")} já usados` : ""}.`);
   }
   if (esperarSegundos) partes.push(`Libera em ~${Math.ceil(esperarSegundos)}s.`);
-  partes.push("Se acontece com frequência, é hora de subir o plano da Groq ou reduzir o volume de resumos em lote.");
+  partes.push("Se acontece com frequência, é hora de subir o plano do provedor ou reduzir o volume de resumos em lote.");
   return partes.join(" ");
 }

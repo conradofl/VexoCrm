@@ -15,73 +15,94 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { resolve, join } from "path";
 import {
-  GROQ_MODEL_LADDER_PADRAO,
+  LLM_MODEL_LADDER_PADRAO,
   GROQ_MODELOS_MORTOS,
-  groqModelLadder,
+  llmModelLadder,
   defaultGroqModel,
+  defaultLlmModel,
+  resolveLlmLadder,
   resolveGroqLadder,
   classifyLlmHttpError,
   parseRateLimit,
   mensagemDeCotaEstourada,
 } from "../services/llmModels.js";
 
-const ladderOriginal = process.env.GROQ_MODEL_LADDER;
+const ladderOriginal = process.env.LLM_MODEL_LADDER;
+const ladderAntigaOriginal = process.env.GROQ_MODEL_LADDER;
 const campaignOriginal = process.env.GROQ_CAMPAIGN_AI_MODEL;
 
 beforeEach(() => {
+  delete process.env.LLM_MODEL_LADDER;
   delete process.env.GROQ_MODEL_LADDER;
   delete process.env.GROQ_CAMPAIGN_AI_MODEL;
 });
 afterEach(() => {
-  if (ladderOriginal === undefined) delete process.env.GROQ_MODEL_LADDER;
-  else process.env.GROQ_MODEL_LADDER = ladderOriginal;
+  if (ladderOriginal === undefined) delete process.env.LLM_MODEL_LADDER;
+  else process.env.LLM_MODEL_LADDER = ladderOriginal;
+  if (ladderAntigaOriginal === undefined) delete process.env.GROQ_MODEL_LADDER;
+  else process.env.GROQ_MODEL_LADDER = ladderAntigaOriginal;
   if (campaignOriginal === undefined) delete process.env.GROQ_CAMPAIGN_AI_MODEL;
   else process.env.GROQ_CAMPAIGN_AI_MODEL = campaignOriginal;
 });
 
 describe("a escada e configuracao, nao constante chumbada", () => {
-  it("GROQ_MODEL_LADDER sobrescreve o padrao, sem deploy de codigo", () => {
-    process.env.GROQ_MODEL_LADDER = "modelo-novo-a, modelo-novo-b";
-    expect(groqModelLadder()).toEqual(["modelo-novo-a", "modelo-novo-b"]);
-    expect(defaultGroqModel()).toBe("modelo-novo-a");
+  it("LLM_MODEL_LADDER sobrescreve o padrao, sem deploy de codigo", () => {
+    process.env.LLM_MODEL_LADDER = "gemini-novo-a, modelo-groq-b";
+    expect(llmModelLadder()).toEqual(["gemini-novo-a", "modelo-groq-b"]);
+    expect(defaultLlmModel()).toBe("gemini-novo-a");
+    // Quem posta direto em api.groq.com recebe o primeiro id da Groq, nunca o do Gemini.
+    expect(defaultGroqModel()).toBe("modelo-groq-b");
   });
 
-  it("sem configuracao, cai no padrao — que sao os modelos reais da conta", () => {
-    expect(groqModelLadder()).toEqual(GROQ_MODEL_LADDER_PADRAO);
+  it("sem configuracao, cai no padrao: Gemini primeiro, Groq na cauda", () => {
+    expect(llmModelLadder()).toEqual(LLM_MODEL_LADDER_PADRAO);
+    expect(defaultLlmModel()).toMatch(/^gemini-/);
+    expect(defaultGroqModel()).not.toMatch(/^gemini-/);
   });
 
   it("configuracao vazia ou so virgulas nao zera a escada", () => {
-    process.env.GROQ_MODEL_LADDER = "  , ,  ";
-    expect(groqModelLadder()).toEqual(GROQ_MODEL_LADDER_PADRAO);
+    process.env.LLM_MODEL_LADDER = "  , ,  ";
+    expect(llmModelLadder()).toEqual(LLM_MODEL_LADDER_PADRAO);
+  });
+
+  it("GROQ_MODEL_LADDER, a variavel antiga, e ignorada — uma variavel so manda na escada", () => {
+    process.env.GROQ_MODEL_LADDER = "openai/gpt-oss-20b";
+    expect(llmModelLadder()).toEqual(LLM_MODEL_LADDER_PADRAO);
   });
 });
 
 describe("os modelos mortos nao voltam", () => {
   it("nenhum modelo descontinuado esta na escada padrao", () => {
-    for (const m of GROQ_MODEL_LADDER_PADRAO) {
+    for (const m of LLM_MODEL_LADDER_PADRAO) {
       expect(GROQ_MODELOS_MORTOS.has(m), `${m} esta morto e ainda na escada`).toBe(false);
     }
   });
 
   it("modelo morto pedido pelo tenant e DESCARTADO, nao tentado", () => {
-    const escada = resolveGroqLadder("llama-3.3-70b-versatile");
+    const escada = resolveLlmLadder("llama-3.3-70b-versatile");
     expect(escada).not.toContain("llama-3.3-70b-versatile");
-    expect(escada[0]).toBe(GROQ_MODEL_LADDER_PADRAO[0]);
+    expect(escada[0]).toBe(LLM_MODEL_LADDER_PADRAO[0]);
   });
 
   it("modelo vivo pedido pelo tenant vem primeiro", () => {
-    const escada = resolveGroqLadder("qwen/qwen3.6-27b");
-    expect(escada[0]).toBe("qwen/qwen3.6-27b");
+    const escada = resolveLlmLadder("openai/gpt-oss-20b");
+    expect(escada[0]).toBe("openai/gpt-oss-20b");
   });
 
   it("nao repete modelo quando o pedido ja esta na escada", () => {
-    const escada = resolveGroqLadder("openai/gpt-oss-120b");
+    const escada = resolveLlmLadder("openai/gpt-oss-120b");
     expect(escada.filter((m) => m === "openai/gpt-oss-120b")).toHaveLength(1);
   });
 
   it("a escada nunca sai vazia", () => {
-    expect(resolveGroqLadder(null).length).toBeGreaterThan(0);
-    expect(resolveGroqLadder("llama-3.1-8b-instant").length).toBeGreaterThan(0);
+    expect(resolveLlmLadder(null).length).toBeGreaterThan(0);
+    expect(resolveLlmLadder("llama-3.1-8b-instant").length).toBeGreaterThan(0);
+  });
+
+  it("a escada da Groq, usada por quem posta direto em api.groq.com, nao leva id de outro provedor", () => {
+    const escada = resolveGroqLadder("gemini-flash-latest");
+    expect(escada.length).toBeGreaterThan(0);
+    expect(escada.some((m) => m.startsWith("gemini-"))).toBe(false);
   });
 
   it("nenhum arquivo de producao ainda chuma um modelo morto", () => {
@@ -144,6 +165,26 @@ describe("404 e 429 sao problemas diferentes", () => {
     expect(d.tentarProximo).toBe(false);
   });
 
+  it("chave invalida do Gemini vem como 400 e tambem e credencial", () => {
+    const d = classifyLlmHttpError(400, '[{"error":{"code":400,"message":"Please pass a valid API key","status":"INVALID_ARGUMENT"}}]');
+    expect(d.tipo).toBe("CREDENCIAL");
+  });
+
+  it("413 e pedido maior que o teto, nao cota do minuto — e traz o teto", () => {
+    const d = classifyLlmHttpError(413, "Request too large for model on tokens per minute (TPM): Limit 8000, Requested 9431");
+    expect(d.tipo).toBe("PEDIDO_GRANDE_DEMAIS");
+    expect(d.limiteTpm).toBe(8000);
+    expect(d.tentarProximo).toBe(true);
+  });
+
+  it("5xx do provedor tenta o proximo degrau em vez de derrubar a escada", () => {
+    for (const status of [500, 502, 503]) {
+      const d = classifyLlmHttpError(status, "Service Unavailable");
+      expect(d.tipo).toBe("INDISPONIVEL");
+      expect(d.tentarProximo).toBe(true);
+    }
+  });
+
   it("json_validate_failed nao e problema de modelo: trocar nao resolve", () => {
     const d = classifyLlmHttpError(400, '{"error":{"code":"json_validate_failed"}}');
     expect(d.tipo).toBe("CONTRATO_JSON");
@@ -184,7 +225,7 @@ describe("o motor usa a escada e distingue os erros", () => {
   const fonte = readFileSync(resolve("src/chatbot-ai-engine.js"), "utf8");
 
   it("callLlmChatCompletion monta a escada pelo modulo compartilhado", () => {
-    expect(fonte).toContain("resolveGroqLadder(model)");
+    expect(fonte).toContain("resolveLlmLadder(chosenModel)");
     expect(fonte).not.toContain("const fallbackGroqModels = [");
   });
 
@@ -208,16 +249,16 @@ describe("o motor usa a escada e distingue os erros", () => {
 // Escada vazia ou toda invalida nao pode virar silencio.
 describe("escada sem nenhum modelo utilizavel", () => {
   it("configuracao so com modelos mortos ainda devolve a escada padrao", () => {
-    process.env.GROQ_MODEL_LADDER = "llama-3.3-70b-versatile,llama-3.1-8b-instant";
-    // groqModelLadder devolve o que foi configurado (o dono mandou), mas
-    // resolveGroqLadder — que e quem o motor usa — descarta os mortos e nunca
+    process.env.LLM_MODEL_LADDER = "llama-3.3-70b-versatile,llama-3.1-8b-instant";
+    // llmModelLadder devolve o que foi configurado (o dono mandou), mas
+    // resolveLlmLadder — que e quem o motor usa — descarta os mortos e nunca
     // entrega lista vazia para o laco de chamada.
-    expect(groqModelLadder()).toHaveLength(2);
-    expect(resolveGroqLadder(null)).toEqual([]);
+    expect(llmModelLadder()).toHaveLength(2);
+    expect(resolveLlmLadder(null)).toEqual([]);
   });
 
   it("com escada vazia o motor FALHA com erro, nunca devolve conteudo inventado", async () => {
-    process.env.GROQ_MODEL_LADDER = "llama-3.3-70b-versatile";
+    process.env.LLM_MODEL_LADDER = "llama-3.3-70b-versatile";
     process.env.GROQ_API_KEY = "chave-de-teste";
     delete process.env.OPENAI_API_KEY;
     delete process.env.GEMINI_API_KEY;
