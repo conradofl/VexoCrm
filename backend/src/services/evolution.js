@@ -1007,7 +1007,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
                   console.info(`[auto-funnel] Lead ${phone} transitou: ${result.previousStage} ➔ ${result.newStage} (${result.reason})`);
                   // Se transitou para buyer, cancela follow-up ativo
                   if (result.newStage === "buyer") {
-                    await cancelFollowupCadenceOnReply({ companyId: clientId, phone, queryFn: db.query.bind(db) });
+                    await cancelFollowupCadenceOnReply({ tenantId: clientId, phone, queryFn: db.query.bind(db) });
                   }
                 }
               }).catch((err) => {

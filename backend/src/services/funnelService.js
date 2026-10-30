@@ -290,7 +290,7 @@ export async function reclassifyLeadFromMessages({
       // 2. Cancela cadências ativas de follow-up
       try {
         await cancelFollowupCadenceOnReply({
-          companyId: clientId,
+          tenantId: clientId,
           phone: targetPhone,
           queryFn: pool.query.bind(pool),
         });

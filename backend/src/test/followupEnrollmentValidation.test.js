@@ -27,9 +27,9 @@ describe("Follow-up Enrollment & after_enrollment Support", () => {
     expect(workerSource).toContain("phone: row.phone");
   });
 
-  it("does not check replies for after_enrollment (unconditional execution)", () => {
-    // Only no_reply triggers reply check
-    expect(workerSource).toContain('if (row.trigger_type === "no_reply" && row.company_id && row.phone)');
+  it("checa resposta no no_reply sempre e nos outros passos só com exit_on_reply (comportamento em followupReplyStopsCadence.test.js T12)", () => {
+    expect(workerSource).toContain('const checksReply = row.trigger_type === "no_reply" || row.exit_on_reply !== false;');
+    expect(workerSource).toContain("since: row.schedule_created_at");
   });
 
   it("surfaces errors with HTTP 422 when enqueued === 0 in enroll route", () => {

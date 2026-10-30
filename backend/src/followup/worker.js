@@ -6,11 +6,8 @@
 //  - trigger no_reply    → verifica followup_replies; se respondeu → skipped
 //  - 3 tentativas com backoff de 30s; após todas: status "failed"
 import { Worker } from "bullmq";
-import { defaultGroqModel } from "../services/llmModels.js";
-import { query, getSupabase, getPool } from "./db.js";
+import { query, getPool } from "./db.js";
 import { QUEUE_NAME, getRedisConnection, getFollowupQueue } from "./queue.js";
-import Groq from "groq-sdk";
-import { ResendProvider } from "../providers/ResendProvider.js";
 import { applyMessagePlaceholders } from "../services/messagePlaceholders.js";
 import { validateOutboundMessage } from "../services/jsonExtractor.js";
 import { sanitizeAgreementForMessage, hasConfirmedAgreement } from "../services/leadAgreement.js";
@@ -31,7 +28,7 @@ import {
 } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
-import { isWonStage, isLostStage } from "../services/followupExitGuard.js";
+import { isWonStage, isLostStage, hasFollowupReplySince } from "../services/followupExitGuard.js";
 import {
   resolveChipDailyLimit,
   reserveChipDailyQuota,
@@ -191,7 +188,7 @@ export async function processJob(job) {
     `SELECT fj.id, fj.schedule_id, fj.template_id, fj.custom_message, fj.status as job_status,
             fj.media_path as job_media_path, fj.media_type as job_media_type, fj.media_mime as job_media_mime, fj.media_filename as job_media_filename,
             fs.lead_name, fs.phone, fs.meeting_datetime, fs.status as schedule_status,
-            fs.campaign_id, fs.company_id,
+            fs.campaign_id, fs.company_id, fs.created_at as schedule_created_at,
             ft.message, ft.trigger_type,
             ft.step_type, ft.action_type, ft.action_payload, ft.conditions,
             ft.media_path as template_media_path, ft.media_type as template_media_type, ft.media_mime as template_media_mime, ft.media_filename as template_media_filename,
@@ -273,31 +270,21 @@ export async function processJob(job) {
     return;
   }
 
-  // 2. Condição de saída: Resposta do lead (trigger no_reply ou exit_on_reply)
-  if (row.trigger_type === "no_reply" && row.company_id && row.phone) {
-    const { rows: replies } = await query(
-      `SELECT id FROM followup_replies
-        WHERE company_id = $1
-          AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-        LIMIT 1`,
-      [row.company_id, row.phone]
-    );
-    if (replies.length) {
+  // 2. Condição de saída: Resposta do lead (trigger no_reply ou exit_on_reply).
+  // Só conta resposta recebida DEPOIS da inscrição (fs.created_at): resposta antiga
+  // do mesmo telefone não pode fazer o lead pular a cadência nova.
+  const checksReply = row.trigger_type === "no_reply" || row.exit_on_reply !== false;
+  if (checksReply && row.phone && (row.tenant_id || row.company_id)) {
+    const replied = await hasFollowupReplySince({
+      tenantId: row.tenant_id,
+      companyId: row.company_id,
+      phone: row.phone,
+      since: row.schedule_created_at,
+      queryFn: query,
+    });
+    if (replied) {
       await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
-      console.log(log, "skipped — lead já respondeu (trigger no_reply)");
-      return;
-    }
-  } else if (row.exit_on_reply !== false && row.company_id && row.phone) {
-    const { rows: replies } = await query(
-      `SELECT id FROM followup_replies
-        WHERE company_id = $1
-          AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-        LIMIT 1`,
-      [row.company_id, row.phone]
-    );
-    if (replies.length) {
-      await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
-      console.log(log, "skipped — lead já respondeu (exit_on_reply)");
+      console.log(log, `skipped — lead respondeu depois da inscrição (${row.trigger_type === "no_reply" ? "trigger no_reply" : "exit_on_reply"})`);
       return;
     }
   }
@@ -622,192 +609,18 @@ export async function processJob(job) {
   console.log(log, `mensagem ${effectiveMediaPath ? 'com mídia ' : ''}enviada via Evolution API (${evoConfig.displayName} -> ${evoConfig.instanceSlug})`);
 }
 
-export async function processEventJourneyJob(job) {
-  const { companyId, leadId, eventName, journeyId, channel, aiPrompt, context } = job.data;
-  const log = `[event-journey][${eventName}][${leadId}]`;
-
-  console.log(log, "Processando disparo de jornada...");
-
-  try {
-    const supabase = getSupabase();
-
-    // Buscar dados do Lead
-    const { data: leadData } = await supabase
-      .from('leads_infinie') // Usando tabela base de leads ou a view, vamos puxar da base principal
-      .select('name, phone, email, status')
-      .eq('id', leadId)
-      .maybeSingle();
-      
-    // Buscar config da empresa
-    const { data: companyData } = await supabase
-      .from('followup_companies')
-      .select('evolution_instance, name, tenant_id')
-      .eq('id', companyId)
-      .maybeSingle();
-
-    if (!leadData) {
-      console.log(log, "Lead não encontrado. Ignorando.");
-      return;
-    }
-
-    let finalMessage = "";
-
-    // Gerar mensagem com IA se houver prompt
-    if (aiPrompt && process.env.GROQ_API_KEY) {
-      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-      const systemMsg = "Você é um especialista em vendas B2C. Escreva uma mensagem persuasiva baseada na diretriz fornecida. Apenas o texto da mensagem final.";
-      let userMsg = `Diretriz: ${aiPrompt}\n\nContexto do Lead:\nNome: ${leadData.name}\nStatus atual: ${leadData.status}`;
-      if (context && Object.keys(context).length > 0) {
-        userMsg += `\n\nContexto Adicional (Eventos/Pagamentos/Cupons):\n${JSON.stringify(context, null, 2)}`;
-      }
-      userMsg += `\n\nEscreva a mensagem (sem aspas ou explicações extras):`;
-      
-      const completion = await groq.chat.completions.create({
-        model: defaultGroqModel(),
-        messages: [
-          { role: "system", content: systemMsg },
-          { role: "user", content: userMsg },
-        ],
-        temperature: 0.5,
-        max_tokens: 512,
-      });
-
-      finalMessage = completion.choices[0]?.message?.content?.trim() || "";
-    } else {
-      // Fallback sem IA
-      finalMessage = aiPrompt || `Olá ${leadData.name}, estamos passando para checar como as coisas estão.`;
-      if (context?.paymentUrl) {
-        finalMessage = finalMessage.replace(/\{\{paymentUrl\}\}/gi, context.paymentUrl);
-      }
-      if (context?.couponCode) {
-        finalMessage = finalMessage.replace(/\{\{couponCode\}\}/gi, context.couponCode);
-      }
-    }
-
-    // Envio pelo Canal
-    if (channel === "email" && leadData.email) {
-      await ResendProvider.sendEmail(
-        leadData.email,
-        `Sobre nosso contato na ${companyData?.name || 'Vexo'}`,
-        `<div style="font-family: sans-serif; font-size: 14px; white-space: pre-wrap;">${finalMessage}</div>`
-      );
-      console.log(log, "Email disparado com sucesso via Resend!");
-    } else {
-      // Fallback pra WhatsApp (Evolution)
-      if (companyData && leadData.phone) {
-        const evoConfig = await resolveEvolutionInstanceForFollowup(
-          companyData.tenant_id,
-          companyData.evolution_instance
-        );
-        const workerPool = getFollowupWorkerDbPool();
-        if (!workerPool) {
-          throw new Error("[followup/worker] Pool de banco de dados indisponível para validação de cota.");
-        }
-        setChipQuotaDbPool(workerPool);
-
-        let sendWindowConfig = null;
-        if (companyData.tenant_id) {
-          try {
-            const tenantSettings = await getLeadClientN8nSettings(companyData.tenant_id);
-            sendWindowConfig = resolveSendWindowConfig(tenantSettings);
-          } catch {}
-        }
-        if (!sendWindowConfig) {
-          sendWindowConfig = resolveSendWindowConfig({});
-        }
-
-        const chipInstanceId = String(evoConfig.instanceId || evoConfig.rawInstance?.id || evoConfig.instanceSlug);
-        const chipLimit = resolveChipDailyLimit(evoConfig.rawInstance);
-        const tenantTz = sendWindowConfig.timezone || "America/Sao_Paulo";
-        const todayKey = getDateKey(new Date(), tenantTz);
-
-        const reserved = await reserveChipDailyQuota(chipInstanceId, todayKey, workerPool);
-        if (reserved === null) {
-          throw new Error(`[followup/worker] Falha ao reservar cota para a instância ${chipInstanceId}`);
-        }
-
-        if (reserved > chipLimit) {
-          // 1. Libera a cota reservada em excesso
-          await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
-
-          // 2. Calcula próxima abertura de janela do dia seguinte
-          let nextOpening = getNextSendWindowOpening(new Date(), sendWindowConfig);
-          const nowParts = getPartsInTimezone(new Date(), tenantTz);
-          const nextParts = getPartsInTimezone(nextOpening, tenantTz);
-          if (nowParts.year === nextParts.year && nowParts.month === nextParts.month && nowParts.day === nextParts.day) {
-            const tomorrowMidnight = createDateInTimezone(nowParts.year, nowParts.month, nowParts.day + 1, 0, 1, 0, tenantTz);
-            nextOpening = getNextSendWindowOpening(tomorrowMidnight, sendWindowConfig);
-          }
-
-          const delay = Math.max(1000, nextOpening.getTime() - Date.now());
-          const quotaMsg = `Cota diária do chip atingida (${chipLimit}/${chipLimit}) para a instância ${evoConfig.displayName || chipInstanceId}. Reagendado para a próxima abertura de janela.`;
-
-          console.warn(log, quotaMsg, { nextOpening: nextOpening.toISOString(), limit: chipLimit, reserved });
-
-          const targetJobId = job.data?.jobId;
-          if (targetJobId) {
-            await query(
-              "UPDATE followup_jobs SET scheduled_for=$1, error_log=$2 WHERE id=$3",
-              [nextOpening.toISOString(), quotaMsg, targetJobId]
-            ).catch(() => {});
-          }
-
-          const journeyBullJob = await getFollowupQueue().add(
-            "process-event-journey",
-            {
-              ...job.data,
-              scheduled_for: nextOpening.toISOString(),
-              error_log: quotaMsg,
-              status: "pending",
-            },
-            {
-              delay,
-              jobId: `fup-journey-quota-${journeyId || eventName}-${leadId}-${nextOpening.getTime()}`,
-            }
-          );
-          if (targetJobId && journeyBullJob?.id) {
-            await query(
-              "UPDATE followup_jobs SET bull_job_id=$1 WHERE id=$2",
-              [journeyBullJob.id, targetJobId]
-            ).catch(() => {});
-          }
-
-          return;
-        }
-
-        try {
-          await sendViaEvolution({
-            baseUrl: evoConfig.baseUrl,
-            apiKey: evoConfig.apiKey,
-            instanceSlug: evoConfig.instanceSlug,
-            phone: leadData.phone,
-            text: finalMessage,
-          });
-        } catch (sendErr) {
-          await releaseChipDailyQuota(chipInstanceId, todayKey, workerPool);
-          throw sendErr;
-        }
-        console.log(log, `WhatsApp disparado com sucesso via Evolution (${evoConfig.displayName})!`);
-      } else {
-        console.log(log, "Faltam dados de instância ou telefone para WhatsApp.");
-      }
-    }
-  } catch (err) {
-    console.error(log, "Falha ao processar jornada:", err);
-    throw err;
-  }
-}
-
 export function startFollowupWorker() {
   const worker = new Worker(
     QUEUE_NAME,
     async (job) => {
       try {
         if (job.name === "process-event-journey") {
-          await processEventJourneyJob(job);
-        } else {
-          await processJob(job);
+          // Jornadas por evento foram removidas (nunca tiveram emissor ligado).
+          // Job antigo que ainda esteja no Redis é descartado, não reprocessado.
+          console.warn("[followup/worker] job de jornada por evento descartado (recurso removido):", job.id);
+          return;
         }
+        await processJob(job);
       } catch (err) {
         const { jobId } = job.data || {};
         const msg = err instanceof Error ? err.message : String(err);

@@ -1,6 +1,5 @@
 import { routeDeps } from "../http/routeDeps.js";
 import { registerFollowupRoutes } from "../followup/routes.js";
-import { registerJourneysRoutes } from "../followup/journeysRoutes.js";
 import { registerFollowupQueueRoutes } from "../followup/queueRoutes.js";
 import { registerGeracaoDigitalRoutes } from "./geracaoDigitalRoutes.js";
 import { registerContractRoutes } from "./geracaoDigitalContracts/contractRoutes.js";
@@ -60,7 +59,6 @@ export function registerAllDomainRoutes(app) {
 
   // ─── Módulo de Follow-up (BullMQ + campanhas independentes) ───────────────
   registerFollowupRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
-  registerJourneysRoutes(app, requireFirebaseAuth, requireInternalPageAccess, requireAdminAccess);
   registerGeracaoDigitalRoutes(app, pgDatabasePool, requireFirebaseAuth, requireInternalPageAccess);
   registerContractRoutes(app);
   registerContractWebhookRoutes(app);

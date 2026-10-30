@@ -46,8 +46,11 @@ describe("Cadence Trigger Types & Modal Validation", () => {
     expect(cadenceEditorSource).toContain("Linha do tempo da cadência");
   });
 
-  it("FollowupQueue keeps event journeys hidden while preserving the component", () => {
-    expect(followupQueueSource).toContain("FollowUpJourneys");
-    expect(followupQueueSource).toContain("false as boolean && isSectionAllowed");
+  it("FollowupQueue não carrega mais as jornadas por evento nem campos que o backend ignora", () => {
+    expect(followupQueueSource).not.toContain("FollowUpJourneys");
+    expect(followupQueueSource).not.toContain("false as boolean && isSectionAllowed");
+    expect(followupQueueSource).not.toContain("auto_pause_on_reply");
+    expect(followupQueueSource).not.toContain("sending_window_start");
+    expect(followupQueueSource).not.toContain("webhooks/followup");
   });
 });

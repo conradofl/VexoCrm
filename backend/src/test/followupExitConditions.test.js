@@ -89,8 +89,8 @@ describe("Follow-up ETAPA 1 — Condições de Saída de Cadência e Guarda from
       // Lead A: Uberlândia DDD 34 -> 5534991093607
       // Lead B: São Paulo   DDD 11 -> 5511991093607 (mesmos 8 dígitos finais: 91093607)
       const schedules = [
-        { id: "sched-lead-a", company_id: "comp-1", phone: "5534991093607", status: "active", exit_on_reply: true },
-        { id: "sched-lead-b", company_id: "comp-1", phone: "5511991093607", status: "active", exit_on_reply: true },
+        { id: "sched-lead-a", tenant_id: "tenant-1", phone: "5534991093607", status: "active", exit_on_reply: true },
+        { id: "sched-lead-b", tenant_id: "tenant-1", phone: "5511991093607", status: "active", exit_on_reply: true },
       ];
       const jobs = [
         { id: "job-lead-a-2", schedule_id: "sched-lead-a", status: "pending" },
@@ -100,9 +100,9 @@ describe("Follow-up ETAPA 1 — Condições de Saída de Cadência e Guarda from
       // Mock da query com comparação estrita de telefone canônico
       const mockQueryFn = vi.fn(async (sql, params) => {
         if (sql.includes("SELECT fs.id AS schedule_id")) {
-          const [companyId, phoneParam] = params;
+          const [tenantId, phoneParam] = params;
           const cleanPhone = phoneParam.replace(/\D/g, "");
-          const matched = schedules.filter((s) => s.company_id === companyId && s.phone === cleanPhone && s.status === "active");
+          const matched = schedules.filter((s) => s.tenant_id === tenantId && s.phone === cleanPhone && s.status === "active");
           return { rows: matched.map((m) => ({ schedule_id: m.id })) };
         }
         if (sql.includes("UPDATE followup_schedules")) {
@@ -128,7 +128,7 @@ describe("Follow-up ETAPA 1 — Condições de Saída de Cadência e Guarda from
 
       // Lead A responde
       const cancelResult = await cancelFollowupCadenceOnReply({
-        companyId: "comp-1",
+        tenantId: "tenant-1",
         phone: "5534991093607",
         queryFn: mockQueryFn,
       });
@@ -171,7 +171,7 @@ describe("Follow-up ETAPA 1 — Condições de Saída de Cadência e Guarda from
       });
 
       const res = await cancelFollowupCadenceOnReply({
-        companyId: "empresa-gd",
+        tenantId: "geracao-digital",
         phone: "5534991093607",
         queryFn: mockQueryFn,
       });
@@ -190,7 +190,7 @@ describe("Follow-up ETAPA 1 — Condições de Saída de Cadência e Guarda from
       });
 
       const res = await cancelFollowupCadenceOnReply({
-        companyId: "empresa-gd",
+        tenantId: "geracao-digital",
         phone: "5534991093607",
         queryFn: mockQueryFn,
       });

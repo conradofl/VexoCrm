@@ -37,6 +37,7 @@ import {
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
+import { registerFollowupReply } from "../../services/followupReplyHook.js";
 import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
 import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceService.js";
 
@@ -2848,9 +2849,10 @@ export function registerChatbotRoutes(app, deps) {
       return;
     }
 
-    const clientId = normalizeTenantKey(
+    const explicitClientId = normalizeTenantKey(
       body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id
-    ) || "outlier";
+    );
+    const clientId = explicitClientId || "outlier";
 
     const phone = sanitizePhone(
       body.phone || body.telefone || body.remoteJid ||
@@ -2927,6 +2929,19 @@ export function registerChatbotRoutes(app, deps) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);
     }
 
+    // Resposta do lead para a cadência de follow-up. Só mensagem do lead (não fromMe)
+    // e só com tenant explícito: o fallback "outlier" acima não pode cancelar nada.
+    if (!fromMe && explicitClientId && pgDatabasePool) {
+      await registerFollowupReply({
+        tenantId: explicitClientId,
+        phone,
+        text: messageData.text,
+        waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
+        instanceName,
+        queryFn: pgDatabasePool.query.bind(pgDatabasePool),
+      });
+    }
+
     // Classificação semântica automática para mensagens inbound
     if (!fromMe && messageData?.text && pgDatabasePool) {
       reclassifyLeadFromMessages({
@@ -2939,7 +2954,7 @@ export function registerChatbotRoutes(app, deps) {
           console.info(`[auto-funnel] Lead ${phone} transitou: ${result.previousStage} ➔ ${result.newStage} (${result.reason})`);
           // Se transitou para buyer, cancela follow-up ativo
           if (result.newStage === "buyer") {
-            await cancelFollowupCadenceOnReply({ companyId: clientId, phone, queryFn: pgDatabasePool.query.bind(pgDatabasePool) });
+            await cancelFollowupCadenceOnReply({ tenantId: clientId, phone, queryFn: pgDatabasePool.query.bind(pgDatabasePool) });
           }
         }
       }).catch((err) => {
