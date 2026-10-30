@@ -102,6 +102,7 @@ import {
   useBulkUpdateChatState,
   useAttendChat,
   useUnmuteChat,
+  useMuteChat,
   useCreateLeadFromChat,
   useBulkCreateLeadsFromChats,
   useDeleteWhatsAppMessage,
@@ -348,7 +349,7 @@ export default function WhatsAppInbox({
   const [selectedInstanceNames, setSelectedInstanceNames] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [compositionMode, setCompositionMode] = useState<"whatsapp" | "internal_note">("whatsapp");
-  const [inboxTab, setInboxTab] = useState<"fila" | "aguardando" | "minhas" | "hoje" | "automacao" | "arquivadas" | "grupos" | "todas">("fila");
+  const [inboxTab, setInboxTab] = useState<"fila" | "aguardando" | "minhas" | "hoje" | "automacao" | "arquivadas" | "pausadas" | "grupos" | "todas">("fila");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -420,6 +421,7 @@ export default function WhatsAppInbox({
   const bulkUpdateChatState = useBulkUpdateChatState(clientId);
   const attendChat = useAttendChat(clientId);
   const unmuteChat = useUnmuteChat(clientId);
+  const muteChat = useMuteChat(clientId);
   const createLeadMutation = useCreateLeadFromChat(clientId);
   const bulkCreateLeadsMutation = useBulkCreateLeadsFromChats(clientId);
   const messagesQuery = useWhatsAppMessages(clientId, instanceFilter, selectedChatId, canLoadInbox);
@@ -879,6 +881,19 @@ export default function WhatsAppInbox({
       chatsQuery.refetch?.();
     } catch (err: any) {
       toast.error(err?.message || "Erro ao reativar agente.");
+    }
+  };
+
+  const handleMuteAgent = async () => {
+    if (!selectedChat) return;
+    try {
+      await muteChat.mutateAsync({
+        phone: selectedChat.id,
+      });
+      toast.success("Agente pausado nesta conversa. Ele só volta pelo \"Reativar agente\".");
+      chatsQuery.refetch?.();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao pausar agente.");
     }
   };
 
@@ -1487,8 +1502,8 @@ export default function WhatsAppInbox({
                   </button>
                 </div>
 
-                {/* Linha 2: Automações | Arquivadas | Grupos */}
-                <div className="grid grid-cols-3 gap-1 border-t border-border/40 pt-1">
+                {/* Linha 2: Automações | Arquivadas | Pausadas | Grupos */}
+                <div className="grid grid-cols-4 gap-1 border-t border-border/40 pt-1">
                   <button
                     type="button"
                     onClick={() => setInboxTab("automacao")}
@@ -1536,6 +1551,31 @@ export default function WhatsAppInbox({
                         )}
                       >
                         {chatsQuery.counts?.archived}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("pausadas")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
+                      inboxTab === "pausadas"
+                        ? "bg-amber-600 text-white shadow-xs"
+                        : "text-amber-700 dark:text-amber-400 hover:text-foreground"
+                    )}
+                    title="Conversas com o agente pausado. A pausa só sai pelo Reativar agente."
+                  >
+                    <span>Pausadas</span>
+                    {(chatsQuery.counts?.paused ?? 0) > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "pausadas"
+                            ? "bg-white text-amber-800"
+                            : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
+                        )}
+                      >
+                        {chatsQuery.counts?.paused}
                       </span>
                     )}
                   </button>
@@ -2268,6 +2308,18 @@ export default function WhatsAppInbox({
                             >
                               <Bot className="h-3.5 w-3.5 text-emerald-600" />
                               <span>Reativar Agente IA</span>
+                            </DropdownMenuItem>
+                          )}
+
+                          {/* Pausar agente na mão (atendimento humano) */}
+                          {!selectedChat.agentMutedAt && !selectedChat.isGroup && (
+                            <DropdownMenuItem
+                              onClick={handleMuteAgent}
+                              disabled={muteChat.isPending}
+                              className="gap-2 cursor-pointer text-amber-700 dark:text-amber-300 font-semibold"
+                            >
+                              <Bot className="h-3.5 w-3.5 text-amber-600" />
+                              <span>{muteChat.isPending ? "Pausando..." : "Pausar Agente IA"}</span>
                             </DropdownMenuItem>
                           )}
 

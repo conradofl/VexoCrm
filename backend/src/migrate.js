@@ -441,6 +441,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='llm_usage' AND column_name='tentativas')
       AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_llm_usage_client_created')
     ) AS ok`,
+    "20261030160000_add_human_takeover_agent_pause.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='agent_pause_on_device_reply')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_chat_states' AND column_name='agent_muted_source')
+    ) AS ok`,
   };
 
   const query = checks[filename];

@@ -261,3 +261,19 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   repetido para o mesmo telefone e a mesma campanha. No banco, o mesmo texto de passo enviado duas ou mais vezes ao mesmo
   telefone, depois de conferir no `information_schema` onde o envio do passo fica registrado.
 - **Status:** aberta, sem medição. Registrada em 30/10/2026. Não consertar junto com outra frente.
+
+## DT-015 — Envio do robô gravado sem `wa_message_id`: o sistema não sabe o id do que mandou
+
+- **O que foi medido (30/10/2026, `lead_messages` dos últimos 7 dias, `direction='outbound'`, `sender_type='bot'`):** as
+  495 linhas de robô que apareceram na medição têm `wa_message_id` nulo. Todas eram da bia-do-spazio, com origem
+  `campaign_reply_progression` (284), `campaign_dispatch` (177) e `campaign_queue` (21).
+- **Onde mora:** o envio de campanha passa por `backend/src/campaign-outbound.js` (`fetch` do passo, por volta da linha 807),
+  que lê a resposta da Evolution como texto e não devolve o `key.id` para quem grava a mensagem. A resposta do agente de
+  atendimento tem outro ponto cego do mesmo tipo: `backend/src/domains/chatbot/routes.js`, no `evolutionResponse.json()`
+  dentro de um `catch {}` vazio (por volta da linha 3627), que deixa `outboundWaId` nulo sem log. Esse segundo caminho
+  **não apareceu** na medição acima e ainda não foi medido.
+- **Por que importa:** sem o id não dá para casar envio com eco nem com recibo de entrega. Foi isso que impediu a
+  `feat/etiqueta-atendimento-humano` de usar o id como sinal principal para separar o eco do robô da mensagem de gente.
+- **Não consertar junto com a etiqueta.** O conserto mexe no envio de campanha e no do agente, e merece medição própria antes:
+  quantas respostas do agente (origem `hardcoded-chat-webhook`) estão sem id.
+- **Status:** aberta. Registrada em 30/10/2026.

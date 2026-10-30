@@ -12,6 +12,13 @@ import { temConversaComercial } from "./conversationInsightHelper.js";
 
 export const DEFAULT_DAILY_MUTE_LIMIT = 20;
 
+// Quem pausou o agente (whatsapp_chat_states.agent_muted_source). NULL nas linhas
+// antigas = classificador. Só a pausa do classificador conta no freio diário e só
+// ela se desfaz com resposta fromMe: pausa de gente só sai pelo botão "Reativar".
+export const MUTE_SOURCE_CLASSIFIER = "classificador";
+export const MUTE_SOURCE_MANUAL = "manual";
+const CLASSIFIER_SOURCE_SQL = `COALESCE(agent_muted_source, '${MUTE_SOURCE_CLASSIFIER}') = '${MUTE_SOURCE_CLASSIFIER}'`;
+
 /**
  * Avalia as cinco travas de segurança obrigatórias antes de permitir que uma conversa seja silenciada.
  * Retorna { canMute: true } somente se NENHUMA das cinco travas for violada.
@@ -84,7 +91,32 @@ export async function isChatAgentMuted(pool, clientId, phone) {
 }
 
 /**
- * Conta quantas conversas foram silenciadas pelo tenant no dia atual (para o freio de emergência).
+ * Quem pausou o agente nesta conversa: null se não está pausado, senão a origem
+ * (MUTE_SOURCE_MANUAL ou MUTE_SOURCE_CLASSIFIER; linha antiga sem origem = classificador).
+ * Existe para o descarte dizer o motivo certo no log.
+ */
+export async function getChatAgentMuteSource(pool, clientId, phone) {
+  if (!pool || !clientId || !phone) return null;
+  try {
+    const res = await pool.query(
+      `SELECT agent_muted_at, agent_muted_source
+         FROM public.whatsapp_chat_states
+        WHERE client_id = $1 AND phone = $2
+        LIMIT 1`,
+      [clientId, phone]
+    );
+    const row = res.rows[0];
+    if (!row?.agent_muted_at) return null;
+    return row.agent_muted_source === MUTE_SOURCE_MANUAL ? MUTE_SOURCE_MANUAL : MUTE_SOURCE_CLASSIFIER;
+  } catch (err) {
+    console.warn("[agentMuteGuard] erro ao consultar getChatAgentMuteSource:", err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Conta quantas conversas foram silenciadas PELO CLASSIFICADOR no dia atual (para o freio de
+ * emergência). Pausa manual não entra: o freio protege contra a IA errar, não contra decisão de gente.
  */
 export async function countTenantMutedToday(pool, clientId) {
   if (!pool || !clientId) return 0;
@@ -93,7 +125,8 @@ export async function countTenantMutedToday(pool, clientId) {
       `SELECT COUNT(*)::integer as total
          FROM public.whatsapp_chat_states
         WHERE client_id = $1
-          AND agent_muted_at >= date_trunc('day', now())`,
+          AND agent_muted_at >= date_trunc('day', now())
+          AND ${CLASSIFIER_SOURCE_SQL}`,
       [clientId]
     );
     return res.rows[0]?.total || 0;
@@ -105,33 +138,40 @@ export async function countTenantMutedToday(pool, clientId) {
 
 /**
  * Grava o silenciamento do robô na conversa, preservando o state (continua 'ativa').
+ * source: MUTE_SOURCE_CLASSIFIER (padrão) ou MUTE_SOURCE_MANUAL.
  */
-export async function recordAgentMute(pool, { clientId, phone, reason }) {
+export async function recordAgentMute(pool, { clientId, phone, reason, source = MUTE_SOURCE_CLASSIFIER }) {
   if (!pool || !clientId || !phone) return;
   const mutedReason = String(reason || "Conversa não-comercial").trim().slice(0, 200);
+  const mutedSource = source === MUTE_SOURCE_MANUAL ? MUTE_SOURCE_MANUAL : MUTE_SOURCE_CLASSIFIER;
 
   await pool.query(
-    `INSERT INTO public.whatsapp_chat_states (client_id, phone, state, reason, source, agent_muted_at, agent_muted_reason, updated_at)
-     VALUES ($1, $2, 'ativa', NULL, 'auto', now(), $3, now())
+    `INSERT INTO public.whatsapp_chat_states (client_id, phone, state, reason, source, agent_muted_at, agent_muted_reason, agent_muted_source, updated_at)
+     VALUES ($1, $2, 'ativa', NULL, 'auto', now(), $3, $4, now())
      ON CONFLICT (client_id, phone) DO UPDATE SET
        agent_muted_at = now(),
        agent_muted_reason = EXCLUDED.agent_muted_reason,
+       agent_muted_source = EXCLUDED.agent_muted_source,
        updated_at = now()`,
-    [clientId, phone, mutedReason]
+    [clientId, phone, mutedReason, mutedSource]
   );
 }
 
 /**
- * Reativa o agente na conversa (limpa agent_muted_at e agent_muted_reason).
+ * Reativa o agente na conversa (limpa agent_muted_at, agent_muted_reason e agent_muted_source).
+ * onlyClassifier: true limpa só pausa do classificador — é o caso da resposta fromMe, que
+ * não pode desfazer pausa de gente.
  */
-export async function clearAgentMute(pool, { clientId, phone }) {
+export async function clearAgentMute(pool, { clientId, phone, onlyClassifier = false }) {
   if (!pool || !clientId || !phone) return;
   await pool.query(
     `UPDATE public.whatsapp_chat_states
         SET agent_muted_at = NULL,
             agent_muted_reason = NULL,
+            agent_muted_source = NULL,
             updated_at = now()
-      WHERE client_id = $1 AND phone = $2 AND agent_muted_at IS NOT NULL`,
+      WHERE client_id = $1 AND phone = $2 AND agent_muted_at IS NOT NULL${onlyClassifier ? `
+        AND ${CLASSIFIER_SOURCE_SQL}` : ""}`,
     [clientId, phone]
   );
 }

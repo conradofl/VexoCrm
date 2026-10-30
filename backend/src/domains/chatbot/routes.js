@@ -227,10 +227,11 @@ import {
 } from "../../services/sendWindow.js";
 import {
   evaluateAgentMuteGuards,
-  isChatAgentMuted,
+  getChatAgentMuteSource,
   countTenantMutedToday,
   recordAgentMute,
   clearAgentMute,
+  MUTE_SOURCE_MANUAL,
 } from "../../services/agentMuteGuard.js";
 
 export function registerChatbotRoutes(app, deps) {
@@ -666,6 +667,10 @@ export function registerChatbotRoutes(app, deps) {
           tabCondition = "AND m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira'";
         } else if (rawTab === "arquivada" || rawTab === "arquivadas") {
           tabCondition = "AND (m.is_group IS NOT TRUE) AND cs.state = 'arquivada'";
+        } else if (rawTab === "pausadas") {
+          // Toda conversa com o agente pausado, em qualquer estado menos lixeira: a pausa
+          // não expira sozinha, então esta aba é onde a conversa esquecida aparece.
+          tabCondition = "AND (m.is_group IS NOT TRUE) AND cs.agent_muted_at IS NOT NULL AND COALESCE(cs.state, 'ativa') != 'lixeira'";
         } else if (rawTab === "automacao" || rawTab === "automacoes") {
           tabCondition = `AND (m.is_group IS NOT TRUE) AND (
             cs.state = 'automacao' OR (cs.state IS NULL AND ${SQL_AUTOMATION_MATCH("m.message_text")})
@@ -712,7 +717,7 @@ export function registerChatbotRoutes(app, deps) {
 
       let total = 0;
       let items = [];
-      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, myUnopened: 0 };
+      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0, myUnopened: 0 };
       let lastQueryInfo = { step: "init", sql: null, params: null };
 
       try {
@@ -747,6 +752,9 @@ export function registerChatbotRoutes(app, deps) {
           SELECT
             COUNT(*) FILTER (WHERE m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira')::integer as groups_count,
             COUNT(*) FILTER (WHERE m.is_group IS NOT TRUE AND cs.state = 'arquivada')::integer as archived_count,
+            COUNT(*) FILTER (
+              WHERE m.is_group IS NOT TRUE AND cs.agent_muted_at IS NOT NULL AND COALESCE(cs.state, 'ativa') != 'lixeira'
+            )::integer as paused_count,
             COUNT(*) FILTER (
               WHERE m.is_group IS NOT TRUE
                 AND (cs.state = 'automacao' OR (cs.state IS NULL AND ${SQL_AUTOMATION_MATCH("m.message_text")}))
@@ -786,6 +794,7 @@ export function registerChatbotRoutes(app, deps) {
             automations: countsRow.automations_count || 0,
             groups: countsRow.groups_count || 0,
             archived: countsRow.archived_count || 0,
+            paused: countsRow.paused_count || 0,
             myUnopened: countsRow.my_unopened_count || 0,
           };
         }
@@ -1002,7 +1011,7 @@ export function registerChatbotRoutes(app, deps) {
         query: _req.query,
         stack: error?.stack,
       });
-      res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0 }, nextOffset: 0, hasMore: false });
+      res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0 }, nextOffset: 0, hasMore: false });
     }
   });
 
@@ -1136,6 +1145,52 @@ export function registerChatbotRoutes(app, deps) {
     } catch (err) {
       console.error("[whatsapp/chats/unmute] erro:", err?.message || err);
       sendError(res, 500, "UNMUTE_ERROR", err?.message || "Erro ao reativar agente na conversa");
+    }
+  });
+
+  // D3: resposta de gente pela tela de Conversas pausa o agente naquela conversa, só no
+  // tenant que ligou agent_pause_on_device_reply (nasce desligada). Falha aqui não pode
+  // derrubar o envio, que já saiu: só loga.
+  async function pauseAgentOnHumanReply(clientId, phone) {
+    try {
+      const settings = await getLeadClientN8nSettings(clientId);
+      if (settings?.agent_pause_on_device_reply !== true) return;
+      await recordAgentMute(pgDatabasePool, {
+        clientId,
+        phone,
+        reason: "Atendimento humano",
+        source: MUTE_SOURCE_MANUAL,
+      });
+    } catch (err) {
+      console.warn("[whatsapp] erro ao pausar agente após resposta pela tela:", err?.message || err);
+    }
+  }
+
+  // POST /api/whatsapp/chats/mute — pausa o agente na conversa por decisão de gente.
+  // Não passa pelas travas do classificador nem conta no freio diário, e só sai pelo
+  // "Reativar agente" (resposta fromMe não desfaz pausa manual).
+  app.post("/api/whatsapp/chats/mute", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = resolveAuthorizedClientId(req, res, req.body?.clientId);
+    if (!clientId) return;
+
+    const phone = sanitizePhone(req.body?.phone);
+    if (!phone) {
+      sendError(res, 400, "INVALID_PHONE", "Telefone é obrigatório");
+      return;
+    }
+
+    try {
+      await recordAgentMute(pgDatabasePool, {
+        clientId,
+        phone,
+        reason: "Atendimento humano",
+        source: MUTE_SOURCE_MANUAL,
+      });
+      res.json({ success: true, phone });
+    } catch (err) {
+      console.error("[whatsapp/chats/mute] erro:", err?.message || err);
+      sendError(res, 500, "MUTE_ERROR", err?.message || "Erro ao pausar agente na conversa");
     }
   });
 
@@ -1900,6 +1955,8 @@ export function registerChatbotRoutes(app, deps) {
         },
       });
 
+      await pauseAgentOnHumanReply(clientId, cleanPhone);
+
       const timestampVal = Math.floor(Date.now() / 1000);
       res.status(201).json({
         item: {
@@ -2247,6 +2304,8 @@ export function registerChatbotRoutes(app, deps) {
           caption: caption || null,
         },
       });
+
+      await pauseAgentOnHumanReply(clientId, cleanPhone);
 
       const timestampVal = Math.floor(Date.now() / 1000);
       res.status(201).json({
@@ -3012,9 +3071,10 @@ export function registerChatbotRoutes(app, deps) {
           );
         }
 
-        // 3. Se um humano responder manualmente pelo celular (fromMe), o silenciamento do robô se desfaz sozinho
+        // 3. Se um humano responder manualmente pelo celular (fromMe), o silenciamento DO CLASSIFICADOR
+        //    se desfaz sozinho. Pausa manual (botão) só sai pelo "Reativar agente".
         if (fromMe) {
-          await clearAgentMute(pgDatabasePool, { clientId, phone }).catch((err) => {
+          await clearAgentMute(pgDatabasePool, { clientId, phone, onlyClassifier: true }).catch((err) => {
             console.warn("[chatbot-webhook] erro ao limpar silenciamento do agente com resposta manual (fromMe):", err?.message || err);
           });
         }
@@ -3377,7 +3437,8 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // Quem o chatbot pode atender. Escopo padrão ('leads_only') só engaja lead conhecido do tenant ou campanha.
-    const isAgentMuted = await isChatAgentMuted(pgDatabasePool, clientId, phone);
+    const agentMutedSource = await getChatAgentMuteSource(pgDatabasePool, clientId, phone);
+    const isAgentMuted = agentMutedSource !== null;
     const escopoInbound = resolveInboundScope(tenantSettings);
     const telefoneEhSdr = resolveTenantSdrNumbers(tenantSettings).includes(normalizeSdrNumber(phone));
     if (isAgentMuted || escopoInbound !== INBOUND_SCOPE_ALL || telefoneEhSdr) {
@@ -3388,6 +3449,7 @@ export function registerChatbotRoutes(app, deps) {
         hasCampaignMatch: temCampanhaParaEsteTelefone,
         isSdrNumber: telefoneEhSdr,
         isAgentMuted,
+        agentMutedSource,
       });
       if (!decisao.engage) {
         descartar(decisao.reason, {
@@ -3398,6 +3460,7 @@ export function registerChatbotRoutes(app, deps) {
           hasCampaignMatch: temCampanhaParaEsteTelefone,
           isSdrNumber: telefoneEhSdr,
           isAgentMuted,
+          agentMutedSource,
         });
         return;
       }

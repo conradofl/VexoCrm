@@ -279,6 +279,8 @@ export default function InboundAgentConfig() {
   // Rodízio de SDR: "todos" avisa a lista inteira (de sempre); "rodizio" gira
   // um consultor por vez, fixo por lead (services/sdrTarget.js).
   const [sdrDistribution, setSdrDistribution] = useState<"todos" | "rodizio">("todos");
+  // Resposta humana pela tela de Conversas pausa o agente naquela conversa. Nasce desligada.
+  const [agentPauseOnDeviceReply, setAgentPauseOnDeviceReply] = useState(false);
 
   const tenantN8nSettings = useMemo(() => {
     return leadClients.find((c) => c.id === selectedClientId)?.n8n_settings;
@@ -289,6 +291,7 @@ export default function InboundAgentConfig() {
       setChatbotInboundScope(tenantN8nSettings.chatbot_inbound_scope === "leads_only" ? "leads_only" : "all");
       setRecontactMessage(tenantN8nSettings.recontact_message ?? "");
       setSdrDistribution(tenantN8nSettings.sdr_distribution === "rodizio" ? "rodizio" : "todos");
+      setAgentPauseOnDeviceReply(tenantN8nSettings.agent_pause_on_device_reply === true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClientId, tenantN8nSettings?.updated_at]);
@@ -436,6 +439,7 @@ export default function InboundAgentConfig() {
             chatbotInboundScope,
             recontactMessage,
             sdrDistribution,
+            agentPauseOnDeviceReply,
           });
         }
         const draftIdSalvo = activeCompany.id;
@@ -464,6 +468,7 @@ export default function InboundAgentConfig() {
           chatbotInboundScope,
           recontactMessage,
           sdrDistribution,
+          agentPauseOnDeviceReply,
         });
       }
       setOrphanCount(0);
@@ -1340,6 +1345,28 @@ export default function InboundAgentConfig() {
                         Apenas Leads cadastrados no CRM
                       </p>
                     </button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Atendimento humano pausa o agente</CardTitle>
+                  <CardDescription>
+                    Quando alguém da equipe responde o lead pela tela de Conversas, o agente para de responder naquela
+                    conversa e só volta pelo botão "Reativar agente". Vale para o tenant inteiro.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between gap-4 max-w-xl">
+                    <Label htmlFor="agent-pause-on-device-reply" className="text-sm">
+                      Pausar o agente quando a equipe responder
+                    </Label>
+                    <Switch
+                      id="agent-pause-on-device-reply"
+                      checked={agentPauseOnDeviceReply}
+                      onCheckedChange={setAgentPauseOnDeviceReply}
+                    />
                   </div>
                 </CardContent>
               </Card>
