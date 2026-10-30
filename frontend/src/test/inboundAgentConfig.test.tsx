@@ -889,11 +889,13 @@ describe("InboundAgentConfig — Passo 6: rolagem do simulador", () => {
 // chega depois do clique pode sujar a conversa nova.
 describe("InboundAgentConfig — Passo 6: limpar conversa do simulador", () => {
   let pendentes: Array<(texto: string) => void>;
+  let quedas: Array<() => void>;
   let corpos: any[];
 
   beforeEach(() => {
     vi.resetModules();
     pendentes = [];
+    quedas = [];
     corpos = [];
     mockCompanies([
       { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: [] },
@@ -904,7 +906,8 @@ describe("InboundAgentConfig — Passo 6: limpar conversa do simulador", () => {
       fetchApi: vi.fn((_url: string, options: RequestInit) => {
         const body = JSON.parse(options.body as string);
         corpos.push(body);
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
+          quedas.push(() => reject(new TypeError("Failed to fetch")));
           pendentes.push((texto: string) =>
             resolve({
               ok: true,
@@ -1034,5 +1037,15 @@ describe("InboundAgentConfig — Passo 6: limpar conversa do simulador", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     await new Promise((r) => setTimeout(r, 0));
     expect(corpos.map((c) => c.message)).toEqual(["pergunta antiga", "pergunta nova"]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] L7 falha de rede da conversa antiga que chega depois da limpeza não aparece na nova", async () => {
+    const { input, botaoLimpar } = await abrir();
+    await enviar(input, "pergunta antiga");
+    await confirmarLimpeza(botaoLimpar);
+    await enviar(input, "pergunta nova");
+    quedas.shift()!();
+    await new Promise((r) => setTimeout(r, 0));
+    await waitFor(() => expect(screen.queryByText(/\[erro\]/)).toBeNull());
   });
 });
