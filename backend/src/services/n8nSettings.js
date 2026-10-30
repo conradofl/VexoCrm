@@ -36,7 +36,7 @@ import {
 import { isMaskedSecretPlaceholder, getRequestBearerToken, sendError } from "./httpInfra.js";
 
 export const N8N_SETTINGS_SELECT_FIELDS =
-  "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, chatbot_llm_model, chatbot_instances, chatbot_inbound_scope, recontact_message, sdr_whatsapp_numbers, sdr_distribution, agent_name, segmentation_config, sdr_whatsapp_number, allowed_tabs, plan_tier, modulos_avulsos, chip_limit, degustacao_expira_em, send_window_start, send_window_end, send_window_days, send_window_timezone, send_window_enabled, agent_replies_outside_window, chatbot_voice_mode, chatbot_voice_id, chatbot_voice_speed, updated_at, updated_by_uid, updated_by_email";
+  "client_id, dispatch_webhook_url, dispatch_webhook_token, inbound_bearer_token, active, chatbot_enabled, chatbot_model, chatbot_llm_model, chatbot_instances, chatbot_inbound_scope, recontact_message, sdr_whatsapp_numbers, sdr_distribution, agent_name, segmentation_config, sdr_whatsapp_number, allowed_tabs, plan_tier, modulos_avulsos, chip_limit, degustacao_expira_em, send_window_start, send_window_end, send_window_days, send_window_timezone, send_window_enabled, agent_replies_outside_window, agent_pause_on_device_reply, chatbot_voice_mode, chatbot_voice_id, chatbot_voice_speed, updated_at, updated_by_uid, updated_by_email";
 
 export function resolveSingleLeadClientSettings(rawRow, instances = []) {
   const masked = rawRow ? maskN8nSettings(rawRow) : null;
@@ -102,6 +102,7 @@ export function maskN8nSettings(row) {
       send_window_timezone: "America/Sao_Paulo",
       send_window_enabled: true,
       agent_replies_outside_window: true,
+      agent_pause_on_device_reply: false,
       reactivation_enabled: false,
       reactivation_stalled_days: 7,
       reactivation_cadence_id: null,
@@ -150,6 +151,8 @@ export function maskN8nSettings(row) {
     send_window_timezone: row.send_window_timezone || "America/Sao_Paulo",
     send_window_enabled: row.send_window_enabled !== false,
     agent_replies_outside_window: row.agent_replies_outside_window !== false,
+    // Resposta humana (pela tela de Conversas) pausa o agente na conversa. Nasce desligada.
+    agent_pause_on_device_reply: row.agent_pause_on_device_reply === true,
     reactivation_enabled: row.reactivation_enabled === true,
     reactivation_stalled_days:
       Number.isInteger(Number(row.reactivation_stalled_days)) && Number(row.reactivation_stalled_days) >= 1
@@ -281,6 +284,7 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
   const sendWindowTimezoneProvided = Object.prototype.hasOwnProperty.call(body, "sendWindowTimezone") || Object.prototype.hasOwnProperty.call(body, "send_window_timezone");
   const sendWindowEnabledProvided = Object.prototype.hasOwnProperty.call(body, "sendWindowEnabled") || Object.prototype.hasOwnProperty.call(body, "send_window_enabled");
   const agentRepliesOutsideWindowProvided = Object.prototype.hasOwnProperty.call(body, "agentRepliesOutsideWindow") || Object.prototype.hasOwnProperty.call(body, "agent_replies_outside_window");
+  const agentPauseOnDeviceReplyProvided = Object.prototype.hasOwnProperty.call(body, "agentPauseOnDeviceReply") || Object.prototype.hasOwnProperty.call(body, "agent_pause_on_device_reply");
   const chatbotVoiceModeProvided = Object.prototype.hasOwnProperty.call(body, "chatbotVoiceMode") || Object.prototype.hasOwnProperty.call(body, "chatbot_voice_mode");
   const chatbotVoiceIdProvided = Object.prototype.hasOwnProperty.call(body, "chatbotVoiceId") || Object.prototype.hasOwnProperty.call(body, "chatbot_voice_id");
   const chatbotVoiceSpeedProvided = Object.prototype.hasOwnProperty.call(body, "chatbotVoiceSpeed") || Object.prototype.hasOwnProperty.call(body, "chatbot_voice_speed");
@@ -364,6 +368,9 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
     agent_replies_outside_window: agentRepliesOutsideWindowProvided
       ? (body.agentRepliesOutsideWindow ?? body.agent_replies_outside_window) !== false && (body.agentRepliesOutsideWindow ?? body.agent_replies_outside_window) !== "false"
       : existing?.agent_replies_outside_window ?? true,
+    agent_pause_on_device_reply: agentPauseOnDeviceReplyProvided
+      ? [true, "true"].includes(body.agentPauseOnDeviceReply ?? body.agent_pause_on_device_reply)
+      : existing?.agent_pause_on_device_reply ?? false,
     chatbot_voice_mode: chatbotVoiceModeProvided
       ? (["disabled", "mirror", "always"].includes(String(body.chatbotVoiceMode ?? body.chatbot_voice_mode).toLowerCase())
           ? String(body.chatbotVoiceMode ?? body.chatbot_voice_mode).toLowerCase()
@@ -461,6 +468,7 @@ export function buildN8nSettingsPayload(input, authAccess, existing = null) {
       send_window_timezone: sendWindowTimezoneProvided,
       send_window_enabled: sendWindowEnabledProvided,
       agent_replies_outside_window: agentRepliesOutsideWindowProvided,
+      agent_pause_on_device_reply: agentPauseOnDeviceReplyProvided,
       chatbot_voice_mode: chatbotVoiceModeProvided,
       chatbot_voice_id: chatbotVoiceIdProvided,
       chatbot_voice_speed: chatbotVoiceSpeedProvided,

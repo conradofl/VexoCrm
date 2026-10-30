@@ -4,7 +4,7 @@
 // freio diário, a limpeza por fromMe e a listagem de Conversas. Dublê só no que sai
 // do processo: o cliente Supabase (grava em lead_messages do mesmo PGlite) e a
 // Evolution/LLM, que este caminho nem chega a chamar.
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 import { countTenantMutedToday, recordAgentMute } from "../services/agentMuteGuard.js";
@@ -112,7 +112,14 @@ function setup({ pauseOnDeviceReply = false } = {}) {
 
   registerChatbotRoutes(app, {
     ensureDb: () => true,
-    getLeadClientEvolutionInstances: async () => [{ id: "chip-cl", name: "Chip CL", active: true }],
+    getLeadClientEvolutionInstances: async () => [{
+      id: "chip-cl",
+      name: "Chip CL",
+      active: true,
+      is_default: true,
+      dispatch_webhook_url: "https://evolution.invalid/message/sendText/ChipCL",
+      dispatch_webhook_token: "token-de-teste",
+    }],
     getLeadClientN8nSettings: async (clientId) => ({
       clientId,
       chatbot_enabled: true,
@@ -156,6 +163,7 @@ function setup({ pauseOnDeviceReply = false } = {}) {
     mute: (phone) => call("POST /api/whatsapp/chats/mute", { body: { clientId: TENANT, phone } }),
     unmute: (phone) => call("POST /api/whatsapp/chats/unmute", { body: { clientId: TENANT, phone } }),
     listChats: (query = {}) => call("GET /api/whatsapp/chats", { query: { clientId: TENANT, ...query } }),
+    replyFromScreen: (text) => call("POST /api/whatsapp/messages", { body: { clientId: TENANT, chatId: LEAD, body: text } }),
   };
 }
 
@@ -279,5 +287,56 @@ describe("Resposta fromMe (celular/Desktop) e a pausa", () => {
     expect(estado.agent_muted_at).toBeTruthy();
     expect(estado.agent_muted_source).toBe("manual");
     expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+  });
+});
+
+describe("Resposta pela tela de Conversas (D3)", () => {
+  let enviosEvolution;
+
+  beforeEach(() => {
+    enviosEvolution = [];
+    // Evolution é HTTP saindo do processo: único dublê deste bloco.
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      enviosEvolution.push({ url: String(url), body: JSON.parse(init?.body || "{}") });
+      return new Response(JSON.stringify({ key: { id: "3EB0TESTE" } }), { status: 201 });
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("D3 ligado: responder pela tela pausa o agente na conversa (origem manual)", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    await t.replyFromScreen("Oi, aqui é o Lucas, vou te atender");
+
+    expect(enviosEvolution).toHaveLength(1);
+    const estado = await estadoDaConversa();
+    expect(estado.agent_muted_at).toBeTruthy();
+    expect(estado.agent_muted_source).toBe("manual");
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+  });
+
+  it("D3 desligado: responder pela tela não pausa o agente", async () => {
+    const t = setup({ pauseOnDeviceReply: false });
+    await t.replyFromScreen("Oi, aqui é o Lucas");
+
+    expect(enviosEvolution).toHaveLength(1);
+    expect((await estadoDaConversa())?.agent_muted_at ?? null).toBeNull();
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+  });
+
+  it("D3 ligado: o eco fromMe da própria resposta pela tela não desfaz a pausa", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    await t.replyFromScreen("Oi, aqui é o Lucas");
+    await t.webhook(mensagem({ fromMe: true, text: "Oi, aqui é o Lucas" }));
+
+    expect((await estadoDaConversa()).agent_muted_source).toBe("manual");
+  });
+
+  it("pausa pela tela não incrementa o contador diário do freio", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    await t.replyFromScreen("Oi");
+    expect(await countTenantMutedToday(pool, TENANT)).toBe(0);
   });
 });

@@ -1140,6 +1140,24 @@ export function registerChatbotRoutes(app, deps) {
     }
   });
 
+  // D3: resposta de gente pela tela de Conversas pausa o agente naquela conversa, só no
+  // tenant que ligou agent_pause_on_device_reply (nasce desligada). Falha aqui não pode
+  // derrubar o envio, que já saiu: só loga.
+  async function pauseAgentOnHumanReply(clientId, phone) {
+    try {
+      const settings = await getLeadClientN8nSettings(clientId);
+      if (settings?.agent_pause_on_device_reply !== true) return;
+      await recordAgentMute(pgDatabasePool, {
+        clientId,
+        phone,
+        reason: "Atendimento humano",
+        source: MUTE_SOURCE_MANUAL,
+      });
+    } catch (err) {
+      console.warn("[whatsapp] erro ao pausar agente após resposta pela tela:", err?.message || err);
+    }
+  }
+
   // POST /api/whatsapp/chats/mute — pausa o agente na conversa por decisão de gente.
   // Não passa pelas travas do classificador nem conta no freio diário, e só sai pelo
   // "Reativar agente" (resposta fromMe não desfaz pausa manual).
@@ -1929,6 +1947,8 @@ export function registerChatbotRoutes(app, deps) {
         },
       });
 
+      await pauseAgentOnHumanReply(clientId, cleanPhone);
+
       const timestampVal = Math.floor(Date.now() / 1000);
       res.status(201).json({
         item: {
@@ -2276,6 +2296,8 @@ export function registerChatbotRoutes(app, deps) {
           caption: caption || null,
         },
       });
+
+      await pauseAgentOnHumanReply(clientId, cleanPhone);
 
       const timestampVal = Math.floor(Date.now() / 1000);
       res.status(201).json({
