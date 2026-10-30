@@ -7,7 +7,7 @@
 // criar o agente, escrever o prompt e testar antes de existir qualquer chip.
 // Só precisa existir a linha (agente salvo); não precisa de número.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -736,5 +736,150 @@ describe("InboundAgentConfig — Extração para o closer no Passo 5 (Urgente 2)
         })
       );
     });
+  });
+});
+
+// Rolagem do simulador: a caixa desce sozinha ao enviar e ao chegar resposta,
+// mas só se a pessoa já estava no fim — quem rolou para cima para reler não é
+// arrancado de lá. Movimento reduzido no navegador = salto sem animação.
+describe("InboundAgentConfig — Passo 6: rolagem do simulador", () => {
+  const originalScrollTo = (HTMLElement.prototype as any).scrollTo;
+  const originalMatchMedia = window.matchMedia;
+  let scrollCalls: Array<{ el: Element; opts: any }>;
+  let resolveReply: (value: any) => void;
+
+  beforeEach(() => {
+    vi.resetModules();
+    scrollCalls = [];
+    (HTMLElement.prototype as any).scrollTo = function (opts: any) {
+      scrollCalls.push({ el: this, opts });
+    };
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: false, evolution_instances: [] },
+    ]);
+    // Resposta do agente fica pendurada até o teste mandar chegar.
+    vi.doMock("@/lib/api", () => ({
+      fetchApi: vi.fn(() => new Promise((resolve) => { resolveReply = resolve; })),
+    }));
+  });
+
+  afterEach(() => {
+    (HTMLElement.prototype as any).scrollTo = originalScrollTo;
+    window.matchMedia = originalMatchMedia;
+  });
+
+  function setReducedMotion(reduce: boolean) {
+    window.matchMedia = ((query: string) => ({
+      matches: reduce && query.includes("prefers-reduced-motion: reduce"),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as any;
+  }
+
+  async function abrirSimulador() {
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+    const box = screen.getByTestId("simulador-mensagens");
+    // Caixa de 400px com 1000px de conversa; o fim é scrollTop = 600.
+    Object.defineProperty(box, "clientHeight", { configurable: true, value: 400 });
+    Object.defineProperty(box, "scrollHeight", { configurable: true, value: 1000 });
+    const input = screen.getByPlaceholderText("Digite sua mensagem...") as HTMLInputElement;
+    const chamadasNaCaixa = () => scrollCalls.filter((c) => c.el === box).map((c) => c.opts);
+    return { box, input, chamadasNaCaixa };
+  }
+
+  async function enviar(input: HTMLInputElement, texto: string) {
+    fireEvent.change(input, { target: { value: texto } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByText(texto);
+  }
+
+  async function respostaChega(texto: string) {
+    resolveReply({ ok: true, json: async () => ({ response: texto, meta: { agente: "inbound" } }) });
+    await screen.findByText(new RegExp(texto));
+  }
+
+  function rolarPara(box: HTMLElement, top: number) {
+    box.scrollTop = top;
+    fireEvent.scroll(box);
+  }
+
+  it("[TESTE OBRIGATÓRIO] R1 ao enviar, desce até o fim da caixa", async () => {
+    setReducedMotion(false);
+    const { input, chamadasNaCaixa } = await abrirSimulador();
+    scrollCalls = [];
+    await enviar(input, "oi");
+    expect(chamadasNaCaixa()).toEqual([{ top: 1000, behavior: "smooth" }]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] R2 ao chegar a resposta, desce de novo (quem estava no fim)", async () => {
+    setReducedMotion(false);
+    const { input, chamadasNaCaixa } = await abrirSimulador();
+    await enviar(input, "oi");
+    scrollCalls = [];
+    await respostaChega("Resposta do agente");
+    expect(chamadasNaCaixa()).toEqual([{ top: 1000, behavior: "smooth" }]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] R3 rolou para cima para reler: a resposta chega e a caixa NÃO se mexe", async () => {
+    setReducedMotion(false);
+    const { box, input, chamadasNaCaixa } = await abrirSimulador();
+    await enviar(input, "oi");
+    rolarPara(box, 600);
+    rolarPara(box, 100);
+    scrollCalls = [];
+    await respostaChega("Resposta do agente");
+    expect(chamadasNaCaixa()).toEqual([]);
+  });
+
+  it("R4 rolou para cima e depois enviou: enviar é pedido explícito, desce", async () => {
+    setReducedMotion(false);
+    const { box, input, chamadasNaCaixa } = await abrirSimulador();
+    await enviar(input, "oi");
+    await respostaChega("Primeira resposta");
+    rolarPara(box, 600);
+    rolarPara(box, 100);
+    scrollCalls = [];
+    await enviar(input, "e agora?");
+    expect(chamadasNaCaixa()).toEqual([{ top: 1000, behavior: "smooth" }]);
+  });
+
+  it("R5 rolagem para BAIXO no meio do caminho (a própria animação) não solta do fim", async () => {
+    setReducedMotion(false);
+    const { box, input, chamadasNaCaixa } = await abrirSimulador();
+    await enviar(input, "oi");
+    rolarPara(box, 300);
+    scrollCalls = [];
+    await respostaChega("Resposta do agente");
+    expect(chamadasNaCaixa()).toEqual([{ top: 1000, behavior: "smooth" }]);
+  });
+
+  it("R6 voltou sozinho ao fim depois de reler: volta a acompanhar", async () => {
+    setReducedMotion(false);
+    const { box, input, chamadasNaCaixa } = await abrirSimulador();
+    await enviar(input, "oi");
+    rolarPara(box, 600);
+    rolarPara(box, 100);
+    rolarPara(box, 590);
+    scrollCalls = [];
+    await respostaChega("Resposta do agente");
+    expect(chamadasNaCaixa()).toEqual([{ top: 1000, behavior: "smooth" }]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] R7 movimento reduzido: salta sem animação, ao enviar e ao chegar resposta", async () => {
+    setReducedMotion(true);
+    const { input, chamadasNaCaixa } = await abrirSimulador();
+    scrollCalls = [];
+    await enviar(input, "oi");
+    await respostaChega("Resposta do agente");
+    expect(chamadasNaCaixa()).toEqual([
+      { top: 1000, behavior: "auto" },
+      { top: 1000, behavior: "auto" },
+    ]);
   });
 });

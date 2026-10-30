@@ -59,6 +59,7 @@ import { AgentInstructionAuditPanel } from "@/components/agente/AgentInstruction
 import { AgentKnowledgeBaseSection } from "@/components/agente/AgentKnowledgeBaseSection";
 import { SdrNumbersDialog } from "@/components/agente/SdrNumbersDialog";
 import { VoiceSettingsCard } from "@/components/agente/VoiceSettingsCard";
+import { useStickToBottom } from "@/hooks/useStickToBottom";
 
 // Empresa "de mentira" mostrada quando o tenant ainda nao tem linha em
 // followup_companies. Salvar com ela cria a linha de verdade. Toda linha de
@@ -293,6 +294,7 @@ export default function InboundAgentConfig() {
     { role: "bot", text: "Olá! Como posso ajudar?" }
   ]);
   const [simInput, setSimInput] = useState("");
+  const simScroll = useStickToBottom<HTMLDivElement>(simMessages.length);
 
   // Depende do ID e dos chips do tenant:
   // - Valores que resolvem para chip ativo entram em numerosVinculados.
@@ -487,6 +489,7 @@ export default function InboundAgentConfig() {
   const handleSimulate = async () => {
     const texto = simInput.trim();
     if (!texto || simulando || isPlaceholderCompany || !activeCompany) return;
+    simScroll.scrollOnNextChange();
     setSimMessages((prev) => [...prev, { role: "user", text: texto }]);
     setSimInput("");
     setSimulando(true);
@@ -1102,7 +1105,11 @@ export default function InboundAgentConfig() {
                   </p>
                 ) : (
                   <div className="flex flex-col h-[420px] border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
-                    <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50 dark:bg-slate-900/50">
+                    <div
+                      ref={simScroll.containerRef}
+                      onScroll={simScroll.onScroll}
+                      data-testid="simulador-mensagens"
+                      className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50 dark:bg-slate-900/50">
                       {simMessages.map((msg, i) => (
                         <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                           <div
