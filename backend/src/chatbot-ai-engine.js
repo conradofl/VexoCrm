@@ -1580,6 +1580,7 @@ export async function runChatbotAI({
       mensagem: "",
       mensagemAusente: true,
       contratoQuebrado: true,
+      falhaIa: diagnosticarFalhaDaEscada(credenciaisQuebradas, lastError),
       status_conversa: "aguardando_usuario",
       dados: {},
       classificacao: null,
@@ -1589,7 +1590,41 @@ export async function runChatbotAI({
     };
   }
 
+  // A resposta saiu, mas de outro provedor: a chave quebrada nao pode ficar
+  // escondida atras de uma conversa que parece saudavel.
+  if (credenciaisQuebradas.size > 0) {
+    finalResposta._credenciaisQuebradas = [...credenciaisQuebradas];
+  }
   return finalResposta;
+}
+
+/**
+ * Por que a escada inteira falhou, em forma que a tela entende. Credencial vence
+ * cota pelo mesmo motivo do erro final de callLlmChatCompletion: e a causa que o
+ * dono resolve sozinho. Sem diagnostico, null — a tela fica com o texto que ja tem.
+ */
+function diagnosticarFalhaDaEscada(credenciaisQuebradas, lastError) {
+  if (credenciaisQuebradas.size > 0) {
+    const provedores = [...credenciaisQuebradas];
+    return {
+      code: "LLM_CREDENTIAL_INVALID",
+      provedores,
+      mensagem:
+        `Credencial invalida no provedor ${provedores.join(", ")}. ` +
+        "A escada seguiu sem ele e os outros degraus tambem falharam. Troque a chave no EasyPanel.",
+    };
+  }
+  if (lastError?.code === "LLM_QUOTA_EXCEEDED") {
+    return {
+      code: "LLM_QUOTA_EXCEEDED",
+      mensagem: lastError.message,
+      modelo: lastError.modelo ?? null,
+      limiteTpm: lastError.limiteTpm ?? null,
+      usadoTpm: lastError.usadoTpm ?? null,
+      esperarSegundos: lastError.esperarSegundos ?? null,
+    };
+  }
+  return null;
 }
 
 const VALID_SPIN_FASES = new Set(["situacao", "problema", "implicacao", "necessidade"]);
@@ -2006,6 +2041,9 @@ export async function processBatch({
   isSimulation = false,
   noPersist = false,
   simulationState = null,
+  // Opcional. Quando a IA falha no turno, processBatch devolve null (contrato de
+  // sempre); quem quer saber POR QUE passa este objeto e recebe aqui a causa.
+  diagnosticoIa = null,
 }) {
   // Simulador ("Testar antes de soltar"): a memória da conversa vem do
   // chamador ({ historico, dados }) e nada é lido nem gravado na tabela leads.
@@ -2435,6 +2473,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
   }
 
   if (!aiResponse || !aiResponse.mensagem || !String(aiResponse.mensagem).trim()) {
+    if (diagnosticoIa && aiResponse?.falhaIa) Object.assign(diagnosticoIa, aiResponse.falhaIa);
     console.error("[chatbot-ai] RESPOSTA VAZIA DA IA — silenciando resposta automática", {
       clientId,
       phone: phone.slice(-4),

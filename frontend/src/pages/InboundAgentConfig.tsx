@@ -227,7 +227,9 @@ export default function InboundAgentConfig() {
   const { data: llmInfo } = useLlmModels();
   const llmModels = llmInfo?.models ?? [];
   const providerStatus = llmInfo?.providerStatus;
-  const providerOrder = ["groq", "openai", "anthropic", "gemini"] as const;
+  // Gemini primeiro: e o padrao do sistema desde 30/10/2026. A rota so devolve
+  // provedor com chave, e grupo vazio nao e desenhado.
+  const providerOrder = ["gemini", "groq", "openai", "anthropic"] as const;
 
   // Modelos prontos de prompt — mesma tabela chatbot_templates da consolidação
   // (Commits 1-3). "Começar de um modelo pronto" copia o texto composto a
@@ -248,7 +250,7 @@ export default function InboundAgentConfig() {
   const activeCompany = companies.find((c) => c.id === companyId);
   const isPlaceholderCompany = isDraftCompanyId(activeCompany?.id);
 
-  const defaultLlmModel = llmInfo?.defaultModel || "openai/gpt-oss-120b";
+  const defaultLlmModel = llmInfo?.defaultModel || "";
   const [agentName, setAgentName] = useState("");
   // "Um agente por chip, com função declarada": pra que serve o chip —
   // atendimento (responde quem procurou a empresa) ou campanha (chip de

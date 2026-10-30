@@ -142,6 +142,44 @@ describe("cota de IA esgotada aparece como tal", () => {
   });
 });
 
+describe("chave de IA quebrada aparece como tal", () => {
+  it("503 LLM_CREDENTIAL_INVALID vira aviso de credencial, com o provedor — não 'Prompt não configurado'", async () => {
+    fetchApiMock.mockResolvedValue(
+      respostaJson(503, {
+        success: false,
+        error: "Credencial de IA inválida",
+        reason: "Credencial invalida no provedor gemini. Troque a chave no EasyPanel.",
+        code: "LLM_CREDENTIAL_INVALID",
+        provedores: ["gemini"],
+      })
+    );
+
+    await enviar();
+    await waitFor(() => {
+      expect(screen.getByText(/^🔑 Credencial de IA inválida/)).toBeTruthy();
+      expect(screen.getByText(/provedor gemini/)).toBeTruthy();
+    });
+    expect(screen.queryByText(/Prompt não configurado/i)).toBeNull();
+    expect(screen.queryByText(/Cota de IA esgotada/i)).toBeNull();
+  });
+
+  it("resposta que veio de outro provedor mostra o aviso da chave quebrada junto", async () => {
+    fetchApiMock.mockResolvedValue(
+      respostaJson(200, {
+        success: true,
+        response: "Oi! Como posso ajudar?",
+        avisos: ["Credencial inválida no provedor gemini: esta resposta veio de outro provedor da escada. Troque a chave no EasyPanel."],
+      })
+    );
+
+    await enviar();
+    await waitFor(() => {
+      expect(screen.getByText("Oi! Como posso ajudar?")).toBeTruthy();
+      expect(screen.getByText(/Credencial inválida no provedor gemini/)).toBeTruthy();
+    });
+  });
+});
+
 describe("o turno da LLM ganha tempo suficiente", () => {
   it("a chamada pede timeout maior que o padrão de 15s", async () => {
     fetchApiMock.mockResolvedValue(respostaJson(200, { success: true, response: "oi" }));

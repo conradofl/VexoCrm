@@ -2644,11 +2644,14 @@ export function registerChatbotRoutes(app, deps) {
   });
 
   // GET /api/chatbot-llm-models — lista modelos de LLM registrados e status dos provedores (API keys no servidor)
+  // So oferece modelo de provedor com chave: o que nao pode ser chamado nao aparece
+  // na tela. A escada ja descartava esses ids; agora o tenant nem consegue escolher.
   app.get("/api/chatbot-llm-models", requireFirebaseAuth, async (req, res) => {
+    const providerStatus = getLlmProviderStatus();
     return res.json({
-      models: LLM_MODELS,
+      models: LLM_MODELS.filter((m) => providerStatus[m.provider] === true),
       defaultModel: defaultLlmModel(),
-      providerStatus: getLlmProviderStatus(),
+      providerStatus,
     });
   });
 
@@ -4071,7 +4074,9 @@ export function registerChatbotRoutes(app, deps) {
         inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
       }
 
+      const diagnosticoIa = {};
       const aiResponse = await processBatch({
+        diagnosticoIa,
         clientId,
         phone,
         messages: [{ text: message, type: "text" }],
@@ -4089,6 +4094,32 @@ export function registerChatbotRoutes(app, deps) {
         noPersist: isSimulation,
         simulationState,
       });
+
+      // A IA falhou no turno e a causa e conhecida: a tela diz qual e. Sem isto a
+      // chave quebrada aparecia como "Prompt não configurado".
+      if (!aiResponse?.mensagem && diagnosticoIa.code === "LLM_CREDENTIAL_INVALID") {
+        return res.status(503).json({
+          success: false,
+          error: "Credencial de IA inválida",
+          reason: diagnosticoIa.mensagem,
+          code: "LLM_CREDENTIAL_INVALID",
+          provedores: diagnosticoIa.provedores,
+        });
+      }
+      if (!aiResponse?.mensagem && diagnosticoIa.code === "LLM_QUOTA_EXCEEDED") {
+        return res.status(429).json({
+          success: false,
+          error: "Cota de IA esgotada",
+          reason: diagnosticoIa.mensagem,
+          code: "LLM_QUOTA_EXCEEDED",
+          quota: {
+            modelo: diagnosticoIa.modelo,
+            limiteTpm: diagnosticoIa.limiteTpm,
+            usadoTpm: diagnosticoIa.usadoTpm,
+            esperarSegundos: diagnosticoIa.esperarSegundos,
+          },
+        });
+      }
 
       if (!aiResponse?.mensagem) {
         // Dois motivos MUITO diferentes cabiam nesta mesma frase. Sem separar, o
@@ -4111,6 +4142,11 @@ export function registerChatbotRoutes(app, deps) {
       if (aiResponse._persistErro) {
         avisos.push(
           `A resposta foi gerada mas NÃO foi salva (${aiResponse._persistErro}). O histórico se perdeu: o próximo turno vai começar sem memória.`
+        );
+      }
+      if (Array.isArray(aiResponse._credenciaisQuebradas) && aiResponse._credenciaisQuebradas.length > 0) {
+        avisos.push(
+          `Credencial inválida no provedor ${aiResponse._credenciaisQuebradas.join(", ")}: esta resposta veio de outro provedor da escada. Troque a chave no EasyPanel.`
         );
       }
       if (aiResponse._repetiuUltimaFala) {

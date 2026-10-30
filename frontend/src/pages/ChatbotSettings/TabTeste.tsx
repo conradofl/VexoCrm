@@ -71,6 +71,15 @@ export function TabTeste({ clientId }: { clientId: string }) {
         for (const aviso of data?.avisos ?? []) {
           setConversation((c) => [...c, { role: "bot", text: `⚠️ ${aviso}` }]);
         }
+      } else if (res.status === 503) {
+        // Chave de IA quebrada: o dono resolve trocando a chave, nao mexendo no
+        // prompt. Sem este ramo aparecia como "Prompt não configurado".
+        const dados = await res.json().catch(() => null);
+        if (dados?.code === "LLM_CREDENTIAL_INVALID") {
+          setConversation((c) => [...c, { role: "bot", text: `🔑 Credencial de IA inválida — ${dados?.reason || "troque a chave no EasyPanel."}` }]);
+        } else {
+          setConversation((c) => [...c, { role: "bot", text: `Erro: ${dados?.reason || dados?.error || "Erro"}` }]);
+        }
       } else if (res.status === 429) {
         // Cota esgotada não é erro técnico: é informação de negócio. Aparece com
         // rótulo próprio para o dono não confundir com "prompt errado".
