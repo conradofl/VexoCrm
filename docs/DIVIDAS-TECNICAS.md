@@ -209,3 +209,21 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   saia do servidor. Relatório de custo agrupa por `client_id`, `origem`, `provider` e `model`; telefone só para investigação
   dentro do servidor.
 - **Status:** restrição permanente. Registrada em 30/10/2026.
+
+## DT-012 — Ordem da escada Gemini e `GEMINI_REASONING_EFFORT` decididas sem prompt real
+
+- **Onde:** `LLM_MODEL_LADDER_PADRAO` em `backend/src/services/llmModels.js` (hoje `gemini-flash-latest` antes de
+  `gemini-flash-lite-latest`) e `GEMINI_REASONING_EFFORT` em `backend/src/chatbot-ai-engine.js` (padrão `none`).
+- **O que foi medido (30/10/2026, endpoint compatível com OpenAI, respondendo "oi", prompt de 13 tokens):**
+  `gemini-flash-latest` com raciocínio 3027 ms e 129 tokens no total; sem raciocínio (`none`) 1693 ms e 18 tokens;
+  `gemini-flash-lite-latest` 899 ms e 18 tokens (ele não pensa por padrão e recusa `reasoning_effort` com 400).
+- **O que essa medição NÃO prova:** o "7x" de tokens é artefato do prompt minúsculo. O raciocínio custa uns cem tokens fixos, e
+  num prompt real de tenant com RAG a entrada tem milhares: a economia de custo ali é pequena, talvez desprezível. O que é real
+  é a latência, quase um segundo e meio por resposta, e é por ela que o `none` entrou. Nada sobre qualidade de conversa.
+- **A medição que falta, uma só, respondendo as duas perguntas juntas, com prompts reais de tenant de venda com RAG:**
+  1. o `gemini-flash-latest` sem raciocínio conversa tão bem quanto com raciocínio?
+  2. o `gemini-flash-lite-latest` conversa tão bem quanto o flash?
+  Ela decide a ordem dos degraus e o valor de `GEMINI_REASONING_EFFORT`. Medir também latência e `total_tokens` (de
+  `public.llm_usage`, que já registra o total da API, raciocínio incluído).
+- **Até lá:** a ordem fica a do commit que pôs o Gemini como padrão, e o `none` fica. Nenhum dos dois muda por esta medição de "oi".
+- **Status:** aberta, para depois do merge de `fix/migracao-gemini`. Registrada em 30/10/2026.

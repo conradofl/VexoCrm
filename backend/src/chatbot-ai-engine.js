@@ -138,6 +138,59 @@ async function postOpenAiCompat(url, apiKey, body) {
   };
 }
 
+// reasoning_effort do Gemini: politica por env, aprendizado por modelo.
+//
+// Por que "none": LATENCIA, nao custo. Medido em 30/10/2026 no gemini-flash-latest
+// respondendo "oi": 3027ms com raciocinio contra 1693ms sem — quase um segundo e
+// meio por resposta, e isso o cliente sente no WhatsApp. O total de tokens caiu de
+// 129 para 18 ("7x"), mas e ARTEFATO do prompt de 13 tokens: o raciocinio custa uns
+// cem tokens fixos, e num prompt real de tenant com RAG a entrada tem milhares —
+// la a economia e pequena, talvez desprezivel. Nao decidir nada por esse "7x".
+// Se o flash sem raciocinio conversa tao bem quanto com ele e a DT-012.
+//
+// GEMINI_REASONING_EFFORT: padrao "none"; vazio = nunca manda o parametro.
+// Nao ha lista de modelos: quem recusa o parametro (gemini-flash-lite-latest
+// devolveu 400 INVALID_ARGUMENT em 30/10/2026) e aprendido no primeiro 400 e
+// lembrado pelo resto do processo.
+const geminiSemReasoning = new Set();
+export function _resetGeminiSemReasoningForTest() {
+  geminiSemReasoning.clear();
+}
+
+function politicaDeReasoningGemini() {
+  return String(process.env.GEMINI_REASONING_EFFORT ?? "none").trim();
+}
+
+async function chamarGemini({ apiKey, model, messages, temperature, max_tokens, response_format }) {
+  const url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+  const body = { model, messages, temperature, max_tokens };
+  if (response_format) body.response_format = response_format;
+
+  const politica = politicaDeReasoningGemini();
+  if (!politica || geminiSemReasoning.has(model)) return postOpenAiCompat(url, apiKey, body);
+
+  const r = await postOpenAiCompat(url, apiKey, { ...body, reasoning_effort: politica });
+  // Chave invalida tambem volta 400 INVALID_ARGUMENT no Gemini (medido em
+  // 30/10/2026): essa vai para CREDENCIAL, nunca vira "modelo recusou o parametro".
+  const recusouParametro =
+    !r.ok &&
+    r.status === 400 &&
+    /INVALID_ARGUMENT/.test(String(r.corpo)) &&
+    classifyLlmHttpError(r.status, r.corpo).tipo !== "CREDENCIAL";
+  if (!recusouParametro) return r;
+
+  const semParametro = await postOpenAiCompat(url, apiKey, body);
+  // So aprende quando a repeticao SEM o parametro da certo: isso prova que ele era
+  // a causa. Se falhar de novo, o problema e outro e nada fica lembrado.
+  if (semParametro.ok) {
+    geminiSemReasoning.add(model);
+    console.warn(
+      `[chatbot-ai-engine] modelo "${model}" recusou reasoning_effort="${politica}"; seguindo sem ele neste processo.`
+    );
+  }
+  return semParametro;
+}
+
 const LLM_PROVIDERS = {
   groq: {
     nome: "Groq",
@@ -151,11 +204,7 @@ const LLM_PROVIDERS = {
   gemini: {
     nome: "Gemini",
     chave: () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "",
-    chamar: ({ apiKey, model, messages, temperature, max_tokens, response_format }) => {
-      const body = { model, messages, temperature, max_tokens };
-      if (response_format) body.response_format = response_format;
-      return postOpenAiCompat("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", apiKey, body);
-    },
+    chamar: chamarGemini,
   },
   openai: {
     nome: "OpenAI",
