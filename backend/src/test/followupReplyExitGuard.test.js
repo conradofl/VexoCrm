@@ -183,4 +183,3 @@ describe("hasFollowupReplySince + worker — janela de tempo", () => {
     expect(evolutionCalls).toHaveLength(1);
   });
 });
-
