@@ -31,7 +31,7 @@ import {
 } from "../services/sendWindow.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
-import { isWonStage, isLostStage } from "../services/followupExitGuard.js";
+import { isWonStage, isLostStage, hasFollowupReplySince } from "../services/followupExitGuard.js";
 import {
   resolveChipDailyLimit,
   reserveChipDailyQuota,
@@ -191,7 +191,7 @@ export async function processJob(job) {
     `SELECT fj.id, fj.schedule_id, fj.template_id, fj.custom_message, fj.status as job_status,
             fj.media_path as job_media_path, fj.media_type as job_media_type, fj.media_mime as job_media_mime, fj.media_filename as job_media_filename,
             fs.lead_name, fs.phone, fs.meeting_datetime, fs.status as schedule_status,
-            fs.campaign_id, fs.company_id,
+            fs.campaign_id, fs.company_id, fs.created_at as schedule_created_at,
             ft.message, ft.trigger_type,
             ft.step_type, ft.action_type, ft.action_payload, ft.conditions,
             ft.media_path as template_media_path, ft.media_type as template_media_type, ft.media_mime as template_media_mime, ft.media_filename as template_media_filename,
@@ -273,31 +273,21 @@ export async function processJob(job) {
     return;
   }
 
-  // 2. Condição de saída: Resposta do lead (trigger no_reply ou exit_on_reply)
-  if (row.trigger_type === "no_reply" && row.company_id && row.phone) {
-    const { rows: replies } = await query(
-      `SELECT id FROM followup_replies
-        WHERE company_id = $1
-          AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-        LIMIT 1`,
-      [row.company_id, row.phone]
-    );
-    if (replies.length) {
+  // 2. Condição de saída: Resposta do lead (trigger no_reply ou exit_on_reply).
+  // Só conta resposta recebida DEPOIS da inscrição (fs.created_at): resposta antiga
+  // do mesmo telefone não pode fazer o lead pular a cadência nova.
+  const checksReply = row.trigger_type === "no_reply" || row.exit_on_reply !== false;
+  if (checksReply && row.phone && (row.tenant_id || row.company_id)) {
+    const replied = await hasFollowupReplySince({
+      tenantId: row.tenant_id,
+      companyId: row.company_id,
+      phone: row.phone,
+      since: row.schedule_created_at,
+      queryFn: query,
+    });
+    if (replied) {
       await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
-      console.log(log, "skipped — lead já respondeu (trigger no_reply)");
-      return;
-    }
-  } else if (row.exit_on_reply !== false && row.company_id && row.phone) {
-    const { rows: replies } = await query(
-      `SELECT id FROM followup_replies
-        WHERE company_id = $1
-          AND ${SQL_CANONICAL_PHONE("phone")} = ${SQL_CANONICAL_PHONE("$2::text")}
-        LIMIT 1`,
-      [row.company_id, row.phone]
-    );
-    if (replies.length) {
-      await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
-      console.log(log, "skipped — lead já respondeu (exit_on_reply)");
+      console.log(log, `skipped — lead respondeu depois da inscrição (${row.trigger_type === "no_reply" ? "trigger no_reply" : "exit_on_reply"})`);
       return;
     }
   }

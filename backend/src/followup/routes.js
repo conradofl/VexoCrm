@@ -151,7 +151,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       const supabase = getSupabase();
       const { data: company } = await supabase
         .from("followup_companies")
-        .select("id, webhook_url")
+        .select("id, webhook_url, tenant_id")
         .eq("id", companyId || "")
         .maybeSingle();
 
@@ -193,7 +193,7 @@ export function registerFollowupRoutes(app, requireFirebaseAuth, requireInternal
       // Cancelar cadência em andamento quando o lead responde (exit_on_reply)
       if (phone) {
         await cancelFollowupCadenceOnReply({
-          companyId,
+          tenantId: company?.tenant_id || null,
           phone,
           queryFn: query,
         }).catch((err) => {

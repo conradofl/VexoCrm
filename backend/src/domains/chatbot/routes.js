@@ -2939,7 +2939,7 @@ export function registerChatbotRoutes(app, deps) {
           console.info(`[auto-funnel] Lead ${phone} transitou: ${result.previousStage} ➔ ${result.newStage} (${result.reason})`);
           // Se transitou para buyer, cancela follow-up ativo
           if (result.newStage === "buyer") {
-            await cancelFollowupCadenceOnReply({ companyId: clientId, phone, queryFn: pgDatabasePool.query.bind(pgDatabasePool) });
+            await cancelFollowupCadenceOnReply({ tenantId: clientId, phone, queryFn: pgDatabasePool.query.bind(pgDatabasePool) });
           }
         }
       }).catch((err) => {
