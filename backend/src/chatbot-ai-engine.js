@@ -126,6 +126,10 @@ async function postOpenAiCompat(url, apiKey, body) {
     ok: true,
     content: data.choices?.[0]?.message?.content || "",
     finishReason: data.choices?.[0]?.finish_reason ?? null,
+    // total_tokens vem da API e NAO e redundante com entrada + saida: no Gemini
+    // com thinking, os tokens de raciocinio sao cobrados e ficam fora dos dois.
+    // Medido em 30/10/2026 no gemini-flash-latest: prompt 13 + completion 5 = 18,
+    // total 129. Somar os dois esconderia 111 tokens faturaveis. Nao "simplificar".
     usage: {
       promptTokens: data.usage?.prompt_tokens ?? null,
       completionTokens: data.usage?.completion_tokens ?? null,

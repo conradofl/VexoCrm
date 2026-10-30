@@ -3,6 +3,9 @@
 //
 // So fato do evento (provedor, modelo, tokens). Nada de custo em reais e nada
 // de texto de prompt ou resposta.
+//
+// A tabela guarda TELEFONE e nao tem RLS (ver DT-011 em docs/DIVIDAS-TECNICAS.md):
+// nunca expor por rota publica nem por relatorio que saia do servidor.
 
 import { pgDatabasePool } from "./database.js";
 

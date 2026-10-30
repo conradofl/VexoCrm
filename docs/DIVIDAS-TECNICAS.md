@@ -165,3 +165,47 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   intenção em linguagem natural), o risco de falso positivo ("pode parar de ligar às 18h?"), se há mensagem de confirmação, e
   o que fazer com quem já está em sequência no meio.
 - **Status:** aberta, **sem correção em andamento**; o dono abrirá frente própria. Registrada em 29/10/2026.
+
+## DT-009 — Custo de IA de campanha sem dono em `llm_usage`
+
+- **Onde:** as cinco rotas de IA de campanha em `backend/src/domains/campaigns/routes.js` chamam o `campaign-ai.js` sem o
+  tenant: `generateCampaignCopySuggestion` (linha 661, rota `POST /api/campaigns/ai/generate-copy`), `suggestCampaignSequence`
+  (682, `suggest-sequence`), `generateCampaignTemplateVariants` (713, `generate-template-variants`), `suggestCampaignDelays`
+  (743, `suggest-delays`) e `rewriteCampaignStep` (789, `rewrite-step`). Linhas medidas no commit 3795380f.
+- **O que acontece:** o `campaign-ai.js` já mede (`contextoDeCampanha`, linha 159, lê `input.clientId`), mas como a rota não
+  passa o campo, toda linha de `public.llm_usage` com `origem = 'campanha'` sai com `client_id` nulo.
+- **Como resolver:** em cada uma das cinco chamadas, acrescentar `clientId` ao objeto passado, com o mesmo tenant que a rota já
+  resolve para autorizar o pedido. Nenhuma mudança no `campaign-ai.js`. Fazer de passagem por quem mexer nessas rotas.
+- **Por que não foi feito junto:** `domains/campaigns/*` tem outra frente viva; o commit de medição não tocou nesses arquivos.
+- **Status:** aberta. Registrada em 30/10/2026.
+
+## DT-010 — Chamadas de LLM que vão direto na Groq ficam fora de `llm_usage`
+
+- **Onde:** estes pontos postam em `api.groq.com` sem passar por `callLlmChatCompletion` (`backend/src/chatbot-ai-engine.js`),
+  então não entram na escada multi-provedor nem na medição de custo:
+  - `backend/src/followup/automationEngine.js:219` (SDK `groq.chat.completions.create`)
+  - `backend/src/followup/worker.js:665` (SDK `groq.chat.completions.create`)
+  - `backend/src/helpdesk-ai.js:67`
+  - `backend/src/domains/geracaoDigitalContracts/contractExtract.js:76`
+  - `backend/src/domains/geracaoDigital/briefingExtract.js:119`
+  - `backend/src/domains/geracaoDigitalRoutes.js:2911`
+  - `backend/src/domains/leads/chatInsight.js:567` (fallback direto, depois que `callLlmChatCompletion` falha)
+  - `backend/src/services/leadAiFieldExtractor.js:197` (fallback direto, idem)
+  - `backend/src/chatbot-ai-engine.js:810`, `describeImage` (visão). Sai desta lista quando a visão for para o Gemini.
+- **Fora de propósito:** a transcrição de áudio (`chatbot-ai-engine.js:753` e `domains/geracaoDigital/briefingTranscribe.js`)
+  continua na Groq com whisper, por decisão de 30/10/2026. Não conta como texto de LLM.
+- **Por que é uma dívida:** hoje é a Groq gratuita e não pesa na fatura. Mas o follow-up acabou de ser consertado e vai passar
+  a ser usado, e no dia em que qualquer um desses pontos for apontado para o Gemini vira custo invisível: nada em `llm_usage`.
+- **Como resolver:** trocar a chamada direta por `callLlmChatCompletion` com `contexto: { clientId, origem }`. Os dois fallbacks
+  diretos podem simplesmente sair, porque a escada já tenta outro provedor.
+- **Status:** aberta. Registrada em 30/10/2026.
+
+## DT-011 — `llm_usage` guarda telefone e não tem RLS
+
+- **Onde:** `public.llm_usage` (migration `20261030120000_create_llm_usage.sql`), coluna `phone`.
+- **Decisão:** sem RLS de propósito. As tabelas do repositório se dividem entre sem RLS e com uma política que nega tudo, e
+  uma política errada bloquearia o INSERT do backend e apagaria a medição sem aviso.
+- **A restrição que vem junto:** a tabela tem telefone de lead. Não pode ser exposta por rota pública nem por relatório que
+  saia do servidor. Relatório de custo agrupa por `client_id`, `origem`, `provider` e `model`; telefone só para investigação
+  dentro do servidor.
+- **Status:** restrição permanente. Registrada em 30/10/2026.
