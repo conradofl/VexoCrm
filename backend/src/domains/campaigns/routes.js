@@ -103,7 +103,14 @@ export function normalizeDispatchPhone(phone, lead = null) {
   return normalizeString(raw).replace(/\D/g, "");
 }
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
-import { QUOTA_PAUSE_MARKER, createChipQuotaGate, findInstanceByWebhookUrl } from "../../services/campaignQuotaGate.js";
+import { isPhoneOptedOut } from "../../campaign/queueOptOut.js";
+import { resumeDeferredQueues } from "../../campaign/queueResume.js";
+import {
+  QUOTA_PAUSE_MARKER,
+  buildQuotaGateForWebhook as buildQuotaGateForWebhookShared,
+  createChipQuotaGate,
+  findInstanceByWebhookUrl,
+} from "../../services/campaignQuotaGate.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET, SQL_LEAD_TEMPERATURE_ONLY } from "../../services/leadTemperature.js";
 import {
   EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS,
@@ -2578,6 +2585,14 @@ export function registerCampaignsRoutes(app, deps) {
       console.error("[campaign-recurrence] falha ao materializar ocorrencias:", err);
     }
 
+    // Filas de resposta adiadas por um freio (janela fechada, cota do chip esgotada): retoma as que já podem tentar de novo.
+    // Falha aqui nunca derruba o agendador de lotes.
+    try {
+      await resumeDeferredQueues({ pool: pgDatabasePool });
+    } catch (err) {
+      console.error("[campaign-queue] falha ao retomar filas adiadas:", err);
+    }
+
     const now = new Date().toISOString();
 
     try {
@@ -3079,15 +3094,13 @@ export function registerCampaignsRoutes(app, deps) {
   // Portão de cota para os disparos que só têm a URL do webhook (envio manual e direto): o chip é a instância
   // cadastrada cujo webhook é EXATAMENTE essa URL; sem correspondência, não identificado (segue sem cota, registrado).
   async function buildQuotaGateForWebhook(clientId, webhookUrl) {
-    let chip = null;
-    let timezone = "America/Sao_Paulo";
-    try {
-      chip = findInstanceByWebhookUrl(await getLeadClientEvolutionInstances(clientId), webhookUrl);
-      timezone = resolveSendWindowConfig((await getLeadClientN8nSettings(clientId)) || {}).timezone || timezone;
-    } catch (err) {
-      console.warn("[campaign-quota] não foi possível resolver o chip do webhook:", err?.message || err);
-    }
-    return createChipQuotaGate({ chip, timezone, pool: pgDatabasePool });
+    return buildQuotaGateForWebhookShared({
+      clientId,
+      webhookUrl,
+      pool: pgDatabasePool,
+      getInstances: getLeadClientEvolutionInstances,
+      getSettings: getLeadClientN8nSettings,
+    });
   }
 
   // ── Defeito A: elegibilidade idempotente por disparo ────────────────────────
@@ -3760,13 +3773,32 @@ export function registerCampaignsRoutes(app, deps) {
           }
         : null;
 
-    const checkOptout = async ({ phone }) => {
+    // Opt-out do lote. ATÉ 29/10/2026 esta função existia, lia lead_optouts e NUNCA foi passada ao envio (onLeadCheckOptout):
+    // quem digitava "parar" entrava na tabela e continuava recebendo campanha. Agora é ligada, lendo as duas fontes pelo mesmo
+    // helper da fila (queueOptOut.js). O lead pulado fica como 'skipped' para contar como processado (o lote fecha 'done').
+    // Erro de leitura = pula (nunca libera); sem registro, para o lead poder ser retomado em "executar pendentes".
+    const checkOptout = async ({ lead, phone }) => {
       if (!pgDatabasePool || !phone) return false;
-      const { rows } = await pgDatabasePool.query(
-        `SELECT id FROM public.lead_optouts WHERE client_id = $1 AND phone = $2 LIMIT 1`,
-        [clientId, phone]
-      );
-      return rows.length > 0;
+      let optOut;
+      try {
+        optOut = await isPhoneOptedOut(pgDatabasePool, { clientId, phone });
+      } catch (err) {
+        console.error("[campaign-dispatch] falha ao checar opt-out; lead pulado nesta rodada:", err?.message || err);
+        return true;
+      }
+      if (!optOut) return false;
+      await pgDatabasePool
+        .query(
+          `INSERT INTO public.campaign_dispatch_runs
+             (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
+           VALUES ($1, $2, $3, $4, $5, 'skipped', 'Lead está na lista de Opt-out', now(), $6)
+           ON CONFLICT (dispatch_id, lead_id) DO NOTHING`,
+          [dispatchId, campaign.id, clientId, lead?.id || null, normalizeString(phone).replace(/\D/g, ""), importItemIdOf(lead)]
+        )
+        .catch((err) => {
+          console.warn("[campaign-dispatch] falha ao registrar lead pulado por opt-out:", err?.message || err);
+        });
+      return true;
     };
 
     // ── GARANTIA DURA INEGOCIÁVEL (Item 1a): ──────────────────────────────────
@@ -4084,6 +4116,7 @@ export function registerCampaignsRoutes(app, deps) {
       },
       onLeadClaim: claimLead,
       onLeadClaimRollback: rollbackClaimLead,
+      onLeadCheckOptout: checkOptout,
       onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
         runChipTracker.record(lead?.id, activeChip);
         try {

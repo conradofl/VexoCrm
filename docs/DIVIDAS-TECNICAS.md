@@ -19,7 +19,9 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   de envio do lote.
 - **Como resolver (futuro):** ou a fila passa a criar/reaproveitar um lote (com claim, cota e janela), ou é desarmada
   para campanhas que usam lotes. Decisão do dono, com medição de quantas campanhas dependem dela.
-- **Status:** aberta, sem prioridade. Registrada em 28/10/2026.
+- **Status:** aberta. Registrada em 28/10/2026. Atualizado em 29/10/2026: a fila ganhou claim (PR #167), trava por ciclo no claim do lote
+  (PR 1b) e os três freios (PR 2): janela de envio, cota do chip e opt-out, com adiamento e retomada pelo agendador. Continua
+  fora do agendador de lotes (sem run); a rotação entre chips na fila é o PR 3.
 
 ## DT-002 — A tela não usa `missingOrigin` da recorrência sem origem
 
@@ -58,7 +60,20 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   considera candidato quem não tem progresso nenhum, e o lote só conhece a regra de `aguardando_usuario`. Ninguém resolve.
 - **Como resolver (futuro):** tratar `iniciando` com `claimedAt` mais antigo que um limite (proposta: 10 minutos) como livre,
   tanto na escolha de candidatos quanto no `UPDATE` do claim. Entra junto do PR dos freios, onde claim pendurado é o tema.
-- **Status:** aberta. Registrada em 29/10/2026.
+- **Status:** RESOLVIDA em 29/10/2026 no PR dos freios: `isStaleQueueClaim` e o `UPDATE` do claim tratam `iniciando` com mais de 10
+  minutos (`CLAIM_TTL_MINUTES`) como livre. Mantida aqui só como registro.
+
+## DT-005 — Quem digita "parar" vira `lead_optouts`, mas não vira a flag `leads.opt_out`
+
+- **Onde:** `backend/src/domains/followup/routes.js` (webhook de resposta do follow-up, que reconhece "sair", "parar",
+  "cancelar" e "stop" e grava em `lead_optouts`) e `backend/src/campaign/queueOptOut.js` (a leitura única das duas fontes).
+- **O que acontece:** o opt-out por palavra grava só na tabela. A flag `leads.opt_out` (a que a tela de leads edita e que
+  `buildDispatchLeads` filtra na montagem da lista) não é gravada. Até 29/10/2026 NENHUM envio de campanha lia a tabela: o
+  `checkOptout` do lote existia e nunca foi passado ao envio. Agora a fila e o lote leem as duas fontes pelo mesmo helper
+  (`isPhoneOptedOut`), mas qualquer outra tela ou relatório que olhe só a flag continua sem enxergar quem digitou "parar".
+- **Como resolver (futuro):** gravar a flag `leads.opt_out` (e `metadata.opt_out`) no mesmo ponto em que se grava
+  `lead_optouts`; decidir se o opt-out por palavra também vale para o agente de IA e o follow-up.
+- **Status:** aberta. Registrada em 29/10/2026. Dívida nomeada do PR dos freios.
 
 ## DT-006 — Dois presets "gestor": o da tela e o do backend divergem, e o da tela vence
 
@@ -93,3 +108,60 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
   produção são o que leva para 1 a 2 dias.
 - **Status:** aberta. Registrada em 29/10/2026. O RAG deixou de depender disso com `fix/rag-gate-agente-rag` (gate pela
   página `agente` + módulo do tenant), mas a dívida continua para qualquer página nova.
+
+## DT-007 — Todo deploy pausa os lotes que estão em voo
+
+- **Onde:** `backend/src/campaign/orphanRecovery.js`, `recoverOrphanDispatches` (chamada em `server.js:976`, logo depois de
+  `runMigrations`, antes de o servidor ouvir). A mensagem gravada está nas linhas 130-132.
+- **O que acontece:** um lote `running` no momento em que o processo reinicia fica órfão. No boot ele é recolhido e vai para
+  `paused` com "Pausado — servidor reiniciou durante o envio. Retome quando quiser." (com a contagem de leads de envio não
+  confirmado, quando há). Ninguém retoma sozinho.
+- **Medido em 29/10/2026:** lote 4/21 da campanha "Continuação - Apoio Julio": `paused`, target 10, sent 7, failed 0, com essa
+  mensagem. No log do boot anterior, "Lote 2/21" pausado com `leadsSent: 5`. Explica lotes "com pendentes" depois de um
+  deploy sem que a fila, o claim ou o envio tenham defeito.
+- **Por que não é defeito:** a recuperação protege contra reenvio (lead com envio não confirmado não é reenviado). O custo é
+  que **todo deploy nosso pega algum lote em voo** e o deixa parado até alguém clicar em retomar.
+- **O que fazer hoje:** antes de subir, conferir `activeDispatchesCount` no `/health` (`domains/insights/routes.js:163`) e
+  preferir subir com zero lotes em andamento; depois do deploy, listar e retomar os lotes pausados por reinício.
+- **Como resolver (futuro):** decisão do dono. Ou retomada automática dos lotes pausados por reinício (respeitando janela de
+  envio e cota do chip, e tratando os leads de envio não confirmado), ou drenagem do que está em voo antes do deploy.
+- **Status:** aberta. Registrada em 29/10/2026.
+
+## DT-008 — O pedido de saída só é capturado na resposta ao follow-up; resposta de campanha não é registrada em lugar nenhum
+
+- **Medição (29/10/2026, dono, 23:41Z):** `lead_optouts` existe (colunas `id`, `client_id`, `phone`, `optout_at`, `reason`) e tem
+  **zero registros em todos os tenants**, com cerca de 12 mil telefones importados e meses de campanha. Ninguém nunca ter pedido
+  para sair não é verdade: o problema está **antes da tabela**.
+- **Único ponto que escreve:** `backend/src/followup/routes.js`, webhook `POST /webhooks/whatsapp/:companyId` (linha 147), detecção
+  na **linha 211** (`messageText.match(/^(sair|parar|cancelar|stop)$/i)`) e `INSERT` na linha 213. Só vale para quem responde a
+  uma mensagem de **follow-up**, e a regex é ancorada: a mensagem inteira tem de ser uma das quatro palavras. "Parar!", "parar.",
+  "pare de me mandar mensagem", "não quero mais", "me tira da lista" e "descadastrar" **não casam**. O `.catch` do `INSERT`
+  (linha 217) só escreve no log.
+- **As três fontes de opt-out:** `leads.opt_out` (coluna), `leads.metadata.opt_out` / `leads.dados.opt_out` (JSON) e a tabela
+  `lead_optouts`. A coluna e o JSON só são gravados à mão, pelo PATCH de lead (`backend/src/domains/leads/routes.js:3087-3101`).
+  Nenhum código grava as três a partir de uma mensagem do lead numa campanha.
+- **Caminho que a resposta de uma CAMPANHA percorre hoje (nenhuma etapa procura pedido de saída):**
+  1. `backend/src/domains/chatbot/routes.js`, `POST /api/hardcoded-chat-webhook` (linha 2802), o webhook por instância. Descarta eco
+     e mensagem nossa (2823-2880) e resolve o conteúdo (2881).
+  2. **ETAPA 3, gravação da mensagem** (2901-2930, `appendLeadMessage` na 2906): a mensagem é gravada como inbound. Nada de
+     opt-out aqui.
+  3. `reclassifyLeadFromMessages` (2931) muda o estágio do funil; `classifyConversation` (2968,
+     `services/whatsappChatClassifier.js`) só separa humano de robô/URA. Nenhum dos dois entende "pare".
+  4. **ETAPA 4, roteamento de campanha** (3022): `findCampaignReplyMatches` (3033).
+  5. **CAMINHO 1** (3130): `continueCampaignLeadFromReply` (3175, definida em `backend/src/campaign/dispatch.js:2228`) **envia o
+     próximo passo da sequência** para o lead que acabou de pedir para sair.
+  6. **CAMINHO 2** (3212): o agente de IA responde a mensagem.
+  - Variante n8n: `backend/src/domains/campaigns/routes.js`, `POST /api/campaigns/reply-webhook` (6484), com
+    `findCampaignReplyMatches` (6533), `continueCampaignLeadFromReply` (6546) e a gravação do inbound (6631 e 6729). Mesma falta.
+- **Onde faltaria o gancho:** um único ponto, **logo depois da ETAPA 3** (a mensagem já gravada, 2930) e **antes** da
+  reclassificação (2931), da ETAPA 4 (3022), do CAMINHO 1 (3130) e do CAMINHO 2 (3212), com retorno antecipado: quem pediu para
+  sair não pode receber o próximo passo da campanha nem resposta do agente. O mesmo gancho na variante n8n, antes da linha 6546.
+  O gancho tem de gravar `lead_optouts` **e** a flag `leads.opt_out` (ver DT-005), cancelar a cadência de follow-up
+  (`cancelFollowupCadenceOnReply`, já usada no mesmo arquivo) e tirar o lead da fila e do lote, que já leem as duas fontes
+  (`campaign/queueOptOut.js`, lote em `routes.js` `checkOptout`, `campaign-outbound.js:1013`).
+- **Por que o commit que liga o opt-out ao lote não resolve sozinho:** ele faz o lote respeitar uma lista que continua vazia.
+  Passa a valer quando a captura existir.
+- **O que a captura exige decidir (peso jurídico, fora do escopo dos PRs de fila):** quais frases valem (palavra exata ou
+  intenção em linguagem natural), o risco de falso positivo ("pode parar de ligar às 18h?"), se há mensagem de confirmação, e
+  o que fazer com quem já está em sequência no meio.
+- **Status:** aberta, **sem correção em andamento**; o dono abrirá frente própria. Registrada em 29/10/2026.

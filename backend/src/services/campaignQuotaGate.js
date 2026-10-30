@@ -20,6 +20,7 @@
 import { getDateKey } from "./analytics.js";
 import { releaseChipDailyQuota, reserveChipDailyQuota, resolveChipDailyLimit } from "./chipQuota.js";
 import { normalizeString } from "../textNormalize.js";
+import { resolveSendWindowConfig } from "./sendWindow.js";
 
 // O agendador (routes.js, runDueIndependentDispatches) reconhece o lote pausado por cota por este trecho.
 export const QUOTA_PAUSE_MARKER = "cota diária do chip atingida";
@@ -121,4 +122,21 @@ export function createChipQuotaGate({ chip = null, timezone = "America/Sao_Paulo
       };
     },
   };
+}
+
+/**
+ * O portão de cota do chip que ENVIA por `webhookUrl`, com o fuso do tenant. Uma construção só para o envio manual/n8n, o
+ * lote e a fila de leads. Os leitores entram por parâmetro: cada chamador usa os seus (as rotas recebem os deles por
+ * injeção e os testes dublam isso). Chip ou fuso ilegíveis: portão sem chip (o envio segue, registrado como "sem chip").
+ */
+export async function buildQuotaGateForWebhook({ clientId, webhookUrl, pool, getInstances, getSettings, logger = console }) {
+  let chip = null;
+  let timezone = "America/Sao_Paulo";
+  try {
+    chip = findInstanceByWebhookUrl(await getInstances(clientId), webhookUrl);
+    timezone = resolveSendWindowConfig((await getSettings(clientId)) || {}).timezone || timezone;
+  } catch (err) {
+    logger.warn("[campaign-quota] não foi possível resolver o chip do webhook:", err?.message || err);
+  }
+  return createChipQuotaGate({ chip, timezone, pool });
 }

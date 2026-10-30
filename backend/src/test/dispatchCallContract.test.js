@@ -65,6 +65,7 @@ describe("contrato das chamadas de dispatchCampaignSequence", () => {
       "context",
       "onLeadClaim", // claim idempotente antes do envio (sem ele, reenvio)
       "onLeadClaimRollback", // devolve o lead à fila quando o chip cai
+      "onLeadCheckOptout", // opt-out (lead_optouts + flag): sem ele o lote envia a quem pediu para sair (era código morto até 29/10/2026)
       "onLeadFailed", // fecha o lead como failed/invalid_number
       "onLeadDispatched", // fecha o lead como sent (sem isso nada vira 'sent')
       "onStepDispatched", // grava a mensagem e o chip que enviou
