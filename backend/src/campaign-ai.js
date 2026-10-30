@@ -154,7 +154,13 @@ function buildTechniqueContext(style = "") {
 export { extractJsonFromLlmText } from "./services/jsonExtractor.js";
 import { extractJsonFromLlmText } from "./services/jsonExtractor.js";
 
-async function callGroqJson({ taskPrompt }) {
+// O tenant vem em input.clientId quando a rota passa. Hoje as rotas de campanha
+// nao passam, e a linha de llm_usage sai com dono nulo — visivel no relatorio.
+function contextoDeCampanha(input) {
+  return { clientId: normalizeString(input?.clientId) || null, origem: "campanha" };
+}
+
+async function callGroqJson({ taskPrompt, contexto = null }) {
   if (!process.env.GROQ_API_KEY && !process.env.GROQ_KEY) {
     throw new Error("GROQ_DISABLED");
   }
@@ -163,6 +169,7 @@ async function callGroqJson({ taskPrompt }) {
     model: getGroqModel(),
     temperature: 0.3,
     max_tokens: 1200,
+    contexto,
     messages: [
       {
         role: "system",
@@ -198,6 +205,7 @@ export async function generateCampaignCopySuggestion(input = {}) {
   };
 
   return callGroqJson({
+    contexto: contextoDeCampanha(input),
     schemaName: "campaign_copy_suggestion",
     schema: {
       type: "object",
@@ -542,6 +550,7 @@ Retorne EXCLUSIVAMENTE um objeto JSON no formato:
     model: defaultGroqModel(),
     temperature: 0.7,
     max_tokens: 2500,
+    contexto: contextoDeCampanha(input),
     messages: [
       {
         role: "system",
@@ -603,6 +612,7 @@ export async function suggestCampaignSequence(input = {}) {
   };
 
   const parsed = await callGroqJson({
+    contexto: contextoDeCampanha(input),
     schemaName: "campaign_sequence_suggestion",
     schema: {
       type: "object",
@@ -655,6 +665,7 @@ export async function suggestCampaignDelays(input = {}) {
   };
 
   const parsed = await callGroqJson({
+    contexto: contextoDeCampanha(input),
     schemaName: "campaign_delay_suggestion",
     schema: {
       type: "object",
@@ -711,6 +722,7 @@ export async function rewriteCampaignStep(input = {}) {
   };
 
   return callGroqJson({
+    contexto: contextoDeCampanha(input),
     schemaName: "campaign_step_rewrite",
     schema: {
       type: "object",

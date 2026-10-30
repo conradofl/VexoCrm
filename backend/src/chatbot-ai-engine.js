@@ -22,6 +22,7 @@ import { resolveEvolutionInstanceOwner, fetchMediaBase64FromEvolution } from "./
 import { saveMediaBuffer } from "./services/storage.js";
 import { findRagContextForQuestion, buildRagContextBlock, DEFAULT_RAG_TRANSFER_MESSAGE } from "./rag/chatSearch.js";
 import { toCanonicalPhoneFromJid } from "./services/canonicalPhone.js";
+import { gravarUsoLlm } from "./services/llmUsage.js";
 
 /**
  * Chatbot AI Engine
@@ -121,7 +122,16 @@ async function postOpenAiCompat(url, apiKey, body) {
   });
   if (!res.ok) return { ok: false, status: res.status, corpo: await res.text() };
   const data = await res.json();
-  return { ok: true, content: data.choices?.[0]?.message?.content || "" };
+  return {
+    ok: true,
+    content: data.choices?.[0]?.message?.content || "",
+    finishReason: data.choices?.[0]?.finish_reason ?? null,
+    usage: {
+      promptTokens: data.usage?.prompt_tokens ?? null,
+      completionTokens: data.usage?.completion_tokens ?? null,
+      totalTokens: data.usage?.total_tokens ?? null,
+    },
+  };
 }
 
 const LLM_PROVIDERS = {
@@ -172,7 +182,18 @@ const LLM_PROVIDERS = {
       });
       if (!res.ok) return { ok: false, status: res.status, corpo: await res.text() };
       const data = await res.json();
-      return { ok: true, content: data.content?.[0]?.text || "" };
+      const entrada = data.usage?.input_tokens ?? null;
+      const saida = data.usage?.output_tokens ?? null;
+      return {
+        ok: true,
+        content: data.content?.[0]?.text || "",
+        finishReason: data.stop_reason ?? null,
+        usage: {
+          promptTokens: entrada,
+          completionTokens: saida,
+          totalTokens: entrada !== null && saida !== null ? entrada + saida : null,
+        },
+      };
     },
   },
 };
@@ -210,6 +231,27 @@ function erroDeCredencial(provedores, ultimoErro) {
   return erro;
 }
 
+/**
+ * Custo de IA por cliente (public.llm_usage). Fire-and-forget: nao espera o
+ * banco e NUNCA derruba a resposta — sem a tabela, ou com o banco fora, o
+ * agente continua respondendo e so a medicao se perde, com aviso.
+ */
+function registrarUsoLlm(uso) {
+  try {
+    gravarUsoLlm(uso).catch((err) => {
+      console.warn("[llm-usage] falha ao gravar uso de IA — resposta segue sem medicao:", err?.message || err);
+    });
+  } catch (err) {
+    console.warn("[llm-usage] falha ao gravar uso de IA — resposta segue sem medicao:", err?.message || err);
+  }
+}
+
+/**
+ * contexto (opcional): { clientId, origem, phone } — quem pagou a chamada, para
+ * public.llm_usage. Rotulos de origem em services/llmUsage.js. Sem contexto a
+ * linha e gravada com dono nulo. tentativasAnteriores e uso interno: chamadas ja
+ * feitas por uma escada de fora (runChatbotAI) antes desta.
+ */
 export async function callLlmChatCompletion({
   model = defaultLlmModel(),
   messages = [],
@@ -217,6 +259,7 @@ export async function callLlmChatCompletion({
   max_tokens = 600,
   response_format = null,
   singleModelOnly = false,
+  contexto = null,
 }) {
   const chosenModel = model || defaultLlmModel();
 
@@ -247,6 +290,7 @@ export async function callLlmChatCompletion({
     const adaptador = LLM_PROVIDERS[provider];
 
     let r;
+    const inicioMs = Date.now();
     try {
       r = await adaptador.chamar({
         apiKey: adaptador.chave(),
@@ -266,7 +310,24 @@ export async function callLlmChatCompletion({
       continue;
     }
 
-    if (r.ok) return r.content;
+    if (r.ok) {
+      // So a tentativa que deu certo consome token faturavel; as queimadas antes
+      // dela entram em "tentativas", que mede o desperdicio da escada.
+      registrarUsoLlm({
+        clientId: contexto?.clientId ?? null,
+        origem: contexto?.origem ?? null,
+        phone: contexto?.phone ?? null,
+        provider,
+        model: m,
+        promptTokens: r.usage?.promptTokens,
+        completionTokens: r.usage?.completionTokens,
+        totalTokens: r.usage?.totalTokens,
+        finishReason: r.finishReason,
+        latencyMs: Date.now() - inicioMs,
+        tentativas: (contexto?.tentativasAnteriores || 0) + cursor,
+      });
+      return r.content;
+    }
 
     lastError = new Error(`${adaptador.nome} HTTP ${r.status}: ${String(r.corpo).slice(0, 200)}`);
 
@@ -331,6 +392,7 @@ export async function callLlmChatCompletion({
           max_tokens,
           response_format: null,
           singleModelOnly: true,
+          contexto: { ...contexto, tentativasAnteriores: (contexto?.tentativasAnteriores || 0) + cursor },
         });
       } catch (err) {
         lastError = err;
@@ -1379,7 +1441,14 @@ export async function extractBriefingWithAI({
   }
 }
 
-export async function runChatbotAI({ systemPrompt, history, newMessages, existingData, llmModel = defaultLlmModel() }) {
+export async function runChatbotAI({
+  systemPrompt,
+  history,
+  newMessages,
+  existingData,
+  llmModel = defaultLlmModel(),
+  contexto = null,
+}) {
   // Mesclar dados existentes no contexto do sistema
   const dataContext = existingData && Object.keys(existingData).length > 0
     ? `\n\nDADOS JÁ COLETADOS ATÉ AGORA:\n${JSON.stringify(existingData, null, 2)}`
@@ -1402,17 +1471,21 @@ export async function runChatbotAI({ systemPrompt, history, newMessages, existin
   let finalResposta = null;
   let lastError = null;
   const credenciaisQuebradas = new Set();
+  let chamadasFeitas = 0;
 
   for (let i = 0; i < modelsToTry.length; i++) {
     const currentModel = modelsToTry[i];
     if (credenciaisQuebradas.has(detectLlmProvider(currentModel))) continue;
     try {
+      const tentativasAnteriores = chamadasFeitas;
+      chamadasFeitas++;
       const raw = await callLlmChatCompletion({
         model: currentModel,
         messages,
         temperature: 0.4,
         max_tokens: 600,
         singleModelOnly: true,
+        contexto: { ...contexto, tentativasAnteriores },
       });
 
       const resposta = parseAIResponse(raw, finalSystemPrompt);
@@ -2282,6 +2355,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
       newMessages: [combinedText],
       existingData: storedData,
       llmModel: activeLlmModel,
+      contexto: { clientId, phone, origem: isSimulation ? "simulador" : "chatbot" },
     });
   } catch (err) {
     console.error("[chatbot-ai] FALHA AO EXECUTAR IA NO TURNO — silenciando resposta automática", {

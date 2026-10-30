@@ -437,6 +437,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='campaign_queue_deferrals')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='campaign_queue_deferrals' AND column_name='retry_after')
     ) AS ok`,
+    "20261030120000_create_llm_usage.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='llm_usage' AND column_name='tentativas')
+      AND EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='idx_llm_usage_client_created')
+    ) AS ok`,
   };
 
   const query = checks[filename];
