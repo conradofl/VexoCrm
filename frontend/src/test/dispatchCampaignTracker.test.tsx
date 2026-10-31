@@ -437,6 +437,37 @@ describe("DispatchCampaignTracker", () => {
     expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-first", expect.any(Object));
   });
 
+  it("[TESTE OBRIGATÓRIO] caso 31/10 'teste 2': lote manual não disparado mostra 'Aguardando disparo', sem término, e com o botão de disparar", async () => {
+    // Formato que o dispatch-summary devolve para um lote draft sem scheduled_at:
+    // estado novo, sem próximo lote e sem estimativa (nada vai rodar sozinho).
+    setupSummary({
+      active: [
+        makeCampaign({
+          campaignId: "c-aguardando",
+          campaignName: "teste 2",
+          status: "aguardando_disparo",
+          statusLabel: "Aguardando disparo",
+          sentTotal: 0,
+          leadsPending: 2,
+          nextScheduledAt: null,
+          eta: null,
+          batches: [makeBatch({ id: "batch-manual", status: "draft", sentCount: 0, targetCount: 2 })],
+        }),
+      ],
+      ended: [],
+    });
+    const { DispatchCampaignTracker } = await import("@/pages/LeadImports/DispatchCampaignTracker");
+    renderWithProviders(<DispatchCampaignTracker clientId="vexo-adm" onOpenDispatch={vi.fn()} />);
+
+    expect(screen.getAllByText("Aguardando disparo").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Agendada")).toBeNull();
+    expect(screen.queryByText(/Término/)).toBeNull();
+
+    const triggerBtn = screen.getByTestId("btn-trigger-batch-1-c-aguardando");
+    fireEvent.click(triggerBtn);
+    expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-manual", expect.any(Object));
+  });
+
   it("separa o próximo lote do término estimado no cabeçalho e no rodapé do cartão expandido", async () => {
     setupSummary({
       active: [
