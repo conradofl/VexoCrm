@@ -17,7 +17,7 @@ export interface StalledLeadsAlertCardProps {
 
 export function StalledLeadsAlertCard({ clientId, minDays = null }: StalledLeadsAlertCardProps) {
   const navigate = useNavigate();
-  const { data, isLoading } = useStalledLeads(clientId, minDays ?? null, { limit: 1 });
+  const { data, isLoading, error } = useStalledLeads(clientId, minDays ?? null, { limit: 1 });
 
   if (isLoading && !data) {
     return (
@@ -28,8 +28,34 @@ export function StalledLeadsAlertCard({ clientId, minDays = null }: StalledLeads
     );
   }
 
+  // Sem resposta da API (falha, ou consulta que nem rodou) o número é desconhecido: travessão e motivo.
+  // Nunca o aviso verde de "em dia" — ele só sai quando o servidor respondeu e a contagem é zero.
+  const measuredCount = data?.stalled_count ?? data?.count;
+  if (typeof measuredCount !== "number") {
+    const reason = error instanceof Error && error.message ? error.message : "Não foi possível consultar agora.";
+    return (
+      <Card data-testid="stalled-leads-alert-card-unavailable" className="rounded-2xl border border-border p-0 shadow-xs">
+        <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-foreground">Leads parados: —</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{reason}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigate("/crm/leads-parados")}
+            className="shrink-0 h-9 gap-2 rounded-xl font-semibold text-xs self-start sm:self-auto"
+          >
+            <span>Visualizar Leads Parados</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const effectiveMinDays = data?.minDays ?? (typeof minDays === "number" ? minDays : 7);
-  const stalledCount = data?.stalled_count ?? data?.count ?? 0;
+  const stalledCount = measuredCount;
   const neverApproachedCount = data?.never_approached_count ?? 0;
   const hasStalled = stalledCount > 0;
 
