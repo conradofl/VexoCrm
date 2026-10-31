@@ -64,3 +64,4 @@ Todas chamam `dispatchCampaignSequence` **sem** `onLeadClaim`, `onLeadClaimRollb
    o item 1 estiver decidido, para ninguém religá-lo por engano.
 
 Relacionado: DT-001 (a fila de leads também envia fora do agendador de lotes) em `docs/DIVIDAS-TECNICAS.md`.
+Medição de envio duplicado e a resposta repetida no mesmo passo: `docs/ACHADO-ENVIO-DUPLICADO-MEDICAO-31OUT.md`.
