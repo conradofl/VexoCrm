@@ -383,6 +383,31 @@ function refuseCampaignWithoutSource(res, sendError, context) {
   return sendError(res, 422, "CAMPAIGN_WITHOUT_SOURCE", CAMPAIGN_WITHOUT_SOURCE_MESSAGE);
 }
 
+// "Disparar Agora" fora da janela de envio do tenant. Até 30/10/2026 a rota do botão passava ignoreSendWindow: true
+// sem perguntar (decisão de projeto), e o lote saía depois do horário que a própria tela prometia. Agora o botão
+// recusa com 422 e devolve a janela e a próxima abertura; só sai fora dela quem repete a chamada com
+// forceOutsideWindow: true, e esse forçamento fica no log. Mesmo texto do agendador (runDueIndependentDispatches).
+export function describeSendWindowRefusal(now, sendWindowConfig) {
+  const localParts = getPartsInTimezone(now, sendWindowConfig.timezone);
+  const nextOpeningDate = getNextSendWindowOpening(now, sendWindowConfig);
+  const nextOpeningParts = getPartsInTimezone(nextOpeningDate, sendWindowConfig.timezone);
+  const nextOpeningStr = `${nextOpeningParts.timeString} (${nextOpeningParts.day}/${nextOpeningParts.month})`;
+  const windowStr = `${sendWindowConfig.start}–${sendWindowConfig.end} [${sendWindowConfig.days.join(",")}] (${sendWindowConfig.timezone})`;
+  return {
+    message: `Fora da janela de envio: horário local ${localParts.timeString}, janela ${windowStr}, próxima abertura prevista para ${nextOpeningStr}`,
+    details: {
+      localTime: localParts.timeString,
+      start: sendWindowConfig.start,
+      end: sendWindowConfig.end,
+      days: sendWindowConfig.days,
+      timezone: sendWindowConfig.timezone,
+      sendWindow: windowStr,
+      nextOpening: nextOpeningDate.toISOString(),
+      nextOpeningLocal: nextOpeningStr,
+    },
+  };
+}
+
 /**
  * Bloco de contexto com as opcoes de resposta que o lead recebeu escritas na
  * mensagem. Vai anexado ao roteiro copiado para o disparo.
@@ -6410,6 +6435,30 @@ export function registerCampaignsRoutes(app, deps) {
         return refuseCampaignWithoutSource(res, sendError, { campaignId: campaign.id, clientId: authorizedClientId, dispatchId });
       }
 
+      // Janela de envio: o botão obedece a mesma regra do agendador. Fora dela, 422 — a não ser que a tela tenha
+      // pedido confirmação e mandado forceOutsideWindow: true (só o booleano true vale; "true", 1 e afins não).
+      const sendWindowConfig = resolveSendWindowConfig((await getLeadClientN8nSettings(authorizedClientId)) || {});
+      const now = new Date();
+      let forcedOutsideWindow = false;
+      if (!isWithinSendWindow(now, sendWindowConfig)) {
+        const refusal = describeSendWindowRefusal(now, sendWindowConfig);
+        if (req.body?.forceOutsideWindow !== true) {
+          return sendError(res, 422, "OUTSIDE_SEND_WINDOW", refusal.message, refusal.details);
+        }
+        forcedOutsideWindow = true;
+        // Sem tabela de auditoria de disparo (dívida anotada no PR): o registro do forçamento é este log.
+        console.warn("[campaign-dispatch] disparo_forcado_fora_da_janela", {
+          clientId: authorizedClientId,
+          campaignId: campaign.id,
+          dispatchId,
+          uid: req.authAccess?.uid || null,
+          email: req.authAccess?.email || null,
+          localTime: refusal.details.localTime,
+          sendWindow: refusal.details.sendWindow,
+          nextOpening: refusal.details.nextOpening,
+        });
+      }
+
       // Claim atomico tambem no gatilho manual: `.neq("status","running")` impede que
       // dois cliques no botao — ou um clique concorrente com o ciclo do scheduler —
       // iniciem duas execucoes do mesmo disparo. Sem isso o mesmo passo sai duas vezes.
@@ -6467,10 +6516,11 @@ export function registerCampaignsRoutes(app, deps) {
         }
       }
 
-      res.json({ success: true, status: "running", dispatchId });
+      res.json({ success: true, status: "running", dispatchId, ...(forcedOutsideWindow ? { forcedOutsideWindow: true } : {}) });
 
-      // Executa o disparo em background (fire-and-forget da resposta HTTP)
-      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: true }).catch((err) => {
+      // Executa o disparo em background (fire-and-forget da resposta HTTP). Dentro da janela o motor segue checando
+      // e pausa o lote se ela fechar no meio; só o forçamento confirmado desliga essa checagem.
+      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: forcedOutsideWindow }).catch((err) => {
         console.error("[campaign-dispatch] dispatch_run_failed", { dispatchId, error: err.message });
         supabase.from("campaign_dispatches").update({ status: "failed", error_message: err.message, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
       });

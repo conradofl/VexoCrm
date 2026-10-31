@@ -10,6 +10,7 @@ const mockFetchApi = vi.fn();
 vi.mock("@/lib/api", () => ({
   fetchApi: (...args: any[]) => mockFetchApi(...args),
   API_BASE_URL: "",
+  readApiErrorMessage: async (_res: any, fallback: string) => fallback,
 }));
 
 const mockToast = vi.fn();
@@ -345,5 +346,80 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
     expect(
       screen.getByText(/Esta campanha não tem planilha de origem definida/i)
     ).toBeInTheDocument();
+  });
+
+  // Desde 30/10/2026 a rota recusa o "Agora" fora da janela de envio (422 OUTSIDE_SEND_WINDOW). Antes este fluxo nem
+  // conferia a resposta do trigger: com a recusa, diria "O lote de disparos foi iniciado com sucesso" sem nada sair.
+  const JANELA_422 = {
+    ok: false,
+    status: 422,
+    json: async () => ({
+      error: {
+        code: "OUTSIDE_SEND_WINDOW",
+        message: "Fora da janela de envio: horário local 18:38, janela 08:00–18:30 [mon,tue,wed,thu,fri] (America/Sao_Paulo), próxima abertura prevista para 08:00 (2/11)",
+        details: {
+          localTime: "18:38", start: "08:00", end: "18:30", days: ["mon", "tue", "wed", "thu", "fri"],
+          timezone: "America/Sao_Paulo", sendWindow: "08:00–18:30 [mon,tue,wed,thu,fri] (America/Sao_Paulo)",
+          nextOpening: "2026-11-02T11:00:00.000Z", nextOpeningLocal: "08:00 (2/11)",
+        },
+      },
+    }),
+  };
+  const triggerBodies: any[] = [];
+  function triggerFora422() {
+    triggerBodies.length = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, options?: any) => {
+      if (url.includes("/dispatches") && options?.method === "POST") {
+        if (url.endsWith("/trigger")) {
+          const body = options?.body ? JSON.parse(options.body) : {};
+          triggeredDispatchesCalls.push(url);
+          triggerBodies.push(body);
+          if (body.forceOutsideWindow === true) return { ok: true, status: 200, json: async () => ({ success: true }) };
+          return { ...JANELA_422, clone: () => JANELA_422 };
+        }
+        createdDispatchesCalls.push(options?.body ? JSON.parse(options.body) : {});
+        return { ok: true, json: async () => ({ dispatch: { id: "disp-deliberate-1" } }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }) as any;
+  }
+  async function confirmarDisparoAgora() {
+    mockCampaignsList = [testCampaign];
+    renderLeadImports("enviadas");
+    fireEvent.click(await screen.findByRole("button", { name: /Ver detalhes de Campanha em Edição/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Editar$/i }));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
+  }
+
+  it("fora da janela: mostra a janela e a hora atual; 'Não disparar' não envia e não diz 'Sucesso!'", async () => {
+    triggerFora422();
+    await confirmarDisparoAgora();
+
+    const texto = await screen.findByTestId("outside-send-window-text");
+    expect(texto.textContent).toContain("Agora são 18:38 (America/Sao_Paulo)");
+    expect(texto.textContent).toContain("das 08:00 às 18:30, em seg, ter, qua, qui, sex");
+    expect(texto.textContent).toContain("A próxima abertura é 08:00 (2/11)");
+
+    fireEvent.click(screen.getByTestId("outside-send-window-cancel"));
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Campanha salva, lote não disparado" }));
+    });
+    expect(triggerBodies).toEqual([{}]);
+    expect(mockToast).not.toHaveBeenCalledWith(expect.objectContaining({ title: "Sucesso!" }));
+  });
+
+  it("fora da janela: 'Disparar fora da janela' repete o trigger com forceOutsideWindow: true", async () => {
+    triggerFora422();
+    await confirmarDisparoAgora();
+
+    fireEvent.click(await screen.findByTestId("outside-send-window-force"));
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Sucesso!" }));
+    });
+    expect(triggerBodies).toEqual([{}, { forceOutsideWindow: true }]);
   });
 });

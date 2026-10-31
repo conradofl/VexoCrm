@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
+import { postDispatchTrigger } from "@/lib/dispatchTrigger";
 import type { RecurrenceEndType, RecurrenceOriginKind, RecurrencePattern } from "@/lib/campaignRecurrence";
 
 const CAMPAIGN_REQUEST_TIMEOUT_MS = 15000;
@@ -1124,14 +1125,11 @@ export function useTriggerDispatch(campaignId: string) {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dispatchId: string) => {
+    // Fora da janela de envio a rota recusa (OutsideSendWindowError); quem chama confirma e repete com forceOutsideWindow.
+    mutationFn: async (input: string | { dispatchId: string; forceOutsideWindow?: boolean }) => {
+      const { dispatchId, forceOutsideWindow = false } = typeof input === "string" ? { dispatchId: input } : input;
       const token = await getIdToken();
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao disparar"));
-      return res.json();
+      return postDispatchTrigger(token, dispatchId, { forceOutsideWindow });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });

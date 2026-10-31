@@ -51,6 +51,8 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/use-toast";
 import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
+import { OutsideSendWindowError, type OutsideSendWindowDetails } from "@/lib/dispatchTrigger";
+import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
 import {
   useDispatchSummary,
   useCampaignDispatchBulkAction,
@@ -330,6 +332,14 @@ export function DispatchCampaignTracker({
   );
 }
 
+// A pessoa viu o diálogo da janela e escolheu não forçar: nada saiu e o lote ficou como estava.
+function toastNotForcedOutsideWindow(details: OutsideSendWindowDetails) {
+  toast({
+    title: "Lote não disparado",
+    description: `Fora da janela de envio (${details.start}–${details.end}). Nada foi enviado e o lote continua como estava. A janela abre ${details.nextOpeningLocal}.`,
+  });
+}
+
 function CampaignCard({
   campaign,
   onOpenDispatch,
@@ -347,6 +357,7 @@ function CampaignCard({
   const qc = useQueryClient();
   const [isRenaming, setIsRenaming] = useState(false);
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
+  const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
 
   const isScheduled = campaign.status === "agendada";
   const batch1 =
@@ -356,7 +367,7 @@ function CampaignCard({
 
   const handleTriggerBatch1 = () => {
     if (!batch1) return;
-    triggerDispatch.mutate(batch1.id, {
+    const callbacks = {
       onSuccess: () => {
         qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
         qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
@@ -367,13 +378,21 @@ function CampaignCard({
         });
       },
       onError: (err: any) => {
+        if (err instanceof OutsideSendWindowError) {
+          void askToForce(err.details).then((force) => {
+            if (force) triggerDispatch.mutate({ dispatchId: batch1.id, forceOutsideWindow: true }, callbacks);
+            else toastNotForcedOutsideWindow(err.details);
+          });
+          return;
+        }
         toast({
           title: "Erro ao disparar lote",
           description: err.message || "Falha ao iniciar o disparo do lote.",
           variant: "destructive",
         });
       },
-    });
+    };
+    triggerDispatch.mutate(batch1.id, callbacks);
   };
 
   const handleHeaderClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -572,6 +591,7 @@ function CampaignCard({
           onClose={() => setIsRenaming(false)}
         />
       )}
+      {outsideWindowDialog}
     </div>
   );
 }
@@ -591,6 +611,7 @@ export function CampaignDetails({
   const qc = useQueryClient();
   const bulkAction = useCampaignDispatchBulkAction();
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
+  const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
 
   // Inicializa com o primeiro lote pendente/agendado ou o lote 1
   const defaultBatch =
@@ -608,7 +629,7 @@ export function CampaignDetails({
   const currentSelectedBatch = campaign.batches[selectedBatchIndex];
 
   const handleTriggerBatch = (batchId: string, batchNumber: number) => {
-    triggerDispatch.mutate(batchId, {
+    const callbacks = {
       onSuccess: () => {
         // Força recálculo imediato na tela de todos os tempos e estimativas
         qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
@@ -620,13 +641,21 @@ export function CampaignDetails({
         });
       },
       onError: (err: any) => {
+        if (err instanceof OutsideSendWindowError) {
+          void askToForce(err.details).then((force) => {
+            if (force) triggerDispatch.mutate({ dispatchId: batchId, forceOutsideWindow: true }, callbacks);
+            else toastNotForcedOutsideWindow(err.details);
+          });
+          return;
+        }
         toast({
           title: "Erro ao disparar lote",
           description: err.message || "Falha ao iniciar o disparo do lote.",
           variant: "destructive",
         });
       },
-    });
+    };
+    triggerDispatch.mutate(batchId, callbacks);
   };
 
   const total = campaign.leadsTotal || 1;
@@ -828,6 +857,7 @@ export function CampaignDetails({
         </div>
       )}
 
+      {outsideWindowDialog}
     </>
   );
 }
