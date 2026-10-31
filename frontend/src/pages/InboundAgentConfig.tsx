@@ -281,6 +281,12 @@ export default function InboundAgentConfig() {
   const [sdrDistribution, setSdrDistribution] = useState<"todos" | "rodizio">("todos");
   // Resposta humana pela tela de Conversas pausa o agente naquela conversa. Nasce desligada.
   const [agentPauseOnDeviceReply, setAgentPauseOnDeviceReply] = useState(false);
+  // Dias sem contato da equipe até a pausa manual sair sozinha. 0 = nunca. Texto para
+  // permitir o campo vazio enquanto digita; só vai no PATCH se for inteiro válido.
+  const [agentPauseExpiryDays, setAgentPauseExpiryDays] = useState("3");
+  const agentPauseExpiryDaysValue = /^\d{1,4}$/.test(agentPauseExpiryDays) && Number(agentPauseExpiryDays) <= 3650
+    ? Number(agentPauseExpiryDays)
+    : undefined;
 
   const tenantN8nSettings = useMemo(() => {
     return leadClients.find((c) => c.id === selectedClientId)?.n8n_settings;
@@ -292,6 +298,7 @@ export default function InboundAgentConfig() {
       setRecontactMessage(tenantN8nSettings.recontact_message ?? "");
       setSdrDistribution(tenantN8nSettings.sdr_distribution === "rodizio" ? "rodizio" : "todos");
       setAgentPauseOnDeviceReply(tenantN8nSettings.agent_pause_on_device_reply === true);
+      setAgentPauseExpiryDays(String(tenantN8nSettings.agent_pause_expiry_days ?? 3));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClientId, tenantN8nSettings?.updated_at]);
@@ -440,6 +447,7 @@ export default function InboundAgentConfig() {
             recontactMessage,
             sdrDistribution,
             agentPauseOnDeviceReply,
+            ...(agentPauseExpiryDaysValue !== undefined ? { agentPauseExpiryDays: agentPauseExpiryDaysValue } : {}),
           });
         }
         const draftIdSalvo = activeCompany.id;
@@ -469,6 +477,7 @@ export default function InboundAgentConfig() {
           recontactMessage,
           sdrDistribution,
           agentPauseOnDeviceReply,
+          ...(agentPauseExpiryDaysValue !== undefined ? { agentPauseExpiryDays: agentPauseExpiryDaysValue } : {}),
         });
       }
       setOrphanCount(0);
@@ -1354,7 +1363,8 @@ export default function InboundAgentConfig() {
                   <CardTitle className="text-base">Atendimento humano pausa o agente</CardTitle>
                   <CardDescription>
                     Quando alguém da equipe responde o lead pela tela de Conversas, o agente para de responder naquela
-                    conversa e só volta pelo botão "Reativar agente". Vale para o tenant inteiro.
+                    conversa. Ele volta pelo botão "Reativar agente" ou sozinho, depois do prazo abaixo. Vale para o
+                    tenant inteiro.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1367,6 +1377,29 @@ export default function InboundAgentConfig() {
                       checked={agentPauseOnDeviceReply}
                       onCheckedChange={setAgentPauseOnDeviceReply}
                     />
+                  </div>
+                  <div className="mt-4 max-w-xl space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Label htmlFor="agent-pause-expiry-days" className="text-sm font-normal">
+                        Reativar o agente sozinho depois de
+                      </Label>
+                      <Input
+                        id="agent-pause-expiry-days"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={3650}
+                        step={1}
+                        className="h-8 w-20"
+                        value={agentPauseExpiryDays}
+                        onChange={(e) => setAgentPauseExpiryDays(e.target.value)}
+                        aria-invalid={agentPauseExpiryDaysValue === undefined}
+                      />
+                      <span>dias sem contato da equipe</span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      0 = nunca reativa sozinho. Vale para toda pausa feita por gente, inclusive pelo botão "Pausar".
+                    </p>
                   </div>
                 </CardContent>
               </Card>

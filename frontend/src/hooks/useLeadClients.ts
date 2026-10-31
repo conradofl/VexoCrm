@@ -79,6 +79,8 @@ export interface LeadClientN8nSettingsPayload {
   agentRepliesOutsideWindow?: boolean;
   agent_pause_on_device_reply?: boolean;
   agentPauseOnDeviceReply?: boolean;
+  agent_pause_expiry_days?: number;
+  agentPauseExpiryDays?: number;
   chatbot_voice_mode?: "disabled" | "mirror" | "always" | string;
   chatbotVoiceMode?: "disabled" | "mirror" | "always" | string;
   chatbot_voice_id?: string;
@@ -165,6 +167,7 @@ export interface LeadClientN8nSettingsSummary {
   send_window_enabled?: boolean;
   agent_replies_outside_window?: boolean;
   agent_pause_on_device_reply?: boolean;
+  agent_pause_expiry_days?: number;
   chatbot_voice_mode?: "disabled" | "mirror" | "always" | string;
   chatbot_voice_id?: string;
   chatbot_voice_speed?: number;

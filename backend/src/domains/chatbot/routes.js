@@ -227,7 +227,11 @@ import {
 } from "../../services/sendWindow.js";
 import {
   evaluateAgentMuteGuards,
-  getChatAgentMuteSource,
+  resolveChatMuteState,
+  clearAgentMuteIfExpired,
+  touchAgentMuteClock,
+  resolveAgentPauseExpiryDays,
+  agentPauseExpiredSql,
   countTenantMutedToday,
   recordAgentMute,
   clearAgentMute,
@@ -638,6 +642,13 @@ export function registerChatbotRoutes(app, deps) {
       const instanceAliases = await resolveInstanceNameAliases(clientId, rawInstanceName);
       const leadsTable = leadsTableName(clientId);
 
+      // Pausa manual vencida não aparece como pausada em lugar nenhum da tela: mesma
+      // fonte do prazo e mesma expressão do portão (agentMuteGuard), inclusive no erro.
+      const pauseExpiryDays = resolveAgentPauseExpiryDays(
+        await getLeadClientN8nSettings(clientId).catch(() => null)
+      );
+      const pauseExpiredSql = agentPauseExpiredSql(pauseExpiryDays, "cs");
+
       const queryParams = [clientId];
 
       let instanceFilter = "";
@@ -670,7 +681,7 @@ export function registerChatbotRoutes(app, deps) {
         } else if (rawTab === "pausadas") {
           // Toda conversa com o agente pausado, em qualquer estado menos lixeira: a pausa
           // não expira sozinha, então esta aba é onde a conversa esquecida aparece.
-          tabCondition = "AND (m.is_group IS NOT TRUE) AND cs.agent_muted_at IS NOT NULL AND COALESCE(cs.state, 'ativa') != 'lixeira'";
+          tabCondition = `AND (m.is_group IS NOT TRUE) AND cs.agent_muted_at IS NOT NULL AND NOT ${pauseExpiredSql} AND COALESCE(cs.state, 'ativa') != 'lixeira'`;
         } else if (rawTab === "automacao" || rawTab === "automacoes") {
           tabCondition = `AND (m.is_group IS NOT TRUE) AND (
             cs.state = 'automacao' OR (cs.state IS NULL AND ${SQL_AUTOMATION_MATCH("m.message_text")})
@@ -753,7 +764,8 @@ export function registerChatbotRoutes(app, deps) {
             COUNT(*) FILTER (WHERE m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira')::integer as groups_count,
             COUNT(*) FILTER (WHERE m.is_group IS NOT TRUE AND cs.state = 'arquivada')::integer as archived_count,
             COUNT(*) FILTER (
-              WHERE m.is_group IS NOT TRUE AND cs.agent_muted_at IS NOT NULL AND COALESCE(cs.state, 'ativa') != 'lixeira'
+              WHERE m.is_group IS NOT TRUE AND cs.agent_muted_at IS NOT NULL AND NOT ${pauseExpiredSql}
+                AND COALESCE(cs.state, 'ativa') != 'lixeira'
             )::integer as paused_count,
             COUNT(*) FILTER (
               WHERE m.is_group IS NOT TRUE
@@ -910,7 +922,8 @@ export function registerChatbotRoutes(app, deps) {
             cs.attended_at as chat_attended_at,
             cs.attended_by as chat_attended_by,
             cs.agent_muted_at,
-            cs.agent_muted_reason
+            cs.agent_muted_reason,
+            ${pauseExpiredSql} as agent_mute_expired
           FROM latest_messages m
           LEFT JOIN public."${leadsTable}" l ON ${SQL_CANONICAL_PHONE("l.telefone")} = m.phone AND l.client_id = $1
           LEFT JOIN public.whatsapp_chat_states cs ON cs.client_id = $1 AND cs.phone = m.phone
@@ -951,8 +964,8 @@ export function registerChatbotRoutes(app, deps) {
             muted: false,
             attendedAt: row.chat_attended_at || null,
             attendedBy: row.chat_attended_by || null,
-            agentMutedAt: row.agent_muted_at ? new Date(row.agent_muted_at).toISOString() : null,
-            agentMutedReason: row.agent_muted_reason || null,
+            agentMutedAt: row.agent_muted_at && row.agent_mute_expired !== true ? new Date(row.agent_muted_at).toISOString() : null,
+            agentMutedReason: row.agent_muted_at && row.agent_mute_expired !== true ? row.agent_muted_reason || null : null,
             lastMessage: {
               id: row.id ? String(row.id) : null,
               body: row.message_text || "",
@@ -1153,6 +1166,9 @@ export function registerChatbotRoutes(app, deps) {
   // derrubar o envio, que já saiu: só loga.
   async function pauseAgentOnHumanReply(clientId, phone) {
     try {
+      // Já pausada à mão: a resposta só empurra o prazo, com ou sem o D3. Regravar a
+      // pausa reescreveria agent_muted_at ("pausado desde quando") a cada resposta.
+      if (await touchAgentMuteClock(pgDatabasePool, { clientId, phone })) return;
       const settings = await getLeadClientN8nSettings(clientId);
       if (settings?.agent_pause_on_device_reply !== true) return;
       await recordAgentMute(pgDatabasePool, {
@@ -3077,6 +3093,10 @@ export function registerChatbotRoutes(app, deps) {
           await clearAgentMute(pgDatabasePool, { clientId, phone, onlyClassifier: true }).catch((err) => {
             console.warn("[chatbot-webhook] erro ao limpar silenciamento do agente com resposta manual (fromMe):", err?.message || err);
           });
+          // Pausa manual: o contato da equipe empurra o prazo de expiração e não desfaz a pausa.
+          await touchAgentMuteClock(pgDatabasePool, { clientId, phone }).catch((err) => {
+            console.warn("[chatbot-webhook] erro ao empurrar prazo da pausa manual (fromMe):", err?.message || err);
+          });
         }
       }
     } catch (reactivateErr) {
@@ -3437,7 +3457,27 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // Quem o chatbot pode atender. Escopo padrão ('leads_only') só engaja lead conhecido do tenant ou campanha.
-    const agentMutedSource = await getChatAgentMuteSource(pgDatabasePool, clientId, phone);
+    const pauseExpiryDays = resolveAgentPauseExpiryDays(tenantSettingsReadFailed ? null : tenantSettings);
+    let muteState = await resolveChatMuteState(pgDatabasePool, { clientId, phone, expiryDays: pauseExpiryDays });
+    if (muteState?.expired) {
+      const limpou = await clearAgentMuteIfExpired(pgDatabasePool, { clientId, phone, expiryDays: pauseExpiryDays }).catch((err) => {
+        console.warn("[chatbot-webhook] erro ao limpar pausa vencida:", err?.message || err);
+        return false;
+      });
+      if (limpou) {
+        console.log("[chatbot-webhook] pausa de atendimento humano expirou", {
+          clientId,
+          phone: maskPhoneForLog(phone),
+          diasSemContato: muteState.daysSinceHuman,
+          expiryDays: pauseExpiryDays,
+        });
+        muteState = null;
+      } else {
+        // A equipe falou com o lead entre a leitura e a limpeza: vale o estado de agora.
+        muteState = await resolveChatMuteState(pgDatabasePool, { clientId, phone, expiryDays: pauseExpiryDays });
+      }
+    }
+    const agentMutedSource = muteState?.source ?? null;
     const isAgentMuted = agentMutedSource !== null;
     const escopoInbound = resolveInboundScope(tenantSettings);
     const telefoneEhSdr = resolveTenantSdrNumbers(tenantSettings).includes(normalizeSdrNumber(phone));

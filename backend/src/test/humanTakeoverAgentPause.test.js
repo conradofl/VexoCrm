@@ -7,7 +7,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
-import { countTenantMutedToday, recordAgentMute } from "../services/agentMuteGuard.js";
+import { countTenantMutedToday, recordAgentMute, resolveAgentPauseExpiryDays } from "../services/agentMuteGuard.js";
 import { _resetInboundGuard } from "../services/inboundGuard.js";
 
 const TENANT = "container-led";
@@ -35,7 +35,7 @@ beforeAll(async () => {
       client_id TEXT NOT NULL, phone TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'ativa', reason TEXT,
       source TEXT NOT NULL DEFAULT 'auto', changed_by TEXT, attended_at TIMESTAMPTZ, attended_by TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      agent_muted_at TIMESTAMPTZ, agent_muted_reason TEXT, agent_muted_source TEXT,
+      agent_muted_at TIMESTAMPTZ, agent_muted_reason TEXT, agent_muted_source TEXT, agent_mute_last_human_at TIMESTAMPTZ,
       PRIMARY KEY (client_id, phone)
     );
     CREATE TABLE public.whatsapp_lid_map (lid TEXT, profile_pic TEXT, contact_name TEXT);
@@ -103,7 +103,7 @@ const AGENTE = {
   inbound_role: "atendimento",
 };
 
-function setup({ pauseOnDeviceReply = false } = {}) {
+function setup({ pauseOnDeviceReply = false, expiryDays = 3, settingsFail = false } = {}) {
   const routes = {};
   const register = (method) => vi.fn((path, ...handlers) => {
     routes[`${method} ${path}`] = handlers[handlers.length - 1];
@@ -120,13 +120,17 @@ function setup({ pauseOnDeviceReply = false } = {}) {
       dispatch_webhook_url: "https://evolution.invalid/message/sendText/ChipCL",
       dispatch_webhook_token: "token-de-teste",
     }],
-    getLeadClientN8nSettings: async (clientId) => ({
-      clientId,
-      chatbot_enabled: true,
-      chatbot_inbound_scope: "all",
-      chatbot_instances: [],
-      agent_pause_on_device_reply: pauseOnDeviceReply,
-    }),
+    getLeadClientN8nSettings: async (clientId) => {
+      if (settingsFail) throw new Error("settings indisponível");
+      return {
+        clientId,
+        chatbot_enabled: true,
+        chatbot_inbound_scope: "all",
+        chatbot_instances: [],
+        agent_pause_on_device_reply: pauseOnDeviceReply,
+        agent_pause_expiry_days: expiryDays,
+      };
+    },
     internalErrorPayloadDetails: () => ({}),
     isMissingSchemaError: () => false,
     leadsTableName: () => "leads",
@@ -414,5 +418,214 @@ describe("Aba Pausadas (D5)", () => {
     const lista = await t.listChats({ tab: "pausadas" });
     expect(lista.items).toEqual([]);
     expect(lista.counts.paused).toBe(0);
+  });
+});
+
+// ── PR 2: a pausa manual expira sozinha depois de N dias sem contato da equipe ──
+
+// O tempo passa no banco: atrasa as colunas da pausa em vez de dublar o relógio.
+async function envelhecer(phone, { mutedDaysAgo, humanDaysAgo = null }) {
+  await db.query(
+    `UPDATE public.whatsapp_chat_states
+        SET agent_muted_at = now() - make_interval(days => $3::int),
+            agent_mute_last_human_at = CASE WHEN $4::int IS NULL THEN NULL ELSE now() - make_interval(days => $4::int) END
+      WHERE client_id = $1 AND phone = $2`,
+    [TENANT, phone, mutedDaysAgo, humanDaysAgo]
+  );
+}
+
+// Simula N dias passando para as duas colunas de uma vez (relógio relativo preservado).
+async function passarDias(phone, dias) {
+  await db.query(
+    `UPDATE public.whatsapp_chat_states
+        SET agent_muted_at = agent_muted_at - make_interval(days => $3::int),
+            agent_mute_last_human_at = agent_mute_last_human_at - make_interval(days => $3::int)
+      WHERE client_id = $1 AND phone = $2`,
+    [TENANT, phone, dias]
+  );
+}
+
+async function estadoCompleto(phone = LEAD) {
+  const { rows } = await db.query(
+    `SELECT agent_muted_at, agent_muted_source, agent_mute_last_human_at
+       FROM public.whatsapp_chat_states WHERE client_id = $1 AND phone = $2`,
+    [TENANT, phone]
+  );
+  return rows[0] || null;
+}
+
+describe("Expiração da pausa manual no portão", () => {
+  it("1. pausa manual com 4 dias e prazo 3: o portão deixa passar e a pausa é limpa", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 4 });
+
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+    const estado = await estadoCompleto();
+    expect(estado.agent_muted_at).toBeNull();
+    expect(estado.agent_muted_source).toBeNull();
+    expect(estado.agent_mute_last_human_at).toBeNull();
+  });
+
+  it("2. pausa manual com 2 dias e prazo 3: continua descartando", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 2 });
+
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
+    expect((await estadoCompleto()).agent_muted_at).toBeTruthy();
+  });
+
+  it("3. pausa manual com 4 dias e prazo 0: nunca expira", async () => {
+    const t = setup({ expiryDays: 0 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 4 });
+
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
+    expect((await estadoCompleto()).agent_muted_at).toBeTruthy();
+  });
+
+  it("4. fromMe no dia 2 empurra o prazo: no dia 4 (2 dias após o fromMe) ainda está pausada, e agent_muted_at não muda", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 2 });
+    const pausadaDesde = (await estadoCompleto()).agent_muted_at;
+
+    // Dia 2: a equipe responde pelo aparelho.
+    expect(await t.webhook(mensagem({ fromMe: true, text: "Oi, sigo com você por aqui" }))).toMatchObject({ saved: "outbound_from_me" });
+    const depoisDoFromMe = await estadoCompleto();
+    expect(depoisDoFromMe.agent_mute_last_human_at).toBeTruthy();
+    expect(depoisDoFromMe.agent_muted_source).toBe("manual");
+    expect(depoisDoFromMe.agent_muted_at.getTime()).toBe(pausadaDesde.getTime());
+
+    // Passam 2 dias: pausada há 4, último contato da equipe há 2.
+    await passarDias(LEAD, 2);
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
+    expect((await estadoCompleto()).agent_muted_at).toBeTruthy();
+  });
+
+  it("5. pausa do classificador com 10 dias NÃO expira por este caminho", async () => {
+    const t = setup({ expiryDays: 3 });
+    await recordAgentMute(pool, { clientId: TENANT, phone: LEAD, reason: "Conversa pessoal" });
+    await envelhecer(LEAD, { mutedDaysAgo: 10 });
+
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "conversa_nao_comercial" });
+    expect((await estadoCompleto()).agent_muted_at).toBeTruthy();
+  });
+
+  it("7. linha antiga sem relógio (last_human_at NULL) conta a partir de agent_muted_at", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 4, humanDaysAgo: null });
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+  });
+
+  it("7b. com last_human_at preenchido, vale ele e não agent_muted_at", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 10, humanDaysAgo: 1 });
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
+  });
+
+  it("Reativar continua funcionando igual: limpa a pausa e o relógio, e o agente volta", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 2, humanDaysAgo: 1 });
+
+    expect(await t.unmute(LEAD)).toEqual({ success: true, phone: LEAD });
+    const estado = await estadoCompleto();
+    expect(estado.agent_muted_at).toBeNull();
+    expect(estado.agent_mute_last_human_at).toBeNull();
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+  });
+
+  it("nova pausa zera o relógio de uma pausa anterior", async () => {
+    const t = setup({ expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 2, humanDaysAgo: 1 });
+    await t.unmute(LEAD);
+    await t.mute(LEAD);
+    expect((await estadoCompleto()).agent_mute_last_human_at).toBeNull();
+  });
+});
+
+describe("Aba Pausadas e selo concordam com o portão", () => {
+  async function conversaCom(phone, text) {
+    await db.query(
+      `INSERT INTO public.lead_messages (client_id, phone, sender_type, direction, message_text, message_timestamp)
+       VALUES ($1, $2, 'lead', 'inbound', $3, now())`,
+      [TENANT, phone, text]
+    );
+  }
+
+  it("6. a aba não lista a vencida, o contador bate e o selo some em todas as abas", async () => {
+    const t = setup({ expiryDays: 3 });
+    await conversaCom("5534999990041", "Oi");
+    await conversaCom("5534999990042", "Bom dia");
+    await t.mute("5534999990041");
+    await t.mute("5534999990042");
+    await envelhecer("5534999990041", { mutedDaysAgo: 4 }); // vencida
+    await envelhecer("5534999990042", { mutedDaysAgo: 1 }); // em vigor
+
+    const pausadas = await t.listChats({ tab: "pausadas" });
+    expect(pausadas.items.map((c) => c.id)).toEqual(["5534999990042"]);
+    expect(pausadas.counts.paused).toBe(1);
+
+    const todas = await t.listChats({ tab: "todas" });
+    const vencida = todas.items.find((c) => c.id === "5534999990041");
+    const emVigor = todas.items.find((c) => c.id === "5534999990042");
+    expect(vencida.agentMutedAt).toBeNull();
+    expect(vencida.agentMutedReason).toBeNull();
+    expect(emVigor.agentMutedAt).toBeTruthy();
+  });
+
+  it("falha ao ler a config: prazo 0 na tela, igual ao portão (a pausa antiga continua pausada nos dois)", async () => {
+    expect(resolveAgentPauseExpiryDays(null)).toBe(0);
+    expect(resolveAgentPauseExpiryDays({})).toBe(0);
+    expect(resolveAgentPauseExpiryDays({ agent_pause_expiry_days: -1 })).toBe(0);
+    expect(resolveAgentPauseExpiryDays({ agent_pause_expiry_days: 3 })).toBe(3);
+
+    const ok = setup({ expiryDays: 3 });
+    await conversaCom("5534999990051", "Oi");
+    await ok.mute("5534999990051");
+    await envelhecer("5534999990051", { mutedDaysAgo: 4 });
+
+    const quebrada = setup({ settingsFail: true });
+    const pausadas = await quebrada.listChats({ tab: "pausadas" });
+    expect(pausadas.items.map((c) => c.id)).toEqual(["5534999990051"]);
+    expect(pausadas.counts.paused).toBe(1);
+  });
+});
+
+describe("Resposta pela tela empurra o prazo e não reescreve agent_muted_at", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ key: { id: "3EB0TESTE" } }), { status: 201 })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([true, false])("D3 %s: conversa já pausada à mão só empurra o relógio", async (pauseOnDeviceReply) => {
+    const t = setup({ pauseOnDeviceReply, expiryDays: 3 });
+    await t.mute(LEAD);
+    await envelhecer(LEAD, { mutedDaysAgo: 2 });
+    const pausadaDesde = (await estadoCompleto()).agent_muted_at;
+
+    await t.replyFromScreen("Oi, sigo com você");
+    const estado = await estadoCompleto();
+    expect(estado.agent_muted_at.getTime()).toBe(pausadaDesde.getTime());
+    expect(estado.agent_mute_last_human_at).toBeTruthy();
+
+    await passarDias(LEAD, 2); // pausada há 4, último contato há 2
+    expect(await t.webhook(mensagem())).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
+  });
+
+  it("D3 ligado e conversa sem pausa: a resposta pela tela ainda cria a pausa", async () => {
+    const t = setup({ pauseOnDeviceReply: true, expiryDays: 3 });
+    await t.replyFromScreen("Oi");
+    const estado = await estadoCompleto();
+    expect(estado.agent_muted_source).toBe("manual");
+    expect(estado.agent_mute_last_human_at).toBeNull();
   });
 });
