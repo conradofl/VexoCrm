@@ -277,3 +277,16 @@ citado em código, spec e conversa. Resolver um deles exige spec própria.
 - **Não consertar junto com a etiqueta.** O conserto mexe no envio de campanha e no do agente, e merece medição própria antes:
   quantas respostas do agente (origem `hardcoded-chat-webhook`) estão sem id.
 - **Status:** aberta. Registrada em 30/10/2026.
+
+## DT-016 — O resumo de conversa decide "é cota" procurando palavra no texto do erro
+
+- **Onde:** `backend/src/domains/chatbot/routes.js:1373`, na rota de resumo de conversa do inbox (`summarize-chat`):
+  `const ehCota = /cota de ia|rate.?limit|tokens por minuto|TPM/i.test(String(errorReason))`. O texto vem de
+  `insight.error`, montado em `backend/src/domains/leads/chatInsight.js` (linha 636, `lastError`).
+- **O que acontece:** a rota escolhe entre 429 com `LLM_QUOTA_EXCEEDED` e 502 genérico olhando a FRASE do erro, não um código.
+  Qualquer mudança na frase muda a resposta da tela sem nenhum teste perceber. Já mudou uma vez: desde que o 413 passou a dizer
+  "o pedido e maior que o teto do modelo" (commit 480296ba, em vez de "a cota de IA acabou"), esse caso cai no 502 genérico.
+  E chave de IA quebrada não tem código próprio aqui (o simulador ganhou `LLM_CREDENTIAL_INVALID` no commit 667fedc5).
+- **Como resolver:** `chatInsight` devolver o `code` do erro de `callLlmChatCompletion` (`LLM_QUOTA_EXCEEDED`,
+  `LLM_CREDENTIAL_INVALID`) junto com o texto, e a rota decidir pelo código, como o simulador faz.
+- **Status:** aberta, sem correção em andamento. Registrada em 30/10/2026.

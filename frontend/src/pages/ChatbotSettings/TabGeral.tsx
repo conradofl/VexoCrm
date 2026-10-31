@@ -275,16 +275,19 @@ export function TabGeral({ clientId, clientName, client }: { clientId: string; c
     }
   }
 
-  const defaultLlmModel = llmInfo?.defaultModel || "openai/gpt-oss-120b";
+  const defaultLlmModel = llmInfo?.defaultModel || "";
   const isCustomModel = Boolean(llmModel && llmModels.some((m) => m.id === llmModel));
   const isDeadModel = Boolean(llmModel && llmModels.length > 0 && !llmModels.some((m) => m.id === llmModel));
   const effectiveLlmModel = isCustomModel ? llmModel : defaultLlmModel;
   const defaultModelName = llmModels.find((m) => m.id === defaultLlmModel)?.name || defaultLlmModel;
 
-  const groqModels = llmModels.filter((m) => m.provider === "groq");
-  const openaiModels = llmModels.filter((m) => m.provider === "openai");
-  const anthropicModels = llmModels.filter((m) => m.provider === "anthropic");
-  const geminiModels = llmModels.filter((m) => m.provider === "gemini");
+  // Gemini primeiro: e o padrao do sistema desde 30/10/2026.
+  const llmProviderGroups = [
+    { provider: "gemini", label: "✨ Gemini (Google)", labelClass: "text-blue-600 dark:text-blue-400" },
+    { provider: "groq", label: "⚡ Groq (Ultra-rápido)", labelClass: "text-purple-600 dark:text-purple-400" },
+    { provider: "openai", label: "🤖 ChatGPT (OpenAI)", labelClass: "text-emerald-600 dark:text-emerald-400" },
+    { provider: "anthropic", label: "🧠 Claude (Anthropic)", labelClass: "text-amber-600 dark:text-amber-400" },
+  ].map((g) => ({ ...g, models: llmModels.filter((m) => m.provider === g.provider) }));
 
   const isChipMarcado = (chip: any) => {
     const inst = nomeInstancia(chip);
@@ -476,49 +479,19 @@ export function TabGeral({ clientId, clientName, client }: { clientId: string; c
                 <SelectValue placeholder="Selecione o motor de IA..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectGroup>
-                  <SelectLabel className="text-[10px] font-semibold uppercase text-purple-600 dark:text-purple-400">
-                    ⚡ Groq (Ultra-rápido)
-                  </SelectLabel>
-                  {groqModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
-                      {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-
-                <SelectGroup>
-                  <SelectLabel className="text-[10px] font-semibold uppercase text-emerald-600 dark:text-emerald-400">
-                    🤖 ChatGPT (OpenAI)
-                  </SelectLabel>
-                  {openaiModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
-                      {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-
-                <SelectGroup>
-                  <SelectLabel className="text-[10px] font-semibold uppercase text-amber-600 dark:text-amber-400">
-                    🧠 Claude (Anthropic)
-                  </SelectLabel>
-                  {anthropicModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
-                      {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-
-                <SelectGroup>
-                  <SelectLabel className="text-[10px] font-semibold uppercase text-blue-600 dark:text-blue-400">
-                    ✨ Gemini (Google)
-                  </SelectLabel>
-                  {geminiModels.map((m) => (
-                    <SelectItem key={m.id} value={m.id} className="text-xs">
-                      {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
+                {/* So aparece grupo de provedor que a rota devolveu, e a rota so devolve provedor com chave. */}
+                {llmProviderGroups.map((g) =>
+                  g.models.length === 0 ? null : (
+                    <SelectGroup key={g.provider}>
+                      <SelectLabel className={`text-[10px] font-semibold uppercase ${g.labelClass}`}>{g.label}</SelectLabel>
+                      {g.models.map((m) => (
+                        <SelectItem key={m.id} value={m.id} className="text-xs">
+                          {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )
+                )}
               </SelectContent>
             </Select>
 
