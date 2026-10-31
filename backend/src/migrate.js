@@ -445,6 +445,10 @@ async function isAlreadyApplied(pool, filename) {
       EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='agent_pause_on_device_reply')
       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_chat_states' AND column_name='agent_muted_source')
     ) AS ok`,
+    "20261031000000_agent_pause_expiry.sql": `SELECT (
+      EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='whatsapp_chat_states' AND column_name='agent_mute_last_human_at')
+      AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='lead_client_n8n_settings' AND column_name='agent_pause_expiry_days')
+    ) AS ok`,
   };
 
   const query = checks[filename];
