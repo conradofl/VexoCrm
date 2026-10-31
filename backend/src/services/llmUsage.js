@@ -18,8 +18,9 @@ import { pgDatabasePool } from "./database.js";
  *   insight    resumo/insight de conversa do lead (chatInsight.js)
  *   extracao   extracao de campos do lead (aiExtractRoutes.js, leadAiFieldExtractor.js)
  *   magic      criador magico de campanha (magicCampaignCreator.js)
+ *   visao      leitura de imagem recebida no WhatsApp (describeImage)
  */
-export const LLM_USAGE_ORIGENS = Object.freeze(["chatbot", "simulador", "campanha", "insight", "extracao", "magic"]);
+export const LLM_USAGE_ORIGENS = Object.freeze(["chatbot", "simulador", "campanha", "insight", "extracao", "magic", "visao"]);
 
 const SQL_INSERT = `INSERT INTO public.llm_usage
   (client_id, origem, phone, provider, model, prompt_tokens, completion_tokens, total_tokens, finish_reason, latency_ms, tentativas)
