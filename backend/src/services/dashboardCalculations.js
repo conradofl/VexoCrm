@@ -26,7 +26,7 @@ import {
   measureBaseHealth,
   measureFirstHumanResponse,
 } from "./dashboardAnalysis.js";
-import { MESSAGE_EFFECTIVENESS_MIN_SENT, MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS } from "./messageEffectiveness.js";
+import { MESSAGE_EFFECTIVENESS_MIN_SENT, sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
 import { resolveChipDailyLimit } from "./chipQuota.js";
 import {
   DASHBOARD_DEFAULT_TIMEZONE,
@@ -37,7 +37,11 @@ import {
 } from "./dashboardPeriod.js";
 
 const LM_TIMESTAMP_SQL = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
-const RAW_OR_CANONICAL_PHONE_SQL = `lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")}`;
+// "Respondeu" (definição única, 31/10/2026): PESSOAS — COUNT(DISTINCT telefone canônico do envio) dos envios
+// respondidos em até 14 dias. Todo bloco do Dashboard que diz "responderam" conta assim; a taxa é
+// pessoas que responderam ÷ pessoas que receberam envio. "Enviados" continua contando envios.
+const RUN_REPLIED_SQL = sqlRunRepliedWithinWindow("r");
+const RUN_PERSON_SQL = SQL_CANONICAL_PHONE("r.phone");
 
 // Ranking de chips. "Envios" do chip = envios cujo UPDATE de 'sent' gravou ESTE chip em
 // campaign_dispatch_runs.evolution_instance_id (o chip que de fato enviou, rodízio ou padrão). O chip configurado
@@ -49,17 +53,9 @@ export function buildChipSentByInstanceSql() {
     WITH runs_by_instance AS (
       SELECT
         r.evolution_instance_id,
-        r.phone,
+        ${RUN_PERSON_SQL} AS person,
         r.sent_at,
-        EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = r.client_id
-            AND (${RAW_OR_CANONICAL_PHONE_SQL})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${LM_TIMESTAMP_SQL} > r.sent_at
-            AND ${LM_TIMESTAMP_SQL} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-        ) AS replied
+        ${RUN_REPLIED_SQL} AS replied
       FROM public.campaign_dispatch_runs r
       WHERE r.client_id = $1
         AND r.status = 'sent'
@@ -71,7 +67,8 @@ export function buildChipSentByInstanceSql() {
     SELECT
       evolution_instance_id::text AS instance_id,
       COUNT(*)::int AS sent_count,
-      COUNT(*) FILTER (WHERE replied)::int AS replied_count
+      COUNT(DISTINCT person)::int AS reached_count,
+      COUNT(DISTINCT person) FILTER (WHERE replied)::int AS replied_count
     FROM runs_by_instance
     GROUP BY evolution_instance_id;
   `;
@@ -118,17 +115,18 @@ export function buildChipQuotaSql() {
 // é daqui que o resto do backend e os testes sempre importaram.
 export { DASHBOARD_DEFAULT_TIMEZONE, dateKeyInTimezone, calculatePeriodDates };
 
-export const RESPONSE_RATE_DECLARATION = "conversou depois do envio (janela de 14 dias)";
+export const RESPONSE_RATE_DECLARATION = "pessoas que responderam em até 14 dias";
 
 /**
- * Calcula variação percentual inteira entre período atual e anterior.
+ * Variação percentual inteira entre período atual e anterior.
+ * Período anterior zerado (ou ausente) não tem base de comparação: devolve null, nunca um percentual.
+ * Antes devolvia +100% para "0 → qualquer coisa", um número sem base que aparecia em todos os cards.
  */
 export function calculateDelta(current, previous) {
-  const c = Number(current || 0);
-  const p = Number(previous || 0);
-  if (p === 0) {
-    return c > 0 ? 100 : 0;
-  }
+  if (current == null || previous == null) return null;
+  const c = Number(current);
+  const p = Number(previous);
+  if (!Number.isFinite(c) || !Number.isFinite(p) || p === 0) return null;
   return Math.round(((c - p) / p) * 100);
 }
 
@@ -332,7 +330,6 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   } = calculatePeriodDates(periodKey, refDate, options.timezone);
 
   const lmTimestamp = LM_TIMESTAMP_SQL;
-  const rawOrCanonicalPhone = RAW_OR_CANONICAL_PHONE_SQL;
 
   const unavailableBlocks = [];
   const blockFailures = [];
@@ -366,15 +363,8 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     WITH valid_runs AS (
       SELECT
         r.sent_at,
-        EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = r.client_id
-            AND (${rawOrCanonicalPhone})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${lmTimestamp} > r.sent_at
-            AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-        ) AS replied
+        ${RUN_PERSON_SQL} AS person,
+        ${RUN_REPLIED_SQL} AS replied
       FROM public.campaign_dispatch_runs r
       WHERE r.client_id = $1
         AND r.status = 'sent'
@@ -386,8 +376,10 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
         )
     )
     SELECT
-      COUNT(*) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied,
-      COUNT(*) FILTER (WHERE replied AND sent_at >= $4 AND sent_at < $5)::int AS previous_replied
+      COUNT(DISTINCT person) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied,
+      COUNT(DISTINCT person) FILTER (WHERE replied AND sent_at >= $4 AND sent_at < $5)::int AS previous_replied,
+      COUNT(DISTINCT person) FILTER (WHERE sent_at >= $2 AND sent_at < $3)::int AS current_reached,
+      COUNT(DISTINCT person) FILTER (WHERE sent_at >= $4 AND sent_at < $5)::int AS previous_reached
     FROM valid_runs;
   `;
   const repliedBlock = await runBlock("summary.replied", async () => {
@@ -398,21 +390,28 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       previousStart.toISOString(),
       previousEnd.toISOString(),
     ]);
-    return { current: rows[0]?.current_replied || 0, previous: rows[0]?.previous_replied || 0 };
+    return {
+      current: rows[0]?.current_replied || 0,
+      previous: rows[0]?.previous_replied || 0,
+      reached: rows[0]?.current_reached || 0,
+      previousReached: rows[0]?.previous_reached || 0,
+    };
   });
   const repliedCurrent = repliedBlock.ok ? repliedBlock.value.current : null;
   const repliedPrevious = repliedBlock.ok ? repliedBlock.value.previous : null;
-  // A taxa precisa dos dois números (respostas e envios). Faltando um, a taxa é indisponível — não 0%.
-  const bothCountsOk = sentBlock.ok && repliedBlock.ok;
-  const responseRateCurrent = !bothCountsOk
+  // Taxa = pessoas que responderam ÷ pessoas que receberam envio, as duas da mesma consulta.
+  // Dividir por "Enviados" (envios) misturaria unidades: 3 envios para a mesma pessoa pesariam 3 vezes.
+  const reachedCurrent = repliedBlock.ok ? repliedBlock.value.reached : null;
+  const reachedPrevious = repliedBlock.ok ? repliedBlock.value.previousReached : null;
+  const responseRateCurrent = !repliedBlock.ok
     ? null
-    : sentCurrent > 0
-    ? Number(((repliedCurrent / sentCurrent) * 100).toFixed(1))
+    : reachedCurrent > 0
+    ? Number(((repliedCurrent / reachedCurrent) * 100).toFixed(1))
     : 0;
-  const responseRatePrevious = !bothCountsOk
+  const responseRatePrevious = !repliedBlock.ok
     ? null
-    : sentPrevious > 0
-    ? Number(((repliedPrevious / sentPrevious) * 100).toFixed(1))
+    : reachedPrevious > 0
+    ? Number(((repliedPrevious / reachedPrevious) * 100).toFixed(1))
     : 0;
 
   // 3. Agendaram Reunião (followup_schedules + crm_consultant_schedules)
@@ -562,16 +561,8 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     WITH runs AS (
       SELECT
         r.campaign_id,
-        r.phone,
-        EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = r.client_id
-            AND (${rawOrCanonicalPhone})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${lmTimestamp} > r.sent_at
-            AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-        ) AS replied
+        ${RUN_PERSON_SQL} AS person,
+        ${RUN_REPLIED_SQL} AS replied
       FROM public.campaign_dispatch_runs r
       WHERE r.client_id = $1
         AND r.status = 'sent'
@@ -584,8 +575,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       c.name AS campaign_name,
       c.analytics_meta->>'message' AS message,
       COUNT(*)::int AS sent_count,
-      COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count,
-      ROUND(((COUNT(*) FILTER (WHERE runs.replied))::numeric / COUNT(*)) * 100, 1)::float AS reply_rate
+      COUNT(DISTINCT runs.person)::int AS reached_count,
+      COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied)::int AS replied_count,
+      ROUND(((COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied))::numeric / COUNT(DISTINCT runs.person)) * 100, 1)::float AS reply_rate
     FROM runs
     JOIN public.campaigns c ON c.id = runs.campaign_id
     WHERE c.client_id = $1
@@ -656,6 +648,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
           name: chip.instance_name || String(chip.instance_id),
           chipState: chip.chip_state || "cold",
           sent: instStats ? instStats.sent_count : 0,
+          reached: instStats ? instStats.reached_count : 0,
           replies: instStats ? instStats.replied_count : 0,
           sentToday: chip.sent_today,
           quotaLimit,
@@ -690,15 +683,8 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
           'Outro'
         ) AS ddd,
         NULLIF(TRIM(l.cidade), '') AS cidade,
-        EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = r.client_id
-            AND (${rawOrCanonicalPhone})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${lmTimestamp} > r.sent_at
-            AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-        ) AS replied
+        ${RUN_PERSON_SQL} AS person,
+        ${RUN_REPLIED_SQL} AS replied
       FROM public.campaign_dispatch_runs r
       LEFT JOIN public.leads l ON l.id = r.lead_id
       WHERE r.client_id = $1
@@ -711,8 +697,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       ddd,
       cidade,
       COUNT(*)::int AS sent,
-      COUNT(*) FILTER (WHERE replied)::int AS replies,
-      ROUND(((COUNT(*) FILTER (WHERE replied))::numeric / COUNT(*)) * 100, 1)::float AS reply_rate
+      COUNT(DISTINCT person)::int AS reached,
+      COUNT(DISTINCT person) FILTER (WHERE replied)::int AS replies,
+      ROUND(((COUNT(DISTINCT person) FILTER (WHERE replied))::numeric / COUNT(DISTINCT person)) * 100, 1)::float AS reply_rate
     FROM regional_runs
     GROUP BY ddd, cidade
     ORDER BY sent DESC;
@@ -731,6 +718,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
         ddd: r.ddd,
         cidade: r.cidade || null,
         sent: r.sent,
+        reached: r.reached,
         replies: r.replies,
         replyRate: r.reply_rate,
       };
@@ -982,6 +970,8 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
             current: repliedCurrent,
             previous: repliedPrevious,
             delta: calculateDelta(repliedCurrent, repliedPrevious),
+            reached: reachedCurrent,
+            previousReached: reachedPrevious,
             rate: responseRateCurrent,
             previousRate: responseRatePrevious,
             ruleDeclaration: RESPONSE_RATE_DECLARATION,

@@ -285,13 +285,14 @@ function DeltaBadge({
   delta,
   previousValue,
 }: {
-  delta: { text: string; isPositive: boolean; isNegative: boolean; isZero: boolean };
-  previousValue: number;
+  delta: { text: string; isPositive: boolean; isNegative: boolean; isZero: boolean; isMissing: boolean };
+  previousValue: number | null;
 }) {
-  if (previousValue === 0 && delta.isZero) {
+  // Sem delta: anterior zerado = "sem base de comparação"; anterior desconhecido = travessão. Nunca um percentual.
+  if (delta.isMissing) {
     return (
       <Badge variant="outline" className="text-[10px] font-semibold border-border text-muted-foreground">
-        0%
+        {previousValue === 0 ? "sem base de comparação" : "—"}
       </Badge>
     );
   }

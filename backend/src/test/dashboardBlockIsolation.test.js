@@ -38,7 +38,7 @@ const BLOCK_QUERIES = [
   ["summary.closings", "current_closings"],
   ["analysis.leadClassification", "TRIM(l.stage)"],
   ["analysis.firstReplyOnly", "stopped_after_first"],
-  ["analysis.topProfiles", "WITH cohort AS"],
+  ["analysis.topProfiles", "replied_people"],
   ["analysis.baseHealth", "no_reply_over_days"],
   ["analysis.firstHumanResponse", "median_minutes"],
 ];
@@ -48,7 +48,7 @@ const HEALTHY = {
   "summary.proposals": { rows: [{ current_proposals: 10, previous_proposals: 5 }] },
   "summary.contracts": { rows: [{ current_contracts: 4, previous_contracts: 2 }] },
   "summary.sent": { rows: [{ current_sent: 150, previous_sent: 100 }] },
-  "summary.replied": { rows: [{ current_replied: 30, previous_replied: 15 }] },
+  "summary.replied": { rows: [{ current_replied: 30, previous_replied: 15, current_reached: 150, previous_reached: 100 }] },
   "summary.meetings": { rows: [{ current_meetings: 12, previous_meetings: 8 }] },
   "rankings.messages": {
     rows: [
@@ -224,12 +224,14 @@ describe("Dashboard — indisponível não é zero", () => {
     expect(m.summary.replied.current).toBe(30);
   });
 
-  it("sem os envios, a taxa de resposta é indisponível (null), não 0%", async () => {
+  it("sem os envios, a taxa de resposta continua: ela é pessoas ÷ pessoas alcançadas, não depende de Enviados", async () => {
     const m = await compute(makePool({ "summary.sent": pgError("boom") }));
 
+    expect(m.summary.sent).toBeNull();
     expect(m.summary.replied.current).toBe(30);
-    expect(m.summary.replied.rate).toBeNull();
-    expect(m.summary.replied.previousRate).toBeNull();
+    expect(m.summary.replied.reached).toBe(150);
+    expect(m.summary.replied.rate).toBe(20);
+    expect(m.summary.replied.previousRate).toBe(15);
   });
 
   it("sem as respostas, a taxa também é indisponível, e os envios seguem", async () => {

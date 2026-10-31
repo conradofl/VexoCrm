@@ -10,18 +10,20 @@ export function formatDelta(delta: number | null | undefined): {
   isPositive: boolean;
   isNegative: boolean;
   isZero: boolean;
+  isMissing: boolean;
 } {
+  // null = sem base de comparação (período anterior zerado ou indisponível): nunca vira "0%".
   if (delta == null || !Number.isFinite(delta)) {
-    return { text: "—", isPositive: false, isNegative: false, isZero: true };
+    return { text: "—", isPositive: false, isNegative: false, isZero: false, isMissing: true };
   }
   const rounded = Math.round(delta);
   if (rounded > 0) {
-    return { text: `+${rounded}%`, isPositive: true, isNegative: false, isZero: false };
+    return { text: `+${rounded}%`, isPositive: true, isNegative: false, isZero: false, isMissing: false };
   }
   if (rounded < 0) {
-    return { text: `${rounded}%`, isPositive: false, isNegative: true, isZero: false };
+    return { text: `${rounded}%`, isPositive: false, isNegative: true, isZero: false, isMissing: false };
   }
-  return { text: "0%", isPositive: false, isNegative: false, isZero: true };
+  return { text: "0%", isPositive: false, isNegative: false, isZero: true, isMissing: false };
 }
 
 export function formatLastUpdatedTime(isoString: string | null | undefined): string {

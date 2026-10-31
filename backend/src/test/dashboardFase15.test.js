@@ -44,7 +44,7 @@ const MARKERS = [
   ["closings", "current_closings"],
   ["classification", "TRIM(l.stage)"],
   ["firstReplyOnly", "stopped_after_first"],
-  ["profiles", "WITH cohort AS"],
+  ["profiles", "replied_people"],
   ["baseHealth", "no_reply_over_days"],
   ["firstHuman", "median_minutes"],
 ];
@@ -227,7 +227,7 @@ describe("Conversões — UMA verificação para Fechamentos e Perfil que mais c
     expect(sqls.filter((q) => q.includes("to_regclass"))).toHaveLength(1);
     // sem a tabela, NENHUM dos dois blocos encosta nela
     expect(sqls.some((q) => q.includes("current_closings"))).toBe(false); // consulta de Fechamentos nem roda
-    const sqlPerfil = sqls.find((q) => q.includes("WITH cohort AS"));
+    const sqlPerfil = sqls.find((q) => q.includes("replied_people"));
     expect(sqlPerfil).toBeDefined();
     expect(sqlPerfil).not.toContain("lead_conversions");
   });
@@ -247,7 +247,7 @@ describe("Conversões — UMA verificação para Fechamentos e Perfil que mais c
     expect(m.unavailableBlocks).toEqual([]);
     const sqls = pool.queries.map((q) => q.sql);
     expect(sqls.filter((q) => q.includes("to_regclass"))).toHaveLength(1);
-    expect(sqls.find((q) => q.includes("WITH cohort AS"))).toContain("lead_conversions");
+    expect(sqls.find((q) => q.includes("replied_people"))).toContain("lead_conversions");
     expect(logs().warn).toBe("");
   });
 
@@ -265,7 +265,7 @@ describe("Conversões — UMA verificação para Fechamentos e Perfil que mais c
   it("tabela presente e vazia: Fechamentos mostra ZERO (um dado), nem some nem é indisponível", async () => {
     const m = await compute(makePool({ conversionsCheck: { rows: [{ available: true }] }, closings: { rows: [{ current_closings: 0, previous_closings: 0 }] } }));
 
-    expect(m.summary.closings).toEqual({ current: 0, previous: 0, delta: 0 });
+    expect(m.summary.closings).toEqual({ current: 0, previous: 0, delta: null });
     expect(m.unavailableBlocks).not.toContain("summary.closings");
   });
 
