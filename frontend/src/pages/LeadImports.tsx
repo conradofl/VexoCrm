@@ -79,6 +79,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { API_BASE_URL } from "@/lib/api";
 import { pendingDispatchesForUpdate, planAfterCampaignSave } from "@/lib/campaignSaveActions";
 import { PendingDispatchesUpdateDialog } from "@/components/campaigns/PendingDispatchesUpdateDialog";
+import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
+import { triggerDispatchWithWindowConfirm, type DispatchTriggerOutcome } from "@/lib/dispatchTrigger";
 import {
   campaignLocalDateTimeToUtcIso,
   campaignUtcIsoToLocalDateTime,
@@ -273,6 +275,7 @@ export default function LeadImports({
   // Editou campanha com lotes não disparados: "atualizar ou manter" (padrão atualizar).
   const [pendingDispatchUpdate, setPendingDispatchUpdate] = useState<{ dispatchIds: string[]; steps: unknown[] } | null>(null);
   const [isUpdatingPendingDispatches, setIsUpdatingPendingDispatches] = useState(false);
+  const { askToForce: askToForceOutsideWindow, outsideWindowDialog } = useOutsideSendWindowConfirm();
   const crmClient = useOptionalCrmClient();
   const selectedClientId = crmClient?.selectedClientId;
   const activeClientId = fixedClientId || selectedClientId || "";
@@ -1846,6 +1849,7 @@ export default function LeadImports({
         const size = Number.parseInt(batchSize, 10) || 100;
         const interval = Number.parseFloat(batchIntervalHours) || 1;
         const numBatches = Math.ceil(totalLeads / size);
+        let firstBatchTrigger: DispatchTriggerOutcome | null = null;
 
         let baseDate = !deliberateDispatch && newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : new Date();
 
@@ -1885,19 +1889,29 @@ export default function LeadImports({
           // Se for manual e for o primeiro lote, dispara imediatamente
           if (i === 0 && (deliberateDispatch || newTriggerType === "manual")) {
             setSubmittingStatus(`Disparando lote 1/${numBatches}...`);
-            await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}` },
-            });
+            firstBatchTrigger = await triggerDispatchWithWindowConfirm(token, dispatchId, askToForceOutsideWindow);
           }
         }
         const hasConnectedChips = evolutionInstanceOptions.length > 0 || Boolean(selectedLeadClient?.n8n_settings?.dispatch_webhook_url);
-        toast({
-          title: "Sucesso!",
-          description: hasConnectedChips
-            ? `${numBatches} lotes criados e enfileirados com sucesso.`
-            : `${numBatches} lotes criados, mas não vão disparar até conectar um chip.`,
-        });
+        if (firstBatchTrigger?.kind === "declined") {
+          toast({
+            title: `${numBatches} lotes criados`,
+            description: `O lote 1 não foi disparado: fora da janela de envio (${firstBatchTrigger.details.start}–${firstBatchTrigger.details.end}). A janela abre ${firstBatchTrigger.details.nextOpeningLocal}; dispare pela fila quando quiser.`,
+          });
+        } else if (firstBatchTrigger?.kind === "failed") {
+          toast({
+            title: `${numBatches} lotes criados, mas o lote 1 não disparou`,
+            description: firstBatchTrigger.message,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: "Sucesso!",
+            description: hasConnectedChips
+              ? `${numBatches} lotes criados e enfileirados com sucesso.`
+              : `${numBatches} lotes criados, mas não vão disparar até conectar um chip.`,
+          });
+        }
       } else {
         const effectiveTriggerType = deliberateDispatch ? "manual" : newTriggerType;
         const dispatchChipList = Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0
@@ -1930,11 +1944,17 @@ export default function LeadImports({
         // 3. Trigger immediate execution if manual
         if (effectiveTriggerType === "manual") {
           setSubmittingStatus("Disparando lote de envios...");
-          await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+          const trigger = await triggerDispatchWithWindowConfirm(token, dispatchId, askToForceOutsideWindow);
+          if (trigger.kind === "declined") {
+            toast({
+              title: "Campanha salva, lote não disparado",
+              description: `Fora da janela de envio (${trigger.details.start}–${trigger.details.end}). Nada foi enviado. A janela abre ${trigger.details.nextOpeningLocal}; dispare pela fila quando quiser.`,
+            });
+          } else if (trigger.kind === "failed") {
+            toast({ title: "Campanha salva, mas o lote não disparou", description: trigger.message, variant: "destructive" });
+          } else {
+            toast({ title: "Sucesso!", description: "O lote de disparos foi iniciado com sucesso." });
+          }
         } else if (effectiveTriggerType === "draft") {
           toast({
             title: "Campanha salva!",
@@ -1972,11 +1992,15 @@ export default function LeadImports({
   const handleTriggerDispatchBatch = async (dispId: string) => {
     try {
       const token = await getIdToken();
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispId}/trigger`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Erro ao iniciar lote.");
+      const trigger = await triggerDispatchWithWindowConfirm(token, dispId, askToForceOutsideWindow);
+      if (trigger.kind === "failed") throw new Error(trigger.message || "Erro ao iniciar lote.");
+      if (trigger.kind === "declined") {
+        toast({
+          title: "Lote não disparado",
+          description: `Fora da janela de envio (${trigger.details.start}–${trigger.details.end}). Nada foi enviado e o lote continua como estava. A janela abre ${trigger.details.nextOpeningLocal}.`,
+        });
+        return;
+      }
       toast({ title: "Lote iniciado", description: "Processamento de envios em andamento." });
       refetchDispatches();
     } catch (err) {
@@ -2747,6 +2771,8 @@ export default function LeadImports({
           isProcessing={duplicateWarningState.isProcessing}
         />
       )}
+
+      {outsideWindowDialog}
 
       <PendingDispatchesUpdateDialog
         open={Boolean(pendingDispatchUpdate)}
