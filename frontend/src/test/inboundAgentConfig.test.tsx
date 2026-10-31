@@ -378,6 +378,63 @@ describe("InboundAgentConfig — Escopo de Atendimento", () => {
   });
 });
 
+describe("InboundAgentConfig — Prazo da pausa de atendimento humano", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    updateMutateAsync.mockClear();
+    updateN8nMutateAsync.mockClear();
+  });
+
+  it("o prazo digitado vai no mesmo PATCH da chave de pausa", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Avançado/i }));
+    fireEvent.change(screen.getByLabelText(/Reativar o agente sozinho depois de/i), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: /Salvar Alterações/i }));
+
+    await waitFor(() => {
+      expect(updateN8nMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: "sonhare", agentPauseOnDeviceReply: false, agentPauseExpiryDays: 5 })
+      );
+    });
+  });
+
+  it("0 é válido (nunca reativa sozinho) e vai no PATCH", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Avançado/i }));
+    fireEvent.change(screen.getByLabelText(/Reativar o agente sozinho depois de/i), { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /Salvar Alterações/i }));
+
+    await waitFor(() => {
+      expect(updateN8nMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ agentPauseExpiryDays: 0 }));
+    });
+  });
+
+  it("campo vazio não manda prazo: o backend mantém o que estava", async () => {
+    mockCompanies([
+      { id: "agente-1", name: "Atendimento GD", agent_kind: "atendimento", inbound_enabled: true, evolution_instances: ["chip-1"] },
+    ]);
+    const { default: InboundAgentConfig } = await import("../pages/InboundAgentConfig");
+    renderWithProviders(<InboundAgentConfig />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Avançado/i }));
+    fireEvent.change(screen.getByLabelText(/Reativar o agente sozinho depois de/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /Salvar Alterações/i }));
+
+    await waitFor(() => expect(updateN8nMutateAsync).toHaveBeenCalled());
+    expect(updateN8nMutateAsync.mock.calls.at(-1)[0]).not.toHaveProperty("agentPauseExpiryDays");
+  });
+});
+
 describe("InboundAgentConfig — Seletor de Número atendido (Urgente 1)", () => {
   beforeEach(() => {
     vi.resetModules();
