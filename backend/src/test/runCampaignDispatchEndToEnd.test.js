@@ -539,7 +539,12 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
     expect(dispatchesTable[dispatchId].error_message).toContain("Pausado — fora da janela de envio");
   });
 
-  it("5. ignoreSendWindow = true faz bypass da janela de envio e conclui o lote com sucesso", async () => {
+  // Contrato mudou em 30/10/2026. Antes este teste afirmava o bypass como comportamento do botão "Disparar Agora": a rota
+  // /dispatches/:id/trigger ligava ignoreSendWindow sempre, e o lote saía fora da janela que a tela prometia. Agora a
+  // rota recusa fora da janela (422 OUTSIDE_SEND_WINDOW) e só liga ignoreSendWindow quando a tela confirma com
+  // forceOutsideWindow: true (contrato da rota em campaignTriggerSendWindow.test.js). O motor continua aceitando a
+  // flag — é por ela que o forçamento confirmado passa —, então o que este teste prova é só o lado do motor.
+  it("5. ignoreSendWindow = true (só o forçamento confirmado liga) faz bypass da janela e conclui o lote", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,

@@ -257,6 +257,9 @@ describe("Propagação Automática na Edição (PATCH /api/campaigns/:id)", () =
 describe("Disparo Manual com Cascata (POST /api/campaigns/dispatches/:dispatchId/trigger)", () => {
   it("reagenda lotes subsequentes com intervalo de 1h e atualiza timestamp da campanha para recontagem do ETA", async () => {
     const { deps, poolQueries } = makeDeps();
+    // Janela desligada: este teste é da cascata, não da janela. Com a config vazia a janela padrão (08–20 seg–sex)
+    // valeria e o resultado dependeria da hora em que a suíte roda (o botão recusa fora dela desde 30/10/2026).
+    deps.getLeadClientN8nSettings = async () => ({ send_window_enabled: false });
     const handler = getRouteHandler(deps, "/api/campaigns/dispatches/:dispatchId/trigger", "post");
 
     const req = {
