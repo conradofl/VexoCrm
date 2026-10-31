@@ -6,7 +6,8 @@
 // ausência de N+1, escopo de tenant, e que as ações em massa atingem só os
 // lotes pendentes.
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { createPgliteDb } from "./helpers/pgliteDb.js";
 import { registerCampaignsRoutes, DISPATCH_SUMMARY_MAX_PAGE_SIZE } from "../domains/campaigns/routes.js";
 
 function fakeRes() {
@@ -513,5 +514,84 @@ describe("GET /api/campaigns/dispatch-summary — carregar tudo de uma vez", () 
 
     expect(res.body.campaigns).toHaveLength(20);
     expect(res.body.totalForScope).toBe(45);
+  });
+});
+
+// Postgres REAL (pglite): a consulta do resumo é SQL escrita à mão; o mock por
+// forma da SQL acima não prova que ela roda nem o que o FILTER conta.
+describe("GET /api/campaigns/dispatch-summary — término estimado só para o que vai rodar (Postgres real)", () => {
+  const T = "vexo-adm";
+  const CHIP = "11111111-1111-4111-8111-111111111111";
+  const SCHEMA = `
+    SET TimeZone = 'UTC';
+    CREATE TABLE public.campaigns (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, name TEXT NOT NULL,
+      archived_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE public.campaign_dispatches (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id UUID NOT NULL, client_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft', sent_count INT NOT NULL DEFAULT 0, failed_count INT NOT NULL DEFAULT 0,
+      target_count INT, scheduled_at TIMESTAMPTZ, error_message TEXT, evolution_instance_id UUID,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE public.campaign_dispatch_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id UUID NOT NULL, client_id TEXT NOT NULL,
+      phone TEXT NOT NULL, status TEXT NOT NULL, sent_at TIMESTAMPTZ
+    );
+    CREATE TABLE public.lead_messages (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, phone TEXT, direction TEXT,
+      engagement_signal TEXT, message_timestamp TIMESTAMPTZ, delivered_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `;
+
+  let db;
+  afterEach(async () => {
+    await db?.close();
+    db = null;
+  });
+
+  async function campanha(nome, lote) {
+    const { rows: [c] } = await db.query("INSERT INTO public.campaigns (client_id, name) VALUES ($1, $2) RETURNING id", [T, nome]);
+    await db.query(
+      `INSERT INTO public.campaign_dispatches (campaign_id, client_id, status, target_count, scheduled_at, error_message, evolution_instance_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [c.id, T, lote.status, lote.target, lote.scheduledAt ?? null, lote.erro ?? null, CHIP]
+    );
+  }
+
+  async function resumo() {
+    const pool = { query: (sql, params) => db.query(sql, params) };
+    const deps = makeDeps({
+      pool,
+      clientId: T,
+      overrides: {
+        getLeadClientEvolutionInstances: async () => [{ id: CHIP, client_id: T, name: "Chip", chip_state: "warm", active: true, sent_count_today: 0 }],
+      },
+    });
+    const handler = getRouteHandler(deps, "/api/campaigns/dispatch-summary");
+    const res = fakeRes();
+    await handler({ query: { clientId: T, scope: "active" } }, res);
+    expect(res.statusCode).toBe(200);
+    return Object.fromEntries(res.body.campaigns.map((c) => [c.campaignName, c]));
+  }
+
+  it("[TESTE OBRIGATÓRIO] caso 31/10 'teste 2': lote manual não disparado, 2 na fila, NÃO promete término", async () => {
+    db = await createPgliteDb(SCHEMA);
+    await campanha("teste 2", { status: "draft", target: 2 });
+    await campanha("agendada", { status: "scheduled", target: 5, scheduledAt: new Date(Date.now() + 3600_000).toISOString() });
+    await campanha("pausada por cota", { status: "paused", target: 4, erro: "Pausado: cota diária do chip atingida (500/500)." });
+    await campanha("pausada à mão", { status: "paused", target: 3 });
+
+    const porNome = await resumo();
+
+    expect(porNome["teste 2"].status).toBe("aguardando_disparo");
+    expect(porNome["teste 2"].leadsPending).toBe(2);
+    expect(porNome["teste 2"].eta).toBeNull();
+
+    expect(porNome["pausada à mão"].eta).toBeNull();
+
+    // O que o agendador vai pegar sozinho continua com estimativa.
+    expect(porNome["agendada"].eta).not.toBeNull();
+    expect(porNome["pausada por cota"].eta).not.toBeNull();
   });
 });
