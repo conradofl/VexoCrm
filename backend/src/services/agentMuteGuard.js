@@ -19,6 +19,44 @@ export const MUTE_SOURCE_CLASSIFIER = "classificador";
 export const MUTE_SOURCE_MANUAL = "manual";
 const CLASSIFIER_SOURCE_SQL = `COALESCE(agent_muted_source, '${MUTE_SOURCE_CLASSIFIER}') = '${MUTE_SOURCE_CLASSIFIER}'`;
 
+// Expiração da pausa manual. O relógio conta desde o último contato da equipe
+// (agent_mute_last_human_at; NULL = agent_muted_at), nunca desde a última mensagem do
+// lead. Pausa do classificador não expira por aqui: ela tem regra própria (sai no fromMe).
+export const DEFAULT_AGENT_PAUSE_EXPIRY_DAYS = 3;
+const MAX_AGENT_PAUSE_EXPIRY_DAYS = 3650;
+
+function normalizeExpiryDays(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= MAX_AGENT_PAUSE_EXPIRY_DAYS ? n : null;
+}
+
+/**
+ * Prazo de expiração da pausa manual para o tenant. FONTE ÚNICA: o portão e a tela de
+ * Conversas chamam esta função, para nunca discordarem. Settings que não puderam ser
+ * lidos (null) ou valor inválido = 0, nunca expira: na dúvida o agente fica quieto, e
+ * portão e tela erram do mesmo jeito.
+ */
+export function resolveAgentPauseExpiryDays(settings) {
+  if (!settings) return 0;
+  return normalizeExpiryDays(settings.agent_pause_expiry_days) ?? 0;
+}
+
+/**
+ * Expressão SQL "esta pausa manual venceu". FONTE ÚNICA para o portão, a limpeza e a
+ * listagem. expiryDays vem de resolveAgentPauseExpiryDays e entra como inteiro validado
+ * (não como parâmetro) para caber nas várias consultas da listagem sem reindexar $n.
+ */
+export function agentPauseExpiredSql(expiryDays, alias = "") {
+  const days = normalizeExpiryDays(expiryDays) ?? 0;
+  const col = (name) => (alias ? `${alias}.${name}` : name);
+  // COALESCE(..., false): coluna NULL (linha sem pausa, origem antiga) não pode virar NULL
+  // aqui, senão um NOT(...) no WHERE da listagem esconderia a conversa.
+  return `COALESCE((${col("agent_muted_at")} IS NOT NULL
+    AND ${col("agent_muted_source")} = '${MUTE_SOURCE_MANUAL}'
+    AND ${days} > 0
+    AND COALESCE(${col("agent_mute_last_human_at")}, ${col("agent_muted_at")}) < now() - make_interval(days => ${days})), false)`;
+}
+
 /**
  * Avalia as cinco travas de segurança obrigatórias antes de permitir que uma conversa seja silenciada.
  * Retorna { canMute: true } somente se NENHUMA das cinco travas for violada.
@@ -91,27 +129,75 @@ export async function isChatAgentMuted(pool, clientId, phone) {
 }
 
 /**
- * Quem pausou o agente nesta conversa: null se não está pausado, senão a origem
- * (MUTE_SOURCE_MANUAL ou MUTE_SOURCE_CLASSIFIER; linha antiga sem origem = classificador).
- * Existe para o descarte dizer o motivo certo no log.
+ * Estado da pausa nesta conversa: null se não está pausada, senão
+ * { source, expired, daysSinceHuman }. source = MUTE_SOURCE_MANUAL ou
+ * MUTE_SOURCE_CLASSIFIER (linha antiga sem origem = classificador). expired só pode
+ * ser true para pausa manual (agentPauseExpiredSql). A conta roda no SQL, com o now()
+ * do banco.
  */
-export async function getChatAgentMuteSource(pool, clientId, phone) {
+export async function resolveChatMuteState(pool, { clientId, phone, expiryDays = 0 }) {
   if (!pool || !clientId || !phone) return null;
   try {
     const res = await pool.query(
-      `SELECT agent_muted_at, agent_muted_source
+      `SELECT agent_muted_at,
+              agent_muted_source,
+              ${agentPauseExpiredSql(expiryDays)} AS expired,
+              floor(extract(epoch FROM now() - COALESCE(agent_mute_last_human_at, agent_muted_at)) / 86400)::int AS days_since_human
          FROM public.whatsapp_chat_states
-        WHERE client_id = $1 AND phone = $2
+        WHERE client_id = $1 AND phone = $2 AND agent_muted_at IS NOT NULL
         LIMIT 1`,
       [clientId, phone]
     );
     const row = res.rows[0];
     if (!row?.agent_muted_at) return null;
-    return row.agent_muted_source === MUTE_SOURCE_MANUAL ? MUTE_SOURCE_MANUAL : MUTE_SOURCE_CLASSIFIER;
+    return {
+      source: row.agent_muted_source === MUTE_SOURCE_MANUAL ? MUTE_SOURCE_MANUAL : MUTE_SOURCE_CLASSIFIER,
+      expired: row.expired === true,
+      daysSinceHuman: row.days_since_human ?? null,
+    };
   } catch (err) {
-    console.warn("[agentMuteGuard] erro ao consultar getChatAgentMuteSource:", err?.message || err);
+    console.warn("[agentMuteGuard] erro ao consultar resolveChatMuteState:", err?.message || err);
     return null;
   }
+}
+
+/**
+ * Limpa a pausa SÓ se ela venceu (a mesma expressão do portão, reavaliada no UPDATE:
+ * se a equipe falou com o lead entre a leitura e a limpeza, nada é limpo).
+ * Devolve true se limpou.
+ */
+export async function clearAgentMuteIfExpired(pool, { clientId, phone, expiryDays }) {
+  if (!pool || !clientId || !phone) return false;
+  const res = await pool.query(
+    `UPDATE public.whatsapp_chat_states
+        SET agent_muted_at = NULL,
+            agent_muted_reason = NULL,
+            agent_muted_source = NULL,
+            agent_mute_last_human_at = NULL,
+            updated_at = now()
+      WHERE client_id = $1 AND phone = $2 AND ${agentPauseExpiredSql(expiryDays)}`,
+    [clientId, phone]
+  );
+  return (res?.rowCount ?? 0) > 0;
+}
+
+/**
+ * Contato da equipe (fromMe pelo aparelho ou resposta pela tela) empurra o prazo da
+ * pausa manual. Não desfaz a pausa e não mexe em agent_muted_at. Só age em conversa
+ * pausada à mão. Devolve true se a conversa estava pausada à mão.
+ */
+export async function touchAgentMuteClock(pool, { clientId, phone }) {
+  if (!pool || !clientId || !phone) return false;
+  const res = await pool.query(
+    `UPDATE public.whatsapp_chat_states
+        SET agent_mute_last_human_at = now(),
+            updated_at = now()
+      WHERE client_id = $1 AND phone = $2
+        AND agent_muted_at IS NOT NULL
+        AND agent_muted_source = '${MUTE_SOURCE_MANUAL}'`,
+    [clientId, phone]
+  );
+  return (res?.rowCount ?? 0) > 0;
 }
 
 /**
@@ -152,6 +238,7 @@ export async function recordAgentMute(pool, { clientId, phone, reason, source = 
        agent_muted_at = now(),
        agent_muted_reason = EXCLUDED.agent_muted_reason,
        agent_muted_source = EXCLUDED.agent_muted_source,
+       agent_mute_last_human_at = NULL,
        updated_at = now()`,
     [clientId, phone, mutedReason, mutedSource]
   );
@@ -169,6 +256,7 @@ export async function clearAgentMute(pool, { clientId, phone, onlyClassifier = f
         SET agent_muted_at = NULL,
             agent_muted_reason = NULL,
             agent_muted_source = NULL,
+            agent_mute_last_human_at = NULL,
             updated_at = now()
       WHERE client_id = $1 AND phone = $2 AND agent_muted_at IS NOT NULL${onlyClassifier ? `
         AND ${CLASSIFIER_SOURCE_SQL}` : ""}`,
