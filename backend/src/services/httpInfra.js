@@ -29,7 +29,33 @@ export function sendError(res, status, code, message, details) {
   if (details) {
     body.error.details = details;
   }
+  registrarRecusa(res?.req, status, code, message);
   res.status(status).json(body);
+}
+
+// Mesmo formato de maskPhoneForLog (services/tenant.js), que nao da para
+// importar daqui: tenant.js ja importa este arquivo.
+function mascararDigitosLongos(texto) {
+  return String(texto ?? "").replace(/\d{8,}/g, (d) => `${"*".repeat(d.length - 4)}${d.slice(-4)}`);
+}
+
+// Toda recusa 4xx/5xx deixa uma linha. Antes um 400 saia para a tela e nao
+// existia em lugar nenhum do servidor. Nunca grava corpo, cabecalho nem detalhes:
+// so o que identifica a recusa, com sequencias longas de digito (telefone) mascaradas.
+function registrarRecusa(req, status, code, message) {
+  if (!(status >= 400)) return;
+  const rotaDeclarada = req?.route?.path ? `${req.baseUrl || ""}${req.route.path}` : null;
+  const caminho = String(req?.originalUrl || req?.url || "").split("?")[0];
+  const clientId = req?.params?.clientId || req?.query?.clientId || req?.body?.clientId || null;
+  const linha = {
+    status,
+    code: code ?? null,
+    metodo: req?.method ?? null,
+    rota: mascararDigitosLongos(rotaDeclarada || caminho) || null,
+    ...(clientId ? { clientId: mascararDigitosLongos(clientId) } : {}),
+    mensagem: mascararDigitosLongos(message).slice(0, 300),
+  };
+  (status >= 500 ? console.error : console.warn)("[http] recusa", linha);
 }
 
 /** When true, INTERNAL_ERROR responses include a short `details` payload (for staging / temporary prod debugging). */
