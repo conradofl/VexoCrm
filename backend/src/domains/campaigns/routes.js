@@ -4496,6 +4496,16 @@ export function registerCampaignsRoutes(app, deps) {
             SUM(
               GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
             ) FILTER (WHERE d.status NOT IN ('done','cancelled'))::int AS leads_pending,
+            -- So o que vai rodar sem clique, com o MESMO criterio do agendador:
+            -- running, scheduled e paused com marcador de janela/cota. Draft,
+            -- failed e interrupted ficam fora — a estimativa nao promete termino
+            -- para campanha parada esperando alguem.
+            SUM(
+              GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
+            ) FILTER (
+              WHERE d.status IN ('running','scheduled')
+                 OR (d.status = 'paused' AND (d.error_message ILIKE '%fora da janela de envio%' OR d.error_message ILIKE '%' || $5::text || '%'))
+            )::int AS leads_will_run,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($2::text[]))::int AS leads_pause_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($3::text[]))::int AS leads_resume_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($4::text[]))::int AS leads_cancel_target,
@@ -4508,7 +4518,7 @@ export function registerCampaignsRoutes(app, deps) {
           WHERE d.client_id = $1
           GROUP BY d.campaign_id, c.name, c.archived_at
         `,
-        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES]
+        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES, QUOTA_PAUSE_MARKER]
       );
 
       const active = [];
@@ -4603,7 +4613,7 @@ export function registerCampaignsRoutes(app, deps) {
         const status = isArchived ? "arquivada" : aggregateDispatchStatus(row.statuses);
         const statusLabel = isArchived ? "Na Lixeira" : (AGGREGATE_STATUS_LABELS[status] || null);
         const eta = isArchived ? null : estimateDispatchCompletion({
-          pendingLeads: row.leads_pending,
+          pendingLeads: row.leads_will_run,
           dailyLimit,
           sentToday,
           windowDays: sendWindowConfig.days,

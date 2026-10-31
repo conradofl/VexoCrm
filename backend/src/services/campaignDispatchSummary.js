@@ -20,6 +20,7 @@ export const AGGREGATE_STATUS_LABELS = {
   concluida: "Concluída",
   cancelada: "Cancelada",
   agendada: "Agendada",
+  aguardando_disparo: "Aguardando disparo",
   pausada: "Pausada",
   arquivada: "Na Lixeira",
 };
@@ -40,9 +41,14 @@ export function isCampaignActive(dispatchStatuses) {
  *   1. algum lote 'running'                          → Enviando
  *   2. todo lote 'done'                               → Concluída
  *   3. algum 'cancelled' e nenhum pendente             → Cancelada
- *   4. algum draft/scheduled/failed/interrupted        → Agendada
- *   5. algum 'paused'                                  → Pausada
- * As cinco regras cobrem toda combinação possível dos 8 status conhecidos
+ *   4. algum 'scheduled'                               → Agendada
+ *   5. algum draft/failed/interrupted                  → Aguardando disparo
+ *   6. algum 'paused'                                  → Pausada
+ * "Agendada" so quando existe lote com data que o agendador vai pegar. Lote
+ * manual que ninguem disparou nasce 'draft' sem scheduled_at, e falha ou
+ * interrupcao so voltam com clique: nenhum dos tres roda sozinho. Chamar isso
+ * de Agendada fazia o cartao dizer "Agendada" e "Sem agendamento" juntos.
+ * As seis regras cobrem toda combinação possível dos 8 status conhecidos
  * (running/draft/scheduled/paused/done/failed/cancelled/interrupted) — não
  * existe estado que caia fora delas.
  */
@@ -55,7 +61,8 @@ export function aggregateDispatchStatus(dispatchStatuses) {
 
   const hasPending = statuses.some((s) => PENDING_DISPATCH_STATUSES.includes(s));
   if (statuses.includes("cancelled") && !hasPending) return "cancelada";
-  if (statuses.some((s) => ["draft", "scheduled", "failed", "interrupted"].includes(s))) return "agendada";
+  if (statuses.includes("scheduled")) return "agendada";
+  if (statuses.some((s) => ["draft", "failed", "interrupted"].includes(s))) return "aguardando_disparo";
   if (statuses.includes("paused")) return "pausada";
 
   // Combinação não prevista (não deveria acontecer com os 8 status válidos).

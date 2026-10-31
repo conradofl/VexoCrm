@@ -1335,13 +1335,14 @@ export function useRunPendingDispatchLeads() {
 // GET /api/campaigns/dispatch-summary: uma linha agregada por campanha, não
 // por lote. batches[] é a faixa de quadrados (só da página atual).
 
-export type DispatchAggregateStatus = "enviando" | "concluida" | "cancelada" | "agendada" | "pausada" | "arquivada";
+export type DispatchAggregateStatus = "enviando" | "concluida" | "cancelada" | "agendada" | "aguardando_disparo" | "pausada" | "arquivada";
 
 export const DISPATCH_AGGREGATE_STATUS_LABELS: Record<DispatchAggregateStatus, string> = {
   enviando: "Enviando",
   concluida: "Concluída",
   cancelada: "Cancelada",
   agendada: "Agendada",
+  aguardando_disparo: "Aguardando disparo",
   pausada: "Pausada",
   arquivada: "Na Lixeira",
 };
@@ -1351,6 +1352,7 @@ export const DISPATCH_AGGREGATE_STATUS_COLORS: Record<DispatchAggregateStatus, s
   concluida: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400",
   cancelada: "border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400",
   agendada: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400",
+  aguardando_disparo: "border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300",
   pausada: "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/30 dark:text-orange-400",
   arquivada: "border-zinc-300 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-400",
 };

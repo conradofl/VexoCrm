@@ -18,7 +18,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchApi } from "@/lib/api";
+import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { fetchCampaignAudience, fetchLeadIds, type LeadRequest } from "@/lib/leads/leadListApi";
 import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
@@ -1882,7 +1882,7 @@ export default function LeadImports({
               offset: offset,
             }),
           });
-          if (!dispatchRes.ok) throw new Error(`Erro ao registrar lote ${i + 1} de disparo.`);
+          if (!dispatchRes.ok) throw new Error(await readApiErrorMessage(dispatchRes, `Erro ao registrar lote ${i + 1} de disparo`));
           const dispatchData = await dispatchRes.json();
           const dispatchId = dispatchData.dispatch.id;
 
@@ -1935,7 +1935,7 @@ export default function LeadImports({
             },
           }),
         });
-        if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");
+        if (!dispatchRes.ok) throw new Error(await readApiErrorMessage(dispatchRes, "Erro ao registrar lote de disparo"));
         const dispatchData = await dispatchRes.json();
         const dispatchId = dispatchData.dispatch.id;
 
@@ -2016,7 +2016,7 @@ export default function LeadImports({
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ status: "paused" }),
       });
-      if (!res.ok) throw new Error("Erro ao pausar lote.");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao pausar lote"));
       toast({ title: "Lote pausado" });
       refetchDispatches();
     } catch (err) {
@@ -2073,7 +2073,7 @@ export default function LeadImports({
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Erro ao excluir lote.");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao excluir lote"));
       toast({ title: "Lote removido" });
       refetchDispatches();
     } catch (err) {
@@ -2087,7 +2087,7 @@ export default function LeadImports({
       const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${disp.id}/failed?format=csv`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Falha ao gerar CSV.");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Falha ao gerar CSV"));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -2098,7 +2098,7 @@ export default function LeadImports({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast({ title: "Erro de download", description: "Não foi possível obter o CSV de falhas.", variant: "destructive" });
+      toast({ title: "Erro de download", description: err instanceof Error ? err.message : "Não foi possível obter o CSV de falhas.", variant: "destructive" });
     }
   };
 

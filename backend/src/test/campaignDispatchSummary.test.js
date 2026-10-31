@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  AGGREGATE_STATUS_LABELS,
   aggregateDispatchStatus,
   isCampaignActive,
   estimateDispatchCompletion,
@@ -29,11 +30,20 @@ describe("aggregateDispatchStatus — status agregado por precedência", () => {
     expect(aggregateDispatchStatus(["cancelled", "scheduled"])).toBe("agendada");
   });
 
-  it("draft/scheduled/failed/interrupted sem running → Agendada", () => {
-    expect(aggregateDispatchStatus(["draft"])).toBe("agendada");
+  it("algum scheduled sem running → Agendada", () => {
     expect(aggregateDispatchStatus(["done", "scheduled"])).toBe("agendada");
-    expect(aggregateDispatchStatus(["done", "failed"])).toBe("agendada");
-    expect(aggregateDispatchStatus(["paused", "interrupted"])).toBe("agendada");
+    expect(aggregateDispatchStatus(["draft", "scheduled"])).toBe("agendada");
+  });
+
+  it("[TESTE OBRIGATÓRIO] caso 31/10 (vexo-adm, 'teste 2'): lote manual não disparado é 'Aguardando disparo', nunca 'Agendada'", () => {
+    // Lote manual nasce draft sem scheduled_at; o dono recusou no diálogo da janela.
+    expect(aggregateDispatchStatus(["draft"])).toBe("aguardando_disparo");
+    expect(AGGREGATE_STATUS_LABELS[aggregateDispatchStatus(["draft"])]).toBe("Aguardando disparo");
+  });
+
+  it("falha ou interrupção sem lote agendado também espera clique → Aguardando disparo", () => {
+    expect(aggregateDispatchStatus(["done", "failed"])).toBe("aguardando_disparo");
+    expect(aggregateDispatchStatus(["paused", "interrupted"])).toBe("aguardando_disparo");
   });
 
   it("só paused (sem draft/scheduled/failed/interrupted) → Pausada", () => {

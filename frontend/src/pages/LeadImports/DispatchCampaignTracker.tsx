@@ -359,7 +359,8 @@ function CampaignCard({
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
   const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
 
-  const isScheduled = campaign.status === "agendada";
+  // "Aguardando disparo" é justamente quem mais precisa do botão: nada roda sem clique.
+  const isScheduled = campaign.status === "agendada" || campaign.status === "aguardando_disparo";
   const batch1 =
     campaign.batches.find(
       (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused"
