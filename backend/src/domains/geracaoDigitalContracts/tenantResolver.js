@@ -15,6 +15,9 @@ export const GD_TENANT_UUID = "00000000-0000-0000-0000-000000000000";
 // (15 contratos e 31 propostas com valor e CNPJ, medido 01/11/2026). Ao criar tenant: chave aqui,
 // no mesmo commit. O fallback vira 404 depois de 7 dias de log do aviso [gd-tenant] sem casos
 // legítimos.
+// PRODUÇÃO: entrou no main em 01/11/2026 04:07Z (6b7f7088, PR #184), mas o build de 01/11 04:08Z
+// foi cancelado por build concorrente (merge do #185) e o EasyPanel só puxa o último merge. Sobe
+// para produção pelo merge de chore/gd-resolvedor-deploy; os 7 dias contam a partir desse deploy.
 const CLIENT_KEY_TO_TENANT_UUID = Object.freeze({
   "geracao-digital": GD_TENANT_UUID,
 });
