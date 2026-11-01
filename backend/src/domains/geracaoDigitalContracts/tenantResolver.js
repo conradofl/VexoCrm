@@ -7,9 +7,14 @@ import { sendError } from "../../services/httpInfra.js";
 // as 341 linhas gd_* + tenant_modules da Geração Digital estão no uuid-zero (que a migration
 // 20260711091500 rebatizou 'LivPub'); nenhuma é da LivPub. O primeiro tenant novo podia virar o
 // LIMIT 1 e esconder tudo. Agora o nome em tenants é só exibição e não decide nada.
-// Tenant novo que precise de gd_*: entra aqui, com a chave de leads_clients.
 export const GD_TENANT_UUID = "00000000-0000-0000-0000-000000000000";
 
+// ATENÇÃO, REGRA QUE NASCE COM ESTE MAPA (decisão do dono, 01/11/2026): chave que não está aqui
+// cai na Geração Digital para usuário interno (fallbackToGd abaixo). Criar tenant novo sem
+// adicionar a chave dele neste mapa faz o cliente novo ENXERGAR os contratos e propostas da GD
+// (15 contratos e 31 propostas com valor e CNPJ, medido 01/11/2026). Ao criar tenant: chave aqui,
+// no mesmo commit. O fallback vira 404 depois de 7 dias de log do aviso [gd-tenant] sem casos
+// legítimos.
 const CLIENT_KEY_TO_TENANT_UUID = Object.freeze({
   "geracao-digital": GD_TENANT_UUID,
 });
