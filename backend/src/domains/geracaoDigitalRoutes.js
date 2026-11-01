@@ -14,6 +14,7 @@ import {
 import { isManagerOrAdmin } from "../access/claims.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { calculateImplementationReadiness } from "./geracaoDigital/briefingReadiness.js";
+import { resolveGdTenantUuid } from "./geracaoDigitalContracts/tenantResolver.js";
 
 // Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
 // grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
@@ -1170,33 +1171,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     return _proposalHasSegmentLogo;
   }
 
-  async function resolveTenantUuid(clientKey) {
-    let tenantId = "00000000-0000-0000-0000-000000000000";
-    if (!clientKey) {
-      const firstTenant = await pool.query("SELECT id FROM public.tenants LIMIT 1");
-      if (firstTenant.rows.length > 0) {
-        return firstTenant.rows[0].id;
-      }
-      return tenantId;
-    }
-
-    // Check if clientKey is already a valid UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (uuidRegex.test(clientKey)) {
-      return clientKey;
-    }
-
-    const tenantRes = await pool.query("SELECT id FROM public.tenants WHERE name ILIKE $1 LIMIT 1", [clientKey]);
-    if (tenantRes.rows.length > 0) {
-      return tenantRes.rows[0].id;
-    }
-
-    const firstTenant = await pool.query("SELECT id FROM public.tenants LIMIT 1");
-    if (firstTenant.rows.length > 0) {
-      return firstTenant.rows[0].id;
-    }
-    return tenantId;
-  }
+  // client_id → tenants.id sai do mapa explícito (tenantResolver.js), não do nome nem do LIMIT 1.
+  const resolveTenantUuid = resolveGdTenantUuid;
 
   // GET /api/gd/segments
   app.get("/api/gd/segments", requireFirebaseAuth, async (req, res) => {
