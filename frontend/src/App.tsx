@@ -468,7 +468,15 @@ const App = () => (
                }
              />
              <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
-             <Route path="/portal/:slug" element={<ClientPortal />} />
+             {/* Protótipo do portal (dados inventados, Fase 3): só interno até existir backend. */}
+             <Route
+               path="/portal/:slug"
+               element={
+                 <ProtectedRoute allowedRoles={["internal"]}>
+                   <ClientPortal />
+                 </ProtectedRoute>
+               }
+             />
              {/* Preview temporário da Apresentação Comercial (teste de layout/copy). */}
              <Route path="/apresentacao-preview" element={<PresentationPreview />} />
              <Route path="*" element={<NotFound />} />
