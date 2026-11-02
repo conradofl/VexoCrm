@@ -22,7 +22,7 @@ describe("LivPub Proactive Followup Automation Rules", () => {
   });
 
   it("implements the inactivity trigger matching leads who did not visit for > X months", () => {
-    expect(engineSource).toContain("ultima_visita < NOW() - INTERVAL '${months} months'");
+    expect(engineSource).toContain("ultima_visita < NOW() - make_interval(months => $2::int)");
   });
 
   it("contains the appropriate reason labels and context for both triggers", () => {
@@ -63,8 +63,8 @@ describe("LivPub Birthday Automation (Esteira 3)", () => {
 
 describe("LivPub Reactivation Manual Trigger (Esteira 4)", () => {
   it("scans lead tables in batches to protect the database with 21k contacts", () => {
-    expect(engineSource).toContain("async function fetchLeadsInBatches(tablename, whereSql, reasonType)");
-    expect(engineSource).toContain("LIMIT ${ENGINE_BATCH_SIZE} OFFSET ${offset}");
+    expect(engineSource).toContain("async function fetchLeadsInBatches(tablename, whereSql, params, reasonType)");
+    expect(engineSource).toContain("LIMIT $${limitIdx} OFFSET $${limitIdx + 1}");
     expect(engineSource).toContain("— lote ${batch}: ${rows.length} leads");
   });
 
