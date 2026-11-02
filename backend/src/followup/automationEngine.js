@@ -26,10 +26,23 @@ function getGroq() {
 const ENGINE_BATCH_SIZE = Math.max(50, Number(process.env.FOLLOWUP_ENGINE_BATCH_SIZE) || 500);
 const ENGINE_MAX_SUGGESTIONS_PER_RUN = Math.max(1, Number(process.env.FOLLOWUP_ENGINE_MAX_SUGGESTIONS) || 100);
 
-async function fetchLeadsInBatches(tablename, whereSql, reasonType) {
+// ESTEIRAS 3 E 4 PRESAS À LIVPUB (decisão do dono, 02/11/2026). Antes, aniversário e inativo
+// varriam TODA empresa ativa de followup_companies usando o tenant_id dela como client_id. Medido
+// em produção 02/11/2026: 18 empresas na varredura, a Geração Digital entre elas (rodou em 27/08);
+// 0 leads com data_nascimento/ultima_visita hoje, então o raio é zero, mas a primeira planilha com
+// data de nascimento faria a GD receber sugestão de "mesa VIP". O vazamento para umuarama-matcon
+// (8 sugestões, última em 07/07) veio por esse caminho. Chave canônica é 'livpub' (03/07, 67
+// sugestões); as 9 empresas 'liv_pub' de 28/06 são teste, com 0 sugestões, e ficam fora.
+// Cliente futuro do mesmo segmento entra pondo a chave do tenant aqui. Nada do módulo foi apagado.
+export const LIVPUB_ESTEIRA_TENANTS = Object.freeze(["livpub"]);
+
+// whereSql usa só placeholders ($1..$n) e os valores vão em params: tenant_id é texto livre de
+// cadastro e era interpolado direto no SQL (aspa no tenant_id = injeção).
+export async function fetchLeadsInBatches(tablename, whereSql, params, reasonType) {
   const results = [];
   let offset = 0;
   let batch = 0;
+  const limitIdx = params.length + 1;
   for (;;) {
     const { rows } = await query(`
       SELECT id, nome AS lead_name, telefone AS phone, lead_source AS origin, NULL AS meeting_datetime,
@@ -37,8 +50,8 @@ async function fetchLeadsInBatches(tablename, whereSql, reasonType) {
         FROM ${tablename}
        WHERE ${whereSql}
        ORDER BY id
-       LIMIT ${ENGINE_BATCH_SIZE} OFFSET ${offset}
-    `);
+       LIMIT $${limitIdx} OFFSET $${limitIdx + 1}
+    `, [...params, ENGINE_BATCH_SIZE, offset]);
     if (!rows.length) break;
     batch++;
     console.info(`[followup/engine] ${tablename} (${reasonType}) — lote ${batch}: ${rows.length} leads`);
@@ -60,16 +73,18 @@ export async function findLivPubCandidates(companyId, inactiveMonths = 6) {
   if (!companyRows.length) return [];
   const tenantId = companyRows[0].tenant_id;
   if (!tenantId) return [];
+  if (!LIVPUB_ESTEIRA_TENANTS.includes(tenantId)) return [];
 
   let candidates = [];
   try {
     if (hasNascimento) {
       const bday = await fetchLeadsInBatches(
         'leads',
-        `client_id = '${tenantId}'
+        `client_id = $1
            AND data_nascimento IS NOT NULL
            AND EXTRACT(MONTH FROM data_nascimento) = EXTRACT(MONTH FROM CURRENT_DATE)
            AND EXTRACT(DAY FROM data_nascimento) = EXTRACT(DAY FROM CURRENT_DATE)`,
+        [tenantId],
         "livpub_aniversario"
       );
       candidates.push(...bday);
@@ -79,9 +94,10 @@ export async function findLivPubCandidates(companyId, inactiveMonths = 6) {
       const months = Number(inactiveMonths) || 6;
       const inativos = await fetchLeadsInBatches(
         'leads',
-        `client_id = '${tenantId}'
+        `client_id = $1
            AND ultima_visita IS NOT NULL
-           AND ultima_visita < NOW() - INTERVAL '${months} months'`,
+           AND ultima_visita < NOW() - make_interval(months => $2::int)`,
+        [tenantId, months],
         "livpub_inativo"
       );
       candidates.push(...inativos);
@@ -101,11 +117,11 @@ async function findCandidates(companyId, campaignId, neverContactedHours = 2, no
       WHERE fs.campaign_id = $1
         AND fs.company_id  = $2
         AND fs.status      = 'active'
-        AND fs.created_at  < NOW() - INTERVAL '${neverHours} hours'
+        AND fs.created_at  < NOW() - make_interval(hours => $3::int)
         AND NOT EXISTS (
           SELECT 1 FROM followup_jobs fj WHERE fj.schedule_id = fs.id
         )`,
-    [campaignId, companyId]
+    [campaignId, companyId, neverHours]
   );
 
   // 2. Todos os jobs enviados há mais de X horas, sem resposta, sem job pendente
@@ -127,8 +143,8 @@ async function findCandidates(companyId, campaignId, neverContactedHours = 2, no
            WHERE fj2.schedule_id = fs.id AND fj2.status = 'pending'
         )
       GROUP BY fs.id
-     HAVING MAX(fj.sent_at) < NOW() - INTERVAL '${staleHours} hours'`,
-    [campaignId, companyId]
+     HAVING MAX(fj.sent_at) < NOW() - make_interval(hours => $3::int)`,
+    [campaignId, companyId, staleHours]
   );
 
   // 3. Jobs com status 'failed', sem pendentes, sem resposta
@@ -249,7 +265,7 @@ export async function generateSuggestion(lead, templates, reasonType, company = 
 
 // ─── Engine principal ─────────────────────────────────────────────────────────
 
-async function runAutomationEngine(isManual = false) {
+export async function runAutomationEngine(isManual = false) {
   console.info("[followup/engine] iniciando varredura proativa...");
   let created = 0;
   let skipped = 0;
@@ -257,7 +273,7 @@ async function runAutomationEngine(isManual = false) {
   try {
     // 0. Carregar configurações de todas as empresas
     const { rows: companiesList } = await query(
-      `SELECT id, engine_scan_interval_hours, never_contacted_delay_hours, 
+      `SELECT id, tenant_id, engine_scan_interval_hours, never_contacted_delay_hours,
               no_reply_delay_hours, livpub_inactive_delay_months, last_engine_run_at,
               livpub_aniversario_prompt, livpub_inativo_prompt
          FROM followup_companies
@@ -381,6 +397,8 @@ async function runAutomationEngine(isManual = false) {
 
     for (const company of companiesList) {
       const company_id = company.id;
+      // Só empresas da LivPub (LIVPUB_ESTEIRA_TENANTS, ver o comentário no topo).
+      if (!LIVPUB_ESTEIRA_TENANTS.includes(company.tenant_id)) continue;
       if (!shouldProcessCompany(company_id)) {
         console.info(`[followup/engine] pulando LivPub para empresa ${company_id} (intervalo não atingido)`);
         continue;
