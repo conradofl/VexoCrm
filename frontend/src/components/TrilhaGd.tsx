@@ -49,6 +49,7 @@ export function TrilhaGd({ modo, estados, eventos, estadoAtual }: Props) {
                 modo={modo}
                 ultima={g === grupos.length - 1 && i === grupo.itens.length - 1}
                 tagParada={trilha.fora?.terminal ? "encerrado aqui" : "pausado aqui"}
+                primeiraAntes={etapa.situacao === "antes" && trilha.etapas[trilha.etapas.indexOf(etapa) - 1]?.situacao !== "antes"}
                 ref={etapa === trilha.atual ? atualRef : undefined}
               />
             ))}
@@ -105,9 +106,15 @@ const COR = {
   parada: { ponto: "bg-muted-foreground ring-4 ring-muted-foreground/20", anel: "border-muted-foreground" },
 } as const;
 
-type EtapaProps = { etapa: EtapaPortal | EtapaInterna; modo: Props["modo"]; ultima: boolean; tagParada: string };
+type EtapaProps = {
+  etapa: EtapaPortal | EtapaInterna;
+  modo: Props["modo"];
+  ultima: boolean;
+  tagParada: string;
+  primeiraAntes: boolean;
+};
 
-const Etapa = forwardRef<HTMLLIElement, EtapaProps>(function Etapa({ etapa, modo, ultima, tagParada }, ref) {
+const Etapa = forwardRef<HTMLLIElement, EtapaProps>(function Etapa({ etapa, modo, ultima, tagParada, primeiraAntes }, ref) {
   const { situacao, acaoDoCliente, parada } = etapa;
   const atual = situacao === "atual";
   const semEvento = situacao === "pulada" || situacao === "antes";
@@ -119,6 +126,9 @@ const Etapa = forwardRef<HTMLLIElement, EtapaProps>(function Etapa({ etapa, modo
   if (atual && parada) tag = tagParada;
   else if (atual && acaoDoCliente) tag = modo === "portal" ? "com você" : "com o cliente";
   else if (atual) tag = "aqui";
+  // "antes do acompanhamento" só na primeira da sequência: num importado são 15 seguidas, e a etiqueta
+  // repetida escondia a etapa atual. As outras ficam tracejadas, e o tracejado diz o mesmo.
+  else if (situacao === "antes") tag = primeiraAntes ? TAG_SITUACAO.antes! : null;
   else tag = TAG_SITUACAO[situacao] ?? null;
 
   const interno = modo === "interno" ? (etapa as EtapaInterna).evento : null;
