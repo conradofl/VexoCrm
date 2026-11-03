@@ -204,7 +204,7 @@ describe("detalhe do cliente", () => {
   // procuravam o conteúdo no DOM, e em jsdom todo nó do DOM conta como visível (não há layout). Este teste exige o
   // que a pessoa vê: um painel de diálogo, fora do fluxo da página (portal), com o nome e a linha do tempo dentro.
   // A posição em pixels foi medida num Chromium real (Playwright), não aqui.
-  it("clicar no nome abre o painel lateral com o cliente e a linha do tempo", async () => {
+  it("clicar no nome abre o painel lateral com o cliente e a trilha", async () => {
     const c = cliente("d1", "Anjos Cuidadores");
     lista = [cliente("d0", "Agência GD"), c];
     detalhe = {
@@ -217,7 +217,8 @@ describe("detalhe do cliente", () => {
 
     const painel = await screen.findByRole("dialog", { name: "Detalhe do cliente" });
     expect(await within(painel).findByRole("heading", { name: "Anjos Cuidadores" })).toBeInTheDocument();
-    expect(within(painel).getByRole("list", { name: "Linha do tempo" })).toHaveTextContent("Cliente ativo · 03/11 12:19 (estimada)");
+    const trilha = await within(painel).findByRole("region", { name: "Trilha do cliente" });
+    expect(trilha.querySelector('[aria-current="step"]')).toHaveTextContent("Cliente ativo03/11 12:19 · aproximado");
     // Fora do <main> da página: não é um bloco no rodapé da lista, é a camada por cima dela.
     expect(painel.closest("main")).toBeNull();
     expect(chamadas.some((ch) => ch.metodo === "GET" && ch.url.endsWith("/api/gd/clientes/d1"))).toBe(true);
@@ -319,7 +320,7 @@ describe("cadastro", () => {
     expect(screen.queryByText(/há \d+ dias|hoje/)).not.toBeInTheDocument();
   });
 
-  it("linha do tempo mostra estado anterior, origem, ator e motivo", async () => {
+  it("histórico completo (interno) mostra estado anterior, origem, ator e motivo", async () => {
     const c = cliente("t1", "Crepfy");
     lista = [c];
     detalhe = {
@@ -331,7 +332,7 @@ describe("cadastro", () => {
     };
     renderTela();
     fireEvent.click(await screen.findByRole("button", { name: "Crepfy" }));
-    const linha = await screen.findByRole("list", { name: "Linha do tempo" });
+    const linha = await screen.findByRole("list", { name: "Histórico completo" });
     expect(linha).toHaveTextContent("Cliente ativo · 03/11 12:19 (estimada)");
     expect(linha).toHaveTextContent("importacao_inicial · importacao · importacao:conrado · Importação inicial");
     expect(linha).toHaveTextContent("ATIVO → Pausado");

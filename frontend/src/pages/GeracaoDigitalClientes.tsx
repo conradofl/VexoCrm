@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
+import { TrilhaGd } from "@/components/TrilhaGd";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -265,6 +266,7 @@ function MoverEstado({ cliente, estados, onConflito }: { cliente: GdCliente; est
 
 function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
   const { data, isLoading, error } = useGdCliente(id);
+  const { data: estados } = useGdEstados();
   const editar = useEditarGdCliente();
   const [editando, setEditando] = useState(false);
   const [cadastro, setCadastro] = useState<Cadastro>(cadastroVazio);
@@ -347,8 +349,19 @@ function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
       )}
 
       <div>
-        <h3 className="font-medium mb-2">Linha do tempo</h3>
-        <ol aria-label="Linha do tempo" className="space-y-2 text-sm">
+        <h3 className="font-medium mb-2">Trilha</h3>
+        {estados ? (
+          <TrilhaGd modo="interno" estados={estados} eventos={eventos} estadoAtual={cliente.estado_atual} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Carregando etapas…</p>
+        )}
+      </div>
+
+      {/* A trilha mostra o último evento de cada etapa. Pausa, correção e volta de etapa têm motivo
+          que só aparece aqui, por isso o log fica, recolhido e só na tela interna. */}
+      <details>
+        <summary className="cursor-pointer text-sm font-medium">Histórico completo ({eventos.length} {eventos.length === 1 ? "evento" : "eventos"})</summary>
+        <ol aria-label="Histórico completo" className="mt-2 space-y-2 text-sm">
           {eventos.map((ev) => (
             <li key={ev.id} className="border-l-2 pl-3">
               <div>
@@ -361,7 +374,7 @@ function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
             </li>
           ))}
         </ol>
-      </div>
+      </details>
     </section>
   );
 }

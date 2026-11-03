@@ -151,6 +151,16 @@ function uidDe(req) {
   return String(uid);
 }
 
+const CAMPOS_ESTADO = ["codigo", "ordem", "fase", "rotulo_interno", "rotulo_portal", "prazo_contagem", "prazo_horas", "terminal"];
+
+// Lista fechada de campos, mais acao_do_cliente só quando a coluna existe.
+function estadoDe(linha) {
+  const estado = {};
+  for (const campo of CAMPOS_ESTADO) estado[campo] = linha[campo] ?? null;
+  if (typeof linha.acao_do_cliente === "boolean") estado.acao_do_cliente = linha.acao_do_cliente;
+  return estado;
+}
+
 async function estadosAtivos(client) {
   const { rows } = await client.query(`SELECT codigo FROM public.gd_estados WHERE ativo ORDER BY ordem`);
   return rows.map((r) => r.codigo);
@@ -254,11 +264,13 @@ export function registerGdClientesRoutes(app, {
 
   app.get("/api/gd/estados", ...guarda, async (_req, res) => {
     try {
+      // to_jsonb(e) em vez de listar colunas: acao_do_cliente vem de uma migration posterior e, se
+      // ela não tiver rodado, a rota segue respondendo sem o campo em vez de cair em 500 (a tela
+      // trata a falta como "nenhuma etapa é ação do cliente").
       const { rows } = await pool().query(
-        `SELECT codigo, ordem, fase, rotulo_interno, prazo_contagem, prazo_horas, terminal
-           FROM public.gd_estados WHERE ativo ORDER BY ordem`
+        `SELECT to_jsonb(e) AS e FROM public.gd_estados e WHERE e.ativo ORDER BY e.ordem`
       );
-      res.json({ estados: rows });
+      res.json({ estados: rows.map(({ e }) => estadoDe(e)) });
     } catch (err) {
       responderErro(res, err, "GET /api/gd/estados");
     }
