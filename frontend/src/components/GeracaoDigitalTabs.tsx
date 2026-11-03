@@ -1,13 +1,14 @@
 import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Briefcase, ListChecks, FileText, Layers, LayoutDashboard } from "lucide-react";
+import { Briefcase, ListChecks, FileText, Layers, LayoutDashboard, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { podeVerClientesGd } from "@/lib/gdClientes";
 
 export function GeracaoDigitalTabs() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { canAccessInternalPage, isInternalUser } = useAuth();
+  const { canAccessInternalPage, isInternalUser, accessProfile } = useAuth();
 
   const hasDashboard = isInternalUser;
   // Fase 3: apresentação e proposta viraram a MESMA coisa. A aba "Apresentação"
@@ -25,10 +26,13 @@ export function GeracaoDigitalTabs() {
   const hasContratos = isInternalUser;
   // Fase 4: O briefing de implantação foi promovido a módulo central do sistema (/crm/implantacao)
   const hasImplantacao = false;
+  // Mesma regra do guarda da API /api/gd/clientes (ver podeVerClientesGd).
+  const hasClientes = podeVerClientesGd(accessProfile);
 
   // Determine active tab based on path name
   let activeTab = "";
-  if (location.pathname.includes("dashboard-gd")) activeTab = "dashboard";
+  if (location.pathname.includes("clientes-gd")) activeTab = "clientes";
+  else if (location.pathname.includes("dashboard-gd")) activeTab = "dashboard";
   else if (location.pathname.includes("apresentacao-gd")) activeTab = "apresentacao";
   else if (location.pathname.includes("implantacao-gd")) activeTab = "implantacao";
   else if (location.pathname.includes("geracao-digital")) activeTab = "briefing";
@@ -37,7 +41,8 @@ export function GeracaoDigitalTabs() {
   else if (location.pathname.includes("contratos-gd")) activeTab = "contratos";
 
   const handleTabChange = (val: string) => {
-    if (val === "dashboard") navigate("/crm/dashboard-gd");
+    if (val === "clientes") navigate("/crm/clientes-gd");
+    else if (val === "dashboard") navigate("/crm/dashboard-gd");
     else if (val === "apresentacao") navigate("/crm/apresentacao-gd");
     else if (val === "implantacao") navigate("/crm/implantacao-gd");
     else if (val === "briefing") navigate("/crm/geracao-digital");
@@ -90,6 +95,12 @@ export function GeracaoDigitalTabs() {
             <TabsTrigger value="contratos" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <FileText className="h-3.5 w-3.5 mr-1.5" />
               Contratos
+            </TabsTrigger>
+          )}
+          {hasClientes && (
+            <TabsTrigger value="clientes" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
+              <Users className="h-3.5 w-3.5 mr-1.5" />
+              Clientes
             </TabsTrigger>
           )}
         </TabsList>
