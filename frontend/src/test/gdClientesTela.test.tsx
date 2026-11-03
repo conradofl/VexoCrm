@@ -199,6 +199,34 @@ describe("mover de estado", () => {
   });
 });
 
+describe("detalhe do cliente", () => {
+  // Bug de 03/11/2026: o detalhe era renderizado depois da tabela e abria fora da janela. Os testes passavam porque
+  // procuravam o conteúdo no DOM, e em jsdom todo nó do DOM conta como visível (não há layout). Este teste exige o
+  // que a pessoa vê: um painel de diálogo, fora do fluxo da página (portal), com o nome e a linha do tempo dentro.
+  // A posição em pixels foi medida num Chromium real (Playwright), não aqui.
+  it("clicar no nome abre o painel lateral com o cliente e a linha do tempo", async () => {
+    const c = cliente("d1", "Anjos Cuidadores");
+    lista = [cliente("d0", "Agência GD"), c];
+    detalhe = {
+      cliente: c,
+      eventos: [{ id: "a", estado: "ATIVO", estado_anterior: null, rotulo_interno: "Cliente ativo", ocorrido_em: "2026-11-03T15:19:06Z", registrado_em: "2026-11-03T15:19:06Z", data_estimada: true, origem: "importacao_inicial", ator_tipo: "importacao", ator_id: "importacao:conrado", motivo: null }],
+    };
+    renderTela();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Anjos Cuidadores" }));
+
+    const painel = await screen.findByRole("dialog", { name: "Detalhe do cliente" });
+    expect(await within(painel).findByRole("heading", { name: "Anjos Cuidadores" })).toBeInTheDocument();
+    expect(within(painel).getByRole("list", { name: "Linha do tempo" })).toHaveTextContent("Cliente ativo · 03/11 12:19 (estimada)");
+    // Fora do <main> da página: não é um bloco no rodapé da lista, é a camada por cima dela.
+    expect(painel.closest("main")).toBeNull();
+    expect(chamadas.some((ch) => ch.metodo === "GET" && ch.url.endsWith("/api/gd/clientes/d1"))).toBe(true);
+
+    fireEvent.click(within(painel).getByRole("button", { name: "Fechar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+});
+
 describe("ajustes de uso (03/11/2026)", () => {
   it("a linha mostra só o botão compacto; seletor e motivo aparecem ao abrir, e o motivo vai no POST", async () => {
     lista = [cliente("m1", "Romari", { estado_atual: "PROPOSTA_ACEITA", rotulo_interno: "Proposta aceita" })];
