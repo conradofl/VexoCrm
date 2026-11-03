@@ -236,6 +236,33 @@ describe("lista inválida é recusada inteira", () => {
   });
 });
 
+describe("embrulho do arquivo", () => {
+  const embrulho = (clientes, extra = {}) => ({
+    dono_client_id: "geracao-digital", estado_inicial: "ATIVO", origem: "importacao_inicial", data_estimada: true, clientes, ...extra,
+  });
+
+  it("o formato do arquivo do dono entra, telefone de 11 dígitos sem 55 ganha o 55", async () => {
+    const n = nome("Embrulhado");
+    const r = await importar(embrulho([{ nome: n, aprovador_telefone: "34990001111", escopo: ["google"], escopo_original: "Google" }]), { aplicar: true, esperado: 1 });
+    expect(r).toMatchObject({ criados: 1, eventos: 1 });
+    const { rows } = await db.query(`SELECT aprovador_telefone, estado_atual FROM gd_clientes WHERE nome = $1`, [n]);
+    expect(rows[0]).toEqual({ aprovador_telefone: "5534990001111", estado_atual: "ATIVO" });
+  });
+
+  it.each([
+    ["estado_inicial diferente do que o script grava", { estado_inicial: "ASSINADO" }, /estado_inicial = "ASSINADO", mas o script grava "ATIVO"/],
+    ["outro dono", { dono_client_id: "tinge-brasil" }, /dono_client_id/],
+    ["data_estimada false", { data_estimada: false }, /data_estimada/],
+    ["chave desconhecida", { ocorrido_em: "2026-01-01" }, /chave desconhecida ocorrido_em/],
+  ])("%s: recusa sem gravar", async (_caso, extra, problema) => {
+    const antes = await totais();
+    const err = await importar(embrulho([{ nome: nome("Embrulho ruim") }], extra), { aplicar: true }).catch((e) => e);
+    expect(err).toBeInstanceOf(ListaRecusada);
+    expect(err.problemas.join("\n")).toMatch(problema);
+    expect(await totais()).toEqual(antes);
+  });
+});
+
 describe("depois de tudo", () => {
   it("nenhum drive_url com /u/0/, todo telefone com 55, atalho igual à linha do tempo", async () => {
     expect(await contar(`SELECT count(*)::int n FROM gd_clientes WHERE drive_url LIKE '%/u/0/%'`)).toBe(0);

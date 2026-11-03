@@ -42,9 +42,26 @@ export class ListaRecusada extends Error {
   }
 }
 
+// O embrulho { clientes: [...] } pode declarar o que a carga faz. O script não lê essas chaves para
+// decidir nada (dono, estado, origem e data estimada são fixos aqui); por isso uma chave a mais ou
+// um valor diferente do que o script vai gravar recusa a lista, em vez de ser ignorado em silêncio.
+const EMBRULHO = { dono_client_id: GD_DONO, estado_inicial: "ATIVO", origem: "importacao_inicial", data_estimada: true };
+
+function conferirEmbrulho(bruta) {
+  if (!bruta || typeof bruta !== "object" || Array.isArray(bruta)) return;
+  const problemas = [];
+  for (const [chave, valor] of Object.entries(bruta)) {
+    if (chave === "clientes") continue;
+    if (!(chave in EMBRULHO)) problemas.push(`embrulho: chave desconhecida ${chave} (aceitas: clientes, ${Object.keys(EMBRULHO).join(", ")}).`);
+    else if (valor !== EMBRULHO[chave]) problemas.push(`embrulho: ${chave} = ${JSON.stringify(valor)}, mas o script grava ${JSON.stringify(EMBRULHO[chave])}.`);
+  }
+  if (problemas.length) throw new ListaRecusada(`Embrulho recusado: ${problemas.length} problema(s). Nada foi gravado.`, problemas);
+}
+
 // Valida a lista inteira antes de abrir conexão. Erro em qualquer linha recusa todas. As mensagens
 // citam a linha e o nome, nunca o valor do telefone.
 export function validarLista(bruta, { esperado } = {}) {
+  conferirEmbrulho(bruta);
   const lista = Array.isArray(bruta) ? bruta : bruta?.clientes;
   if (!Array.isArray(lista)) throw new ListaRecusada("A lista precisa ser um array JSON (ou { \"clientes\": [...] }).", []);
   if (esperado != null && lista.length !== esperado) {
