@@ -13,6 +13,10 @@ const MIGRATION = readFileSync(
   resolve("supabase/migrations/20261102120000_create_gd_estados_clientes.sql"),
   "utf8"
 );
+const MIGRATION_CAMPOS = readFileSync(
+  resolve("supabase/migrations/20261103120000_gd_clientes_aprovador_drive_escopo.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -70,6 +74,7 @@ beforeAll(async () => {
     INSERT INTO public.leads_clients VALUES ('geracao-digital', 'Geração Digital'), ('tinge-brasil', 'Tinge');
   `);
   await db.exec(MIGRATION);
+  await db.exec(MIGRATION_CAMPOS);
 
   const app = express();
   app.use(express.json());
@@ -279,6 +284,78 @@ describe("editar nome e cnpj", () => {
     await expect(
       db.query(`UPDATE public.gd_clientes SET nome = $1, estado_atual = $2 WHERE id = $3 AND dono_client_id = $4`, ["y", "ENCERRADO", c.id, GD_DONO])
     ).rejects.toThrow(/só muda por gd_registrar_evento/);
+  });
+});
+
+describe("dados de cadastro (aprovador, drive, escopo)", () => {
+  const DRIVE = "https://drive.google.com/drive/folders/abc123";
+
+  it("PATCH grava os seis campos normalizados e o GET devolve todos", async () => {
+    const c = await novoCliente("Cadastro completo");
+    const r = await chamar("PATCH", `/api/gd/clientes/${c.id}`, {
+      body: {
+        cnpj: "43.210.987/0001-55", cnpj_a_confirmar: true, aprovador_nome: " Maria ",
+        aprovador_telefone: "(34) 99999-1234", drive_url: DRIVE,
+        escopo: ["google", "vexo", "google"], escopo_original: "Google + Vexo disparo (dezembro)",
+      },
+    });
+    expect(r.status).toBe(200);
+    const { json } = await chamar("GET", `/api/gd/clientes/${c.id}`);
+    expect(json.cliente).toMatchObject({
+      cnpj: "43210987000155", cnpj_a_confirmar: true, aprovador_nome: "Maria",
+      aprovador_telefone: "5534999991234", drive_url: DRIVE,
+      escopo: ["google", "vexo"], escopo_original: "Google + Vexo disparo (dezembro)",
+      estado_atual: "PROPOSTA_ENVIADA",
+    });
+  });
+
+  it("POST aceita os mesmos campos e telefone com 55 fica como veio", async () => {
+    const c = await novoCliente("Cadastro no POST", "ATIVO", { aprovador_telefone: "+55 34 3222-1100", escopo: ["social"] });
+    expect(c).toMatchObject({ aprovador_telefone: "553432221100", escopo: ["social"], cnpj_a_confirmar: false });
+  });
+
+  it.each([
+    ["aprovador_telefone", "5500999991234", "TELEFONE_INVALIDO"],
+    ["aprovador_telefone", "(00) 99999-1234", "TELEFONE_INVALIDO"],
+    ["aprovador_telefone", "9999-1234", "TELEFONE_INVALIDO"],
+    ["drive_url", "https://drive.google.com/drive/u/0/folders/abc", "DRIVE_URL_INVALIDA"],
+    ["drive_url", "http://drive.google.com/drive/folders/abc", "DRIVE_URL_INVALIDA"],
+    ["escopo", ["google", "instagram"], "ESCOPO_INVALIDO"],
+    ["escopo", "google", "ESCOPO_INVALIDO"],
+    ["cnpj_a_confirmar", "sim", "CNPJ_A_CONFIRMAR_INVALIDO"],
+  ])("PATCH %s = %j: 422 %s e nada muda", async (campo, valor, code) => {
+    const c = await novoCliente(`Recusa ${campo} ${JSON.stringify(valor)}`);
+    const r = await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { [campo]: valor } });
+    expect(r.status).toBe(422);
+    expect(r.json.error.code).toBe(code);
+    const { rows } = await db.query(`SELECT aprovador_telefone, drive_url, escopo, cnpj_a_confirmar FROM gd_clientes WHERE id = $1`, [c.id]);
+    expect(rows[0]).toEqual({ aprovador_telefone: null, drive_url: null, escopo: null, cnpj_a_confirmar: false });
+  });
+
+  it("cnpj_a_confirmar sem cnpj: o banco recusa e a rota responde 422, não 500", async () => {
+    const c = await novoCliente("Pendência sem CNPJ");
+    const r = await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { cnpj_a_confirmar: true } });
+    expect(r.status).toBe(422);
+    expect(r.json.error).toMatchObject({ code: "CAMPO_INVALIDO", details: { regra: "gd_clientes_cnpj_a_confirmar" } });
+  });
+
+  it("a pendência do CNPJ se desliga pelo PATCH", async () => {
+    const c = await novoCliente("Pendência desligável", "ATIVO", { cnpj: "50607080000190", cnpj_a_confirmar: true });
+    const r = await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { cnpj_a_confirmar: false } });
+    expect(r.json.cliente.cnpj_a_confirmar).toBe(false);
+  });
+
+  it("o banco recusa /u/0/, telefone sem 55 e escopo fora da lista mesmo sem passar pela rota", async () => {
+    const c = await novoCliente("Travas do banco");
+    for (const [sql, regra] of [
+      [`UPDATE gd_clientes SET drive_url = 'https://drive.google.com/drive/u/0/folders/x' WHERE id = $1`, "gd_clientes_drive_url"],
+      [`UPDATE gd_clientes SET aprovador_telefone = '34999991234' WHERE id = $1`, "gd_clientes_telefone_55"],
+      [`UPDATE gd_clientes SET aprovador_telefone = '5500999991234' WHERE id = $1`, "gd_clientes_telefone_55"],
+      [`UPDATE gd_clientes SET escopo = '["tiktok"]' WHERE id = $1`, "gd_clientes_escopo"],
+      [`UPDATE gd_clientes SET escopo = '{"google":true}' WHERE id = $1`, "gd_clientes_escopo"],
+    ]) {
+      await expect(db.query(sql, [c.id])).rejects.toThrow(new RegExp(regra));
+    }
   });
 });
 
