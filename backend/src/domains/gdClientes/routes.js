@@ -5,15 +5,16 @@
 //   resolveAuthorizedClientId nem pelo tenantResolver (o fallback do uuid-zero fica fora daqui).
 //   Cliente de outro dono responde 404, igual a id inexistente.
 // - Estado só muda por gd_registrar_evento(), com ator_tipo 'humano' e ator_id = uid do Firebase.
-//   Nada disso vem do corpo. 'importacao_inicial' nunca entra por rota (só pelo script dos 21).
+//   Nada disso vem do corpo. 'importacao_inicial' nunca entra por rota (só por src/scripts/gdImportarClientes.js).
 // - Estado pedido passa por duas barreiras: SELECT em gd_estados (existe E ativo) e, se mesmo assim
 //   chegar ao banco, a FK (23503) vira o mesmo 422.
 import { requireFirebaseAuth as requireFirebaseAuthPadrao } from "../../access/middlewares.js";
 import { hasInternalPageAccess } from "../../accessGuards.js";
 import { pgDatabasePool } from "../../services/database.js";
 import { sendError } from "../../services/httpInfra.js";
+import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome } from "./campos.js";
 
-export const GD_DONO = "geracao-digital";
+export { GD_DONO };
 const PERMISSAO_GD = "geracao_digital.proposals";
 const PAGINA_GD = "implantacao-gd";
 const LIMITE_LISTA = 500;
@@ -58,7 +59,8 @@ class ErroDeRota extends Error {
 }
 
 const SELECT_CLIENTE = `
-  SELECT c.id, c.nome, c.cnpj, c.origem, c.estado_atual, c.estado_desde,
+  SELECT c.id, c.nome, c.cnpj, c.cnpj_a_confirmar, c.aprovador_nome, c.aprovador_telefone,
+         c.drive_url, c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
          c.estado_data_estimada, c.created_at, c.updated_at,
          e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
          CASE WHEN e.prazo_contagem = 'horas_corridas' AND e.prazo_horas IS NOT NULL
@@ -84,6 +86,12 @@ function clienteDe(linha) {
     id: linha.id,
     nome: linha.nome,
     cnpj: linha.cnpj,
+    cnpj_a_confirmar: linha.cnpj_a_confirmar,
+    aprovador_nome: linha.aprovador_nome,
+    aprovador_telefone: linha.aprovador_telefone,
+    drive_url: linha.drive_url,
+    escopo: linha.escopo,
+    escopo_original: linha.escopo_original,
     origem: linha.origem,
     estado_atual: linha.estado_atual,
     rotulo_interno: linha.rotulo_interno ?? null,
@@ -97,21 +105,18 @@ function clienteDe(linha) {
   };
 }
 
-function lerNome(bruto) {
-  const nome = typeof bruto === "string" ? bruto.trim() : "";
-  if (!nome || nome.length > 200) throw new ErroDeRota(422, "NOME_INVALIDO", "Nome obrigatório, até 200 caracteres.");
-  return nome;
+// Campos opcionais presentes no corpo, já lidos. Chave ausente fica de fora; chave com null limpa.
+function lerOpcionais(body) {
+  const lidos = {};
+  for (const [campo, ler] of Object.entries(CAMPOS_OPCIONAIS)) {
+    if (campo in body) lidos[campo] = ler(body[campo]);
+  }
+  return lidos;
 }
 
-// CNPJ guardado só com dígitos: "12.345.678/0001-90" e "12345678000190" seriam dois clientes
-// para o índice único se entrassem como vieram.
-function lerCnpj(bruto) {
-  if (bruto == null || (typeof bruto === "string" && !bruto.trim())) return null;
-  if (typeof bruto !== "string") throw new ErroDeRota(422, "CNPJ_INVALIDO", "CNPJ precisa ser texto com 14 dígitos.");
-  const digitos = bruto.replace(/\D/g, "");
-  if (digitos.length !== 14) throw new ErroDeRota(422, "CNPJ_INVALIDO", "CNPJ precisa ter 14 dígitos.");
-  return digitos;
-}
+// escopo é jsonb: vai como texto JSON e o SQL faz o cast.
+const valorSql = (campo, valor) => (campo === "escopo" && valor !== null ? JSON.stringify(valor) : valor);
+const colunaSql = (campo, n) => (campo === "escopo" ? `$${n}::jsonb` : `$${n}`);
 
 // Sem ocorrido_em: fluxo, agora. Com ocorrido_em: correção, com motivo obrigatório; nunca no futuro.
 function lerMovimento(body) {
@@ -200,6 +205,15 @@ function exigirUuid(id) {
 function responderErro(res, err, rota) {
   if (err instanceof ErroDeRota) {
     sendError(res, err.status, err.code, err.message, err.details);
+    return;
+  }
+  if (err instanceof CampoInvalido) {
+    sendError(res, 422, err.code, err.message);
+    return;
+  }
+  // Trava da migration que a leitura acima deixou passar (ex.: cnpj_a_confirmar sem cnpj).
+  if (err?.code === "23514") {
+    sendError(res, 422, "CAMPO_INVALIDO", "Valor recusado pelas regras do cliente.", { regra: err.constraint });
     return;
   }
   if (err?.code === "23505") {
@@ -306,14 +320,22 @@ export function registerGdClientesRoutes(app, {
       const body = req.body || {};
       const uid = uidDe(req);
       const nome = lerNome(body.nome);
-      const cnpj = lerCnpj(body.cnpj);
+      const opcionais = lerOpcionais(body);
       const mov = lerMovimento(body);
+      const colunas = ["dono_client_id", "nome", "origem"];
+      const valores = ["$1", "$2", "'fluxo'"];
+      const params = [GD_DONO, nome];
+      for (const [campo, valor] of Object.entries(opcionais)) {
+        params.push(valorSql(campo, valor));
+        colunas.push(campo);
+        valores.push(colunaSql(campo, params.length));
+      }
       const cliente = await emTransacao(getPool, async (client) => {
         await exigirEstadoValido(client, mov.estado);
         const { rows } = await client.query(
-          `INSERT INTO public.gd_clientes (dono_client_id, nome, cnpj, origem)
-           VALUES ($1, $2, $3, 'fluxo') RETURNING id`,
-          [GD_DONO, nome, cnpj]
+          `INSERT INTO public.gd_clientes (${colunas.join(", ")})
+           VALUES (${valores.join(", ")}) RETURNING id`,
+          params
         );
         await registrarEvento(client, rows[0].id, mov, uid);
         return lerCliente(client, rows[0].id);
@@ -324,23 +346,27 @@ export function registerGdClientesRoutes(app, {
     }
   });
 
-  // Só nome e cnpj. Qualquer outra chave é recusada aqui; o trigger gd_clientes_trava_estado
-  // recusa estado_* no banco mesmo que esta lista um dia afrouxe.
+  // Só nome e os campos de cadastro (CAMPOS_OPCIONAIS). Qualquer outra chave é recusada aqui; o
+  // trigger gd_clientes_trava_estado recusa estado_* no banco mesmo que esta lista um dia afrouxe.
   app.patch("/api/gd/clientes/:id", ...guarda, async (req, res) => {
     try {
       exigirUuid(req.params.id);
       const body = req.body || {};
       const chaves = Object.keys(body);
-      const proibidas = chaves.filter((k) => k !== "nome" && k !== "cnpj");
+      const editaveis = ["nome", ...Object.keys(CAMPOS_OPCIONAIS)];
+      const proibidas = chaves.filter((k) => !editaveis.includes(k));
       if (proibidas.length) {
-        throw new ErroDeRota(422, "CAMPO_NAO_EDITAVEL", "Só nome e cnpj são editáveis; estado muda por evento.", { campos: proibidas });
+        throw new ErroDeRota(422, "CAMPO_NAO_EDITAVEL", "Só os dados de cadastro são editáveis; estado muda por evento.", { campos: proibidas, editaveis });
       }
-      if (chaves.length === 0) throw new ErroDeRota(422, "NADA_PARA_ALTERAR", "Informe nome e/ou cnpj.");
+      if (chaves.length === 0) throw new ErroDeRota(422, "NADA_PARA_ALTERAR", `Informe algum de: ${editaveis.join(", ")}.`);
 
       const sets = [];
       const params = [];
       if ("nome" in body) { params.push(lerNome(body.nome)); sets.push(`nome = $${params.length}`); }
-      if ("cnpj" in body) { params.push(lerCnpj(body.cnpj)); sets.push(`cnpj = $${params.length}`); }
+      for (const [campo, valor] of Object.entries(lerOpcionais(body))) {
+        params.push(valorSql(campo, valor));
+        sets.push(`${campo} = ${colunaSql(campo, params.length)}`);
+      }
       params.push(req.params.id, GD_DONO);
 
       const cliente = await emTransacao(getPool, async (client) => {
