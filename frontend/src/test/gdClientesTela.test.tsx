@@ -184,7 +184,9 @@ describe("mover de estado", () => {
     const antes = leiturasDaLista();
     proximaEscrita = { status: 409, body: { error: { code: "ESTADO_MUDOU", message: "mudou", details: { estado_atual: "PAUSADO" } } } };
 
-    fireEvent.change(screen.getByLabelText("Mover Cafeeiro"), { target: { value: "GRUPOS_CRIADOS" } });
+    // Desde 03/11/2026 o seletor fica num popover aberto pelo botão compacto da linha.
+    fireEvent.click(screen.getByRole("button", { name: "Mover… Cafeeiro" }));
+    fireEvent.change(await screen.findByLabelText("Mover Cafeeiro"), { target: { value: "GRUPOS_CRIADOS" } });
     fireEvent.click(screen.getByRole("button", { name: "Mover" }));
 
     expect(await screen.findByText(/Outra pessoa moveu Cafeeiro para Pausado/)).toBeInTheDocument();
@@ -194,6 +196,45 @@ describe("mover de estado", () => {
     expect(posts[0].corpo).toEqual({ estado: "GRUPOS_CRIADOS", estado_esperado: "ATIVO" });
     await waitFor(() => expect(leiturasDaLista()).toBeGreaterThan(antes));
     expect(escritas("PATCH")).toHaveLength(0);
+  });
+});
+
+describe("ajustes de uso (03/11/2026)", () => {
+  it("a linha mostra só o botão compacto; seletor e motivo aparecem ao abrir, e o motivo vai no POST", async () => {
+    lista = [cliente("m1", "Romari", { estado_atual: "PROPOSTA_ACEITA", rotulo_interno: "Proposta aceita" })];
+    renderTela();
+    await screen.findByText("Romari");
+    expect(screen.queryByLabelText("Mover Romari")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mover… Romari" }));
+    fireEvent.change(await screen.findByLabelText("Mover Romari"), { target: { value: "ASSINADO" } });
+    fireEvent.change(screen.getByLabelText("Motivo (opcional)"), { target: { value: "  assinou hoje " } });
+    fireEvent.click(screen.getByRole("button", { name: "Mover" }));
+    await waitFor(() => expect(escritas("POST")).toHaveLength(1));
+    expect(escritas("POST")[0].corpo).toEqual({ estado: "ASSINADO", estado_esperado: "PROPOSTA_ACEITA", motivo: "assinou hoje" });
+    await waitFor(() => expect(screen.queryByLabelText("Mover Romari")).not.toBeInTheDocument());
+  });
+
+  it("escopo_original sai do texto fixo mas continua acessível pelo nome do gatilho do tooltip", async () => {
+    lista = [cliente("s1", "Nous", { escopo: ["vexo", "linkedin"], escopo_original: "Vexo disparo (dezembro), LinkedIn (Criar)" })];
+    renderTela();
+    const gatilho = await screen.findByRole("button", { name: "vexo, linkedin. Como foi vendido: Vexo disparo (dezembro), LinkedIn (Criar)" });
+    expect(gatilho).toHaveTextContent(/^vexo, linkedin$/);
+    // Em tela estreita (sem hover) o texto aparece embaixo; em tela larga essa linha some pelo md:hidden.
+    expect(screen.getByText("Vexo disparo (dezembro), LinkedIn (Criar)")).toHaveClass("md:hidden");
+  });
+
+  it("sem escopo_original não há gatilho de tooltip, só os códigos", async () => {
+    lista = [cliente("s2", "Hostery", { escopo: ["google"] })];
+    renderTela();
+    await screen.findByText("Hostery");
+    expect(screen.getByText("google").tagName).toBe("SPAN");
+  });
+
+  it("tabela usa o componente de tabela do CRM, com o mesmo tamanho de fonte das outras", async () => {
+    lista = [cliente("f1", "Fonte")];
+    renderTela();
+    await screen.findByText("Fonte");
+    expect(screen.getByRole("table")).toHaveClass("text-xs");
   });
 });
 

@@ -10,6 +10,9 @@ import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -63,6 +66,26 @@ function PrazoCelula({ prazo }: { prazo: GdPrazo | null }) {
       {texto}
       {atrasado && <strong className="ml-1 text-red-600">atrasado</strong>}
     </span>
+  );
+}
+
+// Códigos na célula; o texto como foi vendido ("Vexo disparo (dezembro)") no tooltip e no nome
+// acessível do gatilho, e escrito embaixo só em tela estreita, onde não existe hover.
+function EscopoCelula({ escopo, original }: { escopo: string[] | null; original: string | null }) {
+  const codigos = (escopo || []).join(", ") || "—";
+  if (!original) return <span>{codigos}</span>;
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className="cursor-help text-left underline decoration-dotted underline-offset-2" aria-label={`${codigos}. Como foi vendido: ${original}`}>
+            {codigos}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs text-xs">{original}</TooltipContent>
+      </Tooltip>
+      <span className="block text-muted-foreground md:hidden">{original}</span>
+    </>
   );
 }
 
@@ -196,16 +219,24 @@ function NovoCliente({ estados, onFechar }: { estados: GdEstado[]; onFechar: () 
 
 function MoverEstado({ cliente, estados, onConflito }: { cliente: GdCliente; estados: GdEstado[]; onConflito: (msg: string) => void }) {
   const mover = useMoverGdCliente();
+  const [aberto, setAberto] = useState(false);
   const [destino, setDestino] = useState("");
+  const [motivo, setMotivo] = useState("");
   const opcoes = estados.filter((e) => e.codigo !== cliente.estado_atual);
+
+  const fechar = () => {
+    setAberto(false);
+    setDestino("");
+    setMotivo("");
+  };
 
   const confirmar = async () => {
     if (!destino) return;
     try {
-      await mover.mutateAsync({ id: cliente.id, estado: destino, estadoEsperado: cliente.estado_atual });
-      setDestino("");
+      await mover.mutateAsync({ id: cliente.id, estado: destino, estadoEsperado: cliente.estado_atual, motivo: motivo.trim() || undefined });
+      fechar();
     } catch (err) {
-      setDestino("");
+      fechar();
       if (err instanceof GdApiError && err.code === "ESTADO_MUDOU") {
         const atual = estados.find((e) => e.codigo === err.details?.estado_atual)?.rotulo_interno || err.details?.estado_atual || "outro estado";
         onConflito(`Outra pessoa moveu ${cliente.nome} para ${atual}. A lista foi recarregada; confira antes de mover de novo.`);
@@ -215,11 +246,19 @@ function MoverEstado({ cliente, estados, onConflito }: { cliente: GdCliente; est
     }
   };
 
+  // Botão compacto por linha: os clientes em ATIVO quase nunca se movem, e o seletor aberto em toda
+  // linha virava a coluna mais larga da tela (ajuste do dono, 03/11/2026).
   return (
-    <div className="flex items-center gap-2">
-      <SeletorDeEstado id={`mover-${cliente.id}`} estados={opcoes} valor={destino} onChange={setDestino} rotulo={`Mover ${cliente.nome}`} />
-      <Button size="sm" variant="outline" disabled={!destino || mover.isPending} onClick={confirmar}>Mover</Button>
-    </div>
+    <Popover open={aberto} onOpenChange={(v) => (v ? setAberto(true) : fechar())}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" aria-label={`Mover… ${cliente.nome}`}>Mover…</Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 space-y-2 p-3">
+        <SeletorDeEstado id={`mover-${cliente.id}`} estados={opcoes} valor={destino} onChange={setDestino} rotulo={`Mover ${cliente.nome}`} />
+        <Input aria-label="Motivo (opcional)" placeholder="Motivo (opcional)" value={motivo} onChange={(e) => setMotivo(e.target.value)} className="h-8 text-xs" />
+        <Button size="sm" className="w-full" disabled={!destino || mover.isPending} onClick={confirmar}>Mover</Button>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -386,49 +425,46 @@ function TelaClientes() {
         {clientesQ.isLoading ? (
           <p>Carregando…</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2 pr-3">Cliente</th>
-                  <th className="pr-3">Estado</th>
-                  <th className="pr-3">No estado</th>
-                  <th className="pr-3">Prazo</th>
-                  <th className="pr-3">Aprovador</th>
-                  <th className="pr-3">Escopo</th>
-                  <th className="pr-3">Drive</th>
-                  <th>Mover</th>
-                </tr>
-              </thead>
-              <tbody>
+          <TooltipProvider delayDuration={200}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>No estado</TableHead>
+                  <TableHead>Prazo</TableHead>
+                  <TableHead>Aprovador</TableHead>
+                  <TableHead>Escopo</TableHead>
+                  <TableHead>Drive</TableHead>
+                  <TableHead className="w-px" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {clientes.map((c) => (
-                  <tr key={c.id} data-testid="linha-cliente" className="border-b align-top">
-                    <td className="py-2 pr-3">
+                  <TableRow key={c.id} data-testid="linha-cliente" className="align-top">
+                    <TableCell>
                       <button type="button" className="underline text-left" onClick={() => setAberto(c.id)}>{c.nome}</button>
-                      {c.cnpj_a_confirmar && <span className="ml-2 rounded bg-amber-200 px-1 text-xs text-amber-900">CNPJ a confirmar</span>}
-                    </td>
-                    <td className="pr-3">{c.rotulo_interno || "—"}</td>
-                    <td className="pr-3">{textoDesde(c)}</td>
-                    <td className="pr-3" data-testid="prazo"><PrazoCelula prazo={c.prazo} /></td>
-                    <td className="pr-3">
+                      {c.cnpj_a_confirmar && <span className="ml-2 rounded bg-amber-200 px-1 text-[10px] text-amber-900">CNPJ a confirmar</span>}
+                    </TableCell>
+                    <TableCell>{c.rotulo_interno || "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{textoDesde(c)}</TableCell>
+                    <TableCell data-testid="prazo"><PrazoCelula prazo={c.prazo} /></TableCell>
+                    <TableCell>
                       {c.aprovador_nome || "—"}
                       {c.aprovador_telefone && (
                         <a className="block underline" href={linkWhatsApp(c.aprovador_telefone)} {...LINK_EXTERNO}>WhatsApp</a>
                       )}
-                    </td>
-                    <td className="pr-3">
-                      {(c.escopo || []).join(", ") || "—"}
-                      {c.escopo_original && <span className="block text-muted-foreground">{c.escopo_original}</span>}
-                    </td>
-                    <td className="pr-3">
+                    </TableCell>
+                    <TableCell className="min-w-[10rem]"><EscopoCelula escopo={c.escopo} original={c.escopo_original} /></TableCell>
+                    <TableCell>
                       {c.drive_url ? <a className="underline" href={c.drive_url} {...LINK_EXTERNO}>Pasta</a> : "—"}
-                    </td>
-                    <td><MoverEstado cliente={c} estados={estados} onConflito={setAviso} /></td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="text-right"><MoverEstado cliente={c} estados={estados} onConflito={setAviso} /></TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </TooltipProvider>
         )}
 
         {aberto && <Detalhe id={aberto} onFechar={() => setAberto(null)} />}
