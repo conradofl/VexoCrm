@@ -84,6 +84,7 @@ function calcular<E extends EventoMinimo>(estados: GdEstado[], eventos: E[], est
 }
 
 // Rótulo do portal vazio não pode cair no código nem no nome interno: vira "Etapa N".
+// N é a posição na linha que a rota entrega (estados ativos, sem fora_da_linha): anda se um estado da linha for desativado.
 function rotuloPortal(estado: GdEstado, i: number) {
   const r = typeof estado.rotulo_portal === "string" ? estado.rotulo_portal.trim() : "";
   return r || `Etapa ${i + 1}`;

@@ -106,6 +106,29 @@ describe("pulada nunca vira concluída", () => {
     expect(ponto(etapa("Proposta enviada"))).toContain("border-dashed");
     expect(etapa("Tudo rodando")).toHaveTextContent("03/10/2026 · aproximado");
   });
+
+  // Pedido do dono depois da captura de produção (03/11/2026): 15 etiquetas iguais dominavam a tela.
+  it("'antes do acompanhamento' aparece uma vez, na primeira da sequência; as outras seguem tracejadas e sem etiqueta", () => {
+    const { container, etapa } = montar("portal", [ev("ATIVO", 3, { data_estimada: true })], "ATIVO");
+    const etiquetas = [...container.querySelectorAll("[data-tag]")].filter((t) => t.textContent === "antes do acompanhamento");
+    expect(etiquetas).toHaveLength(1);
+    expect(etiquetas[0].closest("li")).toBe(etapa("Proposta enviada"));
+    for (const nome of ["Proposta aceita", "Contrato assinado", "Estratégia aprovada"]) {
+      const li = etapa(nome);
+      expect(li.dataset.situacao).toBe("antes");
+      expect(ponto(li)).toContain("border-dashed");
+      expect(li.querySelector("[data-tag]")).toBeNull();
+    }
+  });
+
+  it("cliente que entrou no meio: uma etiqueta 'antes' no começo, e cada buraco depois continua 'não registrada'", () => {
+    const eventos = [ev("ASSINADO", 1), ev("BRIEFING_AGENDADO", 3)];
+    const { container, etapa } = montar("portal", eventos, "BRIEFING_AGENDADO");
+    const textos = [...container.querySelectorAll("[data-tag]")].map((t) => t.textContent);
+    expect(textos.filter((t) => t === "antes do acompanhamento")).toHaveLength(1);
+    expect(textos.filter((t) => t === "não registrada")).toHaveLength(1);
+    expect(etapa("Equipe montada").querySelector("[data-tag]")).toHaveTextContent("não registrada");
+  });
 });
 
 describe("modo portal não vaza", () => {
