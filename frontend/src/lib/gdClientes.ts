@@ -48,9 +48,12 @@ export interface GdEstado {
   ordem: number;
   fase: string;
   rotulo_interno: string;
+  rotulo_portal?: string | null;
   prazo_contagem: string;
   prazo_horas: number | null;
   terminal: boolean;
+  // Ausente quando a migration 20261103180000 não rodou: a trilha trata como false.
+  acao_do_cliente?: boolean;
 }
 
 export interface GdEvento {
