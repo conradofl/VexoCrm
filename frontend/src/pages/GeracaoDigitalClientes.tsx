@@ -11,6 +11,7 @@ import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
@@ -467,7 +468,18 @@ function TelaClientes() {
           </TooltipProvider>
         )}
 
-        {aberto && <Detalhe id={aberto} onFechar={() => setAberto(null)} />}
+        {/* Painel lateral fixo sobre a tela. Até 03/11/2026 o detalhe era renderizado depois da
+            tabela: com 22 linhas ele abria ~1200 px abaixo, fora da janela, e o clique parecia não
+            fazer nada. Os testes passavam porque jsdom não tem layout: "está no DOM" não é "está na tela". */}
+        <Sheet open={aberto !== null} onOpenChange={(v) => { if (!v) setAberto(null); }}>
+          <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-xl">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Detalhe do cliente</SheetTitle>
+              <SheetDescription>Dados de cadastro, aviso de CNPJ e linha do tempo.</SheetDescription>
+            </SheetHeader>
+            {aberto && <Detalhe id={aberto} onFechar={() => setAberto(null)} />}
+          </SheetContent>
+        </Sheet>
       </div>
     </PageShell>
   );
