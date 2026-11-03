@@ -17,6 +17,10 @@ const MIGRATION_CAMPOS = readFileSync(
   resolve("supabase/migrations/20261103120000_gd_clientes_aprovador_drive_escopo.sql"),
   "utf8"
 );
+const MIGRATION_TRILHA = readFileSync(
+  resolve("supabase/migrations/20261103180000_gd_estados_acao_rotulo_portal.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -75,6 +79,7 @@ beforeAll(async () => {
   `);
   await db.exec(MIGRATION);
   await db.exec(MIGRATION_CAMPOS);
+  await db.exec(MIGRATION_TRILHA);
 
   const app = express();
   app.use(express.json());
@@ -385,5 +390,30 @@ describe("leitura", () => {
     const estados = await chamar("GET", "/api/gd/estados");
     expect(estados.json.estados.map((e) => e.codigo)).not.toContain("DESATIVADO");
     expect(estados.json.estados).toHaveLength(18);
+  });
+
+  it("GET /api/gd/estados manda rotulo_portal e acao_do_cliente, sem coluna fora da lista", async () => {
+    const { status, json } = await chamar("GET", "/api/gd/estados");
+    expect(status).toBe(200);
+    const assinatura = json.estados.find((e) => e.codigo === "AGUARDANDO_ASSINATURA_CLIENTE");
+    expect(assinatura.rotulo_portal).toBe("Aguardando sua assinatura");
+    expect(assinatura.acao_do_cliente).toBe(true);
+    expect(json.estados.filter((e) => e.acao_do_cliente).map((e) => e.codigo)).toEqual([
+      "AGUARDANDO_ASSINATURA_CLIENTE", "BRIEFING_APROVACAO_CLIENTE", "PLANEJAMENTO_APROVACAO",
+    ]);
+    expect(Object.keys(assinatura)).not.toContain("ativo");
+    expect(Object.keys(assinatura)).not.toContain("updated_at");
+  });
+
+  it("GET /api/gd/estados segue de pé sem a coluna acao_do_cliente (migration que não rodou)", async () => {
+    await db.exec(`ALTER TABLE gd_estados DROP COLUMN acao_do_cliente`);
+    try {
+      const { status, json } = await chamar("GET", "/api/gd/estados");
+      expect(status).toBe(200);
+      expect(json.estados).toHaveLength(18);
+      expect(json.estados.some((e) => "acao_do_cliente" in e)).toBe(false);
+    } finally {
+      await db.exec(MIGRATION_TRILHA);
+    }
   });
 });
