@@ -293,7 +293,8 @@ export function registerGdClientesRoutes(app, {
   app.get("/api/gd/clientes/vigia", requireGoclawToken, async (_req, res) => {
     try {
       const { rows } = await pool().query(
-        `SELECT c.id, c.nome AS nome_empresa, c.estado_atual, e.fase, e.ordem, c.estado_desde AS entrou_em
+        `SELECT c.id, c.nome AS nome_empresa, c.estado_atual, e.fase, e.ordem, c.estado_desde AS entrou_em,
+                e.prazo_horas, e.prazo_contagem, e.rotulo_interno, e.acao_do_cliente
            FROM public.gd_clientes c
            LEFT JOIN public.gd_estados e ON e.codigo = c.estado_atual
           WHERE c.dono_client_id = $1
@@ -308,6 +309,10 @@ export function registerGdClientesRoutes(app, {
           fase: r.fase || null,
           ordem: r.ordem != null ? Number(r.ordem) : null,
           entrou_em: r.entrou_em ? new Date(r.entrou_em).toISOString() : null,
+          prazo_horas: r.prazo_horas != null ? Number(r.prazo_horas) : null,
+          prazo_contagem: r.prazo_contagem || null,
+          rotulo_interno: r.rotulo_interno || null,
+          acao_do_cliente: Boolean(r.acao_do_cliente),
         })),
       });
     } catch (err) {

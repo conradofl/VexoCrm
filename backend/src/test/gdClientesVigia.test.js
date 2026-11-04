@@ -9,6 +9,11 @@ import {
   registerGdClientesRoutes,
   requireGoclawReadToken,
 } from "../domains/gdClientes/routes.js";
+import {
+  classificarCliente,
+  calcularResumo,
+  gerarRelatorioVigia,
+} from "../scripts/vigia-gd.mjs";
 
 const MIGRATION = readFileSync(
   resolve("supabase/migrations/20261102120000_create_gd_estados_clientes.sql"),
@@ -184,7 +189,7 @@ describe("endpoint: GET /api/gd/clientes/vigia", () => {
     expect(empresas).toContain("Empresa Beta");
     expect(empresas).not.toContain("Empresa Outro Tenant");
 
-    // Valida formato dos campos especificados
+    // Valida formato dos campos especificados incluindo os novos campos de prazo
     const clienteBeta = res.json.clientes.find((c) => c.nome_empresa === "Empresa Beta");
     expect(clienteBeta).toEqual({
       id: "22222222-2222-2222-2222-222222222222",
@@ -193,6 +198,10 @@ describe("endpoint: GET /api/gd/clientes/vigia", () => {
       fase: "entrada",
       ordem: 80,
       entrou_em: "2026-11-02T14:30:00.000Z",
+      prazo_horas: 72,
+      prazo_contagem: "horas_corridas",
+      rotulo_interno: "Briefing agendado",
+      acao_do_cliente: false,
     });
 
     const clienteAlfa = res.json.clientes.find((c) => c.nome_empresa === "Empresa Alfa");
@@ -203,6 +212,10 @@ describe("endpoint: GET /api/gd/clientes/vigia", () => {
       fase: "comercial",
       ordem: 10,
       entrou_em: "2026-11-01T10:00:00.000Z",
+      prazo_horas: 168,
+      prazo_contagem: "horas_corridas",
+      rotulo_interno: "Proposta enviada",
+      acao_do_cliente: false,
     });
   });
 
@@ -219,5 +232,142 @@ describe("endpoint: GET /api/gd/clientes/vigia", () => {
     });
     // Não pode dar 200 de sucesso
     expect(resComGoclaw.status).not.toBe(200);
+  });
+});
+
+describe("classificação matemática do Vigia GD (datas fixadas)", () => {
+  const t0 = new Date("2026-11-01T00:00:00.000Z");
+
+  it("classifica cliente ATIVO como EM REGIME independentemente do tempo", () => {
+    const agora = new Date("2026-11-20T00:00:00.000Z");
+    const c = {
+      nome_empresa: "Ativa LTDA",
+      estado_atual: "ATIVO",
+      fase: "regime",
+      entrou_em: t0.toISOString(),
+      prazo_horas: null,
+      prazo_contagem: "horas_corridas",
+      acao_do_cliente: false,
+    };
+    const res = classificarCliente(c, agora);
+    expect(res.status).toBe("EM REGIME");
+    expect(res.prazo_sla).toBe("Sem prazo fatal");
+    expect(res.responsavel).toBe("Equipe GD");
+  });
+
+  it("classifica cliente PAUSADO e ENCERRADO corretamente", () => {
+    const agora = new Date("2026-11-05T00:00:00.000Z");
+    const pausado = classificarCliente({ estado_atual: "PAUSADO", entrou_em: t0.toISOString() }, agora);
+    expect(pausado.status).toBe("PAUSADO");
+
+    const encerrado = classificarCliente({ estado_atual: "ENCERRADO", entrou_em: t0.toISOString() }, agora);
+    expect(encerrado.status).toBe("ENCERRADO");
+  });
+
+  it("classifica NO_PRAZO quando horas_decorridas < 80% do prazo", () => {
+    // Prazo de 100 horas. 72h decorridas = 72% (< 80%)
+    const agora = new Date("2026-11-04T00:00:00.000Z"); // +72h após t0
+    const c = {
+      nome_empresa: "Cliente Prazo",
+      estado_atual: "BRIEFING_AGENDADO",
+      entrou_em: t0.toISOString(),
+      prazo_horas: 100,
+      prazo_contagem: "horas_corridas",
+      acao_do_cliente: false,
+    };
+    const res = classificarCliente(c, agora);
+    expect(res.status).toBe("NO_PRAZO");
+    expect(res.horas_decorridas).toBe(72);
+    expect(res.detalhe).toBe("Restam 28h");
+  });
+
+  it("classifica ALERTA quando horas_decorridas >= 80% do prazo e <= prazo", () => {
+    // Prazo de 100 horas. 80h decorridas = 80% exatos
+    const agora80 = new Date("2026-11-04T08:00:00.000Z"); // +80h
+    const c = {
+      nome_empresa: "Cliente Alerta",
+      estado_atual: "BRIEFING_AGENDADO",
+      entrou_em: t0.toISOString(),
+      prazo_horas: 100,
+      prazo_contagem: "horas_corridas",
+      acao_do_cliente: false,
+    };
+    const res80 = classificarCliente(c, agora80);
+    expect(res80.status).toBe("ALERTA");
+    expect(res80.horas_decorridas).toBe(80);
+    expect(res80.detalhe).toBe("Faltam 20h");
+
+    // 100h decorridas: exatamente no limite do prazo
+    const agora100 = new Date("2026-11-05T04:00:00.000Z"); // +100h
+    const res100 = classificarCliente(c, agora100);
+    expect(res100.status).toBe("ALERTA");
+    expect(res100.horas_decorridas).toBe(100);
+    expect(res100.detalhe).toBe("Faltam 0h");
+  });
+
+  it("classifica ATRASADO quando horas_decorridas > prazo_horas", () => {
+    // Prazo de 100 horas. 101h decorridas (> 100h)
+    const agora = new Date("2026-11-05T05:00:00.000Z"); // +101h
+    const c = {
+      nome_empresa: "Cliente Atrasado",
+      estado_atual: "BRIEFING_AGENDADO",
+      entrou_em: t0.toISOString(),
+      prazo_horas: 100,
+      prazo_contagem: "horas_corridas",
+      acao_do_cliente: false,
+    };
+    const res = classificarCliente(c, agora);
+    expect(res.status).toBe("ATRASADO");
+    expect(res.horas_decorridas).toBe(101);
+    expect(res.detalhe).toBe("Estourado por 1h");
+  });
+
+  it("identifica corretamente ação do cliente vs equipe GD", () => {
+    const agora = new Date("2026-11-02T00:00:00.000Z");
+    const doCliente = classificarCliente({ estado_atual: "BRIEFING_APROVACAO_CLIENTE", acao_do_cliente: true, entrou_em: t0.toISOString() }, agora);
+    expect(doCliente.responsavel).toBe("Cliente");
+
+    const daEquipe = classificarCliente({ estado_atual: "BRIEFING_REALIZADO", acao_do_cliente: false, entrou_em: t0.toISOString() }, agora);
+    expect(daEquipe.responsavel).toBe("Equipe GD");
+  });
+
+  it("classifica horas_uteis e fim_do_dia_util como EM_ANALISE_UTEIS", () => {
+    const agora = new Date("2026-11-01T06:00:00.000Z");
+    const uteis = classificarCliente({
+      estado_atual: "PROPOSTA_ACEITA",
+      prazo_horas: 4,
+      prazo_contagem: "horas_uteis",
+      entrou_em: t0.toISOString(),
+    }, agora);
+    expect(uteis.status).toBe("EM_ANALISE_UTEIS");
+    expect(uteis.prazo_sla).toBe("4h úteis");
+
+    const fimDoDia = classificarCliente({
+      estado_atual: "ASSINADO",
+      prazo_horas: null,
+      prazo_contagem: "fim_do_dia_util",
+      entrou_em: t0.toISOString(),
+    }, agora);
+    expect(fimDoDia.status).toBe("EM_ANALISE_UTEIS");
+    expect(fimDoDia.prazo_sla).toBe("Fim do dia útil");
+  });
+
+  it("calcula resumo de totais com precisão", () => {
+    const agora = new Date("2026-11-05T00:00:00.000Z"); // +96h de t0
+    const clientes = [
+      { nome_empresa: "A", estado_atual: "ATIVO", fase: "regime", entrou_em: t0.toISOString() },
+      { nome_empresa: "B", estado_atual: "PROPOSTA_ENVIADA", fase: "comercial", prazo_horas: 168, prazo_contagem: "horas_corridas", entrou_em: t0.toISOString() }, // 96h < 134h -> NO_PRAZO
+      { nome_empresa: "C", estado_atual: "BRIEFING_AGENDADO", fase: "entrada", prazo_horas: 100, prazo_contagem: "horas_corridas", entrou_em: t0.toISOString() }, // 96h >= 80h -> ALERTA
+      { nome_empresa: "D", estado_atual: "IDENTIDADE_VISUAL", fase: "estrategia", prazo_horas: 48, prazo_contagem: "horas_corridas", entrou_em: t0.toISOString() }, // 96h > 48h -> ATRASADO
+      { nome_empresa: "E", estado_atual: "PAUSADO", fase: "fora_da_linha", entrou_em: t0.toISOString() },
+    ];
+
+    const relatorio = gerarRelatorioVigia(clientes, agora);
+    expect(relatorio.resumo).toEqual({
+      ativos: 1,      // Empresa A
+      onboarding: 3,  // Empresas B, C, D
+      atrasados: 1,   // Empresa D
+      alerta: 1,      // Empresa C
+    });
   });
 });
