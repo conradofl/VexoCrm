@@ -3075,11 +3075,13 @@ export function registerCampaignsRoutes(app, deps) {
     const instances = await getLeadClientEvolutionInstances(clientId);
     const instance = instances.find((item) => item.id === instanceId);
     if (!instance) {
-      sendError(res, 400, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found for this tenant");
+      console.warn("[campaign-dispatch] chip recusado: nao existe nesta empresa", { clientId, evolutionInstanceId: instanceId });
+      sendError(res, 400, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found for this tenant", { evolutionInstanceId: instanceId });
       return false;
     }
     if (instance.active === false) {
-      sendError(res, 400, "EVOLUTION_INSTANCE_INACTIVE", "Evolution instance is inactive");
+      console.warn("[campaign-dispatch] chip recusado: inativo", { clientId, evolutionInstanceId: instanceId });
+      sendError(res, 400, "EVOLUTION_INSTANCE_INACTIVE", "Evolution instance is inactive", { evolutionInstanceId: instanceId });
       return false;
     }
 
