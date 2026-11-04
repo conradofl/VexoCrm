@@ -389,6 +389,35 @@ describe("SPEC 10 — Rodízio Multi-Chip de Disparo", () => {
       );
     });
 
+    it("POST /api/campaigns/:id/dispatches: 400 EVOLUTION_INSTANCE_NOT_FOUND diz qual id foi recusado, na resposta e no log", async () => {
+      const qdb = await criarBancoReal();
+      const mundo = await montarMundoMultiChip({ qdb });
+      const handler = mundo.routesMap["post /api/campaigns/:id/dispatches"];
+      const avisos = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const idRecusado = "00000000-0000-4000-8000-000000000099";
+      const req = {
+        params: { id: mundo.campaign.id },
+        body: { name: "Lote com chip fantasma", triggerType: "manual", evolutionInstanceId: idRecusado },
+      };
+      const res = { statusCode: 200, status(s) { this.statusCode = s; return this; }, json(d) { this.body = d; return this; } };
+
+      await handler(req, res);
+
+      expect(mundo.deps.sendError).toHaveBeenCalledWith(
+        res,
+        400,
+        "EVOLUTION_INSTANCE_NOT_FOUND",
+        expect.any(String),
+        { evolutionInstanceId: idRecusado }
+      );
+      expect(avisos).toHaveBeenCalledWith(
+        expect.stringContaining("recusado"),
+        expect.objectContaining({ evolutionInstanceId: idRecusado })
+      );
+      avisos.mockRestore();
+    });
+
     it("POST /api/campaigns/:id/dispatches: aceita lote com chips válidos do tenant", async () => {
       const qdb = await criarBancoReal();
       const mundo = await montarMundoMultiChip({ qdb });
