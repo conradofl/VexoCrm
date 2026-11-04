@@ -8,6 +8,7 @@
 //   Nada disso vem do corpo. 'importacao_inicial' nunca entra por rota (só por src/scripts/gdImportarClientes.js).
 // - Estado pedido passa por duas barreiras: SELECT em gd_estados (existe E ativo) e, se mesmo assim
 //   chegar ao banco, a FK (23503) vira o mesmo 422.
+import crypto from "node:crypto";
 import { requireFirebaseAuth as requireFirebaseAuthPadrao } from "../../access/middlewares.js";
 import { hasInternalPageAccess } from "../../accessGuards.js";
 import { pgDatabasePool } from "../../services/database.js";
@@ -46,6 +47,31 @@ export function requireGdClientesAccess(req, res, next) {
     sendError(res, 403, "FORBIDDEN", "Clientes da Geração Digital restritos à equipe da GD");
     return;
   }
+  next();
+}
+
+export function requireGoclawReadToken(req, res, next) {
+  const configuredToken = process.env.GOCLAW_READ_TOKEN;
+  if (!configuredToken || typeof configuredToken !== "string" || configuredToken.trim() === "") {
+    res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
+    return;
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
+    return;
+  }
+
+  const token = authHeader.slice("Bearer ".length).trim();
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(configuredToken.trim());
+
+  if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+    res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
+    return;
+  }
+
   next();
 }
 
@@ -254,6 +280,7 @@ async function emTransacao(getPool, fn) {
 export function registerGdClientesRoutes(app, {
   getPool = () => pgDatabasePool,
   requireFirebaseAuth = requireFirebaseAuthPadrao,
+  requireGoclawToken = requireGoclawReadToken,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -261,6 +288,32 @@ export function registerGdClientesRoutes(app, {
     if (!p) throw new ErroDeRota(503, "DATABASE_UNAVAILABLE", "Banco indisponível.");
     return p;
   };
+
+  // Endpoint do Vigia GoClaw: leitura autenticada por token de serviço (GOCLAW_READ_TOKEN).
+  app.get("/api/gd/clientes/vigia", requireGoclawToken, async (_req, res) => {
+    try {
+      const { rows } = await pool().query(
+        `SELECT c.id, c.nome AS nome_empresa, c.estado_atual, e.fase, e.ordem, c.estado_desde AS entrou_em
+           FROM public.gd_clientes c
+           LEFT JOIN public.gd_estados e ON e.codigo = c.estado_atual
+          WHERE c.dono_client_id = $1
+          ORDER BY e.ordem NULLS LAST, c.estado_desde, c.nome`,
+        [GD_DONO]
+      );
+      res.json({
+        clientes: rows.map((r) => ({
+          id: r.id,
+          nome_empresa: r.nome_empresa,
+          estado_atual: r.estado_atual || null,
+          fase: r.fase || null,
+          ordem: r.ordem != null ? Number(r.ordem) : null,
+          entrou_em: r.entrou_em ? new Date(r.entrou_em).toISOString() : null,
+        })),
+      });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/vigia");
+    }
+  });
 
   app.get("/api/gd/estados", ...guarda, async (_req, res) => {
     try {
