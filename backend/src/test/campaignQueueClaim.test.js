@@ -24,6 +24,12 @@ vi.mock("../campaign/settings.js", async (importOriginal) => ({
     source: "teste",
   }),
 }));
+// Janela desligada: este teste é da fila, não da janela. Sem config (o Supabase não existe aqui) vale a janela padrão
+// (08–20 seg–sex) e o teste passava só em horário comercial: às 22h os 4 casos reprovavam com started=false.
+vi.mock("../services/n8nSettings.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getLeadClientN8nSettings: async () => ({ send_window_enabled: false }),
+}));
 vi.mock("../services/evolution.js", async (importOriginal) => ({
   ...(await importOriginal()),
   checkEvolutionInstanceHealth: async () => ({ state: "open" }),
