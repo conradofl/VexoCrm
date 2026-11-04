@@ -33,7 +33,14 @@ jobs:
         run: npm run check
 
       - name: Unit tests
-        run: npm test
+        run: |
+          npm test -- --maxWorkers=1 &
+          TESTPID=$!
+          while kill -0 "$TESTPID" 2>/dev/null; do
+            echo "[probe] $(date -u +%T) mem=$(free -m | awk '/Mem:/{print $7}')MB_avail disk=$(df -m . | awk 'NR==2{print $4}')MB_free"
+            sleep 10
+          done
+          wait "$TESTPID"  
 
   frontend:
     name: Frontend checks
@@ -56,7 +63,7 @@ jobs:
         run: npm ci
 
       - name: Unit tests
-        run: npm test -- --run
+        run: npm test
 
       - name: Build
         run: npm run build
