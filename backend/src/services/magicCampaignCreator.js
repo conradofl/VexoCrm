@@ -23,8 +23,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Que ótimo! Liberamos condições especiais de pré-lançamento com entrada facilitada e potencial de valorização acima da média da região.",
         buttons: [
-          { type: "reply", displayText: "1 - Quero ver os detalhes", replyText: "1 - Quero ver os detalhes" },
-          { type: "reply", displayText: "2 - Agora não posso", replyText: "2 - Agora não posso" },
+          { type: "reply", displayText: "Quero ver os detalhes", replyText: "Quero ver os detalhes" },
+          { type: "reply", displayText: "Agora não posso", replyText: "Agora não posso" },
         ],
       },
       {
@@ -54,8 +54,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Maravilha! Preparamos um protocolo especial com condição VIP para os primeiros pacientes que confirmarem hoje.",
         buttons: [
-          { type: "reply", displayText: "1 - Quero agendar avaliação", replyText: "1 - Quero agendar avaliação" },
-          { type: "reply", displayText: "2 - No momento não", replyText: "2 - No momento não" },
+          { type: "reply", displayText: "Quero agendar avaliação", replyText: "Quero agendar avaliação" },
+          { type: "reply", displayText: "No momento não", replyText: "No momento não" },
         ],
       },
       {
@@ -85,8 +85,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Show de bola! Liberamos isenção na taxa de matrícula + acompanhamento exclusivo com nossos personais no primeiro mês para quem ativar hoje.",
         buttons: [
-          { type: "reply", displayText: "1 - Quero garantir minha vaga", replyText: "1 - Quero garantir minha vaga" },
-          { type: "reply", displayText: "2 - Deixar para depois", replyText: "2 - Deixar para depois" },
+          { type: "reply", displayText: "Quero garantir minha vaga", replyText: "Quero garantir minha vaga" },
+          { type: "reply", displayText: "Deixar para depois", replyText: "Deixar para depois" },
         ],
       },
       {
@@ -116,8 +116,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Excelente! Estamos com supervalorização no seu veículo usado e entrada facilitada para os modelos em destaque no nosso pátio.",
         buttons: [
-          { type: "reply", displayText: "1 - Ver modelos disponíveis", replyText: "1 - Ver modelos disponíveis" },
-          { type: "reply", displayText: "2 - Não tenho interesse", replyText: "2 - Não tenho interesse" },
+          { type: "reply", displayText: "Ver modelos disponíveis", replyText: "Ver modelos disponíveis" },
+          { type: "reply", displayText: "Não tenho interesse", replyText: "Não tenho interesse" },
         ],
       },
       {
@@ -147,8 +147,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Perfeito! Você ganhou um desconto exclusivo válido para as próximas 48 horas em toda a nossa linha selecionada.",
         buttons: [
-          { type: "reply", displayText: "1 - Quero aproveitar agora", replyText: "1 - Quero aproveitar agora" },
-          { type: "reply", displayText: "2 - Agora não preciso", replyText: "2 - Agora não preciso" },
+          { type: "reply", displayText: "Quero aproveitar agora", replyText: "Quero aproveitar agora" },
+          { type: "reply", displayText: "Agora não preciso", replyText: "Agora não preciso" },
         ],
       },
       {
@@ -178,8 +178,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Excelente! Ajudamos empresas no mesmo segmento a reduzir custos operacionais e escalar vendas com automação inteligente.",
         buttons: [
-          { type: "reply", displayText: "1 - Quero agendar conversa", replyText: "1 - Quero agendar conversa" },
-          { type: "reply", displayText: "2 - No momento estamos bem", replyText: "2 - No momento estamos bem" },
+          { type: "reply", displayText: "Quero agendar conversa", replyText: "Quero agendar conversa" },
+          { type: "reply", displayText: "No momento estamos bem", replyText: "No momento estamos bem" },
         ],
       },
       {
@@ -209,8 +209,8 @@ const CONTINGENCY_TEMPLATES = {
         triggerMode: "after_reply",
         text: "Que bom! Liberamos uma oportunidade exclusiva para um grupo selecionado de clientes, com vantagens especiais válidas por tempo limitado.",
         buttons: [
-          { type: "reply", displayText: "1 - Quero aproveitar", replyText: "1 - Quero aproveitar" },
-          { type: "reply", displayText: "2 - Agora não", replyText: "2 - Agora não" },
+          { type: "reply", displayText: "Quero aproveitar", replyText: "Quero aproveitar" },
+          { type: "reply", displayText: "Agora não", replyText: "Agora não" },
         ],
       },
       {
@@ -282,6 +282,20 @@ export function getFallbackMagicCampaign({ prompt = "", niche = "geral", tone = 
  * Valida e normaliza o objeto retornado pela IA para garantir que obedece
  * estritamente ao contrato exigido pela tela de campanhas.
  */
+// Quem numera as opcoes e a montagem da mensagem (formatStepTextWithButtons). Instrucao de
+// prompt nao garante obediencia da IA, entao o prefixo sai aqui tambem. "1 Quero" e "2 pessoas"
+// tem a mesma forma: sem separador, so e prefixo se o numero for a posicao da opcao e vier
+// seguido de maiuscula.
+function stripOptionNumbering(label, index) {
+  const text = String(label).trim();
+  const semPrefixo = text
+    .replace(/^\d{1,2}\s*[-–—.)]\s+(?=[^\s\d])/u, "")
+    .replace(/^\d{1,2}\s*[-–—.)](?=\p{Lu})/u, "");
+  if (semPrefixo !== text) return semPrefixo;
+  const semSeparador = text.match(/^(\d{1,2})\s+(?=\p{Lu})/u);
+  return semSeparador && Number(semSeparador[1]) === index + 1 ? text.slice(semSeparador[0].length) : text;
+}
+
 function sanitizeMagicCampaignOutput(parsed, fallback) {
   if (!parsed || typeof parsed !== "object") return fallback;
 
@@ -325,10 +339,10 @@ function sanitizeMagicCampaignOutput(parsed, fallback) {
       triggerMode: "after_reply",
       text: String(rawSteps[1]?.text || rawSteps[1]?.mensagem || fallback.steps[1].text).trim(),
       buttons: Array.isArray(rawSteps[1]?.buttons) && rawSteps[1].buttons.length > 0
-        ? rawSteps[1].buttons.map((b) => ({
+        ? rawSteps[1].buttons.map((b, index) => ({
             type: "reply",
-            displayText: String(b?.displayText || b?.text || "Sim, quero saber mais").slice(0, 30),
-            replyText: String(b?.replyText || b?.displayText || b?.text || "Sim, quero saber mais").slice(0, 30),
+            displayText: stripOptionNumbering(b?.displayText || b?.text || "Sim, quero saber mais", index).slice(0, 30),
+            replyText: stripOptionNumbering(b?.replyText || b?.displayText || b?.text || "Sim, quero saber mais", index).slice(0, 30),
           }))
         : fallback.steps[1].buttons,
     },
@@ -384,8 +398,8 @@ O JSON deve seguir rigorosamente a seguinte estrutura:
       "triggerMode": "after_reply",
       "text": "Mensagem apresentando a oferta/benefício de forma irresistível",
       "buttons": [
-        { "type": "reply", "displayText": "1 - Quero aproveitar", "replyText": "1 - Quero aproveitar" },
-        { "type": "reply", "displayText": "2 - Agora não", "replyText": "2 - Agora não" }
+        { "type": "reply", "displayText": "Quero aproveitar", "replyText": "Quero aproveitar" },
+        { "type": "reply", "displayText": "Agora não", "replyText": "Agora não" }
       ]
     },
     {
@@ -401,7 +415,7 @@ O JSON deve seguir rigorosamente a seguinte estrutura:
 
 Diretrizes Críticas de Copywriting para WhatsApp Brasil:
 - Passo 1: Saudação calorosa, pergunta rápida e curiosidade genuína. Nunca apresente a venda logo de cara.
-- Passo 2: Disparo após a primeira resposta do lead (triggerMode: 'after_reply'). Apresenta o benefício principal de forma leve e persuasiva, com 2 botões de resposta rápida ('Quero aproveitar' / 'Agora não').
+- Passo 2: Disparo após a primeira resposta do lead (triggerMode: 'after_reply'). Apresenta o benefício principal de forma leve e persuasiva, com 2 botões de resposta rápida ('Quero aproveitar' / 'Agora não'). Escreva o texto das opções SEM numeração: "Quero aproveitar", nunca "1 - Quero aproveitar". O sistema numera sozinho ao montar a mensagem.
 - Passo 3: Envio de link oficial (type: 'link', triggerMode: 'after_reply') com linkUrl: '{{scheduling_link}}' para fechar o agendamento/garantir a condição exclusiva.
 - Agent Prompt: Dê orientações práticas para a IA atender quem responder com dúvidas sobre preço, horários, localização e detalhes da oferta.`;
 
