@@ -66,6 +66,7 @@ jobs:
         run: npm test
 
       - name: Build
+        run: npm run build
 
   diff:
     name: Diff hygiene
