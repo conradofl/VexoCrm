@@ -266,6 +266,213 @@
       ],
       "expectedHeldLeadIds": ["lead-especial-sem-cliente"],
       "expectedSendableLeadIds": ["lead-especial-completo"]
+    },
+    {
+      "id": "case_first_name_primeiro_nome",
+      "description": "{{primeiro_nome}} tem fallback seguro e NUNCA retém o lead, com nome completo, um nome ou nome vazio",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{primeiro_nome}}, tudo bem?"
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-nome-completo",
+          "nome": "João Silva",
+          "telefone": "5511999992001"
+        },
+        {
+          "id": "lead-um-nome",
+          "nome": "Maria",
+          "telefone": "5511999992002"
+        },
+        {
+          "id": "lead-sem-nome",
+          "nome": "",
+          "telefone": "5511999992003"
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": [
+        "lead-nome-completo",
+        "lead-um-nome",
+        "lead-sem-nome"
+      ]
+    },
+    {
+      "id": "case_first_name_primeironome",
+      "description": "{{primeironome}} tem fallback seguro e NUNCA retém o lead, com nome completo, um nome ou nome vazio",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{primeironome}}, tudo bem?"
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-nome-completo",
+          "nome": "João Silva",
+          "telefone": "5511999992001"
+        },
+        {
+          "id": "lead-um-nome",
+          "nome": "Maria",
+          "telefone": "5511999992002"
+        },
+        {
+          "id": "lead-sem-nome",
+          "nome": "",
+          "telefone": "5511999992003"
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": [
+        "lead-nome-completo",
+        "lead-um-nome",
+        "lead-sem-nome"
+      ]
+    },
+    {
+      "id": "case_first_name_primeiro_nome",
+      "description": "{{primeiro nome}} tem fallback seguro e NUNCA retém o lead, com nome completo, um nome ou nome vazio",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{primeiro nome}}, tudo bem?"
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-nome-completo",
+          "nome": "João Silva",
+          "telefone": "5511999992001"
+        },
+        {
+          "id": "lead-um-nome",
+          "nome": "Maria",
+          "telefone": "5511999992002"
+        },
+        {
+          "id": "lead-sem-nome",
+          "nome": "",
+          "telefone": "5511999992003"
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": [
+        "lead-nome-completo",
+        "lead-um-nome",
+        "lead-sem-nome"
+      ]
+    },
+    {
+      "id": "case_first_name_first_name",
+      "description": "{{first_name}} tem fallback seguro e NUNCA retém o lead, com nome completo, um nome ou nome vazio",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{first_name}}, tudo bem?"
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-nome-completo",
+          "nome": "João Silva",
+          "telefone": "5511999992001"
+        },
+        {
+          "id": "lead-um-nome",
+          "nome": "Maria",
+          "telefone": "5511999992002"
+        },
+        {
+          "id": "lead-sem-nome",
+          "nome": "",
+          "telefone": "5511999992003"
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": [
+        "lead-nome-completo",
+        "lead-um-nome",
+        "lead-sem-nome"
+      ]
+    },
+    {
+      "id": "case_first_name_firstname",
+      "description": "{{firstname}} tem fallback seguro e NUNCA retém o lead, com nome completo, um nome ou nome vazio",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{firstname}}, tudo bem?"
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-nome-completo",
+          "nome": "João Silva",
+          "telefone": "5511999992001"
+        },
+        {
+          "id": "lead-um-nome",
+          "nome": "Maria",
+          "telefone": "5511999992002"
+        },
+        {
+          "id": "lead-sem-nome",
+          "nome": "",
+          "telefone": "5511999992003"
+        }
+      ],
+      "expectedHeldLeadIds": [],
+      "expectedSendableLeadIds": [
+        "lead-nome-completo",
+        "lead-um-nome",
+        "lead-sem-nome"
+      ]
+    },
+    {
+      "id": "case_first_name_with_missing_custom_field",
+      "description": "{{primeiro_nome}} não libera nem retém sozinho: quem falta {{plano}} continua retido",
+      "sequence": [
+        {
+          "order": 1,
+          "enabled": true,
+          "text": "Olá {{primeiro_nome}}, seu plano é {{plano}}."
+        }
+      ],
+      "leads": [
+        {
+          "id": "lead-sem-plano-pn",
+          "nome": "Lucas Lima",
+          "telefone": "5511999992004",
+          "dados": {
+            "campos": {}
+          }
+        },
+        {
+          "id": "lead-com-plano-pn",
+          "nome": "Beatriz Melo",
+          "telefone": "5511999992005",
+          "dados": {
+            "campos": {
+              "plano": "Premium"
+            }
+          }
+        }
+      ],
+      "expectedHeldLeadIds": [
+        "lead-sem-plano-pn"
+      ],
+      "expectedSendableLeadIds": [
+        "lead-com-plano-pn"
+      ]
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { resolveRowPhones } from "./multiPhone";
+import { isFirstNameVariable, isNameVariable } from "./messageVariables";
 import * as XLSX from "xlsx";
 import type { Campaign, CampaignSequenceStep } from "@/hooks/useCampanhas";
 
@@ -491,8 +492,8 @@ export function auditMessageVariablesAgainstLeads(
     const rawKey = ph.replace(/^\{\{\s*|\s*\}\}$/g, "").trim();
     const lowerKey = rawKey.toLowerCase();
 
-    // 1. {{nome}} (e sinônimos) tem fallback para "cliente" e nunca bloqueia
-    if (["nome", "name", "cliente", "lead_name"].includes(lowerKey)) {
+    // 1. {{nome}}, {{primeiro_nome}} e sinônimos têm fallback para "cliente" e nunca bloqueiam
+    if (isNameVariable(rawKey) || isFirstNameVariable(rawKey)) {
       continue;
     }
 
