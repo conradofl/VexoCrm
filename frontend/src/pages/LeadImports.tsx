@@ -879,6 +879,10 @@ export default function LeadImports({
     if (editingCampaignId) {
       return;
     }
+    // Chips de outra empresa nao podem virar padrao na chave da empresa ativa.
+    if (selectedLeadClient?.id !== activeClientId) {
+      return;
+    }
     const defaultInstanceId =
       evolutionInstanceOptions.find((inst) => inst.isDefault)?.id ||
       evolutionInstanceOptions[0]?.id ||
