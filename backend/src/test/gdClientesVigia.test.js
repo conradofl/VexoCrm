@@ -13,6 +13,12 @@ import {
   classificarCliente,
   calcularResumo,
   gerarRelatorioVigia,
+  determinarPeriodo,
+  normalizarNumerosWhatsApp,
+  gerarPromptGoClaw,
+  gerarBriefingFallback,
+  gerarBriefingGoClaw,
+  despacharVigia,
 } from "../scripts/vigia-gd.mjs";
 
 const MIGRATION = readFileSync(
@@ -369,5 +375,278 @@ describe("classificação matemática do Vigia GD (datas fixadas)", () => {
       atrasados: 1,   // Empresa D
       alerta: 1,      // Empresa C
     });
+  });
+});
+
+describe("período e normalização de destinatários WhatsApp", () => {
+  it("determina período via flag de CLI com prioridade", () => {
+    expect(determinarPeriodo(["--periodo=checkin"])).toBe("checkin");
+    expect(determinarPeriodo(["--periodo=fechamento"])).toBe("fechamento");
+    expect(determinarPeriodo(["--other", "--periodo=CHECKIN"])).toBe("checkin");
+  });
+
+  it("infere período com base no horário quando a flag não for fornecida", () => {
+    // 09:00 no horário de Brasília (UTC-3 -> 12:00Z)
+    const manha = new Date("2026-11-04T12:00:00.000Z");
+    expect(determinarPeriodo([], manha)).toBe("checkin");
+
+    // 15:30 no horário de Brasília (UTC-3 -> 18:30Z)
+    const tarde = new Date("2026-11-04T18:30:00.000Z");
+    expect(determinarPeriodo([], tarde)).toBe("fechamento");
+  });
+
+  it("normaliza números de WhatsApp adicionando DDI 55 e limpando pontuação", () => {
+    const raw = " (34) 99123-4567, 11987654321, 5521998887777 ";
+    const normalizados = normalizarNumerosWhatsApp(raw);
+    expect(normalizados).toEqual([
+      "5534991234567",
+      "5511987654321",
+      "5521998887777",
+    ]);
+  });
+
+  it("ignora números com formatação inválida e remove duplicatas", () => {
+    const raw = "12345, 5534991234567, 5534991234567, texto-invalido, 0011999999999";
+    const normalizados = normalizarNumerosWhatsApp(raw);
+    expect(normalizados).toEqual(["5534991234567"]);
+  });
+
+  it("retorna array vazio quando entrada for nula, indefinida ou vazia", () => {
+    expect(normalizarNumerosWhatsApp(null)).toEqual([]);
+    expect(normalizarNumerosWhatsApp("")).toEqual([]);
+    expect(normalizarNumerosWhatsApp(undefined)).toEqual([]);
+  });
+});
+
+describe("briefing do GoClaw e fallback determinístico", () => {
+  const agora = new Date("2026-11-04T15:00:00.000Z");
+  const relatorioComAtrasos = {
+    resumo: { ativos: 20, onboarding: 2, atrasados: 1, alerta: 1 },
+    classificados: [
+      {
+        cliente: { nome_empresa: "Empresa X", estado_atual: "BRIEFING_AGENDADO", rotulo_interno: "Briefing agendado" },
+        info: { status: "ATRASADO", detalhe: "Estourado por 4h", horas_decorridas: 76, responsavel: "Equipe GD", prazo_sla: "72h corridas" },
+      },
+      {
+        cliente: { nome_empresa: "Empresa Y", estado_atual: "PLANEJAMENTO_APROVACAO", rotulo_interno: "Planejamento para aprovar" },
+        info: { status: "ALERTA", detalhe: "Faltam 2h", horas_decorridas: 46, responsavel: "Cliente", prazo_sla: "48h corridas" },
+      },
+      {
+        cliente: { nome_empresa: "Empresa Z", estado_atual: "ATIVO", rotulo_interno: "Cliente ativo" },
+        info: { status: "EM REGIME", detalhe: "Em regime", horas_decorridas: 300, responsavel: "Equipe GD", prazo_sla: "Sem prazo fatal" },
+      },
+    ],
+    agora,
+  };
+
+  const relatorioEstavel = {
+    resumo: { ativos: 22, onboarding: 0, atrasados: 0, alerta: 0 },
+    classificados: [
+      {
+        cliente: { nome_empresa: "Empresa Alfa", estado_atual: "ATIVO" },
+        info: { status: "EM REGIME", detalhe: "Em regime", horas_decorridas: 200, responsavel: "Equipe GD", prazo_sla: "Sem prazo fatal" },
+      },
+    ],
+    agora,
+  };
+
+  it("gera prompt do GoClaw destacando pendências e persona executiva", () => {
+    const prompt = gerarPromptGoClaw({ relatorio: relatorioComAtrasos, periodo: "checkin" });
+    expect(prompt.system).toContain("Vigia Operacional da Geração Digital");
+    expect(prompt.system).toContain("Check-in Matinal");
+    expect(prompt.user).toContain("Empresa X");
+    expect(prompt.user).toContain("Equipe GD");
+    expect(prompt.user).toContain("Empresa Y");
+    expect(prompt.user).toContain("Cliente");
+  });
+
+  it("gera briefing fallback matinal com destaque aos responsáveis de cobrança", () => {
+    const fallback = gerarBriefingFallback({ relatorio: relatorioComAtrasos, periodo: "checkin" });
+    expect(fallback).toContain("☀️ *Check-in Operacional GD*");
+    expect(fallback).toContain("Demandas Atrasadas: 🚨 *1*");
+    expect(fallback).toContain("Demandas em Alerta: ⚠️ *1*");
+    expect(fallback).toContain("Empresa X");
+    expect(fallback).toContain("Cobrar: *Equipe GD*");
+    expect(fallback).toContain("Empresa Y");
+    expect(fallback).toContain("Cobrar: *Cliente*");
+  });
+
+  it("gera briefing fallback de fechamento com carteira 100% estável", () => {
+    const fallback = gerarBriefingFallback({ relatorio: relatorioEstavel, periodo: "fechamento" });
+    expect(fallback).toContain("🌙 *Fechamento Operacional GD*");
+    expect(fallback).toContain("• Clientes Ativos (em regime): *22*");
+    expect(fallback).toContain("✅ Carteira 100% em dia. Nenhuma demanda atrasada ou em alerta.");
+  });
+
+  it("gerarBriefingGoClaw usa resposta do modelo quando chamada HTTP sucede", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: { content: "Briefing executivo gerado com sucesso pelo Gemini 3 Flash." },
+          },
+        ],
+      }),
+    });
+
+    const texto = await gerarBriefingGoClaw({
+      relatorio: relatorioComAtrasos,
+      periodo: "checkin",
+      goclawUrl: "http://goclaw-teste:1337",
+      goclawToken: "token-goclaw-123",
+      fetchFn: fetchMock,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://goclaw-teste:1337/v1/chat/completions");
+    expect(opts.headers["Authorization"]).toBe("Bearer token-goclaw-123");
+    expect(JSON.parse(opts.body).model).toBe("gemini/gemini-3-flash-preview");
+    expect(texto).toBe("Briefing executivo gerado com sucesso pelo Gemini 3 Flash.");
+  });
+
+  it("gerarBriefingGoClaw usa fallback determinístico quando GoClaw falha ou dá erro 500", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      text: async () => "Internal server error",
+    });
+
+    const texto = await gerarBriefingGoClaw({
+      relatorio: relatorioComAtrasos,
+      periodo: "fechamento",
+      goclawUrl: "http://goclaw-teste:1337",
+      goclawToken: "token-goclaw-123",
+      fetchFn: fetchMock,
+    });
+
+    expect(texto).toContain("🌙 *Fechamento Operacional GD*");
+    expect(texto).toContain("Empresa X");
+  });
+
+  it("gerarBriefingGoClaw usa fallback imediatamente se token não for informado", async () => {
+    const fetchMock = vi.fn();
+    const texto = await gerarBriefingGoClaw({
+      relatorio: relatorioEstavel,
+      periodo: "checkin",
+      goclawToken: null,
+      fetchFn: fetchMock,
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(texto).toContain("☀️ *Check-in Operacional GD*");
+    expect(texto).toContain("Carteira 100% em dia");
+  });
+});
+
+describe("despacho do Vigia: dry-run vs dispatch", () => {
+  const relatorio = {
+    resumo: { ativos: 22, onboarding: 0, atrasados: 0, alerta: 0 },
+    classificados: [],
+    agora: new Date(),
+  };
+  const briefingTexto = "Texto do briefing para teste";
+
+  it("em modo dryRun não invoca remetentes de rede (Slack ou Evolution)", async () => {
+    const slackMock = vi.fn();
+    const evolutionMock = vi.fn();
+
+    const res = await despacharVigia({
+      briefingTexto,
+      relatorio,
+      dryRun: true,
+      periodo: "checkin",
+      slackSender: slackMock,
+      evolutionSender: evolutionMock,
+      config: {
+        slackChannel: "01-ops-geral",
+        slackToken: "slack-token-xyz",
+        whatsappNumbers: "5534991234567, 5511998765432",
+      },
+    });
+
+    expect(slackMock).not.toHaveBeenCalled();
+    expect(evolutionMock).not.toHaveBeenCalled();
+    expect(res.dryRun).toBe(true);
+    expect(res.slack.enviado).toBe(false);
+    expect(res.whatsapp.enviado).toBe(false);
+  });
+
+  it("em modo dispatch (dryRun=false) dispara Slack e cada destinatário WhatsApp", async () => {
+    const slackMock = vi.fn().mockResolvedValue({ ok: true, ts: "123456789.00" });
+    const evolutionMock = vi.fn().mockResolvedValue({ success: true, waMessageId: "msg-wa-123" });
+
+    const res = await despacharVigia({
+      briefingTexto,
+      relatorio,
+      dryRun: false,
+      periodo: "checkin",
+      slackSender: slackMock,
+      evolutionSender: evolutionMock,
+      config: {
+        slackChannel: "01-ops-geral",
+        slackToken: "slack-token-xyz",
+        whatsappNumbers: "5534991234567, 5511998765432",
+        instanceName: "TesteInstancia",
+        evolutionUrl: "https://evolution-teste.com",
+        evolutionApiKey: "evo-key-123",
+      },
+    });
+
+    expect(slackMock).toHaveBeenCalledTimes(1);
+    expect(slackMock).toHaveBeenCalledWith({
+      text: briefingTexto,
+      channel: "01-ops-geral",
+      token: "slack-token-xyz",
+    });
+
+    expect(evolutionMock).toHaveBeenCalledTimes(2);
+    expect(evolutionMock).toHaveBeenNthCalledWith(1, {
+      instanceName: "TesteInstancia",
+      number: "5534991234567",
+      text: briefingTexto,
+      baseUrl: "https://evolution-teste.com",
+      webhookToken: "evo-key-123",
+    });
+    expect(evolutionMock).toHaveBeenNthCalledWith(2, {
+      instanceName: "TesteInstancia",
+      number: "5511998765432",
+      text: briefingTexto,
+      baseUrl: "https://evolution-teste.com",
+      webhookToken: "evo-key-123",
+    });
+
+    expect(res.dryRun).toBe(false);
+    expect(res.slack.enviado).toBe(true);
+    expect(res.whatsapp.destinatarios).toHaveLength(2);
+    expect(res.whatsapp.destinatarios[0].enviado).toBe(true);
+    expect(res.whatsapp.destinatarios[1].enviado).toBe(true);
+  });
+
+  it("continua envio do WhatsApp mesmo se um dos números falhar", async () => {
+    const slackMock = vi.fn().mockResolvedValue({ ok: true });
+    const evolutionMock = vi.fn()
+      .mockRejectedValueOnce(new Error("Falha no envio para número 1"))
+      .mockResolvedValueOnce({ success: true, waMessageId: "msg-wa-456" });
+
+    const res = await despacharVigia({
+      briefingTexto,
+      relatorio,
+      dryRun: false,
+      slackSender: slackMock,
+      evolutionSender: evolutionMock,
+      config: {
+        slackChannel: "01-ops-geral",
+        slackToken: "slack-token-xyz",
+        whatsappNumbers: "5534991234567, 5511998765432",
+      },
+    });
+
+    expect(evolutionMock).toHaveBeenCalledTimes(2);
+    expect(res.whatsapp.destinatarios[0].enviado).toBe(false);
+    expect(res.whatsapp.destinatarios[0].erro).toBe("Falha no envio para número 1");
+    expect(res.whatsapp.destinatarios[1].enviado).toBe(true);
   });
 });
