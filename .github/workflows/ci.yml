@@ -56,7 +56,12 @@ jobs:
         run: npm ci
 
       - name: Unit tests
-        run: npm test -- --run
+        run: |
+          ( while true; do
+              echo "[probe] $(date -u +%T) mem=$(free -m | awk '/Mem:/{print $7}')MB_avail disk=$(df -m . | awk 'NR==2{print $4}')MB_free"
+              sleep 10
+            done ) &
+          npm test -- --maxWorkers=1
 
       - name: Build
         run: npm run build
