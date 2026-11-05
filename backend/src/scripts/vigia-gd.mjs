@@ -674,77 +674,109 @@ const CLIENTES_MOCK = [
   },
 ];
 
-async function main() {
-  loadEnvFallback();
-
-  const apiUrl = process.env.VEXO_API_URL || "https://vexo-backend.xdvm8y.easypanel.host";
-  const token = process.env.GOCLAW_READ_TOKEN;
-  const isMockExplicit = process.argv.includes("--mock");
-  const isDispatch = process.argv.includes("--dispatch");
-  const isDryRun = !isDispatch;
-  const periodo = determinarPeriodo(process.argv, new Date());
-
-  let clientes = [];
+/**
+ * Executa um ciclo completo do Vigia GD (busca clientes, gera relatório, gera briefing e despacha).
+ * Pode ser invocado programaticamente (por exemplo, por um agendador/cron) ou pela CLI.
+ */
+export async function executarCicloVigia({
+  periodo = null,
+  dispatch = false,
+  agora = new Date(),
+  apiUrl = process.env.VEXO_API_URL || "https://vexo-backend.xdvm8y.easypanel.host",
+  token = process.env.GOCLAW_READ_TOKEN,
+  goclawUrl = process.env.GOCLAW_URL,
+  goclawToken = process.env.GOCLAW_GATEWAY_TOKEN,
+  clientes = null,
+  config = {},
+  isMockExplicit = false,
+} = {}) {
+  let listaClientes = clientes;
   let origemDescricao = "";
 
-  if (isMockExplicit || !token) {
-    if (!token && !isMockExplicit) {
-      console.warn("⚠️  GOCLAW_READ_TOKEN não encontrado no ambiente. Executando em modo de demonstração com dados simulados.");
-      console.warn("   Para conectar na API real, exporte GOCLAW_READ_TOKEN=<token>.\n");
-    }
-    clientes = CLIENTES_MOCK;
-    origemDescricao = "Simulação Local (Mock)";
-  } else {
-    try {
-      clientes = await buscarClientesVigia({ apiUrl, token });
-      origemDescricao = `${apiUrl}/api/gd/clientes/vigia`;
-    } catch (err) {
-      console.error(`❌ Não foi possível consultar a API real (${err.message}).`);
-      console.log("   Alternando para simulação de demonstração para visualização do formato:\n");
-      clientes = CLIENTES_MOCK;
-      origemDescricao = "Simulação de Contingência (Mock)";
+  if (!listaClientes) {
+    if (isMockExplicit || !token) {
+      if (!token && !isMockExplicit) {
+        console.warn("⚠️  GOCLAW_READ_TOKEN não encontrado no ambiente. Executando em modo de demonstração com dados simulados.");
+      }
+      listaClientes = CLIENTES_MOCK;
+      origemDescricao = "Simulação Local (Mock)";
+    } else {
+      try {
+        listaClientes = await buscarClientesVigia({ apiUrl, token });
+        origemDescricao = `${apiUrl}/api/gd/clientes/vigia`;
+      } catch (err) {
+        console.error(`❌ Não foi possível consultar a API real (${err.message}). Alternando para dados simulados.`);
+        listaClientes = CLIENTES_MOCK;
+        origemDescricao = "Simulação de Contingência (Mock)";
+      }
     }
   }
 
-  const relatorio = gerarRelatorioVigia(clientes, new Date());
-  const textoTerminal = formatarRelatorioTerminal({
-    classificados: relatorio.classificados,
-    resumo: relatorio.resumo,
-    agora: relatorio.agora,
-    apiUrl: origemDescricao,
-  });
+  const periodoEfetivo = periodo || determinarPeriodo([], agora);
+  const relatorio = gerarRelatorioVigia(listaClientes, agora);
 
-  console.log(textoTerminal);
-
-  console.log("\n🤖 Gerando briefing executivo do Vigia (GoClaw LLM)...");
   const briefingTexto = await gerarBriefingGoClaw({
     relatorio,
-    periodo,
-    goclawUrl: process.env.GOCLAW_URL,
-    goclawToken: process.env.GOCLAW_GATEWAY_TOKEN,
+    periodo: periodoEfetivo,
+    goclawUrl,
+    goclawToken,
   });
-
-  console.log("\n---------------------------------------------------------------------------------------------------------------");
-  console.log(`📝 BRIEFING DO VIGIA (${periodo.toUpperCase()})`);
-  console.log("---------------------------------------------------------------------------------------------------------------");
-  console.log(briefingTexto);
-  console.log("---------------------------------------------------------------------------------------------------------------\n");
 
   const resultadoDespacho = await despacharVigia({
     briefingTexto,
     relatorio,
-    dryRun: isDryRun,
-    periodo,
+    dryRun: !dispatch,
+    periodo: periodoEfetivo,
+    config,
   });
 
-  if (isDryRun) {
+  return {
+    periodo: periodoEfetivo,
+    relatorio,
+    briefingTexto,
+    despacho: resultadoDespacho,
+    origemDescricao,
+  };
+}
+
+async function main() {
+  loadEnvFallback();
+
+  const isMockExplicit = process.argv.includes("--mock");
+  const isDispatch = process.argv.includes("--dispatch");
+  const agora = new Date();
+  const periodoArg = determinarPeriodo(process.argv, agora);
+
+  const resultado = await executarCicloVigia({
+    periodo: periodoArg,
+    dispatch: isDispatch,
+    agora,
+    isMockExplicit,
+  });
+
+  const textoTerminal = formatarRelatorioTerminal({
+    classificados: resultado.relatorio.classificados,
+    resumo: resultado.relatorio.resumo,
+    agora: resultado.relatorio.agora,
+    apiUrl: resultado.origemDescricao,
+  });
+
+  console.log(textoTerminal);
+
+  console.log("\n---------------------------------------------------------------------------------------------------------------");
+  console.log(`📝 BRIEFING DO VIGIA (${resultado.periodo.toUpperCase()})`);
+  console.log("---------------------------------------------------------------------------------------------------------------");
+  console.log(resultado.briefingTexto);
+  console.log("---------------------------------------------------------------------------------------------------------------\n");
+
+  if (!isDispatch) {
     console.log("ℹ️  Modo DRY-RUN ativo. Nenhuma mensagem foi despachada para canais externos.");
     console.log("   Para realizar o envio real para Slack e WhatsApp, execute com a flag --dispatch.");
   } else {
     console.log("🚀 Resultado do Despacho:");
-    console.log(`• Slack:    ${resultadoDespacho.slack.enviado ? "✅ Enviado" : `❌ Falhou (${resultadoDespacho.slack.erro || "não enviado"})`}`);
-    const zapTotal = resultadoDespacho.whatsapp.destinatarios?.length || 0;
-    const zapSucesso = resultadoDespacho.whatsapp.destinatarios?.filter((d) => d.enviado).length || 0;
+    console.log(`• Slack:    ${resultado.despacho.slack.enviado ? "✅ Enviado" : `❌ Falhou (${resultado.despacho.slack.erro || "não enviado"})`}`);
+    const zapTotal = resultado.despacho.whatsapp.destinatarios?.length || 0;
+    const zapSucesso = resultado.despacho.whatsapp.destinatarios?.filter((d) => d.enviado).length || 0;
     console.log(`• WhatsApp: ${zapSucesso}/${zapTotal} enviados com sucesso.`);
   }
 }
