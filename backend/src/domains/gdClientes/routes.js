@@ -14,8 +14,9 @@ import { hasInternalPageAccess } from "../../accessGuards.js";
 import { pgDatabasePool } from "../../services/database.js";
 import { sendError } from "../../services/httpInfra.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome } from "./campos.js";
+import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
-export { GD_DONO };
+export { GD_DONO, gerarPortalToken, hashPortalToken };
 const PERMISSAO_GD = "geracao_digital.proposals";
 const PAGINA_GD = "implantacao-gd";
 const LIMITE_LISTA = 500;
@@ -485,6 +486,152 @@ export function registerGdClientesRoutes(app, {
       res.status(201).json(resultado);
     } catch (err) {
       responderErro(res, err, "POST /api/gd/clientes/:id/eventos");
+    }
+  });
+
+  // ─── Portal do Cliente: emissão e consulta segura por token ───────────────
+
+  // Emissão de token de acompanhamento do portal (acesso interno restrito à GD).
+  // Gera token de alta entropia (base64url) e salva apenas o SHA-256 no banco.
+  // Revoga automaticamente qualquer token anterior que ainda estiver ativo.
+  app.post("/api/gd/clientes/:id/portal-token", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const uid = req.authAccess?.uid || req.authAccess?.email || "sistema";
+      const token = gerarPortalToken();
+      const tokenHash = hashPortalToken(token);
+
+      const criado_em = await emTransacao(getPool, async (client) => {
+        const { rows } = await client.query(
+          `SELECT id FROM public.gd_clientes WHERE id = $1 AND dono_client_id = $2 FOR UPDATE`,
+          [req.params.id, GD_DONO]
+        );
+        if (rows.length === 0) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        await client.query(
+          `UPDATE public.gd_cliente_portal_tokens
+              SET revogado_em = now(),
+                  revogado_por = $2
+            WHERE cliente_id = $1
+              AND revogado_em IS NULL`,
+          [req.params.id, uid]
+        );
+
+        const { rows: insertRows } = await client.query(
+          `INSERT INTO public.gd_cliente_portal_tokens (cliente_id, token_sha256, criado_em, criado_por)
+           VALUES ($1, $2, now(), $3)
+           RETURNING criado_em`,
+          [req.params.id, tokenHash, uid]
+        );
+        return insertRows[0].criado_em;
+      });
+
+      res.status(201).json({
+        token,
+        url: `/acompanhamento/${token}`,
+        criado_em,
+      });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/portal-token");
+    }
+  });
+
+  // Consulta pública da linha do tempo do cliente por token revogável.
+  // Não requer autenticação de usuário; validação feita exclusivamente via SHA-256 do token.
+  // Retorna apenas dados públicos/sanitizados: sem dados sigilosos, notas, motivos, atores ou rótulos internos.
+  app.get("/api/gd/public/portal/:token", async (req, res) => {
+    try {
+      const rawToken = req.params.token;
+      if (!rawToken || typeof rawToken !== "string" || !rawToken.trim()) {
+        res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
+        return;
+      }
+
+      const tokenHash = hashPortalToken(rawToken.trim());
+      const db = pool();
+
+      const { rows: tokenRows } = await db.query(
+        `SELECT id, cliente_id
+           FROM public.gd_cliente_portal_tokens
+          WHERE token_sha256 = $1
+            AND revogado_em IS NULL`,
+        [tokenHash]
+      );
+
+      if (tokenRows.length === 0) {
+        res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
+        return;
+      }
+
+      const { id: tokenId, cliente_id: clienteId } = tokenRows[0];
+
+      // Atualiza último acesso
+      await db.query(
+        `UPDATE public.gd_cliente_portal_tokens
+            SET ultimo_acesso_em = now()
+          WHERE id = $1`,
+        [tokenId]
+      );
+
+      const [clienteRes, estadosRes, eventosRes] = await Promise.all([
+        db.query(
+          `SELECT nome, estado_atual, estado_desde, estado_data_estimada,
+                  proposal_id, drive_url, escopo
+             FROM public.gd_clientes
+            WHERE id = $1 AND dono_client_id = $2`,
+          [clienteId, GD_DONO]
+        ),
+        db.query(
+          `SELECT codigo, ordem, fase, rotulo_portal, terminal, acao_do_cliente
+             FROM public.gd_estados
+            WHERE ativo
+            ORDER BY ordem`
+        ),
+        db.query(
+          `SELECT estado_para AS estado, ocorrido_em, data_estimada
+             FROM public.gd_cliente_eventos
+            WHERE cliente_id = $1
+            ORDER BY ocorrido_em, seq`,
+          [clienteId]
+        ),
+      ]);
+
+      if (clienteRes.rows.length === 0) {
+        res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
+        return;
+      }
+
+      const c = clienteRes.rows[0];
+      const cliente = {
+        nome: c.nome,
+        estado_atual: c.estado_atual,
+        estado_desde: c.estado_desde,
+        estado_data_estimada: Boolean(c.estado_data_estimada),
+        proposal_id: c.proposal_id || null,
+        drive_url: c.drive_url || null,
+        escopo: c.escopo || null,
+      };
+
+      const estados = estadosRes.rows.map((r) => ({
+        codigo: r.codigo,
+        ordem: Number(r.ordem),
+        fase: r.fase,
+        rotulo_portal: r.rotulo_portal,
+        terminal: Boolean(r.terminal),
+        acao_do_cliente: Boolean(r.acao_do_cliente),
+      }));
+
+      const eventos = eventosRes.rows.map((r) => ({
+        estado: r.estado,
+        ocorrido_em: r.ocorrido_em,
+        data_estimada: Boolean(r.data_estimada),
+      }));
+
+      res.json({ cliente, estados, eventos });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/public/portal/:token");
     }
   });
 }
