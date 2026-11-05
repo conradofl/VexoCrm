@@ -20,6 +20,10 @@ const MIGRATION_TRILHA = readFileSync(
   resolve("supabase/migrations/20261103180000_gd_estados_acao_rotulo_portal.sql"),
   "utf8"
 );
+const MIGRATION_DOCUMENTOS = readFileSync(
+  resolve("supabase/migrations/20261105190000_gd_clientes_quatro_documentos.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -83,6 +87,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION);
   await db.exec(MIGRATION_CAMPOS);
   await db.exec(MIGRATION_TRILHA);
+  await db.exec(MIGRATION_DOCUMENTOS);
 
   const app = express();
   app.use(express.json());
@@ -251,6 +256,10 @@ describe("GET /api/gd/public/portal/:token (Consulta pública)", () => {
         aprovador_nome: "Sigiloso Silva",
         aprovador_telefone: "5511988887777",
         drive_url: "https://drive.google.com/drive/folders/pasta-publica",
+        contrato_url: "https://contratos.vexoia.com/doc-123",
+        briefing_url: "https://docs.google.com/document/d/briefing-456",
+        ficha_vexo_url: "https://vexoia.com/ficha/789",
+        planejamento_url: "https://trello.com/b/planejamento-abc",
         escopo: ["google", "meta"],
       },
     });
@@ -290,8 +299,16 @@ describe("GET /api/gd/public/portal/:token (Consulta pública)", () => {
     expect(cliente.nome).toBe(clienteNome);
     expect(cliente.estado_atual).toBe("PROPOSTA_ACEITA");
     expect(cliente.drive_url).toBe("https://drive.google.com/drive/folders/pasta-publica");
+    expect(cliente.contrato_url).toBe("https://contratos.vexoia.com/doc-123");
+    expect(cliente.briefing_url).toBe("https://docs.google.com/document/d/briefing-456");
+    expect(cliente.ficha_vexo_url).toBe("https://vexoia.com/ficha/789");
+    expect(cliente.planejamento_url).toBe("https://trello.com/b/planejamento-abc");
     expect(cliente.escopo).toEqual(["google", "meta"]);
     expect(cliente.estado_desde).toBeDefined();
+
+    // Suporte GD
+    expect(res.json.suporte).toBeDefined();
+    expect(res.json.suporte.whatsapp).toBe("5534997719779");
 
     // Estados
     expect(Array.isArray(estados)).toBe(true);
@@ -367,6 +384,39 @@ describe("GET /api/gd/public/portal/:token (Consulta pública)", () => {
 
     const res2 = await chamar("GET", "/api/gd/public/portal/%20%20");
     expect(res2.status).toBe(404);
+  });
+
+  it("permite atualizar os 4 documentos via PATCH e recusa links que não comecem com https://", async () => {
+    // 1. Atualização com links válidos
+    const patchRes = await chamar("PATCH", `/api/gd/clientes/${clienteId}`, {
+      perfil: "equipeGd",
+      body: {
+        contrato_url: "https://novos-contratos.com/doc-999",
+        briefing_url: "https://novos-briefings.com/b-999",
+        ficha_vexo_url: "https://novas-fichas.com/f-999",
+        planejamento_url: "https://novo-planejamento.com/p-999",
+      },
+    });
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.json.cliente.contrato_url).toBe("https://novos-contratos.com/doc-999");
+    expect(patchRes.json.cliente.briefing_url).toBe("https://novos-briefings.com/b-999");
+    expect(patchRes.json.cliente.ficha_vexo_url).toBe("https://novas-fichas.com/f-999");
+    expect(patchRes.json.cliente.planejamento_url).toBe("https://novo-planejamento.com/p-999");
+
+    // 2. Consulta pública reflete a atualização
+    const resPublica = await chamar("GET", `/api/gd/public/portal/${tokenAtivo}`);
+    expect(resPublica.status).toBe(200);
+    expect(resPublica.json.cliente.contrato_url).toBe("https://novos-contratos.com/doc-999");
+
+    // 3. Rejeita URL que não comece com https://
+    const patchInvalido = await chamar("PATCH", `/api/gd/clientes/${clienteId}`, {
+      perfil: "equipeGd",
+      body: {
+        contrato_url: "http://inseguro.com/doc",
+      },
+    });
+    expect(patchInvalido.status).toBe(422);
+    expect(patchInvalido.json.error.code).toBe("CONTRATO_URL_INVALIDA");
   });
 
   it("atualiza ultimo_acesso_em comprovadamente após acesso com token válido", async () => {

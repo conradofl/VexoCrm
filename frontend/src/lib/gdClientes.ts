@@ -29,6 +29,10 @@ export interface GdCliente {
   aprovador_nome: string | null;
   aprovador_telefone: string | null;
   drive_url: string | null;
+  contrato_url?: string | null;
+  briefing_url?: string | null;
+  ficha_vexo_url?: string | null;
+  planejamento_url?: string | null;
   escopo: Escopo[] | null;
   escopo_original: string | null;
   origem: "fluxo" | "importacao_inicial";
@@ -74,7 +78,8 @@ export interface GdEvento {
 // estado só muda por POST /eventos.
 export const CAMPOS_EDITAVEIS = [
   "nome", "cnpj", "cnpj_a_confirmar", "aprovador_nome", "aprovador_telefone",
-  "drive_url", "escopo", "escopo_original",
+  "drive_url", "contrato_url", "briefing_url", "ficha_vexo_url", "planejamento_url",
+  "escopo", "escopo_original",
 ] as const;
 export type CampoEditavel = (typeof CAMPOS_EDITAVEIS)[number];
 

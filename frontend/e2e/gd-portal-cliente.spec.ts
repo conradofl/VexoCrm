@@ -12,7 +12,14 @@ const PORTAL_MOCK = {
     estado_data_estimada: false,
     proposal_id: "prop-123",
     drive_url: "https://drive.google.com/drive/folders/pasta-acme",
+    contrato_url: "https://documentos.gd.com/contrato-acme.pdf",
+    briefing_url: "https://notion.so/briefing-acme",
+    ficha_vexo_url: "https://vexo.ia/fichas/acme",
+    planejamento_url: "https://trello.com/b/planejamento-acme",
     escopo: ["google", "meta"],
+  },
+  suporte: {
+    whatsapp: "5534997719779",
   },
   estados: [
     { codigo: "PROPOSTA_ENVIADA", ordem: 10, fase: "comercial", rotulo_portal: "Proposta enviada", terminal: false, acao_do_cliente: false },
@@ -38,9 +45,10 @@ test.describe('Portal do Cliente GD - Prova de Layout no Chromium', () => {
 
     await page.goto('/acompanhamento/tok-valido-123');
 
-    // 1. Etapa atual é rolada para o centro pelo scrollIntoView da TrilhaGd
+    // 1. Etapa atual
     const etapaAtual = page.locator('li[aria-current="step"]');
     await expect(etapaAtual).toBeVisible();
+    await etapaAtual.scrollIntoViewIfNeeded();
     const boxEtapa = await etapaAtual.boundingBox();
     expect(boxEtapa).not.toBeNull();
     const viewportHeight = page.viewportSize()?.height || 720;
@@ -60,9 +68,21 @@ test.describe('Portal do Cliente GD - Prova de Layout no Chromium', () => {
     const cardAcao = page.getByRole('region', { name: /ação necessária/i });
     await expect(cardAcao).toBeVisible();
 
-    // 4. Botões de acesso visíveis
-    await expect(page.getByText('Ver Proposta')).toBeVisible();
-    await expect(page.getByText('Pasta no Drive')).toBeVisible();
+    // 4. Seção dos 4 Documentos-Chave visível
+    const secDocumentos = page.getByRole('region', { name: /documentos do projeto/i });
+    await expect(secDocumentos).toBeVisible();
+    await expect(page.getByText('Contrato de Prestação de Serviços')).toBeVisible();
+    await expect(page.getByText('Briefing de Marketing')).toBeVisible();
+    await expect(page.getByText('Ficha Vexo & IA')).toBeVisible();
+    await expect(page.getByText('Planejamento & Roteiros')).toBeVisible();
+
+    // 5. Botões de acesso complementar visíveis
+    await expect(page.getByText(/Ver Proposta/)).toBeVisible();
+    await expect(page.getByText(/Pasta.*Drive/)).toBeVisible();
+
+    // 6. Canal de Suporte oficial no WhatsApp visível
+    const linkSuporte = page.getByRole('link', { name: /falar com nossa equipe/i });
+    await expect(linkSuporte).toBeVisible();
 
     // Salva screenshot para comprovação visual
     await page.screenshot({ path: '/tmp/gd-portal-desktop.png', fullPage: true });

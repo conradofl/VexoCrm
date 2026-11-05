@@ -129,12 +129,99 @@ describe("Página Pública do Portal do Cliente (GeracaoDigitalPortalCliente)", 
     expect(blocoAcao).toHaveTextContent("Sua ação é necessária nesta etapa: Aguardando sua assinatura");
 
     // Acessos úteis: Proposta e Drive
-    expect(screen.getByText("Ver Proposta")).toBeInTheDocument();
-    expect(screen.getByText("Pasta no Drive")).toBeInTheDocument();
+    expect(screen.getByText("Ver Proposta Comercial")).toBeInTheDocument();
+    expect(screen.getByText("Pasta Geral no Drive")).toBeInTheDocument();
 
     // Régua da Trilha renderizada
     expect(screen.getByRole("region", { name: /trilha do cliente/i })).toBeInTheDocument();
     expect(screen.getByText((_content, element) => element?.textContent === "Agora é com você: Aguardando sua assinatura.")).toBeInTheDocument();
+  });
+
+  it("renderiza os 4 documentos-chave com status 'Disponível em breve' quando URLs forem nulas", async () => {
+    vi.spyOn(apiModule, "fetchApi").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...PORTAL_PAYLOAD_MOCK,
+        cliente: {
+          ...PORTAL_PAYLOAD_MOCK.cliente,
+          contrato_url: null,
+          briefing_url: null,
+          ficha_vexo_url: null,
+          planejamento_url: null,
+        },
+      }),
+    } as Response);
+
+    renderComRouter(<GeracaoDigitalPortalCliente />, "/acompanhamento/tok-valido-123");
+
+    await waitFor(() => {
+      expect(screen.getByText("Documentos do Projeto")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Em elaboração / assinatura")).toBeInTheDocument();
+    expect(screen.getByText("Aguardando reunião de briefing")).toBeInTheDocument();
+    expect(screen.getByText("Em parametrização")).toBeInTheDocument();
+    expect(screen.getByText("Em elaboração")).toBeInTheDocument();
+
+    const botoesBreve = screen.getAllByRole("button", { name: /disponível em breve/i });
+    expect(botoesBreve.length).toBe(4);
+    botoesBreve.forEach((botao) => {
+      expect(botao).toBeDisabled();
+    });
+  });
+
+  it("renderiza os 4 documentos-chave com links ativos e badges concluídos quando URLs existirem", async () => {
+    const payloadComDocumentos = {
+      ...PORTAL_PAYLOAD_MOCK,
+      cliente: {
+        ...PORTAL_PAYLOAD_MOCK.cliente,
+        contrato_url: "https://documentos.gd.com/contrato-acme.pdf",
+        briefing_url: "https://notion.so/briefing-acme",
+        ficha_vexo_url: "https://vexo.ia/fichas/acme",
+        planejamento_url: "https://trello.com/b/planejamento-acme",
+      },
+      suporte: {
+        whatsapp: "5534999998888",
+      },
+    };
+
+    vi.spyOn(apiModule, "fetchApi").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payloadComDocumentos,
+    } as Response);
+
+    renderComRouter(<GeracaoDigitalPortalCliente />, "/acompanhamento/tok-valido-123");
+
+    await waitFor(() => {
+      expect(screen.getByText("Documentos do Projeto")).toBeInTheDocument();
+    });
+
+    // Badges de status concluído
+    expect(screen.getByText("Assinado")).toBeInTheDocument();
+    expect(screen.getByText("Aprovado")).toBeInTheDocument();
+    expect(screen.getByText("Configurado")).toBeInTheDocument();
+    expect(screen.getByText("Ativo")).toBeInTheDocument();
+
+    // Links ativos
+    const linkContrato = screen.getByRole("link", { name: /acessar contrato/i });
+    expect(linkContrato).toHaveAttribute("href", "https://documentos.gd.com/contrato-acme.pdf");
+
+    const linkBriefing = screen.getByRole("link", { name: /acessar briefing/i });
+    expect(linkBriefing).toHaveAttribute("href", "https://notion.so/briefing-acme");
+
+    const linkFicha = screen.getByRole("link", { name: /acessar ficha técnica/i });
+    expect(linkFicha).toHaveAttribute("href", "https://vexo.ia/fichas/acme");
+
+    const linkPlan = screen.getByRole("link", { name: /acessar planejamento/i });
+    expect(linkPlan).toHaveAttribute("href", "https://trello.com/b/planejamento-acme");
+
+    // Canal de Suporte oficial no WhatsApp com mensagem contextual
+    const linkSuporte = screen.getByRole("link", { name: /falar com nossa equipe/i });
+    const href = linkSuporte.getAttribute("href") || "";
+    expect(href).toContain("https://wa.me/5534999998888?text=");
+    expect(href).toContain(encodeURIComponent("Olá! Sou do projeto Acme Indústria Solar e gostaria de tirar uma dúvida sobre a etapa atual: Aguardando sua assinatura"));
   });
 });
 

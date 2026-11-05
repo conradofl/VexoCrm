@@ -49,6 +49,10 @@ const CAMPO_DO_ERRO: Record<string, string> = {
   CNPJ_INVALIDO: "cnpj",
   TELEFONE_INVALIDO: "aprovador_telefone",
   DRIVE_URL_INVALIDA: "drive_url",
+  CONTRATO_URL_INVALIDA: "contrato_url",
+  BRIEFING_URL_INVALIDA: "briefing_url",
+  FICHA_VEXO_URL_INVALIDA: "ficha_vexo_url",
+  PLANEJAMENTO_URL_INVALIDA: "planejamento_url",
   ESCOPO_INVALIDO: "escopo",
   APROVADOR_NOME_INVALIDO: "aprovador_nome",
   ESCOPO_ORIGINAL_INVALIDO: "escopo_original",
@@ -115,11 +119,27 @@ type Cadastro = {
   aprovador_nome: string;
   aprovador_telefone: string;
   drive_url: string;
+  contrato_url: string;
+  briefing_url: string;
+  ficha_vexo_url: string;
+  planejamento_url: string;
   escopo: string[];
   escopo_original: string;
 };
 
-const cadastroVazio: Cadastro = { nome: "", cnpj: "", aprovador_nome: "", aprovador_telefone: "", drive_url: "", escopo: [], escopo_original: "" };
+const cadastroVazio: Cadastro = {
+  nome: "",
+  cnpj: "",
+  aprovador_nome: "",
+  aprovador_telefone: "",
+  drive_url: "",
+  contrato_url: "",
+  briefing_url: "",
+  ficha_vexo_url: "",
+  planejamento_url: "",
+  escopo: [],
+  escopo_original: "",
+};
 
 function cadastroDe(c: GdCliente): Cadastro {
   return {
@@ -128,6 +148,10 @@ function cadastroDe(c: GdCliente): Cadastro {
     aprovador_nome: c.aprovador_nome || "",
     aprovador_telefone: c.aprovador_telefone || "",
     drive_url: c.drive_url || "",
+    contrato_url: c.contrato_url || "",
+    briefing_url: c.briefing_url || "",
+    ficha_vexo_url: c.ficha_vexo_url || "",
+    planejamento_url: c.planejamento_url || "",
     escopo: c.escopo || [],
     escopo_original: c.escopo_original || "",
   };
@@ -147,6 +171,10 @@ function CamposOpcionais({ valor, onChange, erros }: { valor: Cadastro; onChange
       {campo("aprovador_nome", "Aprovador")}
       {campo("aprovador_telefone", "Telefone do aprovador", "(34) 99999-0000")}
       {campo("drive_url", "Pasta do Drive", "https://drive.google.com/drive/folders/...")}
+      {campo("contrato_url", "Link do Contrato", "https://...")}
+      {campo("briefing_url", "Link do Briefing", "https://...")}
+      {campo("ficha_vexo_url", "Link da Ficha Vexo & IA", "https://...")}
+      {campo("planejamento_url", "Link do Planejamento & Roteiros", "https://...")}
       <fieldset className="flex flex-col gap-1 text-sm md:col-span-2">
         <legend>Escopo</legend>
         <div className="flex flex-wrap gap-3">
@@ -391,6 +419,16 @@ function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
           <Button size="sm" variant="ghost" onClick={onFechar}>Fechar</Button>
         </div>
       </div>
+
+      {!editando && (
+        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+          {cliente.contrato_url && <a href={cliente.contrato_url} {...LINK_EXTERNO} className="underline text-foreground">Contrato ↗</a>}
+          {cliente.briefing_url && <a href={cliente.briefing_url} {...LINK_EXTERNO} className="underline text-foreground">Briefing ↗</a>}
+          {cliente.ficha_vexo_url && <a href={cliente.ficha_vexo_url} {...LINK_EXTERNO} className="underline text-foreground">Ficha Vexo ↗</a>}
+          {cliente.planejamento_url && <a href={cliente.planejamento_url} {...LINK_EXTERNO} className="underline text-foreground">Planejamento ↗</a>}
+          {cliente.drive_url && <a href={cliente.drive_url} {...LINK_EXTERNO} className="underline text-foreground">Drive ↗</a>}
+        </div>
+      )}
 
       {cliente.cnpj_a_confirmar && (
         <div role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
