@@ -33,7 +33,7 @@ export interface Trilha<E> {
   atual: E | null;
 }
 
-type EventoMinimo = Pick<GdEvento, "estado" | "ocorrido_em" | "data_estimada">;
+export type EventoMinimo = Pick<GdEvento, "estado" | "ocorrido_em" | "data_estimada">;
 
 const FASES_PORTAL: Record<string, string> = {
   comercial: "Proposta e contrato",

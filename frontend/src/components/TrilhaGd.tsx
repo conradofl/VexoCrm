@@ -6,18 +6,18 @@
 import { forwardRef, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { formatarDataHora, rotuloDoAtor, type GdEstado, type GdEvento } from "@/lib/gdClientes";
-import { dataCurta, trilhaInterna, trilhaPortal, type EtapaInterna, type EtapaPortal, type Trilha } from "@/lib/gdTrilha";
+import { dataCurta, trilhaInterna, trilhaPortal, type EtapaInterna, type EtapaPortal, type Trilha, type EventoMinimo } from "@/lib/gdTrilha";
 
 type Props = {
   modo: "interno" | "portal";
   estados: GdEstado[];
-  eventos: GdEvento[];
+  eventos: (GdEvento | EventoMinimo)[];
   estadoAtual: string | null;
 };
 
 export function TrilhaGd({ modo, estados, eventos, estadoAtual }: Props) {
   const trilha: Trilha<EtapaPortal | EtapaInterna> =
-    modo === "portal" ? trilhaPortal(estados, eventos, estadoAtual) : trilhaInterna(estados, eventos, estadoAtual);
+    modo === "portal" ? trilhaPortal(estados, eventos, estadoAtual) : trilhaInterna(estados, eventos as GdEvento[], estadoAtual);
   const atualRef = useRef<HTMLLIElement>(null);
   const posicao = trilha.atual ? trilha.etapas.indexOf(trilha.atual) : -1;
 

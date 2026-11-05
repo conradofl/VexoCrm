@@ -122,3 +122,14 @@ export function useMoverGdCliente() {
     },
   });
 }
+
+export function useEmitirGdPortalToken() {
+  const chamar = useChamar();
+  return useMutation({
+    mutationFn: (clienteId: string) =>
+      chamar<{ token: string; url: string; criado_em: string }>(
+        `/api/gd/clientes/${clienteId}/portal-token`,
+        { method: "POST" }
+      ),
+  });
+}
