@@ -13,6 +13,7 @@
 
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET } from "./leadTemperature.js";
+import { sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
 
 // Perfil só entra no ranking com volume mínimo (mesma regra 6 dos rankings da Fase 1).
 export const PROFILE_MIN_LEADS = 30;
@@ -170,7 +171,9 @@ export async function measureClosings(pool, { clientId, currentStart, currentEnd
 }
 
 // ── 4. Perfil que mais converteu (temperatura × origem) ──────────────────
-// Coorte: leads criados no período. Para cada grupo (temperatura, origem): quantos responderam,
+// Coorte: leads criados no período. Para cada grupo (temperatura, origem): quantos responderam (definição
+// única do Dashboard: responderam a um envio de campanha em até 14 dias — lead que só escreveu sozinho não
+// "respondeu"; envios contados a partir do início do período, que é quando a coorte começa a existir),
 // quantos agendaram (followup_schedules não cancelado, por telefone) e quantos fecharam
 // (lead_conversions ganha). Só grupos com volume mínimo; ordem: fechou, agendou, respondeu (taxas).
 const rate = (n, d) => (d > 0 ? Number(((n / d) * 100).toFixed(1)) : 0);
@@ -220,7 +223,17 @@ export async function measureTopProfiles(pool, { clientId, currentStart, current
     : "0::int AS closed";
   const { rows } = await pool.query(
     `
-      WITH cohort AS (
+      WITH replied_people AS (
+        SELECT DISTINCT ${SQL_CANONICAL_PHONE("r.phone")} AS cphone
+        FROM public.campaign_dispatch_runs r
+        WHERE r.client_id = $1
+          AND r.status = 'sent'
+          AND r.phone <> ''
+          AND r.sent_at IS NOT NULL
+          AND r.sent_at >= $2
+          AND ${sqlRunRepliedWithinWindow("r")}
+      ),
+      cohort AS (
         SELECT
           l.id,
           COALESCE(${SQL_LEAD_TEMPERATURE_BUCKET("l")}, 'SEM_CLASSIFICACAO') AS temperature,
@@ -234,13 +247,7 @@ export async function measureTopProfiles(pool, { clientId, currentStart, current
         c.temperature,
         c.origin,
         COUNT(*)::int AS leads,
-        COUNT(*) FILTER (WHERE EXISTS (
-          SELECT 1 FROM public.lead_messages lm
-          WHERE lm.client_id = $1
-            AND lm.phone IS NOT NULL AND lm.phone <> ''
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${SQL_CANONICAL_PHONE("lm.phone")} = c.cphone
-        ))::int AS replied,
+        COUNT(*) FILTER (WHERE c.cphone IN (SELECT rp.cphone FROM replied_people rp))::int AS replied,
         COUNT(*) FILTER (WHERE EXISTS (
           SELECT 1
           FROM public.followup_schedules fs

@@ -58,8 +58,8 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
         rows: [{ current_sent: 150, previous_sent: 100 }],
       },
       // 2. Replied
-      "COUNT(*) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied": {
-        rows: [{ current_replied: 30, previous_replied: 15 }],
+      "AS current_replied": {
+        rows: [{ current_replied: 30, previous_replied: 15, current_reached: 150, previous_reached: 100 }],
       },
       // 3. Meetings
       "current_meetings": {
@@ -149,8 +149,8 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
       "COUNT(*) FILTER (WHERE sent_at >= $2 AND sent_at < $3)::int AS current_sent": {
         rows: [{ current_sent: 50, previous_sent: 50 }],
       },
-      "COUNT(*) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied": {
-        rows: [{ current_replied: 10, previous_replied: 10 }],
+      "AS current_replied": {
+        rows: [{ current_replied: 10, previous_replied: 10, current_reached: 50, previous_reached: 50 }],
       },
       "current_meetings": {
         rows: [{ current_meetings: 2, previous_meetings: 2 }],
@@ -175,7 +175,7 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
     const pool = makeMockPool({
       "has_gd": { rows: [{ has_gd: false }] },
       "current_sent": { rows: [{ current_sent: 100, previous_sent: 100 }] },
-      "current_replied": { rows: [{ current_replied: 20, previous_replied: 20 }] },
+      "current_replied": { rows: [{ current_replied: 20, previous_replied: 20, current_reached: 100, previous_reached: 100 }] },
       "current_meetings": { rows: [{ current_meetings: 5, previous_meetings: 5 }] },
       "public.leads l": { rows: [{ count: 0 }] },
       "HAVING COUNT(*) >= $4": (sql, params) => {
@@ -229,7 +229,7 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
     const poolComProblemas = makeMockPool({
       "has_gd": { rows: [{ has_gd: false }] },
       "current_sent": { rows: [{ current_sent: 50, previous_sent: 50 }] },
-      "current_replied": { rows: [{ current_replied: 5, previous_replied: 5 }] },
+      "current_replied": { rows: [{ current_replied: 5, previous_replied: 5, current_reached: 50, previous_reached: 50 }] },
       "current_meetings": { rows: [{ current_meetings: 0, previous_meetings: 0 }] },
       // Falhas com alto percentual de números inexistentes (>15% e >= 3)
       "public.campaign_dispatch_runs": (sql) => {
@@ -271,7 +271,7 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
     const poolSaudavel = makeMockPool({
       "has_gd": { rows: [{ has_gd: false }] },
       "current_sent": { rows: [{ current_sent: 200, previous_sent: 200 }] },
-      "current_replied": { rows: [{ current_replied: 50, previous_replied: 50 }] },
+      "current_replied": { rows: [{ current_replied: 50, previous_replied: 50, current_reached: 200, previous_reached: 200 }] },
       "current_meetings": { rows: [{ current_meetings: 10, previous_meetings: 10 }] },
       // Sem falhas
       "public.campaign_dispatch_runs": { rows: [] },
@@ -559,8 +559,8 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
         "COUNT(*) FILTER (WHERE sent_at >= $2 AND sent_at < $3)::int AS current_sent": {
           rows: [{ current_sent: 200, previous_sent: 100 }],
         },
-        "COUNT(*) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied": {
-          rows: [{ current_replied: 40, previous_replied: 20 }],
+        "AS current_replied": {
+          rows: [{ current_replied: 40, previous_replied: 20, current_reached: 200, previous_reached: 100 }],
         },
         "current_meetings": { rows: [{ current_meetings: 5, previous_meetings: 2 }] },
         "has_gd": { rows: [{ has_gd: false }] },
@@ -613,8 +613,8 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
           heavyComputationsCount++;
           return { rows: [{ current_sent: 75, previous_sent: 50 }] };
         },
-        "COUNT(*) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied": {
-          rows: [{ current_replied: 10, previous_replied: 5 }],
+        "AS current_replied": {
+          rows: [{ current_replied: 10, previous_replied: 5, current_reached: 75, previous_reached: 50 }],
         },
         "current_meetings": { rows: [{ current_meetings: 2, previous_meetings: 1 }] },
         "has_gd": { rows: [{ has_gd: false }] },
@@ -656,8 +656,8 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
         "COUNT(*) FILTER (WHERE sent_at >= $2 AND sent_at < $3)::int AS current_sent": {
           rows: [{ current_sent: 10, previous_sent: 10 }],
         },
-        "COUNT(*) FILTER (WHERE replied AND sent_at >= $2 AND sent_at < $3)::int AS current_replied": {
-          rows: [{ current_replied: 2, previous_replied: 2 }],
+        "AS current_replied": {
+          rows: [{ current_replied: 2, previous_replied: 2, current_reached: 10, previous_reached: 10 }],
         },
         "current_meetings": { rows: [{ current_meetings: 0, previous_meetings: 0 }] },
         "has_gd": { rows: [{ has_gd: false }] },

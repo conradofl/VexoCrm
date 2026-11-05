@@ -21,6 +21,24 @@ export const MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS = 14;
 export const REPLY_MESSAGE_FILTER_SQL = "(lm.direction = 'inbound' OR lm.engagement_signal = 'reply')";
 export const MESSAGE_TIMESTAMP_SQL = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
 
+/**
+ * "Este envio foi respondido?" — o pedaço por envio da definição única do Dashboard (decidida em 31/10/2026).
+ * Respondeu = mensagem de resposta do mesmo tenant, telefone cru OU canônico, depois do envio e até
+ * MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS dias. Quem conta PESSOAS (COUNT DISTINCT do telefone canônico do
+ * envio) é a consulta que usa este pedaço: o número da tela é de pessoas, nunca de envios.
+ */
+export function sqlRunRepliedWithinWindow(runAlias = "r") {
+  return `EXISTS (
+      SELECT 1
+      FROM public.lead_messages lm
+      WHERE lm.client_id = ${runAlias}.client_id
+        AND (lm.phone = ${runAlias}.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE(`${runAlias}.phone`)})
+        AND ${REPLY_MESSAGE_FILTER_SQL}
+        AND ${MESSAGE_TIMESTAMP_SQL} > ${runAlias}.sent_at
+        AND ${MESSAGE_TIMESTAMP_SQL} <= ${runAlias}.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+    )`;
+}
+
 export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIsGroupColumn) {
   const canonicalLeadPhone = SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)");
   const lmTimestamp = MESSAGE_TIMESTAMP_SQL;
