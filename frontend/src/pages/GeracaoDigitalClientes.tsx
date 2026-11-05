@@ -16,11 +16,13 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
+import { Link as LinkIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   GdApiError,
   useCriarGdCliente,
   useEditarGdCliente,
+  useEmitirGdPortalToken,
   useGdCliente,
   useGdClientes,
   useGdEstados,
@@ -264,6 +266,70 @@ function MoverEstado({ cliente, estados, onConflito }: { cliente: GdCliente; est
   );
 }
 
+function BotaoCopiarPortal({
+  clienteId,
+  clienteNome,
+  variante = "outline",
+}: {
+  clienteId: string;
+  clienteNome?: string;
+  variante?: "outline" | "ghost";
+}) {
+  const emitir = useEmitirGdPortalToken();
+
+  const copiar = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const data = await emitir.mutateAsync(clienteId);
+      const urlCompleta = `${window.location.origin}/acompanhamento/${data.token}`;
+      await navigator.clipboard.writeText(urlCompleta);
+      toast({
+        title: "Link do portal copiado!",
+        description: urlCompleta,
+      });
+    } catch (err) {
+      toast({
+        title: "Não foi possível gerar link do portal",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (variante === "ghost") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0"
+            onClick={copiar}
+            disabled={emitir.isPending}
+            aria-label={`Copiar link do portal${clienteNome ? ` de ${clienteNome}` : ""}`}
+          >
+            <LinkIcon className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Copiar link do portal</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={copiar}
+      disabled={emitir.isPending}
+      aria-label="Copiar link do portal"
+    >
+      <LinkIcon className="h-4 w-4 mr-1.5" />
+      {emitir.isPending ? "Gerando link…" : "Copiar Link do Portal"}
+    </Button>
+  );
+}
+
 function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
   const { data, isLoading, error } = useGdCliente(id);
   const { data: estados } = useGdEstados();
@@ -319,7 +385,8 @@ function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
           <h2 className="text-lg font-semibold">{cliente.nome}</h2>
           <p className="text-sm text-muted-foreground">CNPJ: {cliente.cnpj || "não informado"}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <BotaoCopiarPortal clienteId={cliente.id} clienteNome={cliente.nome} />
           {!editando && <Button size="sm" variant="outline" onClick={abrirEdicao}>Editar dados</Button>}
           <Button size="sm" variant="ghost" onClick={onFechar}>Fechar</Button>
         </div>
@@ -473,7 +540,12 @@ function TelaClientes() {
                     <TableCell>
                       {c.drive_url ? <a className="underline" href={c.drive_url} {...LINK_EXTERNO}>Pasta</a> : "—"}
                     </TableCell>
-                    <TableCell className="text-right"><MoverEstado cliente={c} estados={estados} onConflito={setAviso} /></TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <BotaoCopiarPortal clienteId={c.id} clienteNome={c.nome} variante="ghost" />
+                        <MoverEstado cliente={c} estados={estados} onConflito={setAviso} />
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
