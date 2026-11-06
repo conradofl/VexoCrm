@@ -10,7 +10,7 @@ export const CONTRACT_FILL_LINE = "______________________________";
 
 export function applyContractMerge(template: string, data: Record<string, any>): string {
   if (!template) return "";
-  
+
   let result = template;
   for (const [key, value] of Object.entries(data || {})) {
     if (value != null && typeof value === "object") continue;
@@ -541,6 +541,3 @@ export function validarCnpjMatematico(cnpj: string | number | null | undefined):
 
   return true;
 }
-
-
-

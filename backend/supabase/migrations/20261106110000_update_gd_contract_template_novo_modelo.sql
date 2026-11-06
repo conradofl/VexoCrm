@@ -4,10 +4,10 @@
 -- dados oficiais da Contratada AGÊNCIA GERAÇÃO DIGITAL LTDA (CNPJ: 66.722.723/0001-02).
 
 -- 1. Garante que as colunas clausulas e template_id existam
-ALTER TABLE public.gd_contract_templates 
+ALTER TABLE public.gd_contract_templates
 ADD COLUMN IF NOT EXISTS clausulas JSONB DEFAULT '[]'::jsonb;
 
-ALTER TABLE public.gd_contracts 
+ALTER TABLE public.gd_contracts
 ADD COLUMN IF NOT EXISTS template_id UUID REFERENCES public.gd_contract_templates(id);
 
 -- 2. Atualiza os dados da Contratada em public.tenant_modules para o tenant padrão da GD
@@ -236,4 +236,3 @@ CPF: ______________________________________________$tpl$;
     now()
   );
 END $$;
-
