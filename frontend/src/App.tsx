@@ -244,21 +244,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="padroes-da-empresa"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <ChatbotSettings />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="padroes-da-empresa" element={<Navigate to="/crm/agente" replace />} />
               <Route path="chatbot" element={<Navigate to="/crm/agente" replace />} />
               <Route path="inbound-agents" element={<Navigate to="/crm/agente" replace />} />
-              <Route path="chatbot-settings" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
-              <Route path="chatbot-config" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
+              <Route path="chatbot-settings" element={<Navigate to="/crm/agente" replace />} />
+              <Route path="chatbot-config" element={<Navigate to="/crm/agente" replace />} />
               <Route path="chatbot-docs" element={<Navigate to="/crm/agente?tab=docs" replace />} />
-              <Route path="prompt-editor" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
-              <Route path="chatbot-templates" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
+              <Route path="prompt-editor" element={<Navigate to="/crm/agente" replace />} />
+              <Route path="chatbot-templates" element={<Navigate to="/crm/agente" replace />} />
 
               <Route
                 path="followup"

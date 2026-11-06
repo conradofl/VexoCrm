@@ -3561,6 +3561,13 @@ export function registerLeadsRoutes(app, deps) {
         }
       }
 
+      // Prevenção de timeout: quando não houver importId especificado e nem limit,
+      // adiciona limite padrão de 500 para evitar statement_timeout (erro 500) em bases com milhares de leads
+      const hasSpecificImportId = Boolean(importId && importId !== "__all__");
+      if (!hasSpecificImportId && !paginate) {
+        query = query.limit(500);
+      }
+
       const { data: items, error } = await query;
       if (error) throw error;
 

@@ -12,7 +12,7 @@ ADD COLUMN IF NOT EXISTS template_id UUID REFERENCES public.gd_contract_template
 
 -- 2. Atualiza os dados da Contratada em public.tenant_modules para o tenant padrão da GD
 -- (00000000-0000-0000-0000-000000000000)
-INSERT INTO public.tenant_modules (tenant_id, config, updated_at)
+INSERT INTO public.tenant_modules (tenant_id, config)
 VALUES (
   '00000000-0000-0000-0000-000000000000'::uuid,
   jsonb_build_object(
@@ -38,8 +38,7 @@ VALUES (
         'assinatura', 'Caio Vinícius Almeida de Oliveira'
       )
     )
-  ),
-  now()
+  )
 )
 ON CONFLICT (tenant_id) DO UPDATE
 SET config = jsonb_set(
@@ -68,8 +67,7 @@ SET config = jsonb_set(
     'comarca', 'Uberlândia – MG',
     'assinatura', 'Caio Vinícius Almeida de Oliveira'
   )
-),
-updated_at = now();
+);
 
 -- 3. Insere ou atualiza o template padrão na tabela public.gd_contract_templates
 DO $$

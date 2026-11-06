@@ -1511,12 +1511,25 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const matchedByImportId = importIds.some((id) => campaignImportIds.has(id));
       const matchedImportItem = resolveMatchedImportItemForCampaign(importItems, campaign);
 
-      const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
-      const hasProgress = progress && Object.keys(progress).length > 0;
+      const stepPlan = getCampaignStepPlan(analyticsMeta || {});
+      const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
+      const isWaitForReply =
+        analyticsMeta.dispatchOptions?.waitForReply === true ||
+        hasAfterReplySteps ||
+        progress?.waitForReply === true;
+
+      const nextStepIdx = normalizeCampaignPendingStepIndex(progress?.nextStepIndex);
+      const steps = stepPlan.enabledSteps || [];
+      const hasStepsRemaining = nextStepIdx !== null && nextStepIdx < steps.length;
+      const isStatusWaiting =
+        progress?.status === "aguardando_usuario" ||
+        progress?.status === "pendente" ||
+        progress?.status === "aguardando_resposta";
+
       const hasPendingProgress =
-        progress &&
-        progress.waitForReply === true &&
-        progress.status === "aguardando_usuario";
+        Boolean(progress) &&
+        (progress.waitForReply === true || isWaitForReply || hasStepsRemaining) &&
+        (isStatusWaiting || hasStepsRemaining);
 
       // A.1: Casamento direto por progresso como fonte primária
       const matchedByProgress = Boolean(hasProgress);
@@ -1542,7 +1555,7 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         status: campaign.status || null,
         scheduledFor: campaign.scheduled_for || null,
         lastTriggeredAt: campaign.last_triggered_at || null,
-        waitForReply: analyticsMeta.dispatchOptions?.waitForReply === true,
+        waitForReply: isWaitForReply,
         hasPendingProgress,
         analyticsMeta,
         isInActivePeriod,
@@ -1589,8 +1602,8 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       return rightDate.localeCompare(leftDate);
     });
 
-  const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply);
-  const processingWaitForReplyMatches = waitForReplyMatches.filter((campaign) => campaign.hasPendingProgress === true);
+  const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply || campaign.hasPendingProgress);
+  const processingWaitForReplyMatches = matches.filter((campaign) => campaign.hasPendingProgress === true);
 
   // Campanha com período ativo que contém este telefone — define qual prompt usar
   const activePeriodCampaign = matches.find((c) => c.isInActivePeriod) || null;
@@ -2252,10 +2265,21 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
   const nextIdxBase = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
+  const isStatusWaiting =
+    progress.status === "aguardando_usuario" ||
+    progress.status === "pendente" ||
+    progress.status === "aguardando_resposta" ||
+    !progress.status;
+  const isWaitForReply =
+    progress.waitForReply === true ||
+    progress.waitForReply === "true" ||
+    campaignMatch.waitForReply === true ||
+    (campaignMatch.analyticsMeta?.sequence && campaignMatch.analyticsMeta.sequence.some((s) => s.enabled && s.triggerMode === "after_reply"));
+
   const hasPendingProgress =
-    progress &&
-    progress.waitForReply === true &&
-    progress.status === "aguardando_usuario" &&
+    Boolean(progress) &&
+    isWaitForReply &&
+    isStatusWaiting &&
     nextIdxBase !== null;
 
   if (!hasPendingProgress) {
@@ -2321,7 +2345,9 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const stepPlan = getCampaignStepPlan(effectiveMeta);
   const analyticsMeta = stepPlan.analyticsMeta;
   const steps = stepPlan.enabledSteps;
-  if (!stepPlan.shouldUseReplyFlow) {
+  const replySteps = stepPlan.replySteps || [];
+  const shouldUseReplyFlow = stepPlan.shouldUseReplyFlow || replySteps.length > 0;
+  if (!shouldUseReplyFlow) {
     return { continued: false, reason: "campaign_not_waiting_reply" };
   }
 

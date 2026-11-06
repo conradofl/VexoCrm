@@ -576,7 +576,7 @@ export default function InboundAgentConfig() {
     >
       {/* Aviso de transparência: se o chatbot global da empresa estiver desligado */}
       {tenantN8nSettings && tenantN8nSettings.chatbot_enabled === false && (
-        <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
           <div className="flex items-start gap-2.5">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <div className="space-y-1">
@@ -584,7 +584,7 @@ export default function InboundAgentConfig() {
                 Atendimento geral da empresa desligado
               </p>
               <p>
-                O <strong>Chatbot Global</strong> está desativado em Padrões da Empresa.
+                O <strong>Chatbot Global</strong> está desativado.
                 Apenas chips com agente próprio configurado e ligado aqui responderão.
                 {unassignedChips.length > 0 && (
                   <span> Chips sem agente ({unassignedChips.map((c: any) => c.name || instanceNameFromChip(c)).join(", ")}) não responderão automaticamente.</span>
@@ -592,14 +592,6 @@ export default function InboundAgentConfig() {
               </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 text-xs border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-            onClick={() => navigate("/crm/padroes-da-empresa")}
-          >
-            Padrões da Empresa
-          </Button>
         </div>
       )}
 
@@ -1105,13 +1097,13 @@ export default function InboundAgentConfig() {
                           <Label className="text-xs font-medium">Prompt de extração do agente (opcional)</Label>
                           <Textarea
                             rows={4}
-                            placeholder="Deixe em branco para usar o prompt padrão da empresa (Padrões da Empresa > Extrato SDR)..."
+                            placeholder="Deixe em branco para usar o prompt padrão da empresa..."
                             value={inboundExtractionPrompt}
                             onChange={(e) => setInboundExtractionPrompt(e.target.value)}
                             className="font-mono text-xs"
                           />
                           <p className="text-[11px] text-slate-500">
-                            Instruções específicas para este agente montar o card do closer. Se em branco, usa o Extrato SDR de Padrões da Empresa.
+                            Instruções específicas para este agente montar o card do closer. Se em branco, usa o Extrato SDR padrão.
                           </p>
                         </div>
                       ) : (
