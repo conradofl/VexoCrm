@@ -11,12 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertCircle,
+  Bot,
+  CalendarDays,
   Clock,
   ExternalLink,
+  FileCheck,
   FileText,
   FolderOpen,
   MessageCircle,
-  Sparkles,
   ShieldAlert,
 } from "lucide-react";
 import type { GdEstado } from "@/lib/gdClientes";
@@ -29,6 +31,10 @@ interface ClientePublico {
   estado_data_estimada: boolean;
   proposal_id: string | null;
   drive_url: string | null;
+  contrato_url: string | null;
+  briefing_url: string | null;
+  ficha_vexo_url: string | null;
+  planejamento_url: string | null;
   escopo: string[] | null;
 }
 
@@ -36,6 +42,9 @@ interface PortalData {
   cliente: ClientePublico;
   estados: GdEstado[];
   eventos: EventoMinimo[];
+  suporte?: {
+    whatsapp?: string;
+  };
 }
 
 const FORMATADOR_DATA = new Intl.DateTimeFormat("pt-BR", {
@@ -131,6 +140,11 @@ export default function GeracaoDigitalPortalCliente() {
 
   // 2. Estado de Erro (404 Link inválido/expirado ou outros erros)
   if (errorStatus || !data) {
+    const whatsappErro = "5534997719779";
+    const linkWhatsAppErro = `https://wa.me/${whatsappErro}?text=${encodeURIComponent(
+      "Olá! Meu link de acompanhamento do portal está expirado ou inválido."
+    )}`;
+
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-6">
         <Card className="max-w-md w-full border-muted text-center shadow-lg">
@@ -149,11 +163,7 @@ export default function GeracaoDigitalPortalCliente() {
             </p>
             <div className="pt-2">
               <Button asChild className="w-full">
-                <a
-                  href="https://wa.me/5511999998888?text=Ol%C3%A1%2C%20meu%20link%20de%20acompanhamento%20do%20portal%20est%C3%A1%20expirado."
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
+                <a href={linkWhatsAppErro} target="_blank" rel="noopener noreferrer">
                   <MessageCircle className="w-4 h-4 mr-2" />
                   Falar com a Geração Digital
                 </a>
@@ -165,11 +175,15 @@ export default function GeracaoDigitalPortalCliente() {
     );
   }
 
-  const { cliente, estados, eventos } = data;
+  const { cliente, estados, eventos, suporte } = data;
   const estadoAtualObj = estados.find((e) => e.codigo === cliente.estado_atual);
   const rotuloAtual = estadoAtualObj?.rotulo_portal || cliente.estado_atual || "Em andamento";
   const acaoDoCliente = estadoAtualObj?.acao_do_cliente === true;
   const dataDesdeFormatada = formatarData(cliente.estado_desde);
+
+  const suporteWhatsapp = suporte?.whatsapp || "5534997719779";
+  const mensagemContextual = `Olá! Sou do projeto ${cliente.nome} e gostaria de tirar uma dúvida sobre a etapa atual: ${rotuloAtual}`;
+  const linkWhatsAppSuporte = `https://wa.me/${suporteWhatsapp}?text=${encodeURIComponent(mensagemContextual)}`;
 
   return (
     <div className="min-h-screen bg-background text-foreground selection:bg-primary/20 pb-16">
@@ -186,7 +200,7 @@ export default function GeracaoDigitalPortalCliente() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 space-y-6">
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 space-y-8">
         {/* Cabeçalho do Cliente */}
         <section aria-label="Identificação do projeto" className="space-y-3">
           <div className="space-y-1">
@@ -231,7 +245,145 @@ export default function GeracaoDigitalPortalCliente() {
           </Card>
         )}
 
-        {/* Acessos Úteis (Proposta, Drive de entregáveis) */}
+        {/* Central dos 4 Documentos-Chave */}
+        <section aria-label="Documentos do projeto" className="space-y-3">
+          <div className="space-y-0.5">
+            <h2 className="text-base sm:text-lg font-semibold tracking-tight">Documentos do Projeto</h2>
+            <p className="text-xs text-muted-foreground">Documentos fundamentais para execução e alinhamento do seu contrato.</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* 1. Contrato */}
+            <Card className="border shadow-sm p-4 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <FileCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm">Contrato de Prestação de Serviços</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Instrumento jurídico e vigência</p>
+                  </div>
+                </div>
+                <Badge variant={cliente.contrato_url ? "default" : "outline"} className="text-[10px] shrink-0 font-normal">
+                  {cliente.contrato_url ? "Assinado" : "Em elaboração / assinatura"}
+                </Badge>
+              </div>
+              <div className="pt-4">
+                {cliente.contrato_url ? (
+                  <Button asChild size="sm" variant="outline" className="w-full text-xs justify-between">
+                    <a href={cliente.contrato_url} target="_blank" rel="noopener noreferrer">
+                      <span>Acessar contrato</span>
+                      <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                    </a>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" disabled className="w-full text-xs justify-center opacity-60">
+                    Disponível em breve
+                  </Button>
+                )}
+              </div>
+            </Card>
+
+            {/* 2. Briefing de Marketing */}
+            <Card className="border shadow-sm p-4 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm">Briefing de Marketing</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Público-alvo, posicionamento e metas</p>
+                  </div>
+                </div>
+                <Badge variant={cliente.briefing_url ? "default" : "outline"} className="text-[10px] shrink-0 font-normal">
+                  {cliente.briefing_url ? "Aprovado" : "Aguardando reunião de briefing"}
+                </Badge>
+              </div>
+              <div className="pt-4">
+                {cliente.briefing_url ? (
+                  <Button asChild size="sm" variant="outline" className="w-full text-xs justify-between">
+                    <a href={cliente.briefing_url} target="_blank" rel="noopener noreferrer">
+                      <span>Acessar briefing</span>
+                      <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                    </a>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" disabled className="w-full text-xs justify-center opacity-60">
+                    Disponível em breve
+                  </Button>
+                )}
+              </div>
+            </Card>
+
+            {/* 3. Ficha Vexo & IA */}
+            <Card className="border shadow-sm p-4 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm">Ficha Vexo & IA</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Diretrizes do agente comercial e regras</p>
+                  </div>
+                </div>
+                <Badge variant={cliente.ficha_vexo_url ? "default" : "outline"} className="text-[10px] shrink-0 font-normal">
+                  {cliente.ficha_vexo_url ? "Configurado" : "Em parametrização"}
+                </Badge>
+              </div>
+              <div className="pt-4">
+                {cliente.ficha_vexo_url ? (
+                  <Button asChild size="sm" variant="outline" className="w-full text-xs justify-between">
+                    <a href={cliente.ficha_vexo_url} target="_blank" rel="noopener noreferrer">
+                      <span>Acessar ficha técnica</span>
+                      <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                    </a>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" disabled className="w-full text-xs justify-center opacity-60">
+                    Disponível em breve
+                  </Button>
+                )}
+              </div>
+            </Card>
+
+            {/* 4. Planejamento & Roteiros */}
+            <Card className="border shadow-sm p-4 flex flex-col justify-between">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
+                    <CalendarDays className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm">Planejamento & Roteiros</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">Calendário editorial e pautas aprovadas</p>
+                  </div>
+                </div>
+                <Badge variant={cliente.planejamento_url ? "default" : "outline"} className="text-[10px] shrink-0 font-normal">
+                  {cliente.planejamento_url ? "Ativo" : "Em elaboração"}
+                </Badge>
+              </div>
+              <div className="pt-4">
+                {cliente.planejamento_url ? (
+                  <Button asChild size="sm" variant="outline" className="w-full text-xs justify-between">
+                    <a href={cliente.planejamento_url} target="_blank" rel="noopener noreferrer">
+                      <span>Acessar planejamento</span>
+                      <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                    </a>
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" disabled className="w-full text-xs justify-center opacity-60">
+                    Disponível em breve
+                  </Button>
+                )}
+              </div>
+            </Card>
+          </div>
+        </section>
+
+        {/* Acessos Complementares (Proposta, Drive geral) */}
         {(cliente.proposal_id || cliente.drive_url) && (
           <section aria-label="Acessos úteis" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {cliente.proposal_id && (
@@ -240,7 +392,7 @@ export default function GeracaoDigitalPortalCliente() {
                   <div className="flex items-center gap-3 text-left">
                     <FileText className="w-5 h-5 text-primary shrink-0" />
                     <div>
-                      <div className="font-medium text-sm">Ver Proposta</div>
+                      <div className="font-medium text-sm">Ver Proposta Comercial</div>
                       <div className="text-xs text-muted-foreground">Termos e escopo aprovados</div>
                     </div>
                   </div>
@@ -255,7 +407,7 @@ export default function GeracaoDigitalPortalCliente() {
                   <div className="flex items-center gap-3 text-left">
                     <FolderOpen className="w-5 h-5 text-primary shrink-0" />
                     <div>
-                      <div className="font-medium text-sm">Pasta no Drive</div>
+                      <div className="font-medium text-sm">Pasta Geral no Drive</div>
                       <div className="text-xs text-muted-foreground">Criativos, roteiros e arquivos</div>
                     </div>
                   </div>
@@ -287,14 +439,14 @@ export default function GeracaoDigitalPortalCliente() {
           </CardContent>
         </Card>
 
-        {/* Rodapé e canal de suporte */}
+        {/* Rodapé e canal de suporte oficial */}
         <footer className="pt-4 text-center space-y-3 border-t">
           <p className="text-xs text-muted-foreground">
             Dúvidas ou precisa de suporte com alguma etapa?
           </p>
           <Button variant="ghost" size="sm" asChild className="text-xs">
             <a
-              href="https://wa.me/5511999998888"
+              href={linkWhatsAppSuporte}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5"

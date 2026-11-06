@@ -87,7 +87,8 @@ class ErroDeRota extends Error {
 
 const SELECT_CLIENTE = `
   SELECT c.id, c.nome, c.cnpj, c.cnpj_a_confirmar, c.aprovador_nome, c.aprovador_telefone,
-         c.drive_url, c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
+         c.drive_url, c.contrato_url, c.briefing_url, c.ficha_vexo_url, c.planejamento_url,
+         c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
          c.estado_data_estimada, c.created_at, c.updated_at,
          e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
          CASE WHEN e.prazo_contagem = 'horas_corridas' AND e.prazo_horas IS NOT NULL
@@ -117,6 +118,10 @@ function clienteDe(linha) {
     aprovador_nome: linha.aprovador_nome,
     aprovador_telefone: linha.aprovador_telefone,
     drive_url: linha.drive_url,
+    contrato_url: linha.contrato_url ?? null,
+    briefing_url: linha.briefing_url ?? null,
+    ficha_vexo_url: linha.ficha_vexo_url ?? null,
+    planejamento_url: linha.planejamento_url ?? null,
     escopo: linha.escopo,
     escopo_original: linha.escopo_original,
     origem: linha.origem,
@@ -578,7 +583,8 @@ export function registerGdClientesRoutes(app, {
       const [clienteRes, estadosRes, eventosRes] = await Promise.all([
         db.query(
           `SELECT nome, estado_atual, estado_desde, estado_data_estimada,
-                  proposal_id, drive_url, escopo
+                  proposal_id, drive_url, escopo,
+                  contrato_url, briefing_url, ficha_vexo_url, planejamento_url
              FROM public.gd_clientes
             WHERE id = $1 AND dono_client_id = $2`,
           [clienteId, GD_DONO]
@@ -612,6 +618,10 @@ export function registerGdClientesRoutes(app, {
         proposal_id: c.proposal_id || null,
         drive_url: c.drive_url || null,
         escopo: c.escopo || null,
+        contrato_url: c.contrato_url || null,
+        briefing_url: c.briefing_url || null,
+        ficha_vexo_url: c.ficha_vexo_url || null,
+        planejamento_url: c.planejamento_url || null,
       };
 
       const estados = estadosRes.rows.map((r) => ({
@@ -629,7 +639,11 @@ export function registerGdClientesRoutes(app, {
         data_estimada: Boolean(r.data_estimada),
       }));
 
-      res.json({ cliente, estados, eventos });
+      const suporte = {
+        whatsapp: process.env.GD_SUPORTE_WHATSAPP || "5534997719779",
+      };
+
+      res.json({ cliente, estados, eventos, suporte });
     } catch (err) {
       responderErro(res, err, "GET /api/gd/public/portal/:token");
     }

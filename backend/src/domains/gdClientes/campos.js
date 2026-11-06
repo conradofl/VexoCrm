@@ -65,6 +65,20 @@ export function lerDriveUrl(bruto) {
   return url;
 }
 
+export function lerUrlOpcional(bruto, code, rotulo) {
+  const url = texto(bruto, code, rotulo, 500);
+  if (url === null) return null;
+  if (!/^https:\/\//.test(url)) {
+    throw new CampoInvalido(code, `${rotulo} precisa começar com https://.`);
+  }
+  return url;
+}
+
+export const lerContratoUrl = (bruto) => lerUrlOpcional(bruto, "CONTRATO_URL_INVALIDA", "Link do contrato");
+export const lerBriefingUrl = (bruto) => lerUrlOpcional(bruto, "BRIEFING_URL_INVALIDA", "Link do briefing");
+export const lerFichaVexoUrl = (bruto) => lerUrlOpcional(bruto, "FICHA_VEXO_URL_INVALIDA", "Link da ficha Vexo");
+export const lerPlanejamentoUrl = (bruto) => lerUrlOpcional(bruto, "PLANEJAMENTO_URL_INVALIDA", "Link do planejamento");
+
 // Lista de códigos, sem repetição. Lista vazia é "sem escopo informado".
 export function lerEscopo(bruto) {
   if (bruto == null) return null;
@@ -90,6 +104,10 @@ export const CAMPOS_OPCIONAIS = {
   aprovador_nome: lerAprovadorNome,
   aprovador_telefone: lerTelefone,
   drive_url: lerDriveUrl,
+  contrato_url: lerContratoUrl,
+  briefing_url: lerBriefingUrl,
+  ficha_vexo_url: lerFichaVexoUrl,
+  planejamento_url: lerPlanejamentoUrl,
   escopo: lerEscopo,
   escopo_original: lerEscopoOriginal,
   cnpj_a_confirmar: lerCnpjAConfirmar,
