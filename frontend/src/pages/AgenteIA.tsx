@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bot, BookOpen, Database, Building2 } from "lucide-react";
+import { Bot, BookOpen, Database } from "lucide-react";
 import InboundAgentConfig from "./InboundAgentConfig";
 import ChatbotDocs from "./ChatbotDocs";
 import { KnowledgeBaseRagTab } from "@/components/agente/KnowledgeBaseRagTab";
@@ -76,15 +76,6 @@ export default function AgenteIA() {
     <PageShell title="Agente IA" subtitle="Gerencie os agentes que atendem cada número de WhatsApp">
       <PageShellContext.Provider value={true}>
         <div className="w-full space-y-6">
-          <div className="flex justify-end">
-            <Link
-              to="/crm/padroes-da-empresa"
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Building2 className="h-3.5 w-3.5" />
-              Padrões da empresa
-            </Link>
-          </div>
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <div className="border-b border-slate-200 dark:border-white/10 pb-2 overflow-x-auto">
               <TabsList className="flex w-max min-w-full bg-muted border border-border h-10 p-1">

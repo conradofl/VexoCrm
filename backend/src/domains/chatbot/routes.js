@@ -3127,12 +3127,31 @@ export function registerChatbotRoutes(app, deps) {
 
     try {
       campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
-      const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+      let activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches?.[0] || null;
+
+      // Fallback: se não estiver no index 0 de processingWaitForReplyMatches, busca em outros candidatos com passos pendentes
+      if (!activeWaitCampaign) {
+        const allCandidates = [
+          ...(campaignReplyContext.processingWaitForReplyMatches || []),
+          ...(campaignReplyContext.waitForReplyMatches || []),
+          ...(campaignReplyContext.matches || []),
+          ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
+        ];
+        activeWaitCampaign = allCandidates.find((c) => {
+          if (!c) return false;
+          const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
+          const steps = stepPlan.enabledSteps || [];
+          const progress = c.leadImportItem?.progress || {};
+          const nextStepIndex = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
+          return nextStepIndex !== null && nextStepIndex < steps.length;
+        }) || null;
+      }
+
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
 
       // Por que este lead caiu (ou nao) no fluxo de resposta.
-      const candidato = campaignReplyContext.waitForReplyMatches[0] || campaignReplyContext.matches[0] || null;
+      const candidato = activeWaitCampaign || campaignReplyContext.waitForReplyMatches?.[0] || campaignReplyContext.matches?.[0] || null;
       const progressoConsultado = candidato?.leadImportItem?.progress ?? null;
       console.log("[campaign-routing] contexto", {
         clientId,
@@ -3182,42 +3201,47 @@ export function registerChatbotRoutes(app, deps) {
             return;
           }
         }
-      } else if (activeCampaignForLead) {
-        const escolha = resolveCampaignAgent(activeCampaignForLead);
-        if (escolha.agente === AGENTE_NENHUM || escolha.bloqueado) {
-          console.log("[campaign-routing] campanha configurada como Sem IA (apenas passos) — IA bloqueada:", {
-            clientId,
-            phone: maskPhoneForLog(phone),
+      }
+
+      // Se NÃO for disparo de próximo passo de campanha (activeWaitCampaignToDispatch é null):
+      if (!activeWaitCampaignToDispatch) {
+        if (activeCampaignForLead) {
+          const escolha = resolveCampaignAgent(activeCampaignForLead);
+          if (escolha.agente === AGENTE_NENHUM || escolha.bloqueado) {
+            console.log("[campaign-routing] campanha configurada como Sem IA (apenas passos) — IA bloqueada:", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              campaignId: activeCampaignForLead.id,
+              campaignName: activeCampaignForLead.name,
+              porque: escolha.porque,
+            });
+            responder({ status: "skipped_disparo_only", motivo: "campanha_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
+            return;
+          }
+          campaignPromptIdOverride = escolha.campaignPromptId;
+          chatbotPromptTypeOverride = escolha.agente === AGENTE_CAMPANHA && escolha.campaignPromptId ? "campanha" : "padrao";
+          if (escolha.configuracaoIncompleta) {
+            console.warn("[campaign-routing] campanha marcada como agente SEM roteiro — caindo no atendimento padrão", {
+              clientId, campaignId: activeCampaignForLead.id,
+            });
+          }
+          console.log("[campaign-routing] agente escolhido", {
+            clientId, phone: maskPhoneForLog(phone),
+            agente: escolha.agente,
+            porque: escolha.porque,
             campaignId: activeCampaignForLead.id,
             campaignName: activeCampaignForLead.name,
-            porque: escolha.porque,
+            campaignPromptId: escolha.campaignPromptId,
+            mode: activeCampaignForLead.mode || null,
+            endsAt: activeCampaignForLead.endsAt,
           });
-          responder({ status: "skipped_disparo_only", motivo: "campanha_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
-          return;
-        }
-        campaignPromptIdOverride = escolha.campaignPromptId;
-        chatbotPromptTypeOverride = escolha.agente === AGENTE_CAMPANHA && escolha.campaignPromptId ? "campanha" : "padrao";
-        if (escolha.configuracaoIncompleta) {
-          console.warn("[campaign-routing] campanha marcada como agente SEM roteiro — caindo no atendimento padrão", {
-            clientId, campaignId: activeCampaignForLead.id,
+        } else {
+          console.log("[campaign-routing] agente escolhido", {
+            clientId, phone: maskPhoneForLog(phone),
+            agente: "atendimento",
+            porque: "nenhuma campanha ativa para este telefone",
           });
         }
-        console.log("[campaign-routing] agente escolhido", {
-          clientId, phone: maskPhoneForLog(phone),
-          agente: escolha.agente,
-          porque: escolha.porque,
-          campaignId: activeCampaignForLead.id,
-          campaignName: activeCampaignForLead.name,
-          campaignPromptId: escolha.campaignPromptId,
-          mode: activeCampaignForLead.mode || null,
-          endsAt: activeCampaignForLead.endsAt,
-        });
-      } else {
-        console.log("[campaign-routing] agente escolhido", {
-          clientId, phone: maskPhoneForLog(phone),
-          agente: "atendimento",
-          porque: "nenhuma campanha ativa para este telefone",
-        });
       }
     } catch (err) {
       console.warn("[chatbot-webhook] campaign routing check failed, continuing normal flow:", err.message);
