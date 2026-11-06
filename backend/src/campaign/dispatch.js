@@ -2559,6 +2559,10 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     normalizeString(lead.link) ||
     normalizeString(lead.normalized_data?.link);
 
+  if (currentSchedulingLink && (currentSchedulingLink.includes("{{") || currentSchedulingLink.includes("}}"))) {
+    currentSchedulingLink = "";
+  }
+
   if ((sequenceRequiresSchedulingLink || !currentSchedulingLink) && !currentSchedulingLink) {
     let resolvedSchedulingLink = null;
 
@@ -2571,7 +2575,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         );
         const activeConsultantLinks = (consultantRes?.rows || [])
           .map((r) => r.scheduling_link)
-          .filter((link) => Boolean(normalizeString(link)));
+          .filter((link) => Boolean(normalizeString(link)) && !link.includes("{{"));
 
         if (activeConsultantLinks.length > 0) {
           resolvedSchedulingLink = activeConsultantLinks[0];
@@ -2582,9 +2586,9 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     }
 
     // 2. Se não houver consultores cadastrados, usar fallback inteligente:
-    // a) Link da campanha ou de algum step
+    // a) Link da campanha ou de algum step (DESDE QUE não seja um placeholder cru como {{scheduling_link}})
     if (!resolvedSchedulingLink) {
-      const campaignLink =
+      const rawCampaignLink =
         normalizeString(campaign.link) ||
         normalizeString(campaign.link_url) ||
         normalizeString(campaign.linkUrl) ||
@@ -2592,10 +2596,12 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         normalizeString(campaign.analytics_meta?.linkUrl) ||
         normalizeString(effectiveMeta?.link) ||
         normalizeString(effectiveMeta?.linkUrl);
-      if (campaignLink) {
-        resolvedSchedulingLink = campaignLink;
+      if (rawCampaignLink && !rawCampaignLink.includes("{{")) {
+        resolvedSchedulingLink = rawCampaignLink;
       } else {
-        const stepLink = remainingSteps.map((s) => s.linkUrl || s.url).find((l) => Boolean(normalizeString(l)));
+        const stepLink = remainingSteps
+          .map((s) => s.linkUrl || s.url)
+          .find((l) => Boolean(normalizeString(l)) && !l.includes("{{"));
         if (stepLink) {
           resolvedSchedulingLink = stepLink;
         }
@@ -2604,13 +2610,15 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
 
     // b) Link do WhatsApp do chip de fechamento (handoffChipId / chipB) (https://wa.me/...)
     if (!resolvedSchedulingLink) {
+      const analyticsMetaObj = campaign.analytics_meta || campaign.analyticsMeta || effectiveMeta || {};
+      const dispatchOptionsObj = analyticsMetaObj.dispatchOptions || {};
       const targetHandoffChipId = normalizeString(
         campaign.handoff_chip_id ||
         campaign.handoffChipId ||
-        campaign.analytics_meta?.handoffChipId ||
-        campaign.analytics_meta?.handoff_chip_id ||
-        effectiveMeta?.handoffChipId ||
-        effectiveMeta?.handoff_chip_id
+        analyticsMetaObj.handoffChipId ||
+        analyticsMetaObj.handoff_chip_id ||
+        dispatchOptionsObj.handoffChipId ||
+        (Array.isArray(dispatchOptionsObj.handoffChipIds) ? dispatchOptionsObj.handoffChipIds[0] : "")
       );
 
       if (targetHandoffChipId) {
@@ -2650,6 +2658,14 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       if (leadImportItem) {
         if (!leadImportItem.normalized_data) leadImportItem.normalized_data = {};
         leadImportItem.normalized_data.scheduling_link = resolvedSchedulingLink;
+      }
+      for (const step of remainingSteps) {
+        if (step.linkUrl && step.linkUrl.includes("{{")) {
+          step.linkUrl = resolvedSchedulingLink;
+        }
+        if (step.url && step.url.includes("{{")) {
+          step.url = resolvedSchedulingLink;
+        }
       }
     }
   }
