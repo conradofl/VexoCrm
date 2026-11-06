@@ -10,7 +10,7 @@ export const CONTRACT_FILL_LINE = "______________________________";
 
 export function applyContractMerge(template: string, data: Record<string, any>): string {
   if (!template) return "";
-  
+
   let result = template;
   for (const [key, value] of Object.entries(data || {})) {
     if (value != null && typeof value === "object") continue;
@@ -217,6 +217,9 @@ export function buildContractDados(formData: Record<string, any>): Record<string
     contratada_email: String(formData.contratada_email || "").trim(),
     contratada_comarca: comarca,
     foro_cidade: comarca,
+    representante_nome: String(formData.representante_nome || formData.responsavel_nome || formData.representante || formData.assinatura_contratante || formData.razao_social || "").trim(),
+    prazo_meses: String(formData.prazo_meses || "12"),
+    condicao_permuta: String(formData.condicao_permuta || formData.permuta || "Não aplicável"),
     assinatura_contratada: contratada,
     assinatura_contratante: contratante,
     espaco_assinatura: espacoAssinatura,
@@ -337,7 +340,7 @@ export function assembleContractFromBlocks({
   const assembledClauses = activeClauses.map((c, idx) => {
     const ordinal = toExtenseOrdinal(idx + 1);
     const cleanTitle = (c.titulo || "")
-      .replace(/^Cláusula\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*/i, "")
+      .replace(/^(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:|]\s*/i, "")
       .trim();
     const header = `Cláusula ${ordinal} – ${cleanTitle}`;
     const body = (c.conteudo || "").trim();
@@ -366,7 +369,7 @@ export function parseTemplateContentToClauses(conteudo: string): {
     return { tituloPrincipal: "", clausulas: [], fechamento: "" };
   }
 
-  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*([^\n]+)/gi;
+  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:|]\s*([^\n]+)/gi;
   const matches = [...conteudo.matchAll(clauseRegex)];
 
   if (matches.length === 0) {
@@ -508,4 +511,33 @@ export function formatFieldLabel(key: string): string {
     .trim();
 }
 
+/**
+ * Validação matemática oficial dos dois dígitos verificadores de CNPJ brasileiro.
+ * Recusa strings que não tenham 14 dígitos, sequências com todos os dígitos iguais e DVs inválidos.
+ */
+export function validarCnpjMatematico(cnpj: string | number | null | undefined): boolean {
+  if (!cnpj) return false;
+  const digitos = String(cnpj).replace(/\D/g, "");
+  if (digitos.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(digitos)) return false;
 
+  const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let soma1 = 0;
+  for (let i = 0; i < 12; i++) {
+    soma1 += parseInt(digitos[i], 10) * pesos1[i];
+  }
+  const resto1 = soma1 % 11;
+  const dv1 = resto1 < 2 ? 0 : 11 - resto1;
+  if (parseInt(digitos[12], 10) !== dv1) return false;
+
+  const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let soma2 = 0;
+  for (let i = 0; i < 13; i++) {
+    soma2 += parseInt(digitos[i], 10) * pesos2[i];
+  }
+  const resto2 = soma2 % 11;
+  const dv2 = resto2 < 2 ? 0 : 11 - resto2;
+  if (parseInt(digitos[13], 10) !== dv2) return false;
+
+  return true;
+}

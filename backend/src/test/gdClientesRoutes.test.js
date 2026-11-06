@@ -21,6 +21,10 @@ const MIGRATION_TRILHA = readFileSync(
   resolve("supabase/migrations/20261103180000_gd_estados_acao_rotulo_portal.sql"),
   "utf8"
 );
+const MIGRATION_DOCUMENTOS = readFileSync(
+  resolve("supabase/migrations/20261105190000_gd_clientes_quatro_documentos.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -80,6 +84,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION);
   await db.exec(MIGRATION_CAMPOS);
   await db.exec(MIGRATION_TRILHA);
+  await db.exec(MIGRATION_DOCUMENTOS);
 
   const app = express();
   app.use(express.json());

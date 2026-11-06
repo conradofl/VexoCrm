@@ -14,7 +14,18 @@ import {
 import { isManagerOrAdmin } from "../access/claims.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { calculateImplementationReadiness } from "./geracaoDigital/briefingReadiness.js";
-import { resolveGdTenantUuid } from "./geracaoDigitalContracts/tenantResolver.js";
+import {
+  resolveGdTenantUuid,
+  tenantUuidForClientKey,
+  GD_TENANT_UUID,
+} from "./geracaoDigitalContracts/tenantResolver.js";
+import {
+  validarCnpjMatematico,
+  lerTelefone,
+  lerEscopo,
+  GD_DONO,
+} from "./gdClientes/campos.js";
+import { buildCronograma } from "./geracaoDigitalContracts/contractMerge.js";
 
 // Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
 // grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
@@ -294,6 +305,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`));
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`));
       await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`));
+      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS assinatura_metodo TEXT DEFAULT 'desenho'`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS assinatura_metodo TEXT DEFAULT 'desenho'`));
+      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS dados_cadastrais JSONB`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS dados_cadastrais JSONB`));
       await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
       await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
       await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_path TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_path TEXT`));
@@ -3566,29 +3579,142 @@ Condições: ${condicoes}`;
     }
   });
 
-  // POST /api/gd/public/proposals/:id/assinar
+  // POST /api/gd/public/proposals/:id/assinar — Formulário de Aceite Enriquecido + Agente Cartório
   app.post("/api/gd/public/proposals/:id/assinar", async (req, res) => {
+    const { id } = req.params;
+    const {
+      assinatura,
+      signer_name,
+      condicao_escolhida_id,
+      assinatura_metodo,
+      razao_social,
+      cnpj,
+      endereco,
+      responsavel_nome,
+      responsavel_cpf,
+      telefone,
+      email_contratante,
+      email_agenda_google,
+      escopo,
+    } = req.body || {};
+
+    // 1. Validação matemática obrigatória de CNPJ
+    if (!cnpj || !validarCnpjMatematico(cnpj)) {
+      return res.status(422).json({
+        error: "CNPJ_INVALIDO",
+        message: "CNPJ inválido ou zerado.",
+      });
+    }
+
+    // 2. Validações de Razão Social e E-mail
+    if (!razao_social || typeof razao_social !== "string" || !razao_social.trim()) {
+      return res.status(400).json({
+        error: "RAZAO_SOCIAL_OBRIGATORIA",
+        message: "Razão social é obrigatória.",
+      });
+    }
+    if (razao_social.trim().length > 200) {
+      return res.status(400).json({
+        error: "RAZAO_SOCIAL_INVALIDA",
+        message: "Razão social não pode ultrapassar 200 caracteres.",
+      });
+    }
+
+    if (!email_contratante || typeof email_contratante !== "string" || !email_contratante.trim()) {
+      return res.status(400).json({
+        error: "EMAIL_CONTRATANTE_OBRIGATORIO",
+        message: "E-mail do contratante é obrigatório.",
+      });
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email_contratante.trim())) {
+      return res.status(400).json({
+        error: "EMAIL_CONTRATANTE_INVALIDO",
+        message: "E-mail do contratante inválido.",
+      });
+    }
+
+    if (email_agenda_google && (typeof email_agenda_google !== "string" || !emailRegex.test(email_agenda_google.trim()))) {
+      return res.status(400).json({
+        error: "EMAIL_AGENDA_GOOGLE_INVALIDO",
+        message: "E-mail da agenda Google inválido.",
+      });
+    }
+
+    // Validação opcional de telefone brasileiro com DDI 55
+    let formattedTelefone = null;
+    if (telefone) {
+      try {
+        formattedTelefone = lerTelefone(telefone);
+      } catch (telErr) {
+        return res.status(400).json({
+          error: telErr.code || "TELEFONE_INVALIDO",
+          message: telErr.message,
+        });
+      }
+    }
+
+    // Validação opcional de escopo
+    let sanitizedEscopo = null;
+    if (escopo) {
+      try {
+        sanitizedEscopo = lerEscopo(escopo);
+      } catch (escErr) {
+        return res.status(400).json({
+          error: escErr.code || "ESCOPO_INVALIDO",
+          message: escErr.message,
+        });
+      }
+    }
+
+    const ip = req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "";
+    const cleanedCnpj = String(cnpj).replace(/\D/g, "");
+
+    const client = typeof pool.connect === "function" ? await pool.connect() : pool;
+    let inTransaction = false;
+
     try {
-      const { id } = req.params;
-      const { assinatura, signer_name, condicao_escolhida_id, assinatura_metodo } = req.body;
-      const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+      await client.query("BEGIN");
+      inTransaction = true;
+
+      // 1. Busca proposta para validar existência e capturar dados
+      const propRes = await client.query(
+        `SELECT * FROM public.gd_proposals WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (propRes.rows.length === 0) {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(404).json({ error: "Proposta não encontrada." });
+      }
+      const currentProp = propRes.rows[0];
 
       // Se o cliente escolheu uma das condições ofertadas, registra a escolha
-      let condicoesPagamentoUpdate = null;
+      let condicoesPagamentoUpdate = currentProp.condicoes_pagamento;
+      let condicaoEscolhida = null;
       if (condicao_escolhida_id) {
-        const currentRes = await pool.query(
-          `SELECT condicoes_pagamento FROM public.gd_proposals WHERE id = $1`,
-          [id]
-        );
-        const cp = currentRes.rows[0]?.condicoes_pagamento;
+        const cp = currentProp.condicoes_pagamento;
         const ofertadas = Array.isArray(cp?.ofertadas) ? cp.ofertadas : [];
-        const escolhida = ofertadas.find((t) => t.id === condicao_escolhida_id) || null;
-        if (escolhida) {
-          condicoesPagamentoUpdate = JSON.stringify({ ...cp, escolhida });
+        condicaoEscolhida = ofertadas.find((t) => t.id === condicao_escolhida_id) || null;
+        if (condicaoEscolhida) {
+          condicoesPagamentoUpdate = { ...cp, escolhida: condicaoEscolhida };
         }
       }
 
-      const result = await pool.query(
+      const dadosCadastrais = {
+        razao_social: razao_social.trim(),
+        cnpj: cleanedCnpj,
+        endereco: endereco || {},
+        responsavel_nome: responsavel_nome ? responsavel_nome.trim() : null,
+        responsavel_cpf: responsavel_cpf ? responsavel_cpf.replace(/\D/g, "") : null,
+        telefone: formattedTelefone,
+        email_contratante: email_contratante.trim(),
+        email_agenda_google: email_agenda_google ? email_agenda_google.trim() : null,
+        escopo: sanitizedEscopo,
+      };
+
+      // 1. Atualiza gd_proposals com status = 'aceita', dados cadastrais e assinatura
+      const updatePropRes = await client.query(
         `UPDATE public.gd_proposals
          SET assinatura = $1,
              signer_name = $2,
@@ -3596,19 +3722,284 @@ Condições: ${condicoes}`;
              signer_ip = $3,
              status = 'aceita',
              condicoes_pagamento = COALESCE($4, condicoes_pagamento),
-             assinatura_metodo = COALESCE($5, 'desenho')
-         WHERE id = $6 RETURNING *`,
-        [assinatura, signer_name, ip, condicoesPagamentoUpdate, assinatura_metodo || 'desenho', id]
+             assinatura_metodo = COALESCE($5, 'desenho'),
+             dados_cadastrais = $6
+         WHERE id = $7
+         RETURNING *`,
+        [
+          assinatura,
+          signer_name || razao_social.trim(),
+          ip,
+          condicoesPagamentoUpdate ? JSON.stringify(condicoesPagamentoUpdate) : null,
+          assinatura_metodo || "desenho",
+          JSON.stringify(dadosCadastrais),
+          id,
+        ]
       );
+      const updatedProposal = updatePropRes.rows[0];
 
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: "Proposta não encontrada." });
+      // 2. Busca ou cria o cliente em public.gd_clientes vinculado ao proposal_id
+      let cliente = null;
+      const cliPropRes = await client.query(
+        `SELECT * FROM public.gd_clientes WHERE proposal_id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (cliPropRes.rows.length > 0) {
+        const cliId = cliPropRes.rows[0].id;
+        const updCliRes = await client.query(
+          `UPDATE public.gd_clientes
+           SET nome = $1,
+               cnpj = $2,
+               aprovador_nome = $3,
+               aprovador_telefone = $4,
+               escopo = $5,
+               updated_at = now()
+           WHERE id = $6
+           RETURNING *`,
+          [
+            razao_social.trim(),
+            cleanedCnpj,
+            responsavel_nome ? responsavel_nome.trim() : null,
+            formattedTelefone,
+            sanitizedEscopo ? JSON.stringify(sanitizedEscopo) : null,
+            cliId,
+          ]
+        );
+        cliente = updCliRes.rows[0];
+      } else {
+        const cliBuscaRes = await client.query(
+          `SELECT * FROM public.gd_clientes
+           WHERE dono_client_id = $1 AND (cnpj = $2 OR nome = $3)
+           ORDER BY (CASE WHEN cnpj = $2 THEN 0 ELSE 1 END)
+           LIMIT 1
+           FOR UPDATE`,
+          [GD_DONO, cleanedCnpj, razao_social.trim()]
+        );
+        if (cliBuscaRes.rows.length > 0) {
+          const cliId = cliBuscaRes.rows[0].id;
+          const updCliRes = await client.query(
+            `UPDATE public.gd_clientes
+             SET proposal_id = $1,
+                 nome = $2,
+                 cnpj = $3,
+                 aprovador_nome = $4,
+                 aprovador_telefone = $5,
+                 escopo = $6,
+                 updated_at = now()
+             WHERE id = $7
+             RETURNING *`,
+            [
+              id,
+              razao_social.trim(),
+              cleanedCnpj,
+              responsavel_nome ? responsavel_nome.trim() : null,
+              formattedTelefone,
+              sanitizedEscopo ? JSON.stringify(sanitizedEscopo) : null,
+              cliId,
+            ]
+          );
+          cliente = updCliRes.rows[0];
+        } else {
+          const insCliRes = await client.query(
+            `INSERT INTO public.gd_clientes (
+               dono_client_id,
+               nome,
+               cnpj,
+               aprovador_nome,
+               aprovador_telefone,
+               escopo,
+               proposal_id,
+               origem
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'fluxo')
+             RETURNING *`,
+            [
+              GD_DONO,
+              razao_social.trim(),
+              cleanedCnpj,
+              responsavel_nome ? responsavel_nome.trim() : null,
+              formattedTelefone,
+              sanitizedEscopo ? JSON.stringify(sanitizedEscopo) : null,
+              id,
+            ]
+          );
+          cliente = insCliRes.rows[0];
+        }
       }
 
-      res.json({ success: true, data: result.rows[0] });
+      // 3. Registra evento na régua GD (gd_cliente_eventos):
+      // estado_para = 'PROPOSTA_ACEITA', origem = 'fluxo', ator_tipo = 'sistema', ator_id = 'public-proposal'
+      await client.query(
+        `SELECT public.gd_registrar_evento($1, 'PROPOSTA_ACEITA', now(), false, 'fluxo', 'sistema', 'public-proposal', $2, $3)`,
+        [
+          cliente.id,
+          "Aceite da proposta comercial via portal público",
+          JSON.stringify({
+            proposal_id: id,
+            signer_name: signer_name || razao_social.trim(),
+            assinatura_metodo: assinatura_metodo || "desenho",
+          }),
+        ]
+      );
+
+      // 4. Agente Cartório:
+      // Busca template ativo em public.gd_contract_templates para o tenant da GD
+      const tenantId = tenantUuidForClientKey(updatedProposal.tenant_id) || GD_TENANT_UUID;
+
+      const templateRes = await client.query(
+        `SELECT * FROM public.gd_contract_templates
+         WHERE (tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000'::uuid) AND ativo = true
+         ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END), created_at DESC
+         LIMIT 1`,
+        [tenantId]
+      );
+      const template = templateRes.rows[0] || null;
+
+      // Busca dados da contratada
+      let contratada = {};
+      try {
+        const modRes = await client.query(
+          `SELECT config FROM public.tenant_modules WHERE tenant_id = $1`,
+          [tenantId]
+        );
+        const cfg = modRes.rows[0]?.config || {};
+        contratada = cfg.contratada || cfg?.gd?.contratada || {};
+      } catch (_) {}
+
+      // Monta cronograma de parcelas e dados do contrato
+      const parcelas = condicaoEscolhida?.parcelas ||
+        (Array.isArray(updatedProposal.condicoes_pagamento?.escolhida?.parcelas) ? updatedProposal.condicoes_pagamento.escolhida.parcelas :
+        (Array.isArray(updatedProposal.condicoes_pagamento?.parcelas) ? updatedProposal.condicoes_pagamento.parcelas : []));
+      const cronograma = parcelas.length > 0 ? buildCronograma(parcelas) : (updatedProposal.condicoes || "");
+
+      const enderecoFormatado = typeof endereco === "object" && endereco !== null
+        ? [
+            endereco.logradouro && `${endereco.logradouro}${endereco.numero ? `, ${endereco.numero}` : ""}`,
+            endereco.complemento,
+            endereco.bairro,
+            endereco.cidade && `${endereco.cidade}${endereco.uf ? ` - ${endereco.uf}` : ""}`,
+            endereco.cep && `CEP ${endereco.cep}`,
+          ].filter(Boolean).join(", ")
+        : (endereco || "");
+
+      const dadosContrato = {
+        razao_social: razao_social.trim(),
+        empresa: razao_social.trim(),
+        cnpj: cleanedCnpj,
+        representante: (responsavel_nome || signer_name || razao_social).trim(),
+        responsavel_nome: (responsavel_nome || signer_name || razao_social).trim(),
+        representante_nome: (responsavel_nome || signer_name || razao_social).trim(),
+        responsavel_cpf: responsavel_cpf ? String(responsavel_cpf).replace(/\D/g, "") : "",
+        cpf: responsavel_cpf ? String(responsavel_cpf).replace(/\D/g, "") : "",
+        endereco: enderecoFormatado,
+        endereco_detalhado: endereco || {},
+        telefone: formattedTelefone || telefone || "",
+        email: email_contratante.trim(),
+        email_contratante: email_contratante.trim(),
+        email_agenda_google: email_agenda_google ? email_agenda_google.trim() : "",
+        escopo: sanitizedEscopo,
+        assinatura_contratante: signer_name || razao_social.trim(),
+        prazo_meses: "12",
+        condicao_permuta: "Não aplicável",
+
+        proposal_id: id,
+        prospect_name: updatedProposal.prospect_name || razao_social.trim(),
+        valor_total: updatedProposal.valor_total,
+        itens: updatedProposal.itens,
+        condicoes: updatedProposal.condicoes,
+        condicoes_pagamento: updatedProposal.condicoes_pagamento,
+        parcelas,
+        cronograma_pagamento: cronograma,
+
+        contratada_razao_social: String(contratada.razao_social || "").trim(),
+        contratada_cnpj: String(contratada.cnpj || "").trim(),
+        contratada_representante: String(contratada.representante || "").trim(),
+        contratada_endereco: String(contratada.endereco || "").trim(),
+        contratada_telefone: String(contratada.telefone || "").trim(),
+        contratada_email: String(contratada.email || "").trim(),
+        contratada_comarca: String(contratada.comarca || "").trim(),
+        assinatura_contratada: String(contratada.assinatura || "").trim(),
+        foro_cidade: String(contratada.comarca || "").trim(),
+      };
+
+      // Cria a linha em public.gd_contracts com status = 'rascunho' e proposal_id = proposal.id
+      const contractRes = await client.query(
+        `INSERT INTO public.gd_contracts (
+           tenant_id,
+           proposal_id,
+           dados,
+           status,
+           owner_company,
+           template_id
+         )
+         VALUES ($1, $2, $3, 'rascunho', $4, $5)
+         RETURNING *`,
+        [
+          tenantId,
+          id,
+          JSON.stringify(dadosContrato),
+          updatedProposal.owner_company || "geracao-digital",
+          template?.id || null,
+        ]
+      );
+      const contract = contractRes.rows[0];
+
+      // Atualiza gd_clientes.contract_id = contract.id
+      await client.query(
+        `UPDATE public.gd_clientes
+         SET contract_id = $1, updated_at = now()
+         WHERE id = $2`,
+        [contract.id, cliente.id]
+      );
+
+      // 5. Registra o evento subsequente na esteira:
+      // estado_para = 'CONTRATO_EM_REVISAO', origem = 'fluxo', ator_tipo = 'sistema', ator_id = 'agente-cartorio'
+      await client.query(
+        `SELECT public.gd_registrar_evento($1, 'CONTRATO_EM_REVISAO', now(), false, 'fluxo', 'sistema', 'agente-cartorio', $2, $3)`,
+        [
+          cliente.id,
+          "Minuta de contrato gerada pelo Agente Cartório para revisão jurídica",
+          JSON.stringify({
+            contract_id: contract.id,
+            proposal_id: id,
+          }),
+        ]
+      );
+
+      await client.query("COMMIT");
+      inTransaction = false;
+
+      // 6. Notificação Slack operacional/jurídico
+      if (process.env.SLACK_WEBHOOK_URL) {
+        try {
+          await fetch(process.env.SLACK_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: `📝 *[Cartório GD]* Nova proposta aceita! Contrato gerado em revisão para *${razao_social.trim()}* (CNPJ: ${cnpj}). Prazo de revisão: 4h úteis.`,
+            }),
+          });
+        } catch (slackErr) {
+          console.warn("[Cartorio GD] Erro ao enviar aviso no Slack:", slackErr.message);
+        }
+      }
+
+      res.json({
+        success: true,
+        data: updatedProposal,
+        cliente_id: cliente.id,
+        contract_id: contract.id,
+      });
     } catch (error) {
+      if (inTransaction) {
+        await client.query("ROLLBACK").catch(() => {});
+      }
       console.error("[GeracaoDigital] Erro ao assinar proposta pública:", error);
       res.status(500).json({ error: "Erro ao registrar assinatura." });
+    } finally {
+      if (typeof client.release === "function") {
+        client.release();
+      }
     }
   });
 

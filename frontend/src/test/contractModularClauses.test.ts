@@ -8,6 +8,7 @@ import {
   formatFieldLabel,
   applyContractMerge,
   ContractClauseBlock,
+  validarCnpjMatematico,
 } from "@/lib/geracaoDigital/contractMerge";
 
 describe("Item 10: Cláusulas Modulares e Numeração Ordinal Dinâmica (Frontend)", () => {
@@ -201,5 +202,73 @@ E, por estarem assim acordadas, assinam.`;
     expect(merged).toContain("75 kWp");
     expect(merged).toContain("taxa de setup de R$ 1.500,00");
     expect(merged).toContain("Cláusula Primeira – Das Partes");
+  });
+
+  describe("Novo Modelo Oficial GD (6 Cláusulas e Separador Pipe |)", () => {
+    const novoModeloGdText = `CONTRATO DE PRESTAÇÃO DE SERVIÇOS
+MARKETING DIGITAL & AUTOMAÇÃO
+
+CLÁUSULA PRIMEIRA | DAS PARTES
+CONTRATADA: {{contratada_razao_social}} (CNPJ: {{contratada_cnpj}})
+CONTRATANTE: {{razao_social}} (CNPJ: {{cnpj}})
+
+CLÁUSULA SEGUNDA | DOS OBJETOS
+Constitui objeto a prestação de serviços de marketing, automação de sistemas, inteligência artificial e consultoria comercial.
+
+CLÁUSULA TERCEIRA | DAS OBRIGAÇÕES DAS PARTES
+Compete à CONTRATANTE responder ao briefing e pagamento. Compete à CONTRATADA treinamento Vexo e consultoria.
+
+CLÁUSULA QUARTA | DO PREÇO E CONDIÇÕES
+Compromisso do período no valor de {{valor_total}}. Cronograma: {{cronograma_pagamento}}. Permuta: {{condicao_permuta}}.
+
+CLÁUSULA QUINTA | DO PRAZO
+O presente instrumento é firmado pelo prazo de {{prazo_meses}} meses.
+
+CLÁUSULA SEXTA | DO FORO
+As partes elegem o foro da Comarca de {{contratada_comarca}}.
+
+E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias.`;
+
+    it("deve decompor perfeitamente o novo modelo oficial com 6 cláusulas e separador pipe", () => {
+      const parsed = parseTemplateContentToClauses(novoModeloGdText);
+
+      expect(parsed.tituloPrincipal).toContain("CONTRATO DE PRESTAÇÃO DE SERVIÇOS");
+      expect(parsed.tituloPrincipal).toContain("MARKETING DIGITAL & AUTOMAÇÃO");
+      expect(parsed.clausulas).toHaveLength(6);
+
+      expect(parsed.clausulas[0].titulo).toBe("DAS PARTES");
+      expect(parsed.clausulas[1].titulo).toBe("DOS OBJETOS");
+      expect(parsed.clausulas[2].titulo).toBe("DAS OBRIGAÇÕES DAS PARTES");
+      expect(parsed.clausulas[3].titulo).toBe("DO PREÇO E CONDIÇÕES");
+      expect(parsed.clausulas[4].titulo).toBe("DO PRAZO");
+      expect(parsed.clausulas[5].titulo).toBe("DO FORO");
+      expect(parsed.fechamento).toContain("E, por estarem assim justas e contratadas");
+    });
+
+    it("deve remontar o novo modelo com ordinais e sem pipes no cabeçalho", () => {
+      const parsed = parseTemplateContentToClauses(novoModeloGdText);
+      const assembled = assembleContractFromBlocks({
+        tituloPrincipal: parsed.tituloPrincipal,
+        clausulas: parsed.clausulas,
+        fechamento: parsed.fechamento,
+      });
+
+      expect(assembled).toContain("Cláusula Primeira – DAS PARTES");
+      expect(assembled).toContain("Cláusula Segunda – DOS OBJETOS");
+      expect(assembled).toContain("Cláusula Terceira – DAS OBRIGAÇÕES DAS PARTES");
+      expect(assembled).toContain("Cláusula Quarta – DO PREÇO E CONDIÇÕES");
+      expect(assembled).toContain("Cláusula Quinta – DO PRAZO");
+      expect(assembled).toContain("Cláusula Sexta – DO FORO");
+    });
+
+    it("deve validar CNPJ matematicamente (rejeitando inválidos e aceitando válidos)", () => {
+      expect(validarCnpjMatematico("66.722.723/0001-02")).toBe(true); // GD oficial
+      expect(validarCnpjMatematico("29.447.330/0001-01")).toBe(true); // Contratante docx
+      expect(validarCnpjMatematico("00.000.000/0000-00")).toBe(false); // Zerado
+      expect(validarCnpjMatematico("11.111.111/1111-11")).toBe(false); // Sequência
+      expect(validarCnpjMatematico("12.345.678/0001-99")).toBe(false); // DV errado
+      expect(validarCnpjMatematico("")).toBe(false);
+      expect(validarCnpjMatematico(null)).toBe(false);
+    });
   });
 });
