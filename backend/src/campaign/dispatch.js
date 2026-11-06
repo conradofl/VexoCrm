@@ -1511,6 +1511,9 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const matchedByImportId = importIds.some((id) => campaignImportIds.has(id));
       const matchedImportItem = resolveMatchedImportItemForCampaign(importItems, campaign);
 
+      const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
+      const hasProgress = progress && Object.keys(progress).length > 0;
+
       const stepPlan = getCampaignStepPlan(analyticsMeta || {});
       const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
       const isWaitForReply =
