@@ -1527,7 +1527,9 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const isStatusWaiting =
         progress?.status === "aguardando_usuario" ||
         progress?.status === "pendente" ||
-        progress?.status === "aguardando_resposta";
+        progress?.status === "aguardando_resposta" ||
+        progress?.status === "enviando_proximas_etapas" ||
+        !progress?.status;
 
       const hasPendingProgress =
         Boolean(progress) &&
@@ -2268,21 +2270,27 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
   const nextIdxBase = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
+  const matchStepPlan = getCampaignStepPlan(campaignMatch.analyticsMeta || {});
+  const matchSteps = matchStepPlan.enabledSteps || [];
+  const hasStepsRemaining = nextIdxBase !== null && nextIdxBase < matchSteps.length;
+
   const isStatusWaiting =
     progress.status === "aguardando_usuario" ||
     progress.status === "pendente" ||
     progress.status === "aguardando_resposta" ||
+    progress.status === "enviando_proximas_etapas" ||
     !progress.status;
   const isWaitForReply =
     progress.waitForReply === true ||
     progress.waitForReply === "true" ||
     campaignMatch.waitForReply === true ||
+    hasStepsRemaining ||
     (campaignMatch.analyticsMeta?.sequence && campaignMatch.analyticsMeta.sequence.some((s) => s.enabled && s.triggerMode === "after_reply"));
 
   const hasPendingProgress =
     Boolean(progress) &&
-    isWaitForReply &&
-    isStatusWaiting &&
+    (isWaitForReply || hasStepsRemaining) &&
+    (isStatusWaiting || hasStepsRemaining) &&
     nextIdxBase !== null;
 
   if (!hasPendingProgress) {
