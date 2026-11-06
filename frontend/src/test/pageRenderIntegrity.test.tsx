@@ -162,7 +162,7 @@ describe("Integridade de Renderização de Páginas e Verificação de Símbolos
     ]);
     expect(screen.queryByText(/^Operação$/)).toBeNull();
     expect(screen.queryByText(/^Configurações$/)).toBeNull();
-    expect(screen.getByText(/Padrões da empresa/)).toBeTruthy();
+    expect(screen.queryByText(/Padrões da empresa/)).toBeNull();
   });
 
   it("TenantScopeBoundary desmonta e remonta sem erros ao trocar de tenantId", () => {
