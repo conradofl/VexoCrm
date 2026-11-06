@@ -70,9 +70,14 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     normalizeString(leadObj.normalizedData?.link) ||
     "";
 
+  // Se o link contiver chaves {{ ou }}, ele NÃO é um link resolvido (é uma variável crua)
+  if (schedulingLink && (schedulingLink.includes("{{") || schedulingLink.includes("}}"))) {
+    schedulingLink = "";
+  }
+
   const hasLinkPlaceholder = /\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/i.test(raw);
   if (!schedulingLink && hasLinkPlaceholder) {
-    const fallbackTenantUrl =
+    const rawFallback =
       normalizeString(extraObj.tenantUrl) ||
       normalizeString(extraObj.tenant_url) ||
       normalizeString(extraObj.fallbackLink) ||
@@ -83,6 +88,8 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
       normalizeString(leadObj.campaign_link) ||
       normalizeString(extraObj.campaignLink) ||
       normalizeString(extraObj.campaign_link);
+
+    const fallbackTenantUrl = (rawFallback && !rawFallback.includes("{{")) ? rawFallback : "";
 
     const cleanTel = telResolvido ? String(telResolvido).replace(/\D/g, "") : "";
     if (fallbackTenantUrl) {
@@ -100,7 +107,7 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     .replace(/\{\{\s*(?:nome|name|lead_name|cliente)\s*\}\}/gi, nomeResolvido)
     .replace(/\{\{\s*(?:telefone|phone|celular)\s*\}\}/gi, telResolvido);
 
-  if (schedulingLink) {
+  if (schedulingLink && !schedulingLink.includes("{{")) {
     if (/^https?:\/\//i.test(schedulingLink)) {
       raw = raw.replace(/https?:\/\/\s*\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/gi, schedulingLink);
     }

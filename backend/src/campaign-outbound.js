@@ -689,8 +689,11 @@ export function buildTextPayload(phone, step, context = {}) {
   // Se o passo for do tipo link (ou contiver linkUrl), compõe o texto apropriadamente
   if (step.type === "link" || step.linkUrl) {
     const rawLinkUrl = step.linkUrl || step.url || "";
-    const resolvedLinkUrl = applyMessagePlaceholders(rawLinkUrl, context.lead, phone);
-    if (resolvedLinkUrl) {
+    let resolvedLinkUrl = applyMessagePlaceholders(rawLinkUrl, context.lead, phone);
+    if (resolvedLinkUrl && (resolvedLinkUrl.includes("{{") || resolvedLinkUrl.includes("}}"))) {
+      resolvedLinkUrl = context.lead?.scheduling_link || "https://mktgeracaodigital.com.br";
+    }
+    if (resolvedLinkUrl && !resolvedLinkUrl.includes("{{")) {
       if (!baseText) {
         baseText = resolvedLinkUrl;
       } else if (!baseText.includes(resolvedLinkUrl)) {
