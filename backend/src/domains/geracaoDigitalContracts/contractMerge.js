@@ -34,7 +34,7 @@ export function assembleContractFromBlocks({
   const assembledClauses = activeClauses.map((c, idx) => {
     const ordinal = toExtenseOrdinal(idx + 1);
     const cleanTitle = (c.titulo || "")
-      .replace(/^Cláusula\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*/i, "")
+      .replace(/^(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:|]\s*/i, "")
       .trim();
     const header = `Cláusula ${ordinal} – ${cleanTitle}`;
     const body = (c.conteudo || "").trim();
@@ -66,8 +66,8 @@ export function parseTemplateContentToClauses(conteudo) {
   }
 
   // Regex para identificar cabeçalhos de cláusula
-  // Suporta: "Cláusula Primeira - Das Partes", "Cláusula Sétima – Do Foro", "CLAUSULA 2ª: Do Objeto"
-  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*([^\n]+)/gi;
+  // Suporta: "Cláusula Primeira - Das Partes", "Cláusula Sétima – Do Foro", "CLAUSULA 2ª: Do Objeto", "CLÁUSULA PRIMEIRA | DAS PARTES"
+  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:|]\s*([^\n]+)/gi;
 
   const matches = [...conteudo.matchAll(clauseRegex)];
 

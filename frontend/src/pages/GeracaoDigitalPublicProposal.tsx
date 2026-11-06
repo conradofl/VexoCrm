@@ -23,7 +23,9 @@ import {
   Lock,
   ChevronDown,
   Sparkles,
+  Building2,
 } from "lucide-react";
+import { validarCnpjMatematico } from "@/lib/geracaoDigital/contractMerge";
 import { Badge } from "@/components/ui/badge";
 import {
   type ProposalPaymentTerms,
@@ -123,6 +125,23 @@ export default function GeracaoDigitalPublicProposal() {
   const [signMethod, setSignMethod] = useState<'desenho' | 'digitado'>('desenho');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [isSubmittingSign, setIsSubmittingSign] = useState<boolean>(false);
+
+  // Dados cadastrais da empresa para emissão do contrato
+  const [razaoSocial, setRazaoSocial] = useState<string>("");
+  const [cnpj, setCnpj] = useState<string>("");
+  const [responsavelNome, setResponsavelNome] = useState<string>("");
+  const [responsavelCpf, setResponsavelCpf] = useState<string>("");
+  const [telefone, setTelefone] = useState<string>("");
+  const [emailContratante, setEmailContratante] = useState<string>("");
+  const [emailAgendaGoogle, setEmailAgendaGoogle] = useState<string>("");
+  const [cep, setCep] = useState<string>("");
+  const [logradouro, setLogradouro] = useState<string>("");
+  const [numero, setNumero] = useState<string>("");
+  const [complemento, setComplemento] = useState<string>("");
+  const [bairro, setBairro] = useState<string>("");
+  const [cidade, setCidade] = useState<string>("");
+  const [uf, setUf] = useState<string>("");
 
   const { isAuthenticated, clientId, getIdToken } = useAuth();
   const [showShare, setShowShare] = useState<boolean>(false);
@@ -132,6 +151,29 @@ export default function GeracaoDigitalPublicProposal() {
       loadPublicProposal();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (proposal?.prospect_name && !razaoSocial) {
+      setRazaoSocial(proposal.prospect_name);
+    }
+  }, [proposal?.prospect_name]);
+
+  const handleCepChange = async (val: string) => {
+    setCep(val);
+    const clean = val.replace(/\D/g, "");
+    if (clean.length === 8) {
+      try {
+        const resp = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
+        const cepData = await resp.json();
+        if (!cepData.erro) {
+          if (cepData.logradouro) setLogradouro(cepData.logradouro);
+          if (cepData.bairro) setBairro(cepData.bairro);
+          if (cepData.localidade) setCidade(cepData.localidade);
+          if (cepData.uf) setUf(cepData.uf);
+        }
+      } catch (_) {}
+    }
+  };
 
   useEffect(() => {
     if (!id || !supabase) return;
@@ -274,13 +316,62 @@ export default function GeracaoDigitalPublicProposal() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
-  // Submit Signature/Aceite
+  // Submit Signature/Aceite com dados cadastrais completos
   const handleSignProposal = async () => {
     if (!id || !proposal) return;
-    if (!signerName.trim()) {
+
+    const nomeAssinante = (signerName.trim() || responsavelNome.trim());
+    if (!nomeAssinante) {
       toast({
         title: "Nome Obrigatório",
-        description: "Por favor, insira o seu nome completo para assinar.",
+        description: "Por favor, insira o nome completo do responsável legal para assinar.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!razaoSocial.trim()) {
+      toast({
+        title: "Razão Social Obrigatória",
+        description: "Por favor, informe a razão social da empresa.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const cleanCnpj = cnpj.replace(/\D/g, "");
+    if (!cleanCnpj || !validarCnpjMatematico(cleanCnpj)) {
+      toast({
+        title: "CNPJ Inválido",
+        description: "O CNPJ informado é inválido ou zerado. Por favor, confira os números.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!emailContratante.trim()) {
+      toast({
+        title: "E-mail Obrigatório",
+        description: "Por favor, informe o e-mail da empresa para envio do contrato.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailContratante.trim())) {
+      toast({
+        title: "E-mail Inválido",
+        description: "Por favor, informe um endereço de e-mail corporativo válido.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (emailAgendaGoogle.trim() && !emailRegex.test(emailAgendaGoogle.trim())) {
+      toast({
+        title: "E-mail da Agenda Inválido",
+        description: "O e-mail para a agenda Google informado não é válido.",
         variant: "destructive"
       });
       return;
@@ -293,15 +384,32 @@ export default function GeracaoDigitalPublicProposal() {
         signatureValue = canvas.toDataURL("image/png");
       }
     } else {
-      signatureValue = signerName;
+      signatureValue = nomeAssinante;
     }
 
     try {
+      setIsSubmittingSign(true);
       const body = {
         assinatura: signatureValue,
-        signer_name: signerName,
+        signer_name: nomeAssinante,
         condicao_escolhida_id: chosenTermId,
-        assinatura_metodo: signMethod
+        assinatura_metodo: signMethod,
+        razao_social: razaoSocial.trim(),
+        cnpj: cleanCnpj,
+        endereco: {
+          cep: cep.trim(),
+          logradouro: logradouro.trim(),
+          numero: numero.trim(),
+          complemento: complemento.trim(),
+          bairro: bairro.trim(),
+          cidade: cidade.trim(),
+          uf: uf.trim().toUpperCase(),
+        },
+        responsavel_nome: responsavelNome.trim() || nomeAssinante,
+        responsavel_cpf: responsavelCpf.replace(/\D/g, "") || undefined,
+        telefone: telefone.trim() || undefined,
+        email_contratante: emailContratante.trim(),
+        email_agenda_google: emailAgendaGoogle.trim() || undefined,
       };
 
       const res = await fetchApi(`/api/gd/public/proposals/${id}/assinar`, {
@@ -311,24 +419,27 @@ export default function GeracaoDigitalPublicProposal() {
       });
 
       if (!res.ok) {
-        throw new Error("Erro ao registrar a assinatura.");
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || errJson.error || "Erro ao registrar a assinatura.");
       }
 
       const data = await res.json();
       if (data.success) {
         toast({
-          title: "Aceite Registrado",
-          description: "Obrigado! A proposta comercial foi aceita e assinada com sucesso!"
+          title: "Aceite Registrado com Sucesso!",
+          description: "Obrigado! A proposta comercial foi aceita e o contrato foi gerado pelo Cartório GD."
         });
         loadPublicProposal();
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
       toast({
         title: "Erro ao Assinar",
-        description: "Não foi possível registrar seu aceite comercial no sistema.",
+        description: err.message || "Não foi possível registrar seu aceite comercial no sistema.",
         variant: "destructive"
       });
+    } finally {
+      setIsSubmittingSign(false);
     }
   };
 
@@ -1153,8 +1264,176 @@ export default function GeracaoDigitalPublicProposal() {
                   "Declaro estar de acordo com os serviços, valores e condições desta proposta e autorizo o início dos trabalhos."
                 </div>
 
+                {/* Dados Cadastrais da Empresa para o Contrato */}
+                <div className="rounded-xl border border-purple-500/20 bg-purple-950/20 p-4 space-y-3 text-left">
+                  <div className="flex items-center gap-2 border-b border-purple-500/20 pb-2">
+                    <Building2 className="h-4 w-4 text-purple-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Dados Cadastrais da Empresa para Emissão do Contrato
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-300 font-mono">
+                        Razão Social / Nome da Empresa <span className="text-red-400">*</span>
+                      </Label>
+                      <Input
+                        value={razaoSocial}
+                        onChange={(e) => setRazaoSocial(e.target.value)}
+                        placeholder="Ex: Minha Empresa Ltda"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <Label className="text-[10px] text-slate-300 font-mono">
+                          CNPJ da Empresa <span className="text-red-400">*</span>
+                        </Label>
+                        {cnpj && (
+                          <span className={`text-[9px] font-mono font-bold ${validarCnpjMatematico(cnpj) ? "text-emerald-400" : "text-amber-400"}`}>
+                            {validarCnpjMatematico(cnpj) ? "✓ Válido" : "Inválido"}
+                          </span>
+                        )}
+                      </div>
+                      <Input
+                        value={cnpj}
+                        onChange={(e) => setCnpj(e.target.value)}
+                        placeholder="00.000.000/0000-00"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-300 font-mono">
+                        Nome do Responsável Legal <span className="text-red-400">*</span>
+                      </Label>
+                      <Input
+                        value={responsavelNome || signerName}
+                        onChange={(e) => {
+                          setResponsavelNome(e.target.value);
+                          if (!signerName) setSignerName(e.target.value);
+                        }}
+                        placeholder="Nome completo do representante"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-300 font-mono">CPF do Responsável (Opcional)</Label>
+                      <Input
+                        value={responsavelCpf}
+                        onChange={(e) => setResponsavelCpf(e.target.value)}
+                        placeholder="000.000.000-00"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-300 font-mono">Telefone / WhatsApp</Label>
+                      <Input
+                        value={telefone}
+                        onChange={(e) => setTelefone(e.target.value)}
+                        placeholder="(34) 99999-9999"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-300 font-mono">
+                        E-mail para Envio do Contrato <span className="text-red-400">*</span>
+                      </Label>
+                      <Input
+                        type="email"
+                        value={emailContratante}
+                        onChange={(e) => setEmailContratante(e.target.value)}
+                        placeholder="contato@suaempresa.com.br"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <Label className="text-[10px] text-slate-300 font-mono">
+                        E-mail para Convites de Reunião (Google Meet / Agenda)
+                      </Label>
+                      <Input
+                        type="email"
+                        value={emailAgendaGoogle}
+                        onChange={(e) => setEmailAgendaGoogle(e.target.value)}
+                        placeholder="agenda@suaempresa.com.br"
+                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Endereço */}
+                  <div className="pt-2 border-t border-purple-500/10 space-y-2">
+                    <span className="text-[11px] font-bold text-slate-300 font-mono block">Endereço da Empresa</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-400 font-mono">CEP</Label>
+                        <Input
+                          value={cep}
+                          onChange={(e) => handleCepChange(e.target.value)}
+                          placeholder="38400-000"
+                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        />
+                      </div>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-[10px] text-slate-400 font-mono">Logradouro / Rua</Label>
+                        <Input
+                          value={logradouro}
+                          onChange={(e) => setLogradouro(e.target.value)}
+                          placeholder="Av. Principal"
+                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-400 font-mono">Número</Label>
+                        <Input
+                          value={numero}
+                          onChange={(e) => setNumero(e.target.value)}
+                          placeholder="123"
+                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-400 font-mono">Bairro</Label>
+                        <Input
+                          value={bairro}
+                          onChange={(e) => setBairro(e.target.value)}
+                          placeholder="Centro"
+                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-400 font-mono">Cidade</Label>
+                        <Input
+                          value={cidade}
+                          onChange={(e) => setCidade(e.target.value)}
+                          placeholder="Uberlândia"
+                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-slate-400 font-mono">UF</Label>
+                        <Input
+                          value={uf}
+                          onChange={(e) => setUf(e.target.value.toUpperCase())}
+                          placeholder="MG"
+                          maxLength={2}
+                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
-                  <Label className="text-[10px] text-slate-400 font-mono">Nome Completo do Assinante</Label>
+                  <Label className="text-[10px] text-slate-400 font-mono">Nome Completo do Assinante no Termo</Label>
                   <Input
                     value={signerName}
                     onChange={(e) => setSignerName(e.target.value)}
@@ -1231,10 +1510,11 @@ export default function GeracaoDigitalPublicProposal() {
 
                 <Button
                   onClick={handleSignProposal}
+                  disabled={isSubmittingSign}
                   className="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:opacity-90 font-extrabold text-white py-3 rounded-xl text-xs"
                 >
                   <PenTool className="h-4 w-4 mr-1.5" />
-                  Registrar Assinatura de Aceite
+                  {isSubmittingSign ? "Registrando e Gerando Contrato..." : "Registrar Assinatura de Aceite"}
                 </Button>
               </div>
             )}

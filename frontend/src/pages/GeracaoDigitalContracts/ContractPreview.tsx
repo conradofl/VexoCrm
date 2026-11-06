@@ -1,8 +1,8 @@
-import React, { useMemo, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { applyContractMerge, formatExtenseDateClient, toggleBoldMarkdown, expandSignatureSpacingInText } from "@/lib/geracaoDigital/contractMerge";
 import { GdContractFormData, GdContractTemplate } from "@/hooks/useGdContracts";
 import { Button } from "@/components/ui/button";
-import { RotateCcw, Pencil, FileText, Bold, MoveVertical } from "lucide-react";
+import { RotateCcw, Pencil, FileText, Bold, MoveVertical, Eye, Palette } from "lucide-react";
 
 interface ContractPreviewProps {
   template: GdContractTemplate | null;
@@ -13,6 +13,7 @@ interface ContractPreviewProps {
 
 export function ContractPreview({ template, formData, onChangeTextoFinal, rawTemplateContent }: ContractPreviewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [useSystemTheme, setUseSystemTheme] = useState(false);
 
   // Texto padrão gerado mesclando os dados atuais do formulário com o template ativo ou blocos montados
   const defaultMergedText = useMemo(() => {
@@ -89,7 +90,7 @@ export function ContractPreview({ template, formData, onChangeTextoFinal, rawTem
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 px-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="flex items-center gap-2">
           {isEdited ? (
             <span className="text-xs font-semibold px-2 py-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1.5">
@@ -99,12 +100,24 @@ export function ContractPreview({ template, formData, onChangeTextoFinal, rawTem
           ) : (
             <span className="text-xs font-medium px-2 py-1 rounded bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-white/10 flex items-center gap-1.5">
               <FileText className="h-3.5 w-3.5" />
-              Texto gerado a partir do modelo (edite diretamente para customizar)
+              Texto gerado a partir do modelo oficial GD (edite diretamente para customizar)
             </span>
           )}
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setUseSystemTheme((v) => !v)}
+            title="Alternar entre visualização de Folha Real (fundo branco) e tema da interface"
+            className="h-8 text-xs flex items-center gap-1.5 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-white/15 hover:bg-slate-100 dark:hover:bg-white/10"
+          >
+            <Palette className="h-3.5 w-3.5 text-slate-500" />
+            <span>{useSystemTheme ? "Modo Folha Real" : "Modo Tema Escuro"}</span>
+          </Button>
+
           <Button
             type="button"
             variant="outline"
@@ -147,21 +160,47 @@ export function ContractPreview({ template, formData, onChangeTextoFinal, rawTem
         </div>
       </div>
 
-      <textarea
-        ref={textareaRef}
-        value={displayText}
-        onChange={handleTextChange}
-        onKeyDown={handleKeyDown}
-        className="w-full h-[500px] rounded-md border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950 p-4 font-serif text-sm leading-relaxed text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500/50 shadow-inner resize-none overflow-y-auto"
-        placeholder="Texto do contrato..."
-      />
+      {/* Container que simula Folha de Documento Real */}
+      <div className="bg-slate-100 dark:bg-slate-950/60 p-3 sm:p-6 rounded-xl border border-slate-200 dark:border-white/10 flex justify-center">
+        <div
+          className={`w-full max-w-4xl rounded-lg p-6 sm:p-8 shadow-md border transition-colors ${
+            useSystemTheme
+              ? "bg-card text-foreground border-border dark:bg-slate-900 dark:text-slate-100 dark:border-white/10"
+              : "bg-white text-slate-900 border-slate-200 shadow-slate-300/40"
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-slate-200/80 dark:border-white/10 pb-3 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+              <span className={`text-xs font-semibold uppercase tracking-wider ${useSystemTheme ? "text-muted-foreground" : "text-slate-600"}`}>
+                Minuta Oficial do Contrato
+              </span>
+            </div>
+            <span className={`text-[11px] font-mono ${useSystemTheme ? "text-muted-foreground" : "text-slate-400"}`}>
+              {displayText.split("\n").length} linhas
+            </span>
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            value={displayText}
+            onChange={handleTextChange}
+            onKeyDown={handleKeyDown}
+            className={`w-full h-[520px] font-serif text-[13px] sm:text-sm leading-relaxed border-0 p-0 focus:outline-none focus:ring-0 resize-none overflow-y-auto ${
+              useSystemTheme
+                ? "bg-transparent text-foreground placeholder:text-muted-foreground"
+                : "bg-white text-slate-900 placeholder:text-slate-400"
+            }`}
+            placeholder="Texto do contrato..."
+          />
+        </div>
+      </div>
 
       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
         <span>
-          💡 Selecione qualquer palavra ou frase e aperte <strong>Ctrl+B</strong> (ou <strong>⌘B</strong>) para colocar em negrito (<code className="text-purple-600 dark:text-purple-400 font-mono">**palavra**</code>). Use o botão <strong>+ Espaço Assinatura</strong> ou dê <strong>Enter</strong> entre as linhas de assinatura para criar o espaço necessário para carimbos digitais.
+          💡 Selecione qualquer palavra ou frase e aperte <strong>Ctrl+B</strong> (ou <strong>⌘B</strong>) para colocar em negrito (<code className="text-purple-600 dark:text-purple-400 font-mono">**palavra**</code>). Use o botão <strong>+ Espaço Assinatura</strong> para abrir espaço para carimbos digitais.
         </span>
       </div>
     </div>
   );
 }
-

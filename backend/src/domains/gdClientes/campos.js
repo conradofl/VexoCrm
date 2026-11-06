@@ -42,6 +42,35 @@ export function lerCnpj(bruto) {
   return digitos;
 }
 
+// Validação matemática oficial dos dois dígitos verificadores de CNPJ brasileiro.
+// Recusa strings que não tenham 14 dígitos, sequências com todos os dígitos iguais e DVs inválidos.
+export function validarCnpjMatematico(cnpj) {
+  if (!cnpj || (typeof cnpj !== "string" && typeof cnpj !== "number")) return false;
+  const digitos = String(cnpj).replace(/\D/g, "");
+  if (digitos.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(digitos)) return false;
+
+  const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let soma1 = 0;
+  for (let i = 0; i < 12; i++) {
+    soma1 += parseInt(digitos[i], 10) * pesos1[i];
+  }
+  const resto1 = soma1 % 11;
+  const dv1 = resto1 < 2 ? 0 : 11 - resto1;
+  if (parseInt(digitos[12], 10) !== dv1) return false;
+
+  const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let soma2 = 0;
+  for (let i = 0; i < 13; i++) {
+    soma2 += parseInt(digitos[i], 10) * pesos2[i];
+  }
+  const resto2 = soma2 % 11;
+  const dv2 = resto2 < 2 ? 0 : 11 - resto2;
+  if (parseInt(digitos[13], 10) !== dv2) return false;
+
+  return true;
+}
+
 // Sempre com o DDI 55, só dígitos. Com 10 ou 11 dígitos o 55 entra na frente; com 12 ou 13 o
 // número já precisa começar com 55. DDD começando com 0 é recusado (o "5500" fabricado).
 export function lerTelefone(bruto) {

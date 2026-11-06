@@ -341,6 +341,9 @@ export async function buildContractPdfBuffer(tenantId, id) {
   if (!dados.foro_cidade && dados.contratada_comarca) {
     dados.foro_cidade = dados.contratada_comarca;
   }
+  dados.representante_nome = dados.representante_nome || dados.responsavel_nome || dados.representante || dados.assinatura_contratante || dados.razao_social || "";
+  dados.prazo_meses = dados.prazo_meses || "12";
+  dados.condicao_permuta = dados.condicao_permuta || "Não aplicável";
 
   // Se o contrato tem parcelas estruturadas salvas, garante a formatação atualizada do cronograma
   if (Array.isArray(dados?.parcelas) && dados.parcelas.length > 0) {

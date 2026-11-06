@@ -747,23 +747,23 @@ export function GenerateContractDialog({
           <TabsContent value="form" className="space-y-4">
             {/* Dados já negociados na proposta */}
             {!isEdit && proposalId && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/60 dark:bg-indigo-950/30 p-3">
                 <div className="min-w-0">
-                  <span className="text-xs font-bold text-indigo-900 block">Dados da proposta</span>
-                  <span className="text-[10px] text-indigo-700/80">
+                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 block">Dados da proposta</span>
+                  <span className="text-[10px] text-indigo-700/80 dark:text-indigo-300/80">
                     Escopo, forma de pagamento, parcelas, valor, 1º vencimento e prazo.
                   </span>
                 </div>
-                <Button size="sm" variant="outline" onClick={handlePuxarDaProposta} className="h-8 border-indigo-300 text-indigo-800 hover:bg-indigo-100 shrink-0">
+                <Button size="sm" variant="outline" onClick={handlePuxarDaProposta} className="h-8 border-indigo-300 dark:border-indigo-800 text-indigo-800 dark:text-indigo-200 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 shrink-0">
                   Puxar da proposta
                 </Button>
               </div>
             )}
 
             {/* Preenchimento assistido por IA — cole o que o cliente mandou */}
-            <div className="rounded-xl border border-purple-200 bg-purple-50/60 p-3 space-y-2">
+            <div className="rounded-xl border border-purple-200 dark:border-purple-900/50 bg-purple-50/60 dark:bg-purple-950/30 p-3 space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <Label className="text-xs font-bold text-purple-800">
+                <Label className="text-xs font-bold text-purple-800 dark:text-purple-200">
                   Preenchimento automático — cole os dados que o cliente enviou
                 </Label>
                 <Button
