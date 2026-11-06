@@ -2522,9 +2522,15 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   });
 
   const lead = {
+    ...(leadImportItem?.normalized_data || {}),
+    ...(leadImportItem || {}),
     id: leadImportItem?.id || null,
     telefone: phone,
-    nome: normalizeString(progress.leadName) || normalizeString(leadImportItem?.nome) || "cliente",
+    phone,
+    nome: normalizeString(progress.leadName) || normalizeString(leadImportItem?.nome) || normalizeString(leadImportItem?.normalized_data?.nome) || "cliente",
+    normalized_data: {
+      ...(leadImportItem?.normalized_data || {}),
+    },
   };
 
   const remainingReplyEntries = steps
@@ -2534,6 +2540,119 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const finalStepEntry = remainingReplyEntries[remainingReplyEntries.length - 1] || null;
   const finalStep = finalStepEntry?.step || null;
   const finalStepIndex = finalStepEntry?.index ?? nextStepIndex;
+
+  const sequenceRequiresSchedulingLink = remainingSteps.some((step) => {
+    const texts = [
+      step.text,
+      step.message,
+      step.caption,
+      step.linkUrl,
+      step.url,
+      ...(Array.isArray(step.textVariants) ? step.textVariants : []),
+    ].filter(Boolean);
+    return texts.some((t) => /\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/i.test(t)) || Boolean(step.linkUrl || step.url);
+  });
+
+  let currentSchedulingLink =
+    normalizeString(lead.scheduling_link) ||
+    normalizeString(lead.normalized_data?.scheduling_link) ||
+    normalizeString(lead.link) ||
+    normalizeString(lead.normalized_data?.link);
+
+  if ((sequenceRequiresSchedulingLink || !currentSchedulingLink) && !currentSchedulingLink) {
+    let resolvedSchedulingLink = null;
+
+    // 1. Buscar link ativo em crm_consultant_schedules para o clientId
+    if (pgDatabasePool) {
+      try {
+        const consultantRes = await pgDatabasePool.query(
+          "SELECT scheduling_link FROM public.crm_consultant_schedules WHERE client_id = $1 AND active = true ORDER BY name ASC",
+          [clientId]
+        );
+        const activeConsultantLinks = (consultantRes?.rows || [])
+          .map((r) => r.scheduling_link)
+          .filter((link) => Boolean(normalizeString(link)));
+
+        if (activeConsultantLinks.length > 0) {
+          resolvedSchedulingLink = activeConsultantLinks[0];
+        }
+      } catch (dbErr) {
+        console.warn("[campaign-dispatch] Erro ao buscar agenda de consultores na continuação:", dbErr?.message || dbErr);
+      }
+    }
+
+    // 2. Se não houver consultores cadastrados, usar fallback inteligente:
+    // a) Link da campanha ou de algum step
+    if (!resolvedSchedulingLink) {
+      const campaignLink =
+        normalizeString(campaign.link) ||
+        normalizeString(campaign.link_url) ||
+        normalizeString(campaign.linkUrl) ||
+        normalizeString(campaign.analytics_meta?.link) ||
+        normalizeString(campaign.analytics_meta?.linkUrl) ||
+        normalizeString(effectiveMeta?.link) ||
+        normalizeString(effectiveMeta?.linkUrl);
+      if (campaignLink) {
+        resolvedSchedulingLink = campaignLink;
+      } else {
+        const stepLink = remainingSteps.map((s) => s.linkUrl || s.url).find((l) => Boolean(normalizeString(l)));
+        if (stepLink) {
+          resolvedSchedulingLink = stepLink;
+        }
+      }
+    }
+
+    // b) Link do WhatsApp do chip de fechamento (handoffChipId / chipB) (https://wa.me/...)
+    if (!resolvedSchedulingLink) {
+      const targetHandoffChipId = normalizeString(
+        campaign.handoff_chip_id ||
+        campaign.handoffChipId ||
+        campaign.analytics_meta?.handoffChipId ||
+        campaign.analytics_meta?.handoff_chip_id ||
+        effectiveMeta?.handoffChipId ||
+        effectiveMeta?.handoff_chip_id
+      );
+
+      if (targetHandoffChipId) {
+        try {
+          const instances = await getLeadClientEvolutionInstances(clientId).catch(() => []);
+          const targetLower = targetHandoffChipId.toLowerCase();
+          const chipB = (instances || []).find((i) => {
+            const slug = extractEvolutionInstanceSlug(i.dispatch_webhook_url);
+            return (
+              String(i.id).toLowerCase() === targetLower ||
+              String(i.name || "").toLowerCase() === targetLower ||
+              (slug && slug.toLowerCase() === targetLower)
+            );
+          });
+          const rawChipPhone = chipB?.phone || chipB?.number || chipB?.telefone || null;
+          if (rawChipPhone) {
+            const cleanChipPhone = String(rawChipPhone).replace(/\D/g, "");
+            if (cleanChipPhone) {
+              resolvedSchedulingLink = `https://wa.me/${cleanChipPhone}`;
+            }
+          }
+        } catch {
+          // ignore fallback lookup errors
+        }
+      }
+    }
+
+    // c) Link institucional da GD
+    if (!resolvedSchedulingLink) {
+      resolvedSchedulingLink = "https://mktgeracaodigital.com.br";
+    }
+
+    if (resolvedSchedulingLink) {
+      lead.scheduling_link = resolvedSchedulingLink;
+      if (!lead.normalized_data) lead.normalized_data = {};
+      lead.normalized_data.scheduling_link = resolvedSchedulingLink;
+      if (leadImportItem) {
+        if (!leadImportItem.normalized_data) leadImportItem.normalized_data = {};
+        leadImportItem.normalized_data.scheduling_link = resolvedSchedulingLink;
+      }
+    }
+  }
 
   if (remainingSteps.length === 0) {
     if (leadImportItem?.id) {
