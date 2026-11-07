@@ -6086,17 +6086,23 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (importError) throw importError;
 
-      const newImportItems = originalItems.map((item, index) => ({
-        import_id: importRecord.id,
-        client_id: clientId,
-        row_number: index + 2,
-        telefone: item.telefone,
-        lead_id: item.lead_id || null,
-        imported: item.imported,
-        skip_reason: item.skip_reason,
-        raw_data: item.raw_data,
-        normalized_data: item.normalized_data,
-      }));
+      const newImportItems = originalItems.map((item, index) => {
+        const cleanNormalized = { ...(item.normalized_data || {}) };
+        delete cleanNormalized.progress;
+        delete cleanNormalized.campaign_progress;
+        delete cleanNormalized.status_conversa;
+        return {
+          import_id: importRecord.id,
+          client_id: clientId,
+          row_number: index + 2,
+          telefone: item.telefone,
+          lead_id: item.lead_id || null,
+          imported: item.imported,
+          skip_reason: item.skip_reason,
+          raw_data: item.raw_data,
+          normalized_data: cleanNormalized,
+        };
+      });
 
       const { error: insertItemsError } = await supabase
         .from("lead_import_items").insert(newImportItems);
@@ -6124,11 +6130,24 @@ export function registerCampaignsRoutes(app, deps) {
     }
     try {
       if (pgDatabasePool) {
-        // 1. Remove os runs de campanha associados a esses itens (tanto por lead_import_item_id quanto lead_id)
+        // 1. Remove os runs de campanha associados a esses itens (tanto por lead_import_item_id, lead_id quanto por telefone)
         await pgDatabasePool.query(
           `DELETE FROM public.campaign_dispatch_runs
             WHERE client_id = $1
-              AND (lead_import_item_id = ANY($2::uuid[]) OR lead_id = ANY($2::uuid[]))`,
+              AND (
+                lead_import_item_id = ANY($2::uuid[])
+                OR lead_id = ANY($2::uuid[])
+                OR phone IN (
+                  SELECT regexp_replace(telefone, '\\D', '', 'g')
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+                OR phone IN (
+                  SELECT telefone
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+              )`,
           [clientId, leadImportItemIds]
         );
         // 2. Remove os itens da planilha
@@ -6166,18 +6185,33 @@ export function registerCampaignsRoutes(app, deps) {
     }
     try {
       if (pgDatabasePool) {
-        // 1. Remove os registros de disparo (runs) para que esses contatos voltem a ser elegíveis
+        // 1. Remove os registros de disparo (runs) por item, lead e telefone via subquery atômica
         await pgDatabasePool.query(
           `DELETE FROM public.campaign_dispatch_runs
             WHERE client_id = $1
-              AND (lead_import_item_id = ANY($2::uuid[]) OR lead_id = ANY($2::uuid[]))`,
+              AND (
+                lead_import_item_id = ANY($2::uuid[])
+                OR lead_id = ANY($2::uuid[])
+                OR phone IN (
+                  SELECT regexp_replace(telefone, '\\D', '', 'g')
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+                OR phone IN (
+                  SELECT telefone
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+              )`,
           [clientId, leadImportItemIds]
         );
-        // 2. Limpa o progresso de régua/campanha no JSON de dados normalizados
+        // 2. Limpa o progresso de régua/campanha (tanto progress quanto campaign_progress) no JSON de dados normalizados
         await pgDatabasePool.query(
           `UPDATE public.lead_import_items
-              SET normalized_data = COALESCE(normalized_data, '{}'::jsonb) - 'progress' - 'status_conversa',
-                  status_conversa = NULL
+              SET normalized_data = COALESCE(normalized_data, '{}'::jsonb) - 'progress' - 'campaign_progress' - 'status_conversa',
+                  status_conversa = NULL,
+                  ultima_interacao_bot = NULL,
+                  ultima_interacao_usuario = NULL
             WHERE client_id = $1
               AND id = ANY($2::uuid[])`,
           [clientId, leadImportItemIds]

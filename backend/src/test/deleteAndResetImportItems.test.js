@@ -168,7 +168,9 @@ describe("Rotas de exclusão e reset de disparos da auditoria de planilha", () =
     expect(pool.calls[0].sql).toContain("DELETE FROM public.campaign_dispatch_runs");
     expect(pool.calls[0].params).toEqual(["client-test-123", itemIds]);
     expect(pool.calls[1].sql).toContain("UPDATE public.lead_import_items");
-    expect(pool.calls[1].sql).toContain("- 'progress' - 'status_conversa'");
+    expect(pool.calls[1].sql).toContain("- 'progress'");
+    expect(pool.calls[1].sql).toContain("- 'campaign_progress'");
+    expect(pool.calls[1].sql).toContain("- 'status_conversa'");
     expect(pool.calls[1].params).toEqual(["client-test-123", itemIds]);
   });
 
