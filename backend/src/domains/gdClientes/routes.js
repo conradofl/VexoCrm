@@ -729,8 +729,8 @@ export function registerGdClientesRoutes(app, {
 
         const clienteTelefone = body.cliente_telefone || cliente.aprovador_telefone || null;
 
-        // 1. Criar Grupo Interno GD
-        const subjectInterno = `[INTERNO] ${cliente.nome}`.slice(0, 100);
+        // 1. Criar Grupo Interno GD (apenas colaboradores)
+        const subjectInterno = `PASTA: ${cliente.nome.toUpperCase()}`.slice(0, 100);
         const resInterno = await evolutionGroupCreator({
           instanceName,
           subject: subjectInterno,
@@ -749,8 +749,8 @@ export function registerGdClientesRoutes(app, {
           }
         }
 
-        // 2. Criar Grupo com o Cliente
-        const subjectCliente = `GD + ${cliente.nome}`.slice(0, 100);
+        // 2. Criar Grupo com o Cliente (Máquina de Vendas)
+        const subjectCliente = `MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}`.slice(0, 100);
         const participantesClienteGrupo = [...equipeParticipantes];
         if (clienteTelefone) {
           participantesClienteGrupo.push(clienteTelefone);

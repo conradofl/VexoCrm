@@ -60,7 +60,7 @@ let mockSlackSender;
 
 function poolDe(pg) {
   const query = async (sql, params) => pg.query(sql, params);
-  const client = { query, release() {} };
+  const client = { query, release() { } };
   return { query, connect: async () => client };
 }
 
@@ -193,7 +193,7 @@ describe("Onboarding GD · Criação de Grupos de WhatsApp", () => {
     // Grupo Interno
     expect(mockEvolutionGroupCreator).toHaveBeenNthCalledWith(1, {
       instanceName: "vexo-adm",
-      subject: "[INTERNO] Clínica Sorriso Aberto",
+      subject: "PASTA: CLÍNICA SORRISO ABERTO",
       description: expect.stringContaining("Grupo interno"),
       participants: ["5534991751267", "5534997719779", "5534991241824"],
     });
@@ -201,7 +201,7 @@ describe("Onboarding GD · Criação de Grupos de WhatsApp", () => {
     // Grupo Cliente
     expect(mockEvolutionGroupCreator).toHaveBeenNthCalledWith(2, {
       instanceName: "vexo-adm",
-      subject: "GD + Clínica Sorriso Aberto",
+      subject: "MÁQUINA DE VENDAS: CLÍNICA SORRISO ABERTO",
       description: expect.stringContaining("Canal oficial"),
       participants: ["5534991751267", "5534997719779", "5534991241824", "5534991112233"],
     });
