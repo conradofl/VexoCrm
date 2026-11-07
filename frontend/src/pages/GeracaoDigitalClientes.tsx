@@ -368,6 +368,7 @@ function BotaoCriarGruposWhatsapp({ cliente }: { cliente: GdCliente }) {
     try {
       const res = await criar.mutateAsync({
         clienteId: cliente.id,
+        instanceName: "vexo-adm-vexo-atende",
         force,
       });
       if (res.status === "already_created") {

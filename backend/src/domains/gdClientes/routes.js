@@ -713,7 +713,7 @@ export function registerGdClientesRoutes(app, {
           (typeof body.instance_name === "string" && body.instance_name.trim()) ||
           process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
           process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm";
+          "vexo-adm-vexo-atende";
 
         // Equipe GD (Conrado, Caio, Gabriel)
         const envEquipe = process.env.GD_ONBOARDING_EQUIPE_TELEFONES;
