@@ -13,7 +13,13 @@ import { requireFirebaseAuth as requireFirebaseAuthPadrao } from "../../access/m
 import { hasInternalPageAccess } from "../../accessGuards.js";
 import { pgDatabasePool } from "../../services/database.js";
 import { sendError } from "../../services/httpInfra.js";
-import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome } from "./campos.js";
+import {
+  createEvolutionGroup,
+  getEvolutionGroupInviteCode,
+  sendTextMessageViaEvolution,
+} from "../../services/evolution.js";
+import { sendSlackMessage } from "../../services/trelloSlackReporter.js";
+import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
 export { GD_DONO, gerarPortalToken, hashPortalToken };
@@ -51,29 +57,42 @@ export function requireGdClientesAccess(req, res, next) {
   next();
 }
 
-export function requireGoclawReadToken(req, res, next) {
+export function isGoclawAuthenticated(req) {
   const configuredToken = process.env.GOCLAW_READ_TOKEN;
   if (!configuredToken || typeof configuredToken !== "string" || configuredToken.trim() === "") {
-    res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
-    return;
+    return false;
   }
-
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
-    return;
+    return false;
   }
-
   const token = authHeader.slice("Bearer ".length).trim();
   const tokenBuf = Buffer.from(token);
   const expectedBuf = Buffer.from(configuredToken.trim());
+  return tokenBuf.length === expectedBuf.length && crypto.timingSafeEqual(tokenBuf, expectedBuf);
+}
 
-  if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
+export function requireGoclawReadToken(req, res, next) {
+  if (!isGoclawAuthenticated(req)) {
     res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
     return;
   }
-
   next();
+}
+
+export function requireGdOrGoclawAuth(requireFirebaseAuth = requireFirebaseAuthPadrao) {
+  return (req, res, next) => {
+    if (isGoclawAuthenticated(req)) {
+      req.authActor = { tipo: "goclaw", id: "goclaw" };
+      return next();
+    }
+    requireFirebaseAuth(req, res, () => {
+      requireGdClientesAccess(req, res, () => {
+        req.authActor = { tipo: "humano", id: req.authAccess?.uid || "humano" };
+        next();
+      });
+    });
+  };
 }
 
 class ErroDeRota extends Error {
@@ -88,6 +107,8 @@ class ErroDeRota extends Error {
 const SELECT_CLIENTE = `
   SELECT c.id, c.nome, c.cnpj, c.cnpj_a_confirmar, c.aprovador_nome, c.aprovador_telefone,
          c.drive_url, c.contrato_url, c.briefing_url, c.ficha_vexo_url, c.planejamento_url,
+         c.grupo_interno_jid, c.grupo_interno_url, c.grupo_cliente_jid, c.grupo_cliente_url,
+         c.onboarding_concluido_em,
          c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
          c.estado_data_estimada, c.created_at, c.updated_at,
          e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
@@ -122,6 +143,11 @@ function clienteDe(linha) {
     briefing_url: linha.briefing_url ?? null,
     ficha_vexo_url: linha.ficha_vexo_url ?? null,
     planejamento_url: linha.planejamento_url ?? null,
+    grupo_interno_jid: linha.grupo_interno_jid ?? null,
+    grupo_interno_url: linha.grupo_interno_url ?? null,
+    grupo_cliente_jid: linha.grupo_cliente_jid ?? null,
+    grupo_cliente_url: linha.grupo_cliente_url ?? null,
+    onboarding_concluido_em: linha.onboarding_concluido_em ?? null,
     escopo: linha.escopo,
     escopo_original: linha.escopo_original,
     origem: linha.origem,
@@ -211,15 +237,15 @@ async function exigirEstadoValido(client, estado) {
   }
 }
 
-async function registrarEvento(client, clienteId, mov, uid) {
+async function registrarEvento(client, clienteId, mov, uid, atorTipo = "humano", dados = null) {
   // SAVEPOINT: depois do erro da FK a transação fica abortada, e a lista de estados válidos da
   // resposta não poderia mais ser lida (a barreira 2 respondia 500; pego por mutação).
   await client.query("SAVEPOINT gd_evento");
   try {
     const { rows } = await client.query(
       `SELECT (e).id, (e).ocorrido_em, (e).origem
-         FROM (SELECT public.gd_registrar_evento($1, $2, COALESCE($3::timestamptz, now()), $4, $5, 'humano', $6, $7) AS e) x`,
-      [clienteId, mov.estado, mov.ocorridoEm, mov.dataEstimada, mov.origem, uid, mov.motivo]
+         FROM (SELECT public.gd_registrar_evento($1, $2, COALESCE($3::timestamptz, now()), $4, $5, $6, $7, $8, COALESCE($9::jsonb, '{}'::jsonb)) AS e) x`,
+      [clienteId, mov.estado, mov.ocorridoEm, mov.dataEstimada, mov.origem, atorTipo, uid, mov.motivo, dados ? JSON.stringify(dados) : null]
     );
     await client.query("RELEASE SAVEPOINT gd_evento");
     return rows[0];
@@ -287,6 +313,10 @@ export function registerGdClientesRoutes(app, {
   getPool = () => pgDatabasePool,
   requireFirebaseAuth = requireFirebaseAuthPadrao,
   requireGoclawToken = requireGoclawReadToken,
+  evolutionGroupCreator = createEvolutionGroup,
+  evolutionInviteGetter = getEvolutionGroupInviteCode,
+  evolutionMessageSender = sendTextMessageViaEvolution,
+  slackSender = sendSlackMessage,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -648,4 +678,185 @@ export function registerGdClientesRoutes(app, {
       responderErro(res, err, "GET /api/gd/public/portal/:token");
     }
   });
+
+  // ─── Onboarding Operacional: criação de grupos de WhatsApp (Braços GoClaw) ──
+  app.post(
+    "/api/gd/clientes/:id/onboarding/whatsapp-groups",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const body = req.body || {};
+        const clienteId = req.params.id;
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        if (cliente.grupo_interno_jid && cliente.grupo_cliente_jid && !body.force) {
+          res.json({
+            status: "already_created",
+            message: "Grupos de WhatsApp já haviam sido criados para este cliente.",
+            cliente,
+            grupos: {
+              interno: { jid: cliente.grupo_interno_jid, url: cliente.grupo_interno_url },
+              cliente: { jid: cliente.grupo_cliente_jid, url: cliente.grupo_cliente_url },
+            },
+          });
+          return;
+        }
+
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm";
+
+        // Equipe GD (Conrado, Caio, Gabriel)
+        const envEquipe = process.env.GD_ONBOARDING_EQUIPE_TELEFONES;
+        const equipeConfigurada = envEquipe
+          ? envEquipe.split(",").map((s) => s.trim()).filter(Boolean)
+          : ["5534991751267", "5534997719779", "5534991241824"];
+
+        const equipeParticipantes = Array.isArray(body.equipe_telefones)
+          ? body.equipe_telefones
+          : typeof body.equipe_telefones === "string"
+          ? body.equipe_telefones.split(",").map((s) => s.trim()).filter(Boolean)
+          : equipeConfigurada;
+
+        const clienteTelefone = body.cliente_telefone || cliente.aprovador_telefone || null;
+
+        // 1. Criar Grupo Interno GD
+        const subjectInterno = `[INTERNO] ${cliente.nome}`.slice(0, 100);
+        const resInterno = await evolutionGroupCreator({
+          instanceName,
+          subject: subjectInterno,
+          description: `Grupo interno da equipe Geração Digital para alinhamento e operação de ${cliente.nome}.`,
+          participants: equipeParticipantes,
+        });
+
+        const jidInterno = resInterno.groupJid;
+        let urlInterno = null;
+        if (jidInterno) {
+          try {
+            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidInterno });
+            urlInterno = invite?.inviteUrl || null;
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo interno (${jidInterno}):`, e.message);
+          }
+        }
+
+        // 2. Criar Grupo com o Cliente
+        const subjectCliente = `GD + ${cliente.nome}`.slice(0, 100);
+        const participantesClienteGrupo = [...equipeParticipantes];
+        if (clienteTelefone) {
+          participantesClienteGrupo.push(clienteTelefone);
+        }
+
+        const resCliente = await evolutionGroupCreator({
+          instanceName,
+          subject: subjectCliente,
+          description: `Canal oficial de acompanhamento e suporte da Geração Digital para ${cliente.nome}.`,
+          participants: participantesClienteGrupo,
+        });
+
+        const jidCliente = resCliente.groupJid;
+        let urlCliente = null;
+        if (jidCliente) {
+          try {
+            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidCliente });
+            urlCliente = invite?.inviteUrl || null;
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo do cliente (${jidCliente}):`, e.message);
+          }
+
+          // Mensagem de boas-vindas no grupo do cliente
+          const nomeDestinatario = cliente.aprovador_nome || cliente.nome;
+          const textoBoasVindas =
+            typeof body.mensagem_boas_vindas === "string" && body.mensagem_boas_vindas.trim()
+              ? body.mensagem_boas_vindas.trim()
+              : `Olá, ${nomeDestinatario}! Seja muito bem-vindo(a) à Geração Digital! 🚀\n\nEste é o nosso canal oficial de atendimento, alinhamento e acompanhamento com toda a nossa equipe. Qualquer dúvida ou solicitação, estamos sempre por aqui.\n\nEm breve daremos início aos próximos passos do seu onboarding!`;
+
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: jidCliente,
+              text: textoBoasVindas,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao enviar mensagem de boas-vindas no grupo ${jidCliente}:`, e.message);
+          }
+        }
+
+        // 3. Atualizar gd_clientes e registrar evento de transição se aplicável
+        const driveUrlInformada = body.drive_url ? lerDriveUrl(body.drive_url) : null;
+
+        const resultado = await emTransacao(getPool, async (client) => {
+          await client.query(
+            `UPDATE public.gd_clientes
+                SET grupo_interno_jid = $1,
+                    grupo_interno_url = $2,
+                    grupo_cliente_jid = $3,
+                    grupo_cliente_url = $4,
+                    onboarding_concluido_em = now(),
+                    drive_url = COALESCE($5, drive_url)
+              WHERE id = $6 AND dono_client_id = $7`,
+            [jidInterno, urlInterno, jidCliente, urlCliente, driveUrlInformada, clienteId, GD_DONO]
+          );
+
+          // Transiciona estado para GRUPOS_CRIADOS caso o cliente esteja em estado anterior
+          let evento = null;
+          if (cliente.estado_atual !== "GRUPOS_CRIADOS") {
+            const mov = {
+              estado: "GRUPOS_CRIADOS",
+              motivo: "Pastas e grupos de WhatsApp criados via automação GoClaw.",
+              ocorridoEm: null,
+              dataEstimada: false,
+              origem: "fluxo",
+            };
+
+            const dadosEvento = {
+              grupo_interno: { jid: jidInterno, url: urlInterno },
+              grupo_cliente: { jid: jidCliente, url: urlCliente },
+              drive_url: driveUrlInformada || cliente.drive_url,
+            };
+
+            await exigirEstadoValido(client, mov.estado);
+            evento = await registrarEvento(client, clienteId, mov, ator.id, ator.tipo, dadosEvento);
+          }
+
+          const clienteAtualizado = await lerCliente(client, clienteId);
+          return { evento, cliente: clienteAtualizado };
+        });
+
+        // 4. Notificação Slack (não bloqueante)
+        try {
+          const slackText =
+            `🚀 *Onboarding GD · Grupos de WhatsApp Criados!*\n` +
+            `• *Cliente:* ${cliente.nome}\n` +
+            `• *Grupo Interno:* ${urlInterno || jidInterno || "Sem link"}\n` +
+            `• *Grupo Cliente:* ${urlCliente || jidCliente || "Sem link"}\n` +
+            `• *Estado:* GRUPOS_CRIADOS`;
+          await slackSender({ text: slackText, channel: "01-ops-geral" });
+        } catch (e) {
+          console.warn("[GD-Onboarding] Falha ao notificar Slack:", e.message);
+        }
+
+        res.status(201).json({
+          success: true,
+          cliente: resultado.cliente,
+          evento: resultado.evento,
+          grupos: {
+            interno: { jid: jidInterno, url: urlInterno },
+            cliente: { jid: jidCliente, url: urlCliente },
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/whatsapp-groups");
+      }
+    }
+  );
 }

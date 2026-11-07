@@ -107,6 +107,19 @@ export const lerContratoUrl = (bruto) => lerUrlOpcional(bruto, "CONTRATO_URL_INV
 export const lerBriefingUrl = (bruto) => lerUrlOpcional(bruto, "BRIEFING_URL_INVALIDA", "Link do briefing");
 export const lerFichaVexoUrl = (bruto) => lerUrlOpcional(bruto, "FICHA_VEXO_URL_INVALIDA", "Link da ficha Vexo");
 export const lerPlanejamentoUrl = (bruto) => lerUrlOpcional(bruto, "PLANEJAMENTO_URL_INVALIDA", "Link do planejamento");
+export const lerGrupoInternoUrl = (bruto) => lerUrlOpcional(bruto, "GRUPO_INTERNO_URL_INVALIDA", "Link do grupo interno");
+export const lerGrupoClienteUrl = (bruto) => lerUrlOpcional(bruto, "GRUPO_CLIENTE_URL_INVALIDA", "Link do grupo do cliente");
+export const lerGrupoInternoJid = (bruto) => texto(bruto, "GRUPO_INTERNO_JID_INVALIDO", "JID do grupo interno", 100);
+export const lerGrupoClienteJid = (bruto) => texto(bruto, "GRUPO_CLIENTE_JID_INVALIDO", "JID do grupo do cliente", 100);
+
+export function lerDataOpcional(bruto, code, rotulo) {
+  if (vazio(bruto)) return null;
+  const d = new Date(bruto);
+  if (Number.isNaN(d.getTime())) throw new CampoInvalido(code, `${rotulo} precisa ser uma data ISO válida.`);
+  return d.toISOString();
+}
+
+export const lerOnboardingConcluidoEm = (bruto) => lerDataOpcional(bruto, "ONBOARDING_CONCLUIDO_EM_INVALIDO", "Data de conclusão do onboarding");
 
 // Lista de códigos, sem repetição. Lista vazia é "sem escopo informado".
 export function lerEscopo(bruto) {
@@ -137,6 +150,11 @@ export const CAMPOS_OPCIONAIS = {
   briefing_url: lerBriefingUrl,
   ficha_vexo_url: lerFichaVexoUrl,
   planejamento_url: lerPlanejamentoUrl,
+  grupo_interno_jid: lerGrupoInternoJid,
+  grupo_interno_url: lerGrupoInternoUrl,
+  grupo_cliente_jid: lerGrupoClienteJid,
+  grupo_cliente_url: lerGrupoClienteUrl,
+  onboarding_concluido_em: lerOnboardingConcluidoEm,
   escopo: lerEscopo,
   escopo_original: lerEscopoOriginal,
   cnpj_a_confirmar: lerCnpjAConfirmar,

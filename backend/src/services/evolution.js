@@ -2506,3 +2506,190 @@ export async function fetchProfilePictureUrlViaEvolution({
   }
 }
 
+/**
+ * Cria grupo no WhatsApp via Evolution API.
+ */
+export async function createEvolutionGroup({
+  instanceName,
+  subject,
+  description = "",
+  participants = [],
+  webhookToken = null,
+  baseUrl = null,
+  fetchFn = fetch,
+}) {
+  if (!instanceName) {
+    throw new Error("instanceName é obrigatório para criação de grupo.");
+  }
+  const cleanSubject = String(subject || "").trim().slice(0, 100);
+  if (!cleanSubject) {
+    throw new Error("subject (título do grupo) é obrigatório.");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    process.env.GD_EVOLUTION_API_TOKEN;
+
+  const formattedParticipants = (participants || [])
+    .map((p) => {
+      if (!p) return null;
+      const str = String(p).trim();
+      if (str.includes("@")) return str;
+      let digits = str.replace(/\D/g, "");
+      if (!digits) return null;
+      if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+      return `${digits}@s.whatsapp.net`;
+    })
+    .filter(Boolean);
+
+  const uniqueParticipants = [...new Set(formattedParticipants)];
+  if (uniqueParticipants.length === 0) {
+    throw new Error("Ao menos um participante válido é obrigatório para criar o grupo.");
+  }
+
+  const payload = {
+    subject: cleanSubject,
+    description: description ? String(description).slice(0, 500) : "",
+    participants: uniqueParticipants,
+  };
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const rootUrl = effectiveBaseUrl.replace(/\/+$/, "");
+  let endpoint = `${rootUrl}/group/create/${encodeURIComponent(instanceName)}`;
+
+  let res = await fetchFn(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  // Fallback caso a versão da Evolution API use /group/createGroup
+  if (res.status === 404) {
+    endpoint = `${rootUrl}/group/createGroup/${encodeURIComponent(instanceName)}`;
+    res = await fetchFn(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  }
+
+  const resText = await res.text();
+  let data = null;
+  try {
+    data = resText ? JSON.parse(resText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const errorMsg =
+      data?.response?.message ||
+      data?.message ||
+      (Array.isArray(data?.response) ? data.response.join(", ") : null) ||
+      resText.slice(0, 300);
+    const err = new Error(`Falha ao criar grupo no WhatsApp (HTTP ${res.status}): ${errorMsg}`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  const groupJid =
+    data?.id ||
+    data?.groupId ||
+    data?.groupMetadata?.id ||
+    data?.jid ||
+    data?.group?.id ||
+    null;
+
+  return {
+    success: true,
+    groupJid,
+    data,
+  };
+}
+
+/**
+ * Obtém o código e link de convite de um grupo WhatsApp via Evolution API.
+ */
+export async function getEvolutionGroupInviteCode({
+  instanceName,
+  groupJid,
+  webhookToken = null,
+  baseUrl = null,
+  fetchFn = fetch,
+}) {
+  if (!instanceName || !groupJid) {
+    throw new Error("instanceName e groupJid são obrigatórios para buscar link de convite.");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    process.env.GD_EVOLUTION_API_TOKEN;
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const rootUrl = effectiveBaseUrl.replace(/\/+$/, "");
+  const endpoint = `${rootUrl}/group/inviteCode/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`;
+
+  const res = await fetchFn(endpoint, {
+    method: "GET",
+    headers,
+  });
+
+  const resText = await res.text();
+  let data = null;
+  try {
+    data = resText ? JSON.parse(resText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const errorMsg = data?.response?.message || data?.message || resText.slice(0, 300);
+    const err = new Error(`Falha ao obter link de convite do grupo (HTTP ${res.status}): ${errorMsg}`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  const inviteCode =
+    data?.inviteCode ||
+    data?.code ||
+    data?.invite_code ||
+    (typeof data === "string" ? data : null);
+
+  const inviteUrl =
+    data?.inviteUrl ||
+    data?.link ||
+    (inviteCode ? `https://chat.whatsapp.com/${inviteCode}` : null);
+
+  return {
+    success: true,
+    inviteCode,
+    inviteUrl,
+    data,
+  };
+}
+
+
