@@ -33,6 +33,11 @@ export interface GdCliente {
   briefing_url?: string | null;
   ficha_vexo_url?: string | null;
   planejamento_url?: string | null;
+  grupo_interno_jid?: string | null;
+  grupo_interno_url?: string | null;
+  grupo_cliente_jid?: string | null;
+  grupo_cliente_url?: string | null;
+  onboarding_concluido_em?: string | null;
   escopo: Escopo[] | null;
   escopo_original: string | null;
   origem: "fluxo" | "importacao_inicial";

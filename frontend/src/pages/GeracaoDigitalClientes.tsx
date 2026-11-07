@@ -16,11 +16,12 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/use-toast";
-import { Link as LinkIcon } from "lucide-react";
+import { Link as LinkIcon, MessageSquare } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   GdApiError,
   useCriarGdCliente,
+  useCriarGruposWhatsapp,
   useEditarGdCliente,
   useEmitirGdPortalToken,
   useGdCliente,
@@ -358,6 +359,60 @@ function BotaoCopiarPortal({
   );
 }
 
+function BotaoCriarGruposWhatsapp({ cliente }: { cliente: GdCliente }) {
+  const criar = useCriarGruposWhatsapp();
+  const [carregando, setCarregando] = useState(false);
+
+  const disparar = async (force = false) => {
+    setCarregando(true);
+    try {
+      const res = await criar.mutateAsync({
+        clienteId: cliente.id,
+        force,
+      });
+      if (res.status === "already_created") {
+        toast({
+          title: "Grupos já existem",
+          description: "Os grupos de WhatsApp já haviam sido criados anteriormente para este cliente.",
+        });
+      } else {
+        toast({
+          title: "🚀 Grupos Criados com Sucesso!",
+          description: `Grupo interno e grupo de atendimento criados via Evolution API. Notificação enviada ao Slack.`,
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Erro ao criar grupos",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  const jaCriados = Boolean(cliente.grupo_interno_jid && cliente.grupo_cliente_jid);
+
+  return (
+    <Button
+      size="sm"
+      variant={jaCriados ? "outline" : "default"}
+      className={
+        jaCriados
+          ? "text-emerald-600 border-emerald-500 hover:bg-emerald-50"
+          : "bg-emerald-600 hover:bg-emerald-700 text-white"
+      }
+      onClick={() => disparar(jaCriados)}
+      disabled={carregando || criar.isPending}
+      title={jaCriados ? "Grupos já criados. Clique para recriar se necessário." : "Criar grupo interno e grupo de atendimento"}
+    >
+      <MessageSquare className="h-4 w-4 mr-1.5" />
+      {carregando ? "Criando Grupos…" : jaCriados ? "Recriar Grupos WhatsApp" : "Criar Grupos WhatsApp"}
+    </Button>
+  );
+}
+
 function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
   const { data, isLoading, error } = useGdCliente(id);
   const { data: estados } = useGdEstados();
@@ -415,6 +470,7 @@ function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <BotaoCopiarPortal clienteId={cliente.id} clienteNome={cliente.nome} />
+          <BotaoCriarGruposWhatsapp cliente={cliente} />
           {!editando && <Button size="sm" variant="outline" onClick={abrirEdicao}>Editar dados</Button>}
           <Button size="sm" variant="ghost" onClick={onFechar}>Fechar</Button>
         </div>
@@ -427,6 +483,8 @@ function Detalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
           {cliente.ficha_vexo_url && <a href={cliente.ficha_vexo_url} {...LINK_EXTERNO} className="underline text-foreground">Ficha Vexo ↗</a>}
           {cliente.planejamento_url && <a href={cliente.planejamento_url} {...LINK_EXTERNO} className="underline text-foreground">Planejamento ↗</a>}
           {cliente.drive_url && <a href={cliente.drive_url} {...LINK_EXTERNO} className="underline text-foreground">Drive ↗</a>}
+          {cliente.grupo_interno_url && <a href={cliente.grupo_interno_url} {...LINK_EXTERNO} className="underline text-emerald-600 font-semibold">Grupo Interno GD ↗</a>}
+          {cliente.grupo_cliente_url && <a href={cliente.grupo_cliente_url} {...LINK_EXTERNO} className="underline text-emerald-600 font-semibold">WhatsApp Cliente ↗</a>}
         </div>
       )}
 

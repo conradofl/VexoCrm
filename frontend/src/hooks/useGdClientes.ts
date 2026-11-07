@@ -133,3 +133,36 @@ export function useEmitirGdPortalToken() {
       ),
   });
 }
+
+export function useCriarGruposWhatsapp() {
+  const chamar = useChamar();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      clienteId,
+      instanceName,
+      force,
+    }: {
+      clienteId: string;
+      instanceName?: string;
+      force?: boolean;
+    }) =>
+      chamar<{
+        success: boolean;
+        status?: string;
+        message?: string;
+        cliente: GdCliente;
+        grupos: {
+          interno: { jid: string | null; url: string | null };
+          cliente: { jid: string | null; url: string | null };
+        };
+      }>(`/api/gd/clientes/${clienteId}/onboarding/whatsapp-groups`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...(instanceName ? { instance_name: instanceName } : {}),
+          ...(force ? { force: true } : {}),
+        }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
+  });
+}
