@@ -3127,25 +3127,26 @@ export function registerChatbotRoutes(app, deps) {
 
     try {
       campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
-      let activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches?.[0] || null;
 
-      // Fallback: se não estiver no index 0 de processingWaitForReplyMatches, busca em outros candidatos com passos pendentes
-      if (!activeWaitCampaign) {
-        const allCandidates = [
-          ...(campaignReplyContext.processingWaitForReplyMatches || []),
-          ...(campaignReplyContext.waitForReplyMatches || []),
-          ...(campaignReplyContext.matches || []),
-          ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
-        ];
-        activeWaitCampaign = allCandidates.find((c) => {
-          if (!c) return false;
-          const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
-          const steps = stepPlan.enabledSteps || [];
-          const progress = c.leadImportItem?.progress || {};
-          const nextStepIndex = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
-          return nextStepIndex !== null && nextStepIndex < steps.length;
-        }) || null;
-      }
+      const allCandidates = [
+        ...(campaignReplyContext.processingWaitForReplyMatches || []),
+        ...(campaignReplyContext.waitForReplyMatches || []),
+        ...(campaignReplyContext.matches || []),
+        ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
+      ];
+
+      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar
+      let activeWaitCampaign = allCandidates.find((c) => {
+        if (!c) return false;
+        const progress = c.leadImportItem?.progress || {};
+        const hasProgress = progress && Object.keys(progress).length > 0;
+        if (!hasProgress) return false;
+        const nextStepIndex = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
+        if (nextStepIndex === null) return false;
+        const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
+        const steps = stepPlan.enabledSteps || [];
+        return nextStepIndex < steps.length;
+      }) || campaignReplyContext.processingWaitForReplyMatches?.[0] || null;
 
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
