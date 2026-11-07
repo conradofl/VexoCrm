@@ -1512,7 +1512,7 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const matchedImportItem = resolveMatchedImportItemForCampaign(importItems, campaign);
 
       const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
-      const hasProgress = progress && Object.keys(progress).length > 0;
+      const hasProgress = Boolean(progress && Object.keys(progress).length > 0);
 
       const stepPlan = getCampaignStepPlan(analyticsMeta || {});
       const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
@@ -1528,12 +1528,11 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         progress?.status === "aguardando_usuario" ||
         progress?.status === "pendente" ||
         progress?.status === "aguardando_resposta" ||
-        progress?.status === "enviando_proximas_etapas" ||
-        !progress?.status;
+        progress?.status === "enviando_proximas_etapas";
 
       const hasPendingProgress =
-        Boolean(progress) &&
-        (progress.waitForReply === true || isWaitForReply || hasStepsRemaining) &&
+        hasProgress &&
+        hasStepsRemaining &&
         (isStatusWaiting || hasStepsRemaining);
 
       // A.1: Casamento direto por progresso como fonte primária
@@ -1594,11 +1593,21 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
     })
     .filter(Boolean)
     .sort((left, right) => {
-      // Campanhas em período ativo têm prioridade
-      if (left.isInActivePeriod !== right.isInActivePeriod) return left.isInActivePeriod ? -1 : 1;
+      // 1. Quem tem progresso pendente REAL (aguardando resposta para enviar próximo passo) TEM PRIORIDADE MÁXIMA!
       const leftPending = left.hasPendingProgress ? 0 : 1;
       const rightPending = right.hasPendingProgress ? 0 : 1;
       if (leftPending !== rightPending) return leftPending - rightPending;
+
+      // Se ambos tiverem progresso pendente, a campanha com atualização/envio mais recente vence:
+      if (left.hasPendingProgress && right.hasPendingProgress) {
+        const leftUpdated = toComparableCampaignTimestamp(left.leadImportItem?.progress?.updatedAt || left.lastTriggeredAt);
+        const rightUpdated = toComparableCampaignTimestamp(right.leadImportItem?.progress?.updatedAt || right.lastTriggeredAt);
+        if (leftUpdated !== rightUpdated) return rightUpdated.localeCompare(leftUpdated);
+      }
+
+      // 2. Campanhas em período ativo vêm depois
+      if (left.isInActivePeriod !== right.isInActivePeriod) return left.isInActivePeriod ? -1 : 1;
+
       const leftScore = left.status === "processing" ? 0 : left.waitForReply ? 1 : 2;
       const rightScore = right.status === "processing" ? 0 : right.waitForReply ? 1 : 2;
       if (leftScore !== rightScore) return leftScore - rightScore;
