@@ -368,7 +368,16 @@ export default function GeracaoDigitalPublicProposal() {
       return;
     }
 
-    if (emailAgendaGoogle.trim() && !emailRegex.test(emailAgendaGoogle.trim())) {
+    if (!emailAgendaGoogle.trim()) {
+      toast({
+        title: "E-mail da Agenda Obrigatório",
+        description: "Por favor, informe o e-mail da Agenda Google para agendamento das reuniões de alinhamento.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!emailRegex.test(emailAgendaGoogle.trim())) {
       toast({
         title: "E-mail da Agenda Inválido",
         description: "O e-mail para a agenda Google informado não é válido.",
@@ -1373,7 +1382,7 @@ export default function GeracaoDigitalPublicProposal() {
                     {/* E-mail Agenda / Google Meet */}
                     <div className="space-y-1">
                       <Label className="text-[11px] font-medium text-slate-300">
-                        E-mail para Convites de Reunião <span className="text-slate-500 text-[10px]">(Google Meet / Agenda)</span>
+                        E-mail da Agenda Google <span className="text-red-400">*</span> <span className="text-slate-500 text-[10px]">(convites Google Meet / reuniões)</span>
                       </Label>
                       <Input
                         type="email"

@@ -24,6 +24,14 @@ const MIGRATION_DOCUMENTOS = readFileSync(
   resolve("supabase/migrations/20261105190000_gd_clientes_quatro_documentos.sql"),
   "utf8"
 );
+const MIGRATION_WHATSAPP = readFileSync(
+  resolve("supabase/migrations/20261107100000_gd_clientes_whatsapp_groups.sql"),
+  "utf8"
+);
+const MIGRATION_CALENDAR = readFileSync(
+  resolve("supabase/migrations/20261108100000_gd_clientes_google_calendar_email.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -88,6 +96,8 @@ beforeAll(async () => {
   await db.exec(MIGRATION_CAMPOS);
   await db.exec(MIGRATION_TRILHA);
   await db.exec(MIGRATION_DOCUMENTOS);
+  await db.exec(MIGRATION_WHATSAPP);
+  await db.exec(MIGRATION_CALENDAR);
 
   const app = express();
   app.use(express.json());

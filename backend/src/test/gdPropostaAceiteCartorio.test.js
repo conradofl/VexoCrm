@@ -26,6 +26,10 @@ const MIGRATION_CLAUSULAS = readFileSync(
   resolve("supabase/migrations/20260929120000_add_clausulas_to_gd_contract_templates.sql"),
   "utf8"
 );
+const MIGRATION_CALENDAR = readFileSync(
+  resolve("supabase/migrations/20261108100000_gd_clientes_google_calendar_email.sql"),
+  "utf8"
+);
 
 let db;
 let server;
@@ -69,6 +73,7 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
     await db.exec(MIGRATION_TRILHA);
     await db.exec(MIGRATION_CONTRACTS);
     await db.exec(MIGRATION_CLAUSULAS);
+    await db.exec(MIGRATION_CALENDAR);
 
     // Template ativo padrão para a GD
     await db.exec(`
@@ -149,6 +154,16 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
     });
     expect(resSemEmail.status).toBe(400);
     expect(resSemEmail.json.error).toBe("EMAIL_CONTRATANTE_OBRIGATORIO");
+
+    // Falta e-mail da agenda Google -> 400
+    const resSemEmailAgenda = await chamar("POST", `/api/gd/public/proposals/${propId}/assinar`, {
+      assinatura: "assinatura",
+      razao_social: "Empresa Teste Ltda",
+      cnpj: "00.000.000/0001-91",
+      email_contratante: "cliente@teste.com",
+    });
+    expect(resSemEmailAgenda.status).toBe(400);
+    expect(resSemEmailAgenda.json.error).toBe("EMAIL_AGENDA_GOOGLE_OBRIGATORIO");
   });
 
   it("2, 3 e 4. Aceite com dados válidos: grava proposta aceita, cria cliente em gd_clientes com dados cadastrais e escopo, registra eventos PROPOSTA_ACEITA e CONTRATO_EM_REVISAO em ordem, gera minuta gd_contracts e notifica Slack", async () => {
@@ -225,6 +240,7 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
     expect(clienteNoBanco.cnpj).toBe("00000000000191");
     expect(clienteNoBanco.aprovador_nome).toBe("Ana Paula Silva");
     expect(clienteNoBanco.aprovador_telefone).toBe("5534988887777");
+    expect(clienteNoBanco.google_calendar_email).toBe("agenda@sorrisoperfeito.com.br");
     expect(clienteNoBanco.escopo).toEqual(["google", "social", "meta"]);
     expect(clienteNoBanco.estado_atual).toBe("CONTRATO_EM_REVISAO");
 
@@ -314,6 +330,7 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
       responsavel_nome: "Diretor Geral da Silva",
       telefone: "11977776666",
       email_contratante: "diretoria@empresa.com",
+      email_agenda_google: "agenda@empresa.com",
       escopo: ["google", "linkedin"],
     };
 
@@ -338,6 +355,7 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
     expect(clienteAtualizado.contract_id).toBeTruthy();
     expect(clienteAtualizado.aprovador_nome).toBe("Diretor Geral da Silva");
     expect(clienteAtualizado.aprovador_telefone).toBe("5511977776666");
+    expect(clienteAtualizado.google_calendar_email).toBe("agenda@empresa.com");
     expect(clienteAtualizado.escopo).toEqual(["google", "linkedin"]);
     expect(clienteAtualizado.estado_atual).toBe("CONTRATO_EM_REVISAO");
   });

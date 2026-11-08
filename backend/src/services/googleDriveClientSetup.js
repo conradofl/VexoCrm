@@ -20,6 +20,8 @@
 
 import crypto from "node:crypto";
 
+export const GD_OFFICIAL_DRIVE_ACCOUNT = "mrkgeracaodigital@gmail.com";
+
 export const DRIVE_SUBFOLDERS = [
   { key: "identidade", name: "01_Identidade_e_Logos" },
   { key: "brutos", name: "02_Fotos_e_Videos_Brutos" },
@@ -199,6 +201,109 @@ async function setFolderPermissionsApi(folderId, accessToken, role = "reader") {
 }
 
 /**
+ * Compartilha pasta no Google Drive com um usuário específico (ex: conta oficial da agência)
+ */
+export async function shareDriveFolderWithUser(folderId, userEmail, accessToken, role = "writer") {
+  if (!folderId || !userEmail || !accessToken) return;
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?supportsAllDrives=true`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        role,
+        type: "user",
+        emailAddress: userEmail,
+      }),
+    });
+  } catch (err) {
+    console.warn(`[google-drive] Aviso: não foi possível compartilhar pasta ${folderId} com ${userEmail}:`, err.message);
+  }
+}
+
+/**
+ * Faz upload de um arquivo para uma pasta do Google Drive via REST API v3
+ */
+export async function uploadFileToDrive({
+  fileName,
+  mimeType = "image/png",
+  fileBuffer,
+  folderId = null,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!fileName || !fileBuffer) {
+    throw new Error("fileName e fileBuffer são obrigatórios para upload no Google Drive.");
+  }
+
+  const token = accessToken || (await getGoogleDriveAccessToken());
+
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para upload.");
+    }
+    const hash = crypto.createHash("md5").update(fileName + Date.now()).digest("hex").slice(0, 16);
+    const mockFileId = `mock_file_${hash}`;
+    return {
+      success: true,
+      fileId: mockFileId,
+      fileName,
+      fileLink: `https://drive.google.com/file/d/${mockFileId}/view`,
+      isMock: true,
+    };
+  }
+
+  // Upload Multipart para a API v3 do Google Drive
+  const boundary = `-------314159265358979323846_${Date.now()}`;
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelimiter = `\r\n--${boundary}--`;
+
+  const metadata = {
+    name: fileName,
+    mimeType,
+  };
+  if (folderId) {
+    metadata.parents = [folderId];
+  }
+
+  const buffer = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
+
+  const multipartRequestBody = Buffer.concat([
+    Buffer.from(
+      `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+      `${delimiter}Content-Type: ${mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n`
+    ),
+    Buffer.from(buffer.toString("base64")),
+    Buffer.from(closeDelimiter),
+  ]);
+
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": `multipart/related; boundary=${boundary}`,
+    },
+    body: multipartRequestBody,
+  });
+
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message || `Falha HTTP ${res.status} ao fazer upload do arquivo ${fileName}`);
+  }
+
+  return {
+    success: true,
+    fileId: data.id,
+    fileName,
+    fileLink: `https://drive.google.com/file/d/${data.id}/view`,
+    isMock: false,
+    data,
+  };
+}
+
+/**
  * Configura a estrutura completa de pastas no Google Drive para um cliente.
  * 
  * @param {Object} params
@@ -274,6 +379,10 @@ export async function setupClientDriveFolders({
   if (makePublic) {
     await setFolderPermissionsApi(clientFolderId, accessToken, "reader");
   }
+
+  // Compartilha com a conta oficial da Geração Digital (mrkgeracaodigital@gmail.com)
+  const agencyEmail = process.env.GD_DRIVE_OFFICIAL_ACCOUNT || GD_OFFICIAL_DRIVE_ACCOUNT;
+  await shareDriveFolderWithUser(clientFolderId, agencyEmail, accessToken, "writer");
 
   // 2. Cria as 4 Subpastas Padrão
   const subfolders = {};

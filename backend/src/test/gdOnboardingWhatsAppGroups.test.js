@@ -27,6 +27,10 @@ const MIGRATION_WHATSAPP = readFileSync(
   resolve("supabase/migrations/20261107100000_gd_clientes_whatsapp_groups.sql"),
   "utf8"
 );
+const MIGRATION_CALENDAR = readFileSync(
+  resolve("supabase/migrations/20261108100000_gd_clientes_google_calendar_email.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   equipeGd: {
@@ -56,6 +60,8 @@ let base;
 let mockEvolutionGroupCreator;
 let mockEvolutionInviteGetter;
 let mockEvolutionMessageSender;
+let mockEvolutionCommunityLinker;
+let mockBrandingAvatarGenerator;
 let mockSlackSender;
 
 function poolDe(pg) {
@@ -95,10 +101,23 @@ beforeAll(async () => {
   await db.exec(MIGRATION_TRILHA);
   await db.exec(MIGRATION_DOCUMENTOS);
   await db.exec(MIGRATION_WHATSAPP);
+  await db.exec(MIGRATION_CALENDAR);
 
   mockEvolutionGroupCreator = vi.fn();
   mockEvolutionInviteGetter = vi.fn();
   mockEvolutionMessageSender = vi.fn();
+  mockEvolutionCommunityLinker = vi.fn().mockResolvedValue({
+    success: true,
+    community: "GD — Operação Interna",
+  });
+  mockBrandingAvatarGenerator = vi.fn().mockResolvedValue({
+    success: true,
+    evolutionUpdated: true,
+    driveFile: {
+      fileId: "mock_avatar_file",
+      fileLink: "https://drive.google.com/file/d/mock_avatar_file/view",
+    },
+  });
   mockSlackSender = vi.fn();
 
   const app = express();
@@ -112,6 +131,8 @@ beforeAll(async () => {
     evolutionGroupCreator: (...args) => mockEvolutionGroupCreator(...args),
     evolutionInviteGetter: (...args) => mockEvolutionInviteGetter(...args),
     evolutionMessageSender: (...args) => mockEvolutionMessageSender(...args),
+    evolutionCommunityLinker: (...args) => mockEvolutionCommunityLinker(...args),
+    brandingAvatarGenerator: (...args) => mockBrandingAvatarGenerator(...args),
     slackSender: (...args) => mockSlackSender(...args),
   });
 
@@ -219,6 +240,23 @@ describe("Onboarding GD · Criação de Grupos de WhatsApp", () => {
       channel: "01-ops-geral",
     });
 
+    // Verifica vínculo automático com Comunidade Interna
+    expect(mockEvolutionCommunityLinker).toHaveBeenCalledWith({
+      instanceName: "vexo-adm",
+      groupJid: "120363000001@g.us",
+      communityName: "GD — Operação Interna",
+      communityJid: null,
+    });
+
+    // Verifica geração e aplicação do Avatar com tarja 50%
+    expect(mockBrandingAvatarGenerator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientName: "Clínica Sorriso Aberto",
+        groupJid: "120363000002@g.us",
+        instanceName: "vexo-adm",
+      })
+    );
+
     // Verifica integridade no banco
     const dbCliente = (
       await db.query(`SELECT * FROM public.gd_clientes WHERE id = $1`, [clienteId])
@@ -321,6 +359,90 @@ describe("Onboarding GD · Criação de Grupos de WhatsApp", () => {
 
     expect(r.status).toBe(404);
     expect(r.json.error.code).toBe("CLIENTE_NAO_ENCONTRADO");
+  });
+
+  it("POST /onboarding/whatsapp-community associa grupo interno à comunidade explicitamente", async () => {
+    const clienteId = await criarClienteExemplo({ nome: "Clínica Vida Nova" });
+    await db.query(
+      `UPDATE public.gd_clientes SET grupo_interno_jid = '120363555555@g.us' WHERE id = $1`,
+      [clienteId]
+    );
+
+    mockEvolutionCommunityLinker.mockResolvedValueOnce({
+      success: true,
+      community: "GD — Operação Interna",
+    });
+
+    const r = await chamar("POST", `/api/gd/clientes/${clienteId}/onboarding/whatsapp-community`, {
+      perfil: "equipeGd",
+      body: {},
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.json.success).toBe(true);
+    expect(r.json.comunidade).toBe("GD — Operação Interna");
+    expect(mockEvolutionCommunityLinker).toHaveBeenCalledWith({
+      instanceName: "vexo-adm",
+      groupJid: "120363555555@g.us",
+      communityName: "GD — Operação Interna",
+      communityJid: null,
+    });
+  });
+
+  it("POST /onboarding/branding-avatar gera e aplica foto do grupo explicitamente", async () => {
+    const clienteId = await criarClienteExemplo({ nome: "Clínica Dental Art" });
+    await db.query(
+      `UPDATE public.gd_clientes SET grupo_cliente_jid = '120363777777@g.us' WHERE id = $1`,
+      [clienteId]
+    );
+
+    mockBrandingAvatarGenerator.mockResolvedValueOnce({
+      success: true,
+      evolutionUpdated: true,
+      driveFile: { fileId: "file-xyz", fileLink: "https://drive.google.com/xyz" },
+    });
+
+    const r = await chamar("POST", `/api/gd/clientes/${clienteId}/onboarding/branding-avatar`, {
+      perfil: "equipeGd",
+      body: { identidade_folder_id: "folder_01" },
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.json.success).toBe(true);
+    expect(r.json.branding.evolution_updated).toBe(true);
+    expect(mockBrandingAvatarGenerator).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientName: "Clínica Dental Art",
+        groupJid: "120363777777@g.us",
+        identidadeFolderId: "folder_01",
+      })
+    );
+  });
+
+  it("permite atualizar e ler google_calendar_email via PATCH e GET /api/gd/clientes/:id", async () => {
+    const clienteId = await criarClienteExemplo({ nome: "Empresa Calendário Ltda" });
+
+    // Atualização com e-mail válido
+    const patchRes = await chamar("PATCH", `/api/gd/clientes/${clienteId}`, {
+      perfil: "equipeGd",
+      body: { google_calendar_email: "agenda@empresacalendario.com.br" },
+    });
+
+    expect(patchRes.status).toBe(200);
+    expect(patchRes.json.cliente.google_calendar_email).toBe("agenda@empresacalendario.com.br");
+
+    // Consulta GET
+    const getRes = await chamar("GET", `/api/gd/clientes/${clienteId}`, { perfil: "equipeGd" });
+    expect(getRes.status).toBe(200);
+    expect(getRes.json.cliente.google_calendar_email).toBe("agenda@empresacalendario.com.br");
+
+    // Recusa e-mail inválido
+    const failRes = await chamar("PATCH", `/api/gd/clientes/${clienteId}`, {
+      perfil: "equipeGd",
+      body: { google_calendar_email: "email-invalido-sem-arroba" },
+    });
+    expect(failRes.status).toBe(422);
+    expect(failRes.json.error.code).toBe("GOOGLE_CALENDAR_EMAIL_INVALIDO");
   });
 });
 

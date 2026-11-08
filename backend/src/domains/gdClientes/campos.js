@@ -134,6 +134,23 @@ export function lerEscopo(bruto) {
 export const lerEscopoOriginal = (bruto) => texto(bruto, "ESCOPO_ORIGINAL_INVALIDO", "Escopo original", 1000);
 export const lerAprovadorNome = (bruto) => texto(bruto, "APROVADOR_NOME_INVALIDO", "Nome do aprovador", 200);
 
+export function lerEmail(bruto, code = "EMAIL_INVALIDO", rotulo = "E-mail") {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido(code, `${rotulo} precisa ser texto.`);
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const t = bruto.trim();
+  if (!emailRegex.test(t)) {
+    throw new CampoInvalido(code, `${rotulo} precisa ser um endereço de e-mail válido.`);
+  }
+  if (t.length > 255) {
+    throw new CampoInvalido(code, `${rotulo} passa de 255 caracteres.`);
+  }
+  return t;
+}
+
+export const lerGoogleCalendarEmail = (bruto) =>
+  lerEmail(bruto, "GOOGLE_CALENDAR_EMAIL_INVALIDO", "E-mail da Agenda Google");
+
 export function lerCnpjAConfirmar(bruto) {
   if (bruto == null) return false;
   if (typeof bruto !== "boolean") throw new CampoInvalido("CNPJ_A_CONFIRMAR_INVALIDO", "cnpj_a_confirmar precisa ser true ou false.");
@@ -145,6 +162,7 @@ export const CAMPOS_OPCIONAIS = {
   cnpj: lerCnpj,
   aprovador_nome: lerAprovadorNome,
   aprovador_telefone: lerTelefone,
+  google_calendar_email: lerGoogleCalendarEmail,
   drive_url: lerDriveUrl,
   contrato_url: lerContratoUrl,
   briefing_url: lerBriefingUrl,

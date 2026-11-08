@@ -3634,7 +3634,13 @@ Condições: ${condicoes}`;
       });
     }
 
-    if (email_agenda_google && (typeof email_agenda_google !== "string" || !emailRegex.test(email_agenda_google.trim()))) {
+    if (!email_agenda_google || typeof email_agenda_google !== "string" || !email_agenda_google.trim()) {
+      return res.status(400).json({
+        error: "EMAIL_AGENDA_GOOGLE_OBRIGATORIO",
+        message: "E-mail da agenda Google é obrigatório.",
+      });
+    }
+    if (!emailRegex.test(email_agenda_google.trim())) {
       return res.status(400).json({
         error: "EMAIL_AGENDA_GOOGLE_INVALIDO",
         message: "E-mail da agenda Google inválido.",
@@ -3753,8 +3759,9 @@ Condições: ${condicoes}`;
                aprovador_nome = $3,
                aprovador_telefone = $4,
                escopo = $5,
+               google_calendar_email = $6,
                updated_at = now()
-           WHERE id = $6
+           WHERE id = $7
            RETURNING *`,
           [
             razao_social.trim(),
@@ -3762,6 +3769,7 @@ Condições: ${condicoes}`;
             responsavel_nome ? responsavel_nome.trim() : null,
             formattedTelefone,
             sanitizedEscopo ? JSON.stringify(sanitizedEscopo) : null,
+            email_agenda_google.trim(),
             cliId,
           ]
         );
@@ -3785,8 +3793,9 @@ Condições: ${condicoes}`;
                  aprovador_nome = $4,
                  aprovador_telefone = $5,
                  escopo = $6,
+                 google_calendar_email = $7,
                  updated_at = now()
-             WHERE id = $7
+             WHERE id = $8
              RETURNING *`,
             [
               id,
@@ -3795,6 +3804,7 @@ Condições: ${condicoes}`;
               responsavel_nome ? responsavel_nome.trim() : null,
               formattedTelefone,
               sanitizedEscopo ? JSON.stringify(sanitizedEscopo) : null,
+              email_agenda_google.trim(),
               cliId,
             ]
           );
@@ -3809,9 +3819,10 @@ Condições: ${condicoes}`;
                aprovador_telefone,
                escopo,
                proposal_id,
+               google_calendar_email,
                origem
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'fluxo')
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'fluxo')
              RETURNING *`,
             [
               GD_DONO,
@@ -3821,6 +3832,7 @@ Condições: ${condicoes}`;
               formattedTelefone,
               sanitizedEscopo ? JSON.stringify(sanitizedEscopo) : null,
               id,
+              email_agenda_google.trim(),
             ]
           );
           cliente = insCliRes.rows[0];

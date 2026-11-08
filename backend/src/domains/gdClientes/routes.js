@@ -17,8 +17,11 @@ import {
   createEvolutionGroup,
   getEvolutionGroupInviteCode,
   sendTextMessageViaEvolution,
+  linkEvolutionGroupToCommunity,
+  updateEvolutionGroupPicture,
 } from "../../services/evolution.js";
-import { setupClientDriveFolders } from "../../services/googleDriveClientSetup.js";
+import { setupClientDriveFolders, uploadFileToDrive } from "../../services/googleDriveClientSetup.js";
+import { generateAndApplyGdBrandingAvatar } from "../../services/gdBrandingAvatarService.js";
 import { sendSlackMessage } from "../../services/trelloSlackReporter.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
@@ -107,6 +110,7 @@ class ErroDeRota extends Error {
 
 const SELECT_CLIENTE = `
   SELECT c.id, c.nome, c.cnpj, c.cnpj_a_confirmar, c.aprovador_nome, c.aprovador_telefone,
+         c.google_calendar_email,
          c.drive_url, c.contrato_url, c.briefing_url, c.ficha_vexo_url, c.planejamento_url,
          c.grupo_interno_jid, c.grupo_interno_url, c.grupo_cliente_jid, c.grupo_cliente_url,
          c.onboarding_concluido_em,
@@ -139,6 +143,7 @@ function clienteDe(linha) {
     cnpj_a_confirmar: linha.cnpj_a_confirmar,
     aprovador_nome: linha.aprovador_nome,
     aprovador_telefone: linha.aprovador_telefone,
+    google_calendar_email: linha.google_calendar_email ?? null,
     drive_url: linha.drive_url,
     contrato_url: linha.contrato_url ?? null,
     briefing_url: linha.briefing_url ?? null,
@@ -317,8 +322,12 @@ export function registerGdClientesRoutes(app, {
   evolutionGroupCreator = createEvolutionGroup,
   evolutionInviteGetter = getEvolutionGroupInviteCode,
   evolutionMessageSender = sendTextMessageViaEvolution,
+  evolutionCommunityLinker = linkEvolutionGroupToCommunity,
+  evolutionPictureUpdater = updateEvolutionGroupPicture,
+  brandingAvatarGenerator = generateAndApplyGdBrandingAvatar,
   slackSender = sendSlackMessage,
   driveFolderSetup = setupClientDriveFolders,
+  driveFileUploader = uploadFileToDrive,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -731,69 +740,7 @@ export function registerGdClientesRoutes(app, {
 
         const clienteTelefone = body.cliente_telefone || cliente.aprovador_telefone || null;
 
-        // 1. Criar Grupo Interno GD (apenas colaboradores)
-        const subjectInterno = `PASTA: ${cliente.nome.toUpperCase()}`.slice(0, 100);
-        const resInterno = await evolutionGroupCreator({
-          instanceName,
-          subject: subjectInterno,
-          description: `Grupo interno da equipe Geração Digital para alinhamento e operação de ${cliente.nome}.`,
-          participants: equipeParticipantes,
-        });
-
-        const jidInterno = resInterno.groupJid;
-        let urlInterno = null;
-        if (jidInterno) {
-          try {
-            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidInterno });
-            urlInterno = invite?.inviteUrl || null;
-          } catch (e) {
-            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo interno (${jidInterno}):`, e.message);
-          }
-        }
-
-        // 2. Criar Grupo com o Cliente (Máquina de Vendas)
-        const subjectCliente = `MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}`.slice(0, 100);
-        const participantesClienteGrupo = [...equipeParticipantes];
-        if (clienteTelefone) {
-          participantesClienteGrupo.push(clienteTelefone);
-        }
-
-        const resCliente = await evolutionGroupCreator({
-          instanceName,
-          subject: subjectCliente,
-          description: `Canal oficial de acompanhamento e suporte da Geração Digital para ${cliente.nome}.`,
-          participants: participantesClienteGrupo,
-        });
-
-        const jidCliente = resCliente.groupJid;
-        let urlCliente = null;
-        if (jidCliente) {
-          try {
-            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidCliente });
-            urlCliente = invite?.inviteUrl || null;
-          } catch (e) {
-            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo do cliente (${jidCliente}):`, e.message);
-          }
-
-          // Mensagem de boas-vindas no grupo do cliente
-          const nomeDestinatario = cliente.aprovador_nome || cliente.nome;
-          const textoBoasVindas =
-            typeof body.mensagem_boas_vindas === "string" && body.mensagem_boas_vindas.trim()
-              ? body.mensagem_boas_vindas.trim()
-              : `Olá, ${nomeDestinatario}! Seja muito bem-vindo(a) à Geração Digital! 🚀\n\nEste é o nosso canal oficial de atendimento, alinhamento e acompanhamento com toda a nossa equipe. Qualquer dúvida ou solicitação, estamos sempre por aqui.\n\nEm breve daremos início aos próximos passos do seu onboarding!`;
-
-          try {
-            await evolutionMessageSender({
-              instanceName,
-              number: jidCliente,
-              text: textoBoasVindas,
-            });
-          } catch (e) {
-            console.warn(`[GD-Onboarding] Falha ao enviar mensagem de boas-vindas no grupo ${jidCliente}:`, e.message);
-          }
-        }
-
-        // 3. Google Drive: Provisionar estrutura de pastas se ainda não tiver
+        // 1. Google Drive: Provisionar estrutura oficial de 4 pastas se ainda não tiver
         let driveUrlFinal = cliente.drive_url || null;
         let driveSetupResult = null;
         if (body.drive_url) {
@@ -810,6 +757,99 @@ export function registerGdClientesRoutes(app, {
             }
           } catch (e) {
             console.warn(`[GD-Onboarding] Falha ao provisionar pasta no Google Drive para ${cliente.nome}:`, e.message);
+          }
+        }
+
+        // 2. Criar Grupo Interno GD (PASTA: {CLIENTE})
+        const subjectInterno = `PASTA: ${cliente.nome.toUpperCase()}`.slice(0, 100);
+        const resInterno = await evolutionGroupCreator({
+          instanceName,
+          subject: subjectInterno,
+          description: `Grupo interno da equipe Geração Digital para alinhamento e operação de ${cliente.nome}.`,
+          participants: equipeParticipantes,
+        });
+
+        const jidInterno = resInterno.groupJid;
+        let urlInterno = null;
+        let communityInternaResult = null;
+        if (jidInterno) {
+          try {
+            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidInterno });
+            urlInterno = invite?.inviteUrl || null;
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo interno (${jidInterno}):`, e.message);
+          }
+
+          // 2.1 Associação automática do grupo interno à Comunidade WhatsApp "GD — Operação Interna"
+          try {
+            communityInternaResult = await evolutionCommunityLinker({
+              instanceName,
+              groupJid: jidInterno,
+              communityName: "GD — Operação Interna",
+              communityJid: body.comunidade_interna_jid || process.env.GD_COMUNIDADE_INTERNA_JID || null,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao associar grupo interno à Comunidade GD — Operação Interna (${jidInterno}):`, e.message);
+          }
+        }
+
+        // 3. Criar Grupo com o Cliente (MÁQUINA DE VENDAS: {CLIENTE})
+        const subjectCliente = `MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}`.slice(0, 100);
+        const participantesClienteGrupo = [...equipeParticipantes];
+        if (clienteTelefone) {
+          participantesClienteGrupo.push(clienteTelefone);
+        }
+
+        const resCliente = await evolutionGroupCreator({
+          instanceName,
+          subject: subjectCliente,
+          description: `Canal oficial de acompanhamento e suporte da Geração Digital para ${cliente.nome}.`,
+          participants: participantesClienteGrupo,
+        });
+
+        const jidCliente = resCliente.groupJid;
+        let urlCliente = null;
+        let brandingAvatarResult = null;
+        if (jidCliente) {
+          try {
+            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidCliente });
+            urlCliente = invite?.inviteUrl || null;
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo do cliente (${jidCliente}):`, e.message);
+          }
+
+          // 3.1 Mensagem de boas-vindas no grupo do cliente
+          const nomeDestinatario = cliente.aprovador_nome || cliente.nome;
+          const textoBoasVindas =
+            typeof body.mensagem_boas_vindas === "string" && body.mensagem_boas_vindas.trim()
+              ? body.mensagem_boas_vindas.trim()
+              : `Olá, ${nomeDestinatario}! Seja muito bem-vindo(a) à Geração Digital! 🚀\n\nEste é o nosso canal oficial de atendimento, alinhamento e acompanhamento com toda a nossa equipe. Qualquer dúvida ou solicitação, estamos sempre por aqui.\n\nEm breve daremos início aos próximos passos do seu onboarding!`;
+
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: jidCliente,
+              text: textoBoasVindas,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao enviar mensagem de boas-vindas no grupo ${jidCliente}:`, e.message);
+          }
+
+          // 3.2 Geração da Imagem de Perfil Padronizada (tarja preta 50% + Máquina de Vendas + Cliente),
+          // envio via Evolution API (/group/updateGroupPicture) e salvamento em 01_Identidade_e_Logos do Drive
+          try {
+            const identidadeFolderId = driveSetupResult?.subfolders?.identidade?.id || null;
+            brandingAvatarResult = await brandingAvatarGenerator({
+              clientName: cliente.nome,
+              groupJid: jidCliente,
+              instanceName,
+              identidadeFolderId,
+              logoUrl: body.logo_url || null,
+              evolutionUpdater: evolutionPictureUpdater,
+              driveUploader: driveFileUploader,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao gerar e aplicar avatar padronizado para ${cliente.nome}:`, e.message);
           }
         }
 
@@ -831,15 +871,23 @@ export function registerGdClientesRoutes(app, {
           if (cliente.estado_atual !== "GRUPOS_CRIADOS") {
             const mov = {
               estado: "GRUPOS_CRIADOS",
-              motivo: "Pastas e grupos de WhatsApp criados via automação GoClaw.",
+              motivo: "Pastas, grupos de WhatsApp, comunidade interna e avatar gerados via automação GoClaw.",
               ocorridoEm: null,
               dataEstimada: false,
               origem: "fluxo",
             };
 
             const dadosEvento = {
-              grupo_interno: { jid: jidInterno, url: urlInterno },
-              grupo_cliente: { jid: jidCliente, url: urlCliente },
+              grupo_interno: {
+                jid: jidInterno,
+                url: urlInterno,
+                comunidade: communityInternaResult?.community || "GD — Operação Interna",
+              },
+              grupo_cliente: {
+                jid: jidCliente,
+                url: urlCliente,
+                avatar_drive_url: brandingAvatarResult?.driveFile?.fileLink || null,
+              },
               drive_url: driveUrlFinal,
             };
 
@@ -851,12 +899,13 @@ export function registerGdClientesRoutes(app, {
           return { evento, cliente: clienteAtualizado };
         });
 
-        // 4. Notificação WhatsApp (Substituindo Slack): avisar no grupo interno e para Conrado e Caio
+        // 4. Notificação WhatsApp: avisar no grupo interno e para a equipe
         const textoNotificacao =
           `🚀 *Onboarding GD · Setup Concluído!*\n\n` +
           `• *Cliente:* ${cliente.nome}\n` +
-          `• *Pasta Interna:* ${urlInterno || jidInterno || "Criada"}\n` +
+          `• *Pasta Interna:* ${urlInterno || jidInterno || "Criada"} (associada à Comunidade *GD — Operação Interna*)\n` +
           `• *Máquina de Vendas:* ${urlCliente || jidCliente || "Criada"}\n` +
+          (brandingAvatarResult?.evolutionUpdated ? `• *Foto do Perfil:* Atualizada com tarja oficial 50%\n` : "") +
           (driveUrlFinal ? `• *Google Drive:* ${driveUrlFinal}\n` : "") +
           `• *Estado:* GRUPOS_CRIADOS\n\n` +
           `📌 *Atenção:* Vincular a Máquina de Vendas à Comunidade *"Máquinas de Vendas GD"* como *Oculto*.`;
@@ -902,16 +951,118 @@ export function registerGdClientesRoutes(app, {
           cliente: resultado.cliente,
           evento: resultado.evento,
           grupos: {
-            interno: { jid: jidInterno, url: urlInterno },
-            cliente: { jid: jidCliente, url: urlCliente },
+            interno: {
+              jid: jidInterno,
+              url: urlInterno,
+              comunidade: communityInternaResult?.community || "GD — Operação Interna",
+            },
+            cliente: {
+              jid: jidCliente,
+              url: urlCliente,
+              avatar_drive_url: brandingAvatarResult?.driveFile?.fileLink || null,
+            },
           },
           drive: {
             url: driveUrlFinal,
             subfolders: driveSetupResult?.subfolders || null,
           },
+          branding: brandingAvatarResult ? {
+            evolution_updated: brandingAvatarResult.evolutionUpdated,
+            drive_file: brandingAvatarResult.driveFile,
+          } : null,
         });
       } catch (err) {
         responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/whatsapp-groups");
+      }
+    }
+  );
+
+  // ─── Onboarding: Vincular grupo interno à Comunidade WhatsApp ─────────────
+  app.post(
+    "/api/gd/clientes/:id/onboarding/whatsapp-community",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+        const jidInterno = req.body.grupo_interno_jid || cliente.grupo_interno_jid;
+        if (!jidInterno) {
+          throw new ErroDeRota(422, "GRUPO_INTERNO_NAO_CONFIGURADO", "Cliente ainda não possui grupo interno criado.");
+        }
+        const instanceName =
+          (typeof req.body.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const communityRes = await evolutionCommunityLinker({
+          instanceName,
+          groupJid: jidInterno,
+          communityName: "GD — Operação Interna",
+          communityJid: req.body.comunidade_interna_jid || process.env.GD_COMUNIDADE_INTERNA_JID || null,
+        });
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          grupo_interno_jid: jidInterno,
+          comunidade: communityRes.community,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/whatsapp-community");
+      }
+    }
+  );
+
+  // ─── Onboarding: Gerar avatar padronizado e aplicar na Máquina de Vendas ────
+  app.post(
+    "/api/gd/clientes/:id/onboarding/branding-avatar",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+        const jidCliente = req.body.grupo_cliente_jid || cliente.grupo_cliente_jid;
+        if (!jidCliente) {
+          throw new ErroDeRota(422, "GRUPO_CLIENTE_NAO_CONFIGURADO", "Cliente ainda não possui grupo de atendimento criado.");
+        }
+        const instanceName =
+          (typeof req.body.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const avatarRes = await brandingAvatarGenerator({
+          clientName: cliente.nome,
+          groupJid: jidCliente,
+          instanceName,
+          identidadeFolderId: req.body.identidade_folder_id || null,
+          logoUrl: req.body.logo_url || null,
+          evolutionUpdater: evolutionPictureUpdater,
+          driveUploader: driveFileUploader,
+        });
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          grupo_cliente_jid: jidCliente,
+          branding: {
+            evolution_updated: avatarRes.evolutionUpdated,
+            drive_file: avatarRes.driveFile,
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/branding-avatar");
       }
     }
   );
