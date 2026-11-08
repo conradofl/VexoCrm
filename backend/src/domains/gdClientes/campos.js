@@ -184,6 +184,31 @@ export const lerBriefingAprovacaoInternaEm = (b) => lerDataOpcional(b, "BRIEFING
 export const lerBriefingAprovacaoClienteStatus = (b) => texto(b, "BRIEFING_APROVACAO_CLIENTE_STATUS_INVALIDO", "Status da aprovação do cliente", 50);
 export const lerBriefingAprovacaoClienteEm = (b) => lerDataOpcional(b, "BRIEFING_APROVACAO_CLIENTE_EM_INVALIDO", "Data da aprovação do cliente");
 
+// ─── Frente 6: Briefing Comercial Vexo, Mineração WhatsApp e Setup de Chips ─────
+export function lerVextoBriefingChips(b) {
+  if (b == null) return null;
+  return lerJsonOpcional(b, "VEXTO_BRIEFING_CHIPS_INVALIDO", "Chips Virtuais Vexo");
+}
+
+export function lerVextoBriefingTransbordoNumero(b) {
+  if (vazio(b)) return null;
+  return lerTelefone(b);
+}
+
+export function lerVextoBriefingPilares(b) {
+  if (b == null) return null;
+  return lerJsonOpcional(b, "VEXTO_BRIEFING_PILARES_INVALIDO", "Pilares do Briefing Vexo");
+}
+
+export function lerVextoBriefingMineracao(b) {
+  if (b == null) return null;
+  return lerJsonOpcional(b, "VEXTO_BRIEFING_MINERACAO_INVALIDA", "Mineração de WhatsApp Vexo");
+}
+
+export const lerVextoBriefingPromptGerado = (b) => texto(b, "VEXTO_BRIEFING_PROMPT_INVALIDO", "Prompt do agente Vexo", 100000);
+export const lerVextoBriefingStatus = (b) => texto(b, "VEXTO_BRIEFING_STATUS_INVALIDO", "Status do Briefing Vexo", 50);
+export const lerVextoBriefingAgenteId = (b) => texto(b, "VEXTO_BRIEFING_AGENTE_ID_INVALIDO", "ID do Agente Vexo", 100);
+
 export function lerCnpjAConfirmar(bruto) {
   if (bruto == null) return false;
   if (typeof bruto !== "boolean") throw new CampoInvalido("CNPJ_A_CONFIRMAR_INVALIDO", "cnpj_a_confirmar precisa ser true ou false.");
@@ -226,4 +251,11 @@ export const CAMPOS_OPCIONAIS = {
   briefing_aprovacao_cliente_em: lerBriefingAprovacaoClienteEm,
   briefing_transcricao: lerBriefingTranscricao,
   briefing_formulario_respostas: lerBriefingFormularioRespostas,
+  vexto_briefing_chips: lerVextoBriefingChips,
+  vexto_briefing_transbordo_numero: lerVextoBriefingTransbordoNumero,
+  vexto_briefing_pilares: lerVextoBriefingPilares,
+  vexto_briefing_mineracao: lerVextoBriefingMineracao,
+  vexto_briefing_prompt_gerado: lerVextoBriefingPromptGerado,
+  vexto_briefing_status: lerVextoBriefingStatus,
+  vexto_briefing_agente_id: lerVextoBriefingAgenteId,
 };

@@ -44,6 +44,10 @@ const MIGRATION_FRENTE5 = readFileSync(
   resolve("supabase/migrations/20261108120000_gd_clientes_briefing_docs_approval.sql"),
   "utf8"
 );
+const MIGRATION_FRENTE6 = readFileSync(
+  resolve("supabase/migrations/20261108160000_gd_clientes_vexto_briefing_and_chips.sql"),
+  "utf8"
+);
 
 let db;
 let server;
@@ -87,6 +91,7 @@ describe("Chat GD · Atualização e Unificação do Modelo Oficial de Contrato 
     await db.exec(MIGRATION_CALENDAR);
     await db.exec(MIGRATION_BRIEFING);
     await db.exec(MIGRATION_FRENTE5);
+    await db.exec(MIGRATION_FRENTE6);
 
     const app = express();
     app.use(express.json());

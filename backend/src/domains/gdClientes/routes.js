@@ -46,6 +46,8 @@ import {
   executarFluxoApresentacaoComercial,
   processarIngestaoLogosNovas,
 } from "../../services/gdCommercialPresentationWorkflowService.js";
+import { minerarConversasWhatsApp } from "../../services/gdWhatsAppChatMinerService.js";
+import { construirEAtivarAgenteInbound } from "../../services/gdAgentBuilderService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
@@ -145,6 +147,10 @@ const SELECT_CLIENTE = `
          c.briefing_aprovacao_interna_ressalvas, c.briefing_aprovacao_interna_em,
          c.briefing_aprovacao_cliente_status, c.briefing_aprovacao_cliente_em,
          c.briefing_transcricao, c.briefing_formulario_respostas,
+         c.vexto_briefing_chips, c.vexto_briefing_transbordo_numero,
+         c.vexto_briefing_pilares, c.vexto_briefing_mineracao,
+         c.vexto_briefing_prompt_gerado, c.vexto_briefing_status,
+         c.vexto_briefing_agente_id,
          c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
          c.estado_data_estimada, c.created_at, c.updated_at,
          e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
@@ -202,6 +208,13 @@ function clienteDe(linha) {
     briefing_aprovacao_cliente_em: linha.briefing_aprovacao_cliente_em ?? null,
     briefing_transcricao: linha.briefing_transcricao ?? null,
     briefing_formulario_respostas: linha.briefing_formulario_respostas ?? null,
+    vexto_briefing_chips: linha.vexto_briefing_chips ?? null,
+    vexto_briefing_transbordo_numero: linha.vexto_briefing_transbordo_numero ?? null,
+    vexto_briefing_pilares: linha.vexto_briefing_pilares ?? null,
+    vexto_briefing_mineracao: linha.vexto_briefing_mineracao ?? null,
+    vexto_briefing_prompt_gerado: linha.vexto_briefing_prompt_gerado ?? null,
+    vexto_briefing_status: linha.vexto_briefing_status ?? "PENDENTE",
+    vexto_briefing_agente_id: linha.vexto_briefing_agente_id ?? null,
     escopo: linha.escopo,
     escopo_original: linha.escopo_original,
     origem: linha.origem,
@@ -227,7 +240,15 @@ function lerOpcionais(body) {
 }
 
 // escopo, briefing_slots_oferecidos, briefing_documentos e briefing_formulario_respostas são jsonb
-const JSONB_CAMPOS = ["escopo", "briefing_slots_oferecidos", "briefing_documentos", "briefing_formulario_respostas"];
+const JSONB_CAMPOS = [
+  "escopo",
+  "briefing_slots_oferecidos",
+  "briefing_documentos",
+  "briefing_formulario_respostas",
+  "vexto_briefing_chips",
+  "vexto_briefing_pilares",
+  "vexto_briefing_mineracao",
+];
 const valorSql = (campo, valor) => (JSONB_CAMPOS.includes(campo) && valor !== null ? JSON.stringify(valor) : valor);
 const colunaSql = (campo, n) => (JSONB_CAMPOS.includes(campo) ? `$${n}::jsonb` : `$${n}`);
 
@@ -386,6 +407,8 @@ export function registerGdClientesRoutes(app, {
   approvalMessageProcessor = processarMensagemAprovacaoWhatsApp,
   commercialWorkflowExecutor = executarFluxoApresentacaoComercial,
   commercialBatchIngestion = processarIngestaoLogosNovas,
+  chatMiner = minerarConversasWhatsApp,
+  agentBuilder = construirEAtivarAgenteInbound,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -1718,4 +1741,180 @@ export function registerGdClientesRoutes(app, {
       }
     }
   );
+
+  // ─── Frente 6: Briefing Comercial Vexo, Mineração WhatsApp e 4 Pilares ─────
+
+  // Upload do histórico de conversas e mineração pelo Gemini
+  const lidarUploadChatMineracao = async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const clienteId = req.params.id;
+      const db = pool();
+      const cliente = await lerCliente(db, clienteId);
+      if (!cliente) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+
+      const body = req.body || {};
+      let input = null;
+
+      if (body.fileBuffer) {
+        input = Buffer.isBuffer(body.fileBuffer) ? body.fileBuffer : Buffer.from(body.fileBuffer);
+      } else if (body.fileBase64 || body.file) {
+        const rawBase64 = String(body.fileBase64 || body.file).replace(/^data:([a-zA-Z0-9/+-]+);base64,/, "");
+        input = Buffer.from(rawBase64, "base64");
+      } else if (typeof body.chat_text === "string" && body.chat_text.trim()) {
+        input = body.chat_text.trim();
+      } else if (typeof body.text === "string" && body.text.trim()) {
+        input = body.text.trim();
+      } else if (typeof body.chat === "string" && body.chat.trim()) {
+        input = body.chat.trim();
+      }
+
+      if (!input) {
+        throw new ErroDeRota(
+          400,
+          "CONVERSA_NAO_INFORMADA",
+          "Envie o arquivo de conversas do WhatsApp (_chat.txt ou .zip) ou o texto no corpo."
+        );
+      }
+
+      const fileName = body.fileName || body.file_name || "exportacao_whatsapp.txt";
+      const apiKey = body.api_key || null;
+      const model = body.model || "gemini-flash-latest";
+      const llmCaller = body.llmCaller || null;
+
+      const mineracao = await chatMiner({
+        input,
+        nomeArquivo: fileName,
+        cliente,
+        apiKey,
+        model,
+        llmCaller,
+      });
+
+      await db.query(
+        `UPDATE public.gd_clientes
+         SET vexto_briefing_mineracao = $1::jsonb,
+             vexto_briefing_status = CASE WHEN vexto_briefing_status = 'AGENTE_ATIVADO' THEN 'AGENTE_ATIVADO' ELSE 'MINERADO' END
+         WHERE id = $2 AND dono_client_id = $3`,
+        [JSON.stringify(mineracao), clienteId, GD_DONO]
+      );
+
+      res.json({
+        success: true,
+        cliente_id: clienteId,
+        status: "MINERADO",
+        mineracao,
+      });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/vexto-briefing/upload-chat");
+    }
+  };
+
+  app.post("/api/gd/clientes/:id/vexto-briefing/upload-chat", requireGdOrGoclawAuth(requireFirebaseAuth), lidarUploadChatMineracao);
+  app.post("/api/gd/clientes/:id/vexo-briefing/upload-chat", requireGdOrGoclawAuth(requireFirebaseAuth), lidarUploadChatMineracao);
+
+  // Salvamento dos 4 pilares e ativação do prompt do agente
+  const lidarSalvarPilaresEAtivar = async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const clienteId = req.params.id;
+      const db = pool();
+      const cliente = await lerCliente(db, clienteId);
+      if (!cliente) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+
+      const body = req.body || {};
+      const pilares = body.pilares || {};
+      const chips = body.chips || null;
+      const transbordoNumero = body.transbordo_numero || body.transbordoNumero || body.telefone_fechador || null;
+      const instanceName = body.instance_name || body.instanceName || null;
+      const instances = Array.isArray(body.instances) ? body.instances : [];
+      const model = body.model || "gemini-flash-latest";
+      const ativarAgente = body.ativar_agente !== false;
+      const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+      if (ativarAgente) {
+        const resultado = await agentBuilder({
+          pool: db,
+          clienteId,
+          pilares,
+          chips,
+          transbordoNumero,
+          instanceName,
+          instances,
+          model,
+          actor: ator,
+        });
+
+        return res.json({
+          success: true,
+          ...resultado,
+        });
+      }
+
+      // Se apenas salvar sem ativar o agente na tabela followup_companies
+      await db.query(
+        `UPDATE public.gd_clientes
+         SET vexto_briefing_pilares = $1::jsonb,
+             vexto_briefing_chips = COALESCE($2::jsonb, vexto_briefing_chips),
+             vexto_briefing_transbordo_numero = COALESCE($3, vexto_briefing_transbordo_numero),
+             vexto_briefing_status = 'PILARES_SALVOS'
+         WHERE id = $4 AND dono_client_id = $5`,
+        [JSON.stringify(pilares), chips ? JSON.stringify(chips) : null, transbordoNumero, clienteId, GD_DONO]
+      );
+
+      res.json({
+        success: true,
+        cliente_id: clienteId,
+        status: "PILARES_SALVOS",
+        pilares,
+      });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/vexto-briefing/salvar-pilares");
+    }
+  };
+
+  app.post("/api/gd/clientes/:id/vexto-briefing/salvar-pilares", requireGdOrGoclawAuth(requireFirebaseAuth), lidarSalvarPilaresEAtivar);
+  app.post("/api/gd/clientes/:id/vexo-briefing/salvar-pilares", requireGdOrGoclawAuth(requireFirebaseAuth), lidarSalvarPilaresEAtivar);
+
+  // Visualização do status técnico, chips virtuais e pilares
+  const lidarConsultaBriefingVexo = async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const clienteId = req.params.id;
+      const db = pool();
+      const cliente = await lerCliente(db, clienteId);
+      if (!cliente) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+
+      res.json({
+        success: true,
+        cliente_id: clienteId,
+        nome: cliente.nome,
+        estado_atual: cliente.estado_atual,
+        status: cliente.vexto_briefing_status || "PENDENTE",
+        chips_virtuais: cliente.vexto_briefing_chips || {
+          chips: [],
+          total: 0,
+          responsavel: "Gabriel (até 72h após contratação)",
+          recomendacao: "2 a 3 chips virtuais de proteção contra restrição",
+          status: "PENDENTE_COMPRA",
+        },
+        transbordo_numero: cliente.vexto_briefing_transbordo_numero || null,
+        mineracao: cliente.vexto_briefing_mineracao || null,
+        pilares: cliente.vexto_briefing_pilares || null,
+        prompt_gerado: cliente.vexto_briefing_prompt_gerado || null,
+        agente_id: cliente.vexto_briefing_agente_id || null,
+      });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/:id/vexto-briefing");
+    }
+  };
+
+  app.get("/api/gd/clientes/:id/vexto-briefing", requireGdOrGoclawAuth(requireFirebaseAuth), lidarConsultaBriefingVexo);
+  app.get("/api/gd/clientes/:id/vexo-briefing", requireGdOrGoclawAuth(requireFirebaseAuth), lidarConsultaBriefingVexo);
 }
