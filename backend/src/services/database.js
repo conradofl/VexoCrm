@@ -100,7 +100,12 @@ export function _setPgDatabasePoolForTesting(pool) {
   supabase = pool ? createPgSupabaseClient(pool) : null;
 }
 
+function _setSupabaseForTesting(client) {
+  supabase = client;
+}
+
 export {
+  _setSupabaseForTesting,
   initDatabase,
   shutdownPgPool,
   getDatabaseHostForLogging,

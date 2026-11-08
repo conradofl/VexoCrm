@@ -406,4 +406,90 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
       ignored: "chip_nao_vinculado",
     });
   });
+
+  it("[REGRA 6] chip pessoal (geracao-digital-pessoal-caio) é descartado com chip_pessoal_sem_ia mesmo se chatbot_enabled = true", async () => {
+    const { webhookHandler } = setupTestEnvironment({
+      chatbotEnabled: true,
+      inboundAgent: {
+        id: "agent-jhon",
+        name: "Jhon Atendimento",
+        evolution_instance: "Vexo Atende",
+        evolution_instances: ["Vexo Atende"],
+        inbound_enabled: true,
+      },
+    });
+
+    const req = {
+      body: {
+        event: "messages.upsert",
+        clientId: "vexo-adm",
+        phone: "5534997719779",
+        instance: "geracao-digital-pessoal-caio",
+        data: {
+          key: {
+            remoteJid: "5534997719779@s.whatsapp.net",
+            fromMe: false,
+            id: "WA_MSG_CAIO_PESSOAL",
+          },
+          message: {
+            conversation: "E aí, tudo bem?",
+          },
+          messageTimestamp: 1788212600,
+        },
+      },
+      query: {},
+    };
+
+    let responseData = null;
+    const res = {
+      json: vi.fn((data) => {
+        responseData = data;
+      }),
+    };
+
+    await webhookHandler(req, res);
+
+    expect(responseData?.motivo || responseData?.ignored).toBe("chip_pessoal_sem_ia");
+  });
+
+  it("[REGRA 7] lead de campanha em chip sem agente inbound próprio não cai em atendimento quando os passos terminam", async () => {
+    const { webhookHandler } = setupTestEnvironment({
+      chatbotEnabled: true,
+      hasActiveCampaign: true,
+      inboundAgent: null,
+    });
+
+    const req = {
+      body: {
+        event: "messages.upsert",
+        clientId: "vexo-adm",
+        phone: "5511999998888",
+        instance: "chip-disparo-sem-inbound",
+        data: {
+          key: {
+            remoteJid: "5511999998888@s.whatsapp.net",
+            fromMe: false,
+            id: "WA_MSG_CAMP_NO_INBOUND",
+          },
+          message: {
+            conversation: "Opa, recebi sua mensagem",
+          },
+          messageTimestamp: 1788212600,
+        },
+      },
+      query: {},
+    };
+
+    let responseData = null;
+    const res = {
+      json: vi.fn((data) => {
+        responseData = data;
+      }),
+    };
+
+    await webhookHandler(req, res);
+
+    // Deve ser descartado sem herdar o robô geral de atendimento
+    expect(responseData?.motivo).toBe("lead_campanha_sem_agente_inbound");
+  });
 });

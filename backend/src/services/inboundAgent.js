@@ -12,6 +12,11 @@
 
 import { getLeadClientEvolutionInstances, expandChipAliases } from "./evolution.js";
 
+export function isPersonalInstance(name) {
+  if (!name || typeof name !== "string") return false;
+  return /pessoal/i.test(name);
+}
+
 function normalize(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -95,6 +100,11 @@ function buildInboundAgentConfig(row) {
 export async function resolveInboundAgentConfig({ supabase, clientId, instanceName, agentId }) {
   if (!supabase || !clientId) return null;
 
+  const wanted = normalize(instanceName);
+  if (wanted && isPersonalInstance(wanted)) {
+    return null;
+  }
+
   if (normalize(agentId)) {
     const { data: row, error } = await supabase
       .from("followup_companies")
@@ -129,21 +139,23 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
 
   const resolveAliases = (instValue) => expandChipAliases(instValue, tenantInstances);
 
-  const wanted = normalize(instanceName);
   const wantedAliases = wanted ? resolveAliases(wanted) : [];
 
   // Casa pelo nome da instância ou apelidos resolvidos (slug da URL, ID ou display name).
-  // Sem casamento exato, só aceita uma linha genérica se ela for a única do tenant.
+  // Sem casamento exato, só aceita uma linha genérica (sem chips amarrados) se ela for a única do tenant.
   const candidatas = wanted
     ? data.filter((row) => {
         const rowAliases = instancesOfRow(row).flatMap(resolveAliases);
         return rowAliases.some((alias) => wantedAliases.includes(alias));
       })
     : [];
+  const isGenericRow = (row) => instancesOfRow(row).length === 0;
+  const genericFallbackRow = data.length === 1 && isGenericRow(data[0]) ? data[0] : null;
+
   const byInstance =
     candidatas.find((row) => row.inbound_enabled === true) ||
     candidatas[0] ||
-    (data.length === 1 ? data[0] : null);
+    genericFallbackRow;
   if (!byInstance) return null;
 
   return buildInboundAgentConfig(byInstance);

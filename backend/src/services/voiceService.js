@@ -1,4 +1,4 @@
-import { EdgeTTS } from "node-edge-tts";
+let EdgeTTS = null;
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
@@ -69,6 +69,10 @@ export async function generateSpeechAudio({
   const startMs = Date.now();
 
   try {
+    if (!EdgeTTS) {
+      const mod = await import("node-edge-tts");
+      EdgeTTS = mod.EdgeTTS;
+    }
     const tts = new EdgeTTS({
       voice: profile.voice,
       pitch: profile.pitch,

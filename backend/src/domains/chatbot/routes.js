@@ -68,7 +68,7 @@ import {
   trackInvalidResponse,
 } from "../../hardcoded-chatbot-persistence.js";
 import { parseStoredHistorico } from "../../leads-outlier-schema.js";
-import { resolveInboundAgentConfig, buildSpinInstruction, fireInboundCompletionWebhook } from "../../services/inboundAgent.js";
+import { resolveInboundAgentConfig, buildSpinInstruction, fireInboundCompletionWebhook, isPersonalInstance } from "../../services/inboundAgent.js";
 import {
   shouldIgnoreInboundEvent,
   resolveInboundEventName,
@@ -3135,9 +3135,9 @@ export function registerChatbotRoutes(app, deps) {
         ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
       ];
 
-      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar
+      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar (não pausada)
       let activeWaitCampaign = allCandidates.find((c) => {
-        if (!c) return false;
+        if (!c || c.status === "pausada") return false;
         const progress = c.leadImportItem?.progress || {};
         const hasProgress = progress && Object.keys(progress).length > 0;
         if (!hasProgress) return false;
@@ -3146,7 +3146,7 @@ export function registerChatbotRoutes(app, deps) {
         const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
         const steps = stepPlan.enabledSteps || [];
         return nextStepIndex < steps.length;
-      }) || campaignReplyContext.processingWaitForReplyMatches?.[0] || null;
+      }) || (campaignReplyContext.processingWaitForReplyMatches?.[0]?.status !== "pausada" ? campaignReplyContext.processingWaitForReplyMatches?.[0] : null) || null;
 
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
@@ -3219,6 +3219,20 @@ export function registerChatbotRoutes(app, deps) {
             responder({ status: "skipped_disparo_only", motivo: "campanha_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
             return;
           }
+          if (escolha.agente === "atendimento") {
+            const chipInboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
+            const chipHasExplicitAgent = Boolean(chipInboundConfig && chipInboundConfig.enabled && chipInboundConfig.agentKind !== "campanha");
+            if (!chipHasExplicitAgent) {
+              console.log("[campaign-routing] campanha sem roteiro próprio e chip sem agente inbound próprio — skipped_disparo_only:", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+                instanceName,
+                campaignId: activeCampaignForLead.id,
+              });
+              responder({ status: "skipped_disparo_only", motivo: "lead_campanha_sem_agente_inbound" }, { clientId, phone: maskPhoneForLog(phone) });
+              return;
+            }
+          }
           campaignPromptIdOverride = escolha.campaignPromptId;
           chatbotPromptTypeOverride = escolha.agente === AGENTE_CAMPANHA && escolha.campaignPromptId ? "campanha" : "padrao";
           if (escolha.configuracaoIncompleta) {
@@ -3237,6 +3251,34 @@ export function registerChatbotRoutes(app, deps) {
             endsAt: activeCampaignForLead.endsAt,
           });
         } else {
+          // Bloqueio rigoroso: se o chip for pessoal ou se for lead de campanha sem IA explicitamente habilitada no chip,
+          // NUNCA atribuir agente: "atendimento". O fluxo deve retornar com skipped_disparo_only e encerrar.
+          const isPersonal = isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName) || isPersonalInstance(matchedChip?.name);
+          if (isPersonal) {
+            console.log("[campaign-routing] chip pessoal sem IA — skipped_disparo_only:", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              instanceName,
+            });
+            responder({ status: "skipped_disparo_only", motivo: "chip_pessoal_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
+            return;
+          }
+
+          if (temCampanhaParaEsteTelefone) {
+            const chipInboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
+            const chipHasExplicitAgent = Boolean(chipInboundConfig && chipInboundConfig.enabled && chipInboundConfig.agentKind !== "campanha");
+            if (!chipHasExplicitAgent) {
+              console.log("[campaign-routing] lead de campanha sem campanha ativa casada e chip sem agente inbound próprio — skipped_disparo_only:", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+                instanceName,
+                campanhasCasadas: campaignReplyContext?.matches?.length ?? 0,
+              });
+              responder({ status: "skipped_disparo_only", motivo: "lead_campanha_sem_agente_inbound" }, { clientId, phone: maskPhoneForLog(phone) });
+              return;
+            }
+          }
+
           console.log("[campaign-routing] agente escolhido", {
             clientId, phone: maskPhoneForLog(phone),
             agente: "atendimento",
@@ -3331,6 +3373,13 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // ── CAMINHO 2: CHATBOT / AGENTE IA (INBOUND OU AGENTE DE CAMPANHA) ──
+    // Trava rígida 1: Chip pessoal NUNCA responde com IA de atendimento
+    const chipAtual = String(instanceName || rawInstanceName || matchedChip?.name || "").trim();
+    if (isPersonalInstance(chipAtual) || isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName) || isPersonalInstance(matchedChip?.name)) {
+      descartar("chip_pessoal_sem_ia", { clientId, instanceName, rawInstanceName });
+      return;
+    }
+
     // SÓ AQUI CONSULTA SE O AGENTE DE IA ESTÁ HABILITADO.
     let tenantSettingsReadFailed = false;
     const tenantSettings = await getLeadClientN8nSettings(clientId).catch((err) => {
@@ -3372,6 +3421,12 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
     } else {
+      // Se este lead veio de campanha mas o chip não tem agente próprio inbound, descarta para não herdar IA geral
+      if (temCampanhaParaEsteTelefone) {
+        descartar("inbound_disabled", { clientId, instanceName, motivo: "lead_campanha_sem_agente_inbound" });
+        return;
+      }
+
       // Chip SEM agente próprio: depende do chatbot global do tenant
       if (tenantSettings && tenantSettings.chatbot_enabled === false) {
         // Frente B: Antes de descartar, verifica se o telefone tem run de campanha aguardando resposta
@@ -3438,7 +3493,6 @@ export function registerChatbotRoutes(app, deps) {
       const chipsDoChatbot = Array.isArray(tenantSettings?.chatbot_instances)
         ? tenantSettings.chatbot_instances.map((v) => String(v ?? "").trim()).filter(Boolean)
         : [];
-      const chipAtual = String(instanceName || "").trim();
       if (chipsDoChatbot.length > 0) {
         const allTenantInstances = (await getLeadClientEvolutionInstances(clientId).catch(() => [])) || [];
         const aliasesDoChip = (await resolveInstanceNameAliases(clientId, chipAtual).catch(() => null)) || [];
@@ -3456,27 +3510,13 @@ export function registerChatbotRoutes(app, deps) {
 
         const vinculado = Array.from(nomesDoChipAtual).some((nome) => nomesMarcadosExpandidos.has(nome));
         if (!chipAtual || !vinculado) {
-          const hasAnyValidConfiguredChip = allTenantInstances.some((inst) => {
-            const urlName = inst.dispatch_webhook_url?.split("/").filter(Boolean).pop();
-            return chipsDoChatbot.some((m) => m === inst.id || m === inst.name || (urlName && m === urlName));
+          descartar("chip_nao_vinculado", {
+            clientId,
+            chipAtual: chipAtual || null,
+            aliasesDoChipAtual: Array.from(nomesDoChipAtual),
+            chipsMarcados: chipsDoChatbot,
           });
-
-          if (!hasAnyValidConfiguredChip && allTenantInstances.length > 0) {
-            console.warn("[chatbot-webhook] chips_marcados_orfaos: nenhum chip ativo do tenant casa com a lista marcada. Atendendo pelo chip ativo para evitar descarte de lead:", {
-              clientId,
-              chipAtual,
-              chipsMarcados: chipsDoChatbot,
-              instanciasAtivas: allTenantInstances.map((i) => i.name || i.id),
-            });
-          } else {
-            descartar("chip_nao_vinculado", {
-              clientId,
-              chipAtual: chipAtual || null,
-              aliasesDoChipAtual: Array.from(nomesDoChipAtual),
-              chipsMarcados: chipsDoChatbot,
-            });
-            return;
-          }
+          return;
         }
       }
     }

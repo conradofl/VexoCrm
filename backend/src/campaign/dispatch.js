@@ -2252,9 +2252,35 @@ export async function executeCampaignChipHandoff({
   };
 }
 
+// Trava atômica em memória para impedir que webhooks concorrentes disparem o mesmo passo duplicado
+const replyDispatchLocks = new Map();
+const REPLY_DISPATCH_LOCK_TTL_MS = 10_000;
+
 export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch, replyPayload = {} }) {
   if (!supabase || !clientId || !phone || !campaignMatch?.id) {
     return { continued: false, reason: "missing_context" };
+  }
+
+  // Trava de concorrência por lead e campanha
+  const sanitizedPhone = String(phone).replace(/\D/g, "");
+  const lockKey = `${clientId}:${campaignMatch.id}:${sanitizedPhone}`;
+  const nowMs = Date.now();
+  const existingLockTime = replyDispatchLocks.get(lockKey);
+  if (existingLockTime && nowMs - existingLockTime < REPLY_DISPATCH_LOCK_TTL_MS) {
+    console.warn("[continueCampaignLeadFromReply] Concorrência bloqueada: lead já está processando avanço de passo", {
+      clientId,
+      campaignId: campaignMatch.id,
+      phone: maskPhoneForLog(phone),
+      elapsedMs: nowMs - existingLockTime,
+    });
+    return { continued: false, reason: "concurrent_reply_in_progress" };
+  }
+  replyDispatchLocks.set(lockKey, nowMs);
+
+  if (replyDispatchLocks.size > 1000) {
+    for (const [k, ts] of replyDispatchLocks.entries()) {
+      if (nowMs - ts > 60_000) replyDispatchLocks.delete(k);
+    }
   }
 
   let { data: campaign, error: fetchError } = await supabase
@@ -2273,8 +2299,32 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     fetchError = fallback.error;
   }
 
-  if (fetchError) throw fetchError;
-  if (!campaign) return { continued: false, reason: "campaign_not_found" };
+  if (fetchError) {
+    replyDispatchLocks.delete(lockKey);
+    throw fetchError;
+  }
+  if (!campaign) {
+    replyDispatchLocks.delete(lockKey);
+    return { continued: false, reason: "campaign_not_found" };
+  }
+
+  // Trava de campanha pausada: interrompe imediatamente
+  const isPaused =
+    campaign.status === "pausada" ||
+    String(campaign.status || "").toLowerCase() === "pausada" ||
+    campaignMatch?.status === "pausada" ||
+    String(campaignMatch?.status || "").toLowerCase() === "pausada";
+
+  if (isPaused) {
+    replyDispatchLocks.delete(lockKey);
+    console.log("[continueCampaignLeadFromReply] Campanha pausada — interrompendo avanço de lead:", {
+      clientId,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      status: campaign.status,
+    });
+    return { continued: false, reason: "campaign_paused" };
+  }
 
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
