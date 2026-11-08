@@ -208,6 +208,12 @@ async function migrationAlreadyRepresented(client, fileName) {
         where table_schema = 'public' and table_name = 'gd_clientes' and column_name = 'google_calendar_email'
       ) as ok
     `,
+    "20261108110000_gd_clientes_briefing_scheduling.sql": `
+      select exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'gd_clientes' and column_name = 'briefing_agendado_inicio'
+      ) as ok
+    `,
   };
 
   const query = checks[fileName];

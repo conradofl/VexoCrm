@@ -1,5 +1,6 @@
 import fetch from "node-fetch"; // Assumindo node-fetch ou fetch nativo (Node 18+)
 import { getGdRedisClient } from "./redisClient.js";
+import { processarRespostaBriefingNoWhatsApp } from "../services/gdBriefingReminderService.js";
 
 // Função para processar a chegada de mensagem do WhatsApp e mandar para o Slack
 export async function processEvolutionMessageToSlack(pool, payload) {
@@ -70,6 +71,13 @@ export async function processEvolutionMessageToSlack(pool, payload) {
   
   if (isMedia) {
     slackMsgText = `*${pushName}:*\n📎 [${mediaType} recebido — ver no telefone]\n${text}`;
+  }
+
+  // Intercepta escolha autônoma de horários de briefing do cliente no grupo de WhatsApp
+  if (!fromMe && text && remoteJid && remoteJid.endsWith("@g.us")) {
+    processarRespostaBriefingNoWhatsApp({ pool, groupJid: remoteJid, text, instanceName: instance }).catch((err) => {
+      console.warn("[gd-mirror-in] Falha ao processar resposta de briefing:", err.message);
+    });
   }
 
   try {

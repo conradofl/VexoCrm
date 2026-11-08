@@ -151,6 +151,20 @@ export function lerEmail(bruto, code = "EMAIL_INVALIDO", rotulo = "E-mail") {
 export const lerGoogleCalendarEmail = (bruto) =>
   lerEmail(bruto, "GOOGLE_CALENDAR_EMAIL_INVALIDO", "E-mail da Agenda Google");
 
+export const lerBriefingMeetUrl = (bruto) => lerUrlOpcional(bruto, "BRIEFING_MEET_URL_INVALIDA", "Link do Google Meet");
+export const lerBriefingCalendarEventId = (bruto) => texto(bruto, "BRIEFING_CALENDAR_EVENT_ID_INVALIDO", "ID do evento da Google Agenda", 255);
+export const lerBriefingAgendadoInicio = (bruto) => lerDataOpcional(bruto, "BRIEFING_AGENDADO_INICIO_INVALIDO", "Data/hora de início do briefing");
+export const lerBriefingAgendadoFim = (bruto) => lerDataOpcional(bruto, "BRIEFING_AGENDADO_FIM_INVALIDO", "Data/hora de término do briefing");
+export function lerBriefingSlotsOferecidos(bruto) {
+  if (bruto == null) return null;
+  if (typeof bruto === "object") return bruto;
+  try {
+    return JSON.parse(bruto);
+  } catch {
+    throw new CampoInvalido("BRIEFING_SLOTS_INVALIDOS", "Slots de briefing precisam ser JSON válido.");
+  }
+}
+
 export function lerCnpjAConfirmar(bruto) {
   if (bruto == null) return false;
   if (typeof bruto !== "boolean") throw new CampoInvalido("CNPJ_A_CONFIRMAR_INVALIDO", "cnpj_a_confirmar precisa ser true ou false.");
@@ -176,4 +190,13 @@ export const CAMPOS_OPCIONAIS = {
   escopo: lerEscopo,
   escopo_original: lerEscopoOriginal,
   cnpj_a_confirmar: lerCnpjAConfirmar,
+  briefing_slots_oferecidos: lerBriefingSlotsOferecidos,
+  briefing_agendado_inicio: lerBriefingAgendadoInicio,
+  briefing_agendado_fim: lerBriefingAgendadoFim,
+  briefing_meet_url: lerBriefingMeetUrl,
+  briefing_calendar_event_id: lerBriefingCalendarEventId,
+  briefing_lembrete_vespera_agendado_para: (b) => lerDataOpcional(b, "LEMBRETE_VESPERA_INVALIDO", "Data do lembrete de véspera"),
+  briefing_lembrete_vespera_enviado_em: (b) => lerDataOpcional(b, "LEMBRETE_VESPERA_INVALIDO", "Data de envio do lembrete de véspera"),
+  briefing_lembrete_1h_agendado_para: (b) => lerDataOpcional(b, "LEMBRETE_1H_INVALIDO", "Data do lembrete de 1 hora"),
+  briefing_lembrete_1h_enviado_em: (b) => lerDataOpcional(b, "LEMBRETE_1H_INVALIDO", "Data de envio do lembrete de 1 hora"),
 };

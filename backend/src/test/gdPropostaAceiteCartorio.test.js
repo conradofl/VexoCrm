@@ -30,6 +30,10 @@ const MIGRATION_CALENDAR = readFileSync(
   resolve("supabase/migrations/20261108100000_gd_clientes_google_calendar_email.sql"),
   "utf8"
 );
+const MIGRATION_BRIEFING = readFileSync(
+  resolve("supabase/migrations/20261108110000_gd_clientes_briefing_scheduling.sql"),
+  "utf8"
+);
 
 let db;
 let server;
@@ -74,6 +78,7 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
     await db.exec(MIGRATION_CONTRACTS);
     await db.exec(MIGRATION_CLAUSULAS);
     await db.exec(MIGRATION_CALENDAR);
+    await db.exec(MIGRATION_BRIEFING);
 
     // Template ativo padrão para a GD
     await db.exec(`

@@ -23,6 +23,19 @@ import {
 import { setupClientDriveFolders, uploadFileToDrive } from "../../services/googleDriveClientSetup.js";
 import { generateAndApplyGdBrandingAvatar } from "../../services/gdBrandingAvatarService.js";
 import { sendSlackMessage } from "../../services/trelloSlackReporter.js";
+import {
+  findAvailableBriefingSlots,
+  createBriefingCalendarEvent,
+  formatBriefingOfferMessage,
+  formatarDataHoraAmigavel,
+  calculateReminderTimes,
+  GD_CALENDAR_AGENCIA,
+  GD_CALENDAR_CAIO,
+} from "../../services/gdCalendarService.js";
+import {
+  processarLembretesBriefing,
+  GD_CAIO_WHATSAPP_PADRAO,
+} from "../../services/gdBriefingReminderService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
@@ -114,6 +127,10 @@ const SELECT_CLIENTE = `
          c.drive_url, c.contrato_url, c.briefing_url, c.ficha_vexo_url, c.planejamento_url,
          c.grupo_interno_jid, c.grupo_interno_url, c.grupo_cliente_jid, c.grupo_cliente_url,
          c.onboarding_concluido_em,
+         c.briefing_slots_oferecidos, c.briefing_agendado_inicio, c.briefing_agendado_fim,
+         c.briefing_meet_url, c.briefing_calendar_event_id,
+         c.briefing_lembrete_vespera_agendado_para, c.briefing_lembrete_vespera_enviado_em,
+         c.briefing_lembrete_1h_agendado_para, c.briefing_lembrete_1h_enviado_em,
          c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
          c.estado_data_estimada, c.created_at, c.updated_at,
          e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
@@ -154,6 +171,15 @@ function clienteDe(linha) {
     grupo_cliente_jid: linha.grupo_cliente_jid ?? null,
     grupo_cliente_url: linha.grupo_cliente_url ?? null,
     onboarding_concluido_em: linha.onboarding_concluido_em ?? null,
+    briefing_slots_oferecidos: linha.briefing_slots_oferecidos ?? null,
+    briefing_agendado_inicio: linha.briefing_agendado_inicio ?? null,
+    briefing_agendado_fim: linha.briefing_agendado_fim ?? null,
+    briefing_meet_url: linha.briefing_meet_url ?? null,
+    briefing_calendar_event_id: linha.briefing_calendar_event_id ?? null,
+    briefing_lembrete_vespera_agendado_para: linha.briefing_lembrete_vespera_agendado_para ?? null,
+    briefing_lembrete_vespera_enviado_em: linha.briefing_lembrete_vespera_enviado_em ?? null,
+    briefing_lembrete_1h_agendado_para: linha.briefing_lembrete_1h_agendado_para ?? null,
+    briefing_lembrete_1h_enviado_em: linha.briefing_lembrete_1h_enviado_em ?? null,
     escopo: linha.escopo,
     escopo_original: linha.escopo_original,
     origem: linha.origem,
@@ -178,9 +204,10 @@ function lerOpcionais(body) {
   return lidos;
 }
 
-// escopo é jsonb: vai como texto JSON e o SQL faz o cast.
-const valorSql = (campo, valor) => (campo === "escopo" && valor !== null ? JSON.stringify(valor) : valor);
-const colunaSql = (campo, n) => (campo === "escopo" ? `$${n}::jsonb` : `$${n}`);
+// escopo e briefing_slots_oferecidos são jsonb: vão como texto JSON e o SQL faz o cast.
+const JSONB_CAMPOS = ["escopo", "briefing_slots_oferecidos"];
+const valorSql = (campo, valor) => (JSONB_CAMPOS.includes(campo) && valor !== null ? JSON.stringify(valor) : valor);
+const colunaSql = (campo, n) => (JSONB_CAMPOS.includes(campo) ? `$${n}::jsonb` : `$${n}`);
 
 // Sem ocorrido_em: fluxo, agora. Com ocorrido_em: correção, com motivo obrigatório; nunca no futuro.
 function lerMovimento(body) {
@@ -328,6 +355,9 @@ export function registerGdClientesRoutes(app, {
   slackSender = sendSlackMessage,
   driveFolderSetup = setupClientDriveFolders,
   driveFileUploader = uploadFileToDrive,
+  calendarSlotFinder = findAvailableBriefingSlots,
+  calendarEventCreator = createBriefingCalendarEvent,
+  reminderProcessor = processarLembretesBriefing,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -810,6 +840,7 @@ export function registerGdClientesRoutes(app, {
         const jidCliente = resCliente.groupJid;
         let urlCliente = null;
         let brandingAvatarResult = null;
+        let briefingOfferResult = null;
         if (jidCliente) {
           try {
             const invite = await evolutionInviteGetter({ instanceName, groupJid: jidCliente });
@@ -851,6 +882,35 @@ export function registerGdClientesRoutes(app, {
           } catch (e) {
             console.warn(`[GD-Onboarding] Falha ao gerar e aplicar avatar padronizado para ${cliente.nome}:`, e.message);
           }
+
+          // 3.3 Oferta de horários de briefing no grupo do cliente (Frente 4)
+          if (jidCliente && body.oferecer_briefing !== false) {
+            try {
+              const slotsRes = await calendarSlotFinder({
+                fromDate: new Date(),
+                targetDays: [1, 2, 3],
+              });
+              if (slotsRes?.options?.length > 0) {
+                const textoOferta = formatBriefingOfferMessage({
+                  clienteNome: cliente.nome,
+                  aprovadorNome: cliente.aprovador_nome,
+                  aprovadorTelefone: clienteTelefone,
+                  slots: slotsRes.options,
+                });
+                await evolutionMessageSender({
+                  instanceName,
+                  number: jidCliente,
+                  text: textoOferta,
+                });
+                briefingOfferResult = {
+                  options: slotsRes.options,
+                  message_sent: true,
+                };
+              }
+            } catch (e) {
+              console.warn(`[GD-Onboarding] Falha ao oferecer horários de briefing para ${cliente.nome}:`, e.message);
+            }
+          }
         }
 
         const resultado = await emTransacao(getPool, async (client) => {
@@ -861,9 +921,19 @@ export function registerGdClientesRoutes(app, {
                     grupo_cliente_jid = $3,
                     grupo_cliente_url = $4,
                     onboarding_concluido_em = now(),
-                    drive_url = COALESCE($5, drive_url)
-              WHERE id = $6 AND dono_client_id = $7`,
-            [jidInterno, urlInterno, jidCliente, urlCliente, driveUrlFinal, clienteId, GD_DONO]
+                    drive_url = COALESCE($5, drive_url),
+                    briefing_slots_oferecidos = COALESCE($6::jsonb, briefing_slots_oferecidos)
+              WHERE id = $7 AND dono_client_id = $8`,
+            [
+              jidInterno,
+              urlInterno,
+              jidCliente,
+              urlCliente,
+              driveUrlFinal,
+              briefingOfferResult?.options ? JSON.stringify(briefingOfferResult.options) : null,
+              clienteId,
+              GD_DONO,
+            ]
           );
 
           // Transiciona estado para GRUPOS_CRIADOS caso o cliente esteja em estado anterior
@@ -970,6 +1040,10 @@ export function registerGdClientesRoutes(app, {
             evolution_updated: brandingAvatarResult.evolutionUpdated,
             drive_file: brandingAvatarResult.driveFile,
           } : null,
+          briefing: briefingOfferResult ? {
+            slots_oferecidos: briefingOfferResult.options,
+            mensagem_enviada: briefingOfferResult.message_sent,
+          } : null,
         });
       } catch (err) {
         responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/whatsapp-groups");
@@ -1063,6 +1137,306 @@ export function registerGdClientesRoutes(app, {
         });
       } catch (err) {
         responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/branding-avatar");
+      }
+    }
+  );
+
+  // ─── Briefing: Oferecer horários disponíveis no WhatsApp do Cliente ────────
+  app.post(
+    "/api/gd/clientes/:id/briefing/oferecer-horarios",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        const jidCliente = req.body?.grupo_cliente_jid || cliente.grupo_cliente_jid;
+        if (!jidCliente) {
+          throw new ErroDeRota(422, "GRUPO_CLIENTE_NAO_CONFIGURADO", "Cliente ainda não possui grupo de atendimento criado.");
+        }
+
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const slotsRes = await calendarSlotFinder({
+          fromDate: req.body?.from_date ? new Date(req.body.from_date) : new Date(),
+          targetDays: Array.isArray(req.body?.target_days) ? req.body.target_days : [1, 2, 3],
+          mockBusyRanges: req.body?.mock_busy_ranges || null,
+        });
+
+        if (!slotsRes?.options || slotsRes.options.length === 0) {
+          throw new ErroDeRota(422, "SEM_SLOTS_DISPONIVEIS", "Nenhum horário comercial disponível encontrado nas agendas para os próximos dias.");
+        }
+
+        const clienteTelefone = req.body?.cliente_telefone || cliente.aprovador_telefone || null;
+        const textoOferta = formatBriefingOfferMessage({
+          clienteNome: cliente.nome,
+          aprovadorNome: cliente.aprovador_nome,
+          aprovadorTelefone: clienteTelefone,
+          slots: slotsRes.options,
+        });
+
+        await evolutionMessageSender({
+          instanceName,
+          number: jidCliente,
+          text: textoOferta,
+        });
+
+        await db.query(
+          `UPDATE public.gd_clientes
+              SET briefing_slots_oferecidos = $1::jsonb
+            WHERE id = $2 AND dono_client_id = $3`,
+          [JSON.stringify(slotsRes.options), clienteId, GD_DONO]
+        );
+
+        const clienteAtualizado = await lerCliente(db, clienteId);
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          grupo_cliente_jid: jidCliente,
+          slots: slotsRes.options,
+          mensagem: textoOferta,
+          cliente: clienteAtualizado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/oferecer-horarios");
+      }
+    }
+  );
+
+  // ─── Briefing: Confirmar agendamento, criar Meet e disparar convites/avisos ─
+  app.post(
+    "/api/gd/clientes/:id/briefing/agendar",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const body = req.body || {};
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        let slotStart = null;
+        let slotEnd = null;
+
+        // Se informou opcao (1, 2, 3), busca dos slots oferecidos
+        if (body.opcao != null) {
+          const numOpcao = Number(body.opcao);
+          const slots = Array.isArray(cliente.briefing_slots_oferecidos)
+            ? cliente.briefing_slots_oferecidos
+            : [];
+          const slotEscolhido = slots.find((s) => Number(s.opcao) === numOpcao || Number(s.id) === numOpcao);
+          if (!slotEscolhido) {
+            throw new ErroDeRota(
+              422,
+              "OPCAO_SLOT_INVALIDA",
+              `Opção ${body.opcao} não encontrada entre os horários oferecidos ao cliente.`
+            );
+          }
+          slotStart = slotEscolhido.inicio;
+          slotEnd = slotEscolhido.fim;
+        } else if (body.slot_start && body.slot_end) {
+          slotStart = new Date(body.slot_start).toISOString();
+          slotEnd = new Date(body.slot_end).toISOString();
+        } else {
+          throw new ErroDeRota(
+            422,
+            "SLOT_OBRIGATORIO",
+            "Informe a opção (1, 2 ou 3) ou slot_start e slot_end para confirmar o agendamento."
+          );
+        }
+
+        const clientCalendarEmail =
+          (typeof body.google_calendar_email === "string" && body.google_calendar_email.trim()) ||
+          cliente.google_calendar_email ||
+          null;
+
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        // Cria o evento no Google Calendar com Google Meet e convidados
+        const eventResult = await calendarEventCreator({
+          clienteId,
+          clienteNome: cliente.nome,
+          slotStart,
+          slotEnd,
+          title: body.title || `Briefing Inicial · ${cliente.nome}`,
+          attendees: [
+            GD_CALENDAR_AGENCIA,
+            GD_CALENDAR_CAIO,
+            clientCalendarEmail,
+          ].filter(Boolean),
+          description: `Reunião de Briefing e Alinhamento Estratégico com a equipe da Geração Digital.\n\nCliente: ${cliente.nome}\nResponsável: ${cliente.aprovador_nome || cliente.nome}`,
+        });
+
+        // Calcula horários da régua de lembretes automáticos
+        const reminderTimes = calculateReminderTimes({ slotStart });
+
+        // Atualiza no banco e registra evento de transição de estado para BRIEFING_AGENDADO
+        const resultado = await emTransacao(getPool, async (client) => {
+          await client.query(
+            `UPDATE public.gd_clientes
+                SET briefing_agendado_inicio = $1,
+                    briefing_agendado_fim = $2,
+                    briefing_meet_url = $3,
+                    briefing_calendar_event_id = $4,
+                    briefing_lembrete_vespera_agendado_para = $5,
+                    briefing_lembrete_1h_agendado_para = $6,
+                    briefing_lembrete_vespera_enviado_em = NULL,
+                    briefing_lembrete_1h_enviado_em = NULL,
+                    google_calendar_email = COALESCE($7, google_calendar_email)
+              WHERE id = $8 AND dono_client_id = $9`,
+            [
+              slotStart,
+              slotEnd,
+              eventResult.meetUrl,
+              eventResult.eventId,
+              reminderTimes.vesperaReminderAt,
+              reminderTimes.umaHoraReminderAt,
+              clientCalendarEmail,
+              clienteId,
+              GD_DONO,
+            ]
+          );
+
+          const mov = {
+            estado: "BRIEFING_AGENDADO",
+            motivo: body.motivo || `Briefing agendado via Google Calendar para ${slotStart}.`,
+            ocorridoEm: null,
+            dataEstimada: false,
+            origem: "fluxo",
+          };
+
+          const dadosEvento = {
+            briefing: {
+              inicio: slotStart,
+              fim: slotEnd,
+              meet_url: eventResult.meetUrl,
+              calendar_event_id: eventResult.eventId,
+              attendees: eventResult.attendees,
+              lembrete_vespera_agendado_para: reminderTimes.vesperaReminderAt,
+              lembrete_1h_agendado_para: reminderTimes.umaHoraReminderAt,
+            },
+          };
+
+          await exigirEstadoValido(client, mov.estado);
+          const evento = await registrarEvento(client, clienteId, mov, ator.id, ator.tipo, dadosEvento);
+          const clienteAtualizado = await lerCliente(client, clienteId);
+          return { evento, cliente: clienteAtualizado };
+        });
+
+        const dataFormatada = formatarDataHoraAmigavel(slotStart);
+        const tagCliente = cliente.aprovador_telefone ? `@${cliente.aprovador_telefone}` : (cliente.aprovador_nome || cliente.nome);
+
+        // 1. Notifica no grupo do cliente (MÁQUINA DE VENDAS: {CLIENTE})
+        if (cliente.grupo_cliente_jid) {
+          const textoCliente =
+            `🎉 *Reunião de Briefing Confirmada!*\n\n` +
+            `Olá, ${tagCliente} (${cliente.aprovador_nome || cliente.nome})! A nossa Reunião de Briefing e Alinhamento Estratégico foi agendada com sucesso.\n\n` +
+            `📅 *Data/Horário:* ${dataFormatada}\n` +
+            `🔗 *Link da Sala (Google Meet):* ${eventResult.meetUrl}\n\n` +
+            (clientCalendarEmail
+              ? `✉️ O convite com link do Google Meet foi enviado para *${clientCalendarEmail}*.\n\n`
+              : "") +
+            `Nos vemos em breve! Qualquer dúvida estamos por aqui. 🚀`;
+
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: cliente.grupo_cliente_jid,
+              text: textoCliente,
+            });
+          } catch (e) {
+            console.warn(`[GD-Briefing] Falha ao enviar confirmação no grupo do cliente (${cliente.grupo_cliente_jid}):`, e.message);
+          }
+        }
+
+        // 2. Notifica diretamente o Caio no WhatsApp
+        const caioNumero = process.env.GD_CAIO_WHATSAPP || GD_CAIO_WHATSAPP_PADRAO;
+        const textoCaio =
+          `📅 *Briefing Agendado!*\n\n` +
+          `• *Cliente:* ${cliente.nome}\n` +
+          `• *Data/Hora:* ${dataFormatada}\n` +
+          `• *Google Meet:* ${eventResult.meetUrl}\n` +
+          `• *Convidados:* mrkgeracaodigital@gmail.com, caioalmeidmrk@gmail.com, ${clientCalendarEmail || "cliente"}\n` +
+          `• *Responsável:* ${cliente.aprovador_nome || cliente.nome} (${cliente.aprovador_telefone || "N/A"})`;
+
+        try {
+          await evolutionMessageSender({
+            instanceName,
+            number: caioNumero,
+            text: textoCaio,
+          });
+        } catch (e) {
+          console.warn(`[GD-Briefing] Falha ao enviar aviso de agendamento para o Caio:`, e.message);
+        }
+
+        res.json({
+          success: true,
+          cliente: resultado.cliente,
+          evento: resultado.evento,
+          briefing: {
+            inicio: slotStart,
+            fim: slotEnd,
+            meet_url: eventResult.meetUrl,
+            calendar_event_id: eventResult.eventId,
+            attendees: eventResult.attendees,
+            lembretes: {
+              vespera_agendado_para: reminderTimes.vesperaReminderAt,
+              uma_hora_agendado_para: reminderTimes.umaHoraReminderAt,
+            },
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/agendar");
+      }
+    }
+  );
+
+  // ─── Briefing: Processar e disparar lembretes pendentes da régua ────────────
+  app.post(
+    "/api/gd/briefing/processar-lembretes",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        const db = pool();
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+        const now = req.body?.now ? new Date(req.body.now) : new Date();
+
+        const resultado = await reminderProcessor({
+          pool: db,
+          now,
+          evolutionSender: evolutionMessageSender,
+          instanceName,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/briefing/processar-lembretes");
       }
     }
   );

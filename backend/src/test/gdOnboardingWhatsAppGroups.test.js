@@ -31,6 +31,10 @@ const MIGRATION_CALENDAR = readFileSync(
   resolve("supabase/migrations/20261108100000_gd_clientes_google_calendar_email.sql"),
   "utf8"
 );
+const MIGRATION_BRIEFING = readFileSync(
+  resolve("supabase/migrations/20261108110000_gd_clientes_briefing_scheduling.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   equipeGd: {
@@ -102,6 +106,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION_DOCUMENTOS);
   await db.exec(MIGRATION_WHATSAPP);
   await db.exec(MIGRATION_CALENDAR);
+  await db.exec(MIGRATION_BRIEFING);
 
   mockEvolutionGroupCreator = vi.fn();
   mockEvolutionInviteGetter = vi.fn();

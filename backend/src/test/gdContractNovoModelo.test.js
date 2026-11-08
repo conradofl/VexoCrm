@@ -36,6 +36,10 @@ const MIGRATION_CALENDAR = readFileSync(
   resolve("supabase/migrations/20261108100000_gd_clientes_google_calendar_email.sql"),
   "utf8"
 );
+const MIGRATION_BRIEFING = readFileSync(
+  resolve("supabase/migrations/20261108110000_gd_clientes_briefing_scheduling.sql"),
+  "utf8"
+);
 
 let db;
 let server;
@@ -77,6 +81,7 @@ describe("Chat GD · Atualização e Unificação do Modelo Oficial de Contrato 
     await db.exec(MIGRATION_CLAUSULAS);
     await db.exec(MIGRATION_NOVO_MODELO);
     await db.exec(MIGRATION_CALENDAR);
+    await db.exec(MIGRATION_BRIEFING);
 
     const app = express();
     app.use(express.json());
