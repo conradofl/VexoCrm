@@ -404,3 +404,200 @@ export async function setupClientDriveFolders({
     isMock: false,
   };
 }
+
+/**
+ * Busca o ID de uma pasta pelo nome e pasta pai via Google Drive API v3
+ */
+async function findFolderByNameApi(folderName, parentId, accessToken) {
+  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName.replace(/'/g, "\\'")}' and trashed = false`;
+  if (parentId) {
+    query += ` and '${parentId}' in parents`;
+  }
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&supportsAllDrives=true&fields=files(id,name)`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json();
+  if (data?.files && data.files.length > 0) {
+    return data.files[0].id;
+  }
+  return null;
+}
+
+/**
+ * Obtém ou cria uma pasta no Google Drive pelo nome
+ */
+export async function getOrCreateDriveFolder({
+  folderName,
+  parentFolderId = null,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  const cleanName = (folderName || "").trim();
+  if (!cleanName) throw new Error("folderName é obrigatório.");
+
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para criar/buscar pasta.");
+    }
+    const hash = crypto.createHash("md5").update(cleanName + (parentFolderId || "")).digest("hex").slice(0, 16);
+    const mockId = `mock_folder_${hash}`;
+    return {
+      id: mockId,
+      name: cleanName,
+      link: `https://drive.google.com/drive/folders/${mockId}`,
+      isMock: true,
+    };
+  }
+
+  const existingId = await findFolderByNameApi(cleanName, parentFolderId, token);
+  if (existingId) {
+    return {
+      id: existingId,
+      name: cleanName,
+      link: `https://drive.google.com/drive/folders/${existingId}`,
+      isMock: false,
+    };
+  }
+
+  const newId = await createFolderApi(cleanName, parentFolderId, token);
+  return {
+    id: newId,
+    name: cleanName,
+    link: `https://drive.google.com/drive/folders/${newId}`,
+    isMock: false,
+  };
+}
+
+/**
+ * Lista arquivos dentro de uma pasta no Google Drive
+ */
+export async function listFilesInDriveFolder({
+  folderId,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!folderId) throw new Error("folderId é obrigatório.");
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para listar arquivos.");
+    }
+    return [];
+  }
+
+  const query = `'${folderId}' in parents and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&supportsAllDrives=true&fields=files(id,name,mimeType,size,createdTime,webViewLink)`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message || `Falha HTTP ${res.status} ao listar arquivos da pasta ${folderId}`);
+  }
+  return data.files || [];
+}
+
+/**
+ * Baixa o buffer binário de um arquivo do Google Drive
+ */
+export async function downloadFileFromDrive({
+  fileId,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!fileId) throw new Error("fileId é obrigatório.");
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para download.");
+    }
+    // 1x1 transparente PNG base64 fallback
+    return Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  }
+
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Falha HTTP ${res.status} ao baixar arquivo ${fileId}`);
+  }
+  const arrayBuf = await res.arrayBuffer();
+  return Buffer.from(arrayBuf);
+}
+
+/**
+ * Exclui um arquivo do Google Drive por ID (Limpeza de lixo eletrônico)
+ */
+export async function deleteFileFromDrive({
+  fileId,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!fileId) throw new Error("fileId é obrigatório para exclusão.");
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para exclusão.");
+    }
+    return { success: true, fileId, isMock: true };
+  }
+
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204 && res.status !== 404) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error?.message || `Falha HTTP ${res.status} ao excluir arquivo ${fileId}`);
+  }
+  return { success: true, fileId, isMock: false };
+}
+
+/**
+ * Garante a criação da estrutura comercial "Máquinas de Vendas / {Nome do Prospect}"
+ */
+export async function ensureCommercialPresentationFolders({
+  prospectName,
+  rootParentId = null,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  const cleanProspect = (prospectName || "Prospect").trim();
+  const parentId =
+    rootParentId ||
+    process.env.GOOGLE_DRIVE_MAQUINAS_DE_VENDAS_FOLDER_ID ||
+    process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID ||
+    null;
+
+  // 1. Garante a pasta raiz "Máquinas de Vendas"
+  const rootFolder = await getOrCreateDriveFolder({
+    folderName: "Máquinas de Vendas",
+    parentFolderId: parentId,
+    accessToken,
+    allowMockFallback,
+  });
+
+  // 2. Garante a pasta do Prospect dentro de "Máquinas de Vendas"
+  const prospectFolder = await getOrCreateDriveFolder({
+    folderName: cleanProspect,
+    parentFolderId: rootFolder.id,
+    accessToken,
+    allowMockFallback,
+  });
+
+  return {
+    rootFolder,
+    prospectFolder,
+    prospectFolderId: prospectFolder.id,
+    prospectFolderLink: prospectFolder.link,
+    isMock: prospectFolder.isMock,
+  };
+}
+

@@ -42,6 +42,10 @@ import {
   enviarDocumentosParaAprovacaoCliente,
   processarMensagemAprovacaoWhatsApp,
 } from "../../services/gdApprovalFlowService.js";
+import {
+  executarFluxoApresentacaoComercial,
+  processarIngestaoLogosNovas,
+} from "../../services/gdCommercialPresentationWorkflowService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
@@ -380,6 +384,8 @@ export function registerGdClientesRoutes(app, {
   internalApprovalSender = enviarDocumentosParaAprovacaoInterna,
   clientApprovalSender = enviarDocumentosParaAprovacaoCliente,
   approvalMessageProcessor = processarMensagemAprovacaoWhatsApp,
+  commercialWorkflowExecutor = executarFluxoApresentacaoComercial,
+  commercialBatchIngestion = processarIngestaoLogosNovas,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -1639,6 +1645,76 @@ export function registerGdClientesRoutes(app, {
         });
       } catch (err) {
         responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos");
+      }
+    }
+  );
+
+  // ─── Comercial: Gerador Autônomo da Apresentação "Máquina de Vendas" ────────
+  app.post(
+    "/api/gd/comercial/gerar-apresentacao",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        const body = req.body || {};
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        // Modo 1: Ingestão em lote / Watcher da pasta "Logos Novas" no Google Drive
+        if (
+          body.poll ||
+          body.ler_pasta_drive ||
+          body.readDriveFolder ||
+          (!body.fileBase64 && !body.logoBase64 && !body.fileBuffer && !body.fileId)
+        ) {
+          const resultadoLote = await commercialBatchIngestion({
+            folderId: body.folderId || null,
+            apiKey: body.api_key || null,
+            model: body.model || "gemini-flash-latest",
+            caioNumero: body.caio_whatsapp || null,
+            instanceName,
+            workflowExecutor: commercialWorkflowExecutor,
+          });
+
+          return res.json({
+            success: true,
+            modo: "ingestao_logos_novas",
+            ...resultadoLote,
+          });
+        }
+
+        // Modo 2: Upload Direto / Processamento de Prospect Específico
+        let fileBuffer = null;
+        if (body.fileBuffer) {
+          fileBuffer = Buffer.isBuffer(body.fileBuffer) ? body.fileBuffer : Buffer.from(body.fileBuffer);
+        } else if (body.fileBase64 || body.logoBase64) {
+          const rawBase64 = (body.fileBase64 || body.logoBase64).replace(/^data:image\/[a-zA-Z0-9]+;base64,/, "");
+          fileBuffer = Buffer.from(rawBase64, "base64");
+        }
+
+        const resultado = await commercialWorkflowExecutor({
+          fileBuffer,
+          fileName: body.fileName || body.file_name || "",
+          fileId: body.fileId || body.file_id || null,
+          prospectName: body.prospectName || body.prospect_name || null,
+          nicho: body.nicho || body.niche || null,
+          apiKey: body.api_key || null,
+          model: body.model || "gemini-flash-latest",
+          caioNumero: body.caio_whatsapp || null,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          driveUploader: driveFileUploader,
+        });
+
+        res.json({
+          success: true,
+          modo: "upload_direto",
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/comercial/gerar-apresentacao");
       }
     }
   );
