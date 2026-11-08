@@ -1265,48 +1265,70 @@ export default function GeracaoDigitalPublicProposal() {
                 </div>
 
                 {/* Dados Cadastrais da Empresa para o Contrato */}
-                <div className="rounded-xl border border-purple-500/20 bg-purple-950/20 p-4 space-y-3 text-left">
-                  <div className="flex items-center gap-2 border-b border-purple-500/20 pb-2">
-                    <Building2 className="h-4 w-4 text-purple-400" />
-                    <span className="text-xs font-bold text-white uppercase tracking-wider">
-                      Dados Cadastrais da Empresa para Emissão do Contrato
-                    </span>
+                <div className="rounded-xl border border-slate-700/60 bg-slate-900/90 p-4 space-y-3.5 text-left shadow-xl backdrop-blur-md">
+                  <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5">
+                    <Building2 className="h-4 w-4 text-violet-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-bold text-white uppercase tracking-wider block font-sans">
+                        Dados Cadastrais da Empresa
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-sans block">
+                        Para emissão e assinatura do contrato oficial
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-3 font-sans">
+                    {/* Razão Social (Largura total) */}
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-300 font-mono">
+                      <Label className="text-[11px] font-medium text-slate-300">
                         Razão Social / Nome da Empresa <span className="text-red-400">*</span>
                       </Label>
                       <Input
                         value={razaoSocial}
                         onChange={(e) => setRazaoSocial(e.target.value)}
                         placeholder="Ex: Minha Empresa Ltda"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
                       />
                     </div>
 
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center">
-                        <Label className="text-[10px] text-slate-300 font-mono">
-                          CNPJ da Empresa <span className="text-red-400">*</span>
-                        </Label>
-                        {cnpj && (
-                          <span className={`text-[9px] font-mono font-bold ${validarCnpjMatematico(cnpj) ? "text-emerald-400" : "text-amber-400"}`}>
-                            {validarCnpjMatematico(cnpj) ? "✓ Válido" : "Inválido"}
-                          </span>
-                        )}
+                    {/* CNPJ + Telefone */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-[11px] font-medium text-slate-300">
+                            CNPJ da Empresa <span className="text-red-400">*</span>
+                          </Label>
+                          {cnpj && (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${validarCnpjMatematico(cnpj) ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                              {validarCnpjMatematico(cnpj) ? "✓ Válido" : "Inválido"}
+                            </span>
+                          )}
+                        </div>
+                        <Input
+                          value={cnpj}
+                          onChange={(e) => setCnpj(e.target.value)}
+                          placeholder="00.000.000/0000-00"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
+                        />
                       </div>
-                      <Input
-                        value={cnpj}
-                        onChange={(e) => setCnpj(e.target.value)}
-                        placeholder="00.000.000/0000-00"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
-                      />
+
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-medium text-slate-300">
+                          Telefone / WhatsApp <span className="text-red-400">*</span>
+                        </Label>
+                        <Input
+                          value={telefone}
+                          onChange={(e) => setTelefone(e.target.value)}
+                          placeholder="(34) 99999-9999"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
+                        />
+                      </div>
                     </div>
 
+                    {/* Responsável Legal (Largura total) */}
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-300 font-mono">
+                      <Label className="text-[11px] font-medium text-slate-300">
                         Nome do Responsável Legal <span className="text-red-400">*</span>
                       </Label>
                       <Input
@@ -1316,142 +1338,148 @@ export default function GeracaoDigitalPublicProposal() {
                           if (!signerName) setSignerName(e.target.value);
                         }}
                         placeholder="Nome completo do representante"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
                       />
                     </div>
 
+                    {/* CPF + E-mail Contrato */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-medium text-slate-300">
+                          CPF do Responsável <span className="text-slate-500 text-[10px]">(Opcional)</span>
+                        </Label>
+                        <Input
+                          value={responsavelCpf}
+                          onChange={(e) => setResponsavelCpf(e.target.value)}
+                          placeholder="000.000.000-00"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-medium text-slate-300">
+                          E-mail para Envio <span className="text-red-400">*</span>
+                        </Label>
+                        <Input
+                          type="email"
+                          value={emailContratante}
+                          onChange={(e) => setEmailContratante(e.target.value)}
+                          placeholder="contato@suaempresa.com.br"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
+                        />
+                      </div>
+                    </div>
+
+                    {/* E-mail Agenda / Google Meet */}
                     <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-300 font-mono">CPF do Responsável (Opcional)</Label>
-                      <Input
-                        value={responsavelCpf}
-                        onChange={(e) => setResponsavelCpf(e.target.value)}
-                        placeholder="000.000.000-00"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-300 font-mono">Telefone / WhatsApp</Label>
-                      <Input
-                        value={telefone}
-                        onChange={(e) => setTelefone(e.target.value)}
-                        placeholder="(34) 99999-9999"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-slate-300 font-mono">
-                        E-mail para Envio do Contrato <span className="text-red-400">*</span>
-                      </Label>
-                      <Input
-                        type="email"
-                        value={emailContratante}
-                        onChange={(e) => setEmailContratante(e.target.value)}
-                        placeholder="contato@suaempresa.com.br"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
-                      />
-                    </div>
-
-                    <div className="space-y-1 sm:col-span-2">
-                      <Label className="text-[10px] text-slate-300 font-mono">
-                        E-mail para Convites de Reunião (Google Meet / Agenda)
+                      <Label className="text-[11px] font-medium text-slate-300">
+                        E-mail para Convites de Reunião <span className="text-slate-500 text-[10px]">(Google Meet / Agenda)</span>
                       </Label>
                       <Input
                         type="email"
                         value={emailAgendaGoogle}
                         onChange={(e) => setEmailAgendaGoogle(e.target.value)}
                         placeholder="agenda@suaempresa.com.br"
-                        className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                        className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
                       />
                     </div>
                   </div>
 
-                  {/* Endereço */}
-                  <div className="pt-2 border-t border-purple-500/10 space-y-2">
-                    <span className="text-[11px] font-bold text-slate-300 font-mono block">Endereço da Empresa</span>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {/* Endereço da Empresa */}
+                  <div className="pt-2.5 border-t border-slate-800 space-y-2.5 font-sans">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Endereço da Empresa
+                    </span>
+
+                    {/* CEP + Número */}
+                    <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-400 font-mono">CEP</Label>
+                        <Label className="text-[10px] text-slate-400">CEP</Label>
                         <Input
                           value={cep}
                           onChange={(e) => handleCepChange(e.target.value)}
                           placeholder="38400-000"
-                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
-                        />
-                      </div>
-                      <div className="space-y-1 col-span-2">
-                        <Label className="text-[10px] text-slate-400 font-mono">Logradouro / Rua</Label>
-                        <Input
-                          value={logradouro}
-                          onChange={(e) => setLogradouro(e.target.value)}
-                          placeholder="Av. Principal"
-                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 h-9 rounded-lg"
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-400 font-mono">Número</Label>
+                        <Label className="text-[10px] text-slate-400">Número</Label>
                         <Input
                           value={numero}
                           onChange={(e) => setNumero(e.target.value)}
-                          placeholder="123"
-                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                          placeholder="123, Sala 4"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 h-9 rounded-lg"
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-400 font-mono">Bairro</Label>
+
+                    {/* Rua / Logradouro */}
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-400">Rua / Logradouro</Label>
+                      <Input
+                        value={logradouro}
+                        onChange={(e) => setLogradouro(e.target.value)}
+                        placeholder="Av. Principal"
+                        className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 h-9 rounded-lg"
+                      />
+                    </div>
+
+                    {/* Bairro + Cidade + UF */}
+                    <div className="grid grid-cols-5 gap-2">
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-[10px] text-slate-400">Bairro</Label>
                         <Input
                           value={bairro}
                           onChange={(e) => setBairro(e.target.value)}
                           placeholder="Centro"
-                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 h-9 rounded-lg"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-400 font-mono">Cidade</Label>
+                      <div className="space-y-1 col-span-2">
+                        <Label className="text-[10px] text-slate-400">Cidade</Label>
                         <Input
                           value={cidade}
                           onChange={(e) => setCidade(e.target.value)}
                           placeholder="Uberlândia"
-                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 h-9 rounded-lg"
                         />
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] text-slate-400 font-mono">UF</Label>
+                      <div className="space-y-1 col-span-1">
+                        <Label className="text-[10px] text-slate-400">UF</Label>
                         <Input
                           value={uf}
                           onChange={(e) => setUf(e.target.value.toUpperCase())}
                           placeholder="MG"
                           maxLength={2}
-                          className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white h-8"
+                          className="bg-slate-950/80 border-slate-700/80 text-xs text-white text-center placeholder:text-slate-500 focus:border-violet-500 h-9 rounded-lg"
                         />
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-[10px] text-slate-400 font-mono">Nome Completo do Assinante no Termo</Label>
+                <div className="space-y-1.5 font-sans">
+                  <Label className="text-[11px] font-medium text-slate-300">
+                    Nome Completo do Assinante no Termo <span className="text-red-400">*</span>
+                  </Label>
                   <Input
                     value={signerName}
                     onChange={(e) => setSignerName(e.target.value)}
                     placeholder="Nome do Responsável Legal"
-                    className="bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder:text-slate-500 focus-visible:ring-purple-500/50 h-9"
+                    className="bg-slate-950/80 border-slate-700/80 text-xs text-white placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 h-9 rounded-lg"
                   />
                 </div>
 
                 {/* Seleção do Método de Assinatura */}
-                <div className="space-y-3">
-                  <Label className="text-[10px] text-slate-400 font-mono block">Escolha a Forma de Aceite</Label>
-                  <div className="flex bg-slate-900/50 p-1 rounded-lg border border-slate-850 gap-1">
+                <div className="space-y-2 font-sans">
+                  <Label className="text-[11px] font-medium text-slate-300 block">Escolha a Forma de Aceite</Label>
+                  <div className="flex bg-slate-950/80 p-1 rounded-lg border border-slate-800 gap-1">
                     <button
                       type="button"
                       onClick={() => setSignMethod('desenho')}
                       className={cn(
-                        "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
-                        signMethod === 'desenho' ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                        "flex-1 py-1.5 text-xs font-bold rounded-md transition-all font-sans",
+                        signMethod === 'desenho' ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow" : "text-slate-400 hover:text-white"
                       )}
                     >
                       Desenhar Assinatura
@@ -1460,8 +1488,8 @@ export default function GeracaoDigitalPublicProposal() {
                       type="button"
                       onClick={() => setSignMethod('digitado')}
                       className={cn(
-                        "flex-1 py-1 text-[10px] font-extrabold rounded-md transition-all font-mono",
-                        signMethod === 'digitado' ? "bg-gradient-to-r from-purple-700 to-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                        "flex-1 py-1.5 text-xs font-bold rounded-md transition-all font-sans",
+                        signMethod === 'digitado' ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow" : "text-slate-400 hover:text-white"
                       )}
                     >
                       Digitar Nome
