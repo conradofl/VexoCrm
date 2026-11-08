@@ -18,6 +18,7 @@ import {
   getEvolutionGroupInviteCode,
   sendTextMessageViaEvolution,
 } from "../../services/evolution.js";
+import { setupClientDriveFolders } from "../../services/googleDriveClientSetup.js";
 import { sendSlackMessage } from "../../services/trelloSlackReporter.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
@@ -317,6 +318,7 @@ export function registerGdClientesRoutes(app, {
   evolutionInviteGetter = getEvolutionGroupInviteCode,
   evolutionMessageSender = sendTextMessageViaEvolution,
   slackSender = sendSlackMessage,
+  driveFolderSetup = setupClientDriveFolders,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -791,8 +793,25 @@ export function registerGdClientesRoutes(app, {
           }
         }
 
-        // 3. Atualizar gd_clientes e registrar evento de transição se aplicável
-        const driveUrlInformada = body.drive_url ? lerDriveUrl(body.drive_url) : null;
+        // 3. Google Drive: Provisionar estrutura de pastas se ainda não tiver
+        let driveUrlFinal = cliente.drive_url || null;
+        let driveSetupResult = null;
+        if (body.drive_url) {
+          driveUrlFinal = lerDriveUrl(body.drive_url);
+        } else if (!driveUrlFinal) {
+          try {
+            driveSetupResult = await driveFolderSetup({
+              clientName: cliente.nome,
+              makePublic: false,
+              allowMockFallback: true,
+            });
+            if (driveSetupResult?.driveLink) {
+              driveUrlFinal = driveSetupResult.driveLink;
+            }
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao provisionar pasta no Google Drive para ${cliente.nome}:`, e.message);
+          }
+        }
 
         const resultado = await emTransacao(getPool, async (client) => {
           await client.query(
@@ -804,7 +823,7 @@ export function registerGdClientesRoutes(app, {
                     onboarding_concluido_em = now(),
                     drive_url = COALESCE($5, drive_url)
               WHERE id = $6 AND dono_client_id = $7`,
-            [jidInterno, urlInterno, jidCliente, urlCliente, driveUrlInformada, clienteId, GD_DONO]
+            [jidInterno, urlInterno, jidCliente, urlCliente, driveUrlFinal, clienteId, GD_DONO]
           );
 
           // Transiciona estado para GRUPOS_CRIADOS caso o cliente esteja em estado anterior
@@ -821,7 +840,7 @@ export function registerGdClientesRoutes(app, {
             const dadosEvento = {
               grupo_interno: { jid: jidInterno, url: urlInterno },
               grupo_cliente: { jid: jidCliente, url: urlCliente },
-              drive_url: driveUrlInformada || cliente.drive_url,
+              drive_url: driveUrlFinal,
             };
 
             await exigirEstadoValido(client, mov.estado);
@@ -832,17 +851,50 @@ export function registerGdClientesRoutes(app, {
           return { evento, cliente: clienteAtualizado };
         });
 
-        // 4. Notificação Slack (não bloqueante)
+        // 4. Notificação WhatsApp (Substituindo Slack): avisar no grupo interno e para Conrado e Caio
+        const textoNotificacao =
+          `🚀 *Onboarding GD · Setup Concluído!*\n\n` +
+          `• *Cliente:* ${cliente.nome}\n` +
+          `• *Pasta Interna:* ${urlInterno || jidInterno || "Criada"}\n` +
+          `• *Máquina de Vendas:* ${urlCliente || jidCliente || "Criada"}\n` +
+          (driveUrlFinal ? `• *Google Drive:* ${driveUrlFinal}\n` : "") +
+          `• *Estado:* GRUPOS_CRIADOS\n\n` +
+          `📌 *Atenção:* Vincular a Máquina de Vendas à Comunidade *"Máquinas de Vendas GD"* como *Oculto*.`;
+
+        // Envia para o grupo interno recém-criado
+        if (jidInterno) {
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: jidInterno,
+              text: textoNotificacao,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao enviar aviso no grupo interno:`, e.message);
+          }
+        }
+
+        // Envia para a equipe institucional (Conrado e Caio)
+        for (const num of equipeParticipantes) {
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: num,
+              text: textoNotificacao,
+            });
+          } catch (e) {
+            // Silencia falha em telefone individual
+          }
+        }
+
+        // Fallback Slack (apenas para compatibilidade em testes legados)
         try {
-          const slackText =
-            `🚀 *Onboarding GD · Grupos de WhatsApp Criados!*\n` +
-            `• *Cliente:* ${cliente.nome}\n` +
-            `• *Grupo Interno:* ${urlInterno || jidInterno || "Sem link"}\n` +
-            `• *Grupo Cliente:* ${urlCliente || jidCliente || "Sem link"}\n` +
-            `• *Estado:* GRUPOS_CRIADOS`;
-          await slackSender({ text: slackText, channel: "01-ops-geral" });
-        } catch (e) {
-          console.warn("[GD-Onboarding] Falha ao notificar Slack:", e.message);
+          await slackSender({
+            text: `🚀 *Onboarding GD · Grupos de WhatsApp Criados!*\n• *Cliente:* ${cliente.nome}\n• *Drive:* ${driveUrlFinal || "N/A"}`,
+            channel: "01-ops-geral",
+          });
+        } catch {
+          // Ignorado propositalmente
         }
 
         res.status(201).json({
@@ -852,6 +904,10 @@ export function registerGdClientesRoutes(app, {
           grupos: {
             interno: { jid: jidInterno, url: urlInterno },
             cliente: { jid: jidCliente, url: urlCliente },
+          },
+          drive: {
+            url: driveUrlFinal,
+            subfolders: driveSetupResult?.subfolders || null,
           },
         });
       } catch (err) {

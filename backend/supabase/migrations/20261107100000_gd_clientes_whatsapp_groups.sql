@@ -16,3 +16,4 @@ ALTER TABLE public.gd_clientes ADD CONSTRAINT gd_clientes_grupo_interno_url
 ALTER TABLE public.gd_clientes DROP CONSTRAINT IF EXISTS gd_clientes_grupo_cliente_url;
 ALTER TABLE public.gd_clientes ADD CONSTRAINT gd_clientes_grupo_cliente_url
   CHECK (grupo_cliente_url IS NULL OR grupo_cliente_url ~ '^https://');
+
