@@ -44,6 +44,10 @@ const MIGRATION_FRENTE6 = readFileSync(
   resolve("supabase/migrations/20261108160000_gd_clientes_vexto_briefing_and_chips.sql"),
   "utf8"
 );
+const MIGRATION_FRENTE7 = readFileSync(
+  resolve("supabase/migrations/20261108180000_gd_clientes_customer_success_and_portal_slug.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -113,6 +117,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION_BRIEFING);
   await db.exec(MIGRATION_FRENTE5);
   await db.exec(MIGRATION_FRENTE6);
+  await db.exec(MIGRATION_FRENTE7);
 
   const app = express();
   app.use(express.json());
@@ -466,5 +471,45 @@ describe("GET /api/gd/public/portal/:token (Consulta pública)", () => {
     expect(depois.rows[0].ultimo_acesso_em).not.toBeNull();
     const dataAcesso = new Date(depois.rows[0].ultimo_acesso_em);
     expect(Number.isNaN(dataAcesso.getTime())).toBe(false);
+  });
+
+  it("Frente 7: consulta pública via portal_slug direto (/api/gd/public/portal/:slug)", async () => {
+    const slugUnico = `cliente-solar-${Date.now()}`;
+    const patchRes = await chamar("PATCH", `/api/gd/clientes/${clienteId}`, {
+      perfil: "equipeGd",
+      body: {
+        portal_slug: slugUnico,
+        grupo_cliente_url: "https://chat.whatsapp.com/invitation-link-123",
+        briefing_documentos: {
+          pastaUrl: "https://drive.google.com/drive/folders/pasta-oficial",
+          documentos: {
+            briefing: { docxUrl: "https://drive.google.com/doc-b.docx", pdfUrl: "https://drive.google.com/doc-b.pdf" },
+            identidade_visual: { docxUrl: "https://drive.google.com/doc-i.docx", pdfUrl: "https://drive.google.com/doc-i.pdf" },
+            roteiro: { docxUrl: "https://drive.google.com/doc-r.docx", pdfUrl: "https://drive.google.com/doc-r.pdf" },
+            planejamento: { docxUrl: "https://drive.google.com/doc-p.docx", pdfUrl: "https://drive.google.com/doc-p.pdf" },
+          },
+        },
+        vexto_briefing_chips: [
+          { chip: "chip-1", status: "ATIVO", ativo: true },
+          { chip: "chip-2", status: "ATIVO", ativo: true },
+        ],
+      },
+    });
+    expect(patchRes.status).toBe(200);
+
+    // Consulta pelo slug
+    const resSlug = await chamar("GET", `/api/gd/public/portal/${slugUnico}`);
+    expect(resSlug.status).toBe(200);
+    expect(resSlug.json.cliente.portal_slug).toBe(slugUnico);
+    expect(resSlug.json.cliente.grupo_cliente_url).toBe("https://chat.whatsapp.com/invitation-link-123");
+    expect(resSlug.json.cliente.briefing_documentos).toBeDefined();
+    expect(resSlug.json.cliente.briefing_documentos.briefing.pdf_url).toBe("https://drive.google.com/doc-b.pdf");
+    expect(resSlug.json.cliente.briefing_documentos.drive_pasta_url).toBe("https://drive.google.com/drive/folders/pasta-oficial");
+    expect(resSlug.json.cliente.chips_configurados).toEqual({
+      total: 2,
+      ativos: 2,
+      prontos: true,
+    });
+    expect(resSlug.json.suporte.google_review_url).toBeDefined();
   });
 });

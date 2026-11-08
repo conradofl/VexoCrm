@@ -67,6 +67,7 @@ function renderComRouter(elemento: React.ReactElement, rotaInicial = "/acompanha
       <MemoryRouter initialEntries={[rotaInicial]}>
         <Routes>
           <Route path="/acompanhamento/:token" element={elemento} />
+          <Route path="/portal/:slug" element={elemento} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -222,6 +223,72 @@ describe("Página Pública do Portal do Cliente (GeracaoDigitalPortalCliente)", 
     const href = linkSuporte.getAttribute("href") || "";
     expect(href).toContain("https://wa.me/5534999998888?text=");
     expect(href).toContain(encodeURIComponent("Olá! Sou do projeto Acme Indústria Solar e gostaria de tirar uma dúvida sobre a etapa atual: Aguardando sua assinatura"));
+  });
+
+  it("Frente 7: renderiza as 5 etapas da jornada do cliente e botões de acesso direto (WhatsApp e Drive)", async () => {
+    const payloadFrente7 = {
+      ...PORTAL_PAYLOAD_MOCK,
+      cliente: {
+        ...PORTAL_PAYLOAD_MOCK.cliente,
+        nome: "Infinie Energia Solar",
+        estado_atual: "ATIVO",
+        grupo_cliente_url: "https://chat.whatsapp.com/grupo-maquina-infinie",
+        drive_url: "https://drive.google.com/drive/folders/pasta-infinie",
+        portal_slug: "infinie-energia",
+        briefing_documentos: {
+          pastaUrl: "https://drive.google.com/drive/folders/pasta-infinie",
+          briefing: {
+            docx_url: "https://drive.google.com/doc-b.docx",
+            pdf_url: "https://drive.google.com/doc-b.pdf",
+          },
+          roteiro: {
+            pdf_url: "https://drive.google.com/roteiros.pdf",
+          },
+        },
+      },
+      suporte: {
+        whatsapp: "5534997719779",
+        google_review_url: "https://g.page/r/geracaodigital/review",
+      },
+    };
+
+    vi.spyOn(apiModule, "fetchApi").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payloadFrente7,
+    } as Response);
+
+    // Testa rota pública via slug (/portal/:slug)
+    renderComRouter(<GeracaoDigitalPortalCliente />, "/portal/infinie-energia");
+
+    await waitFor(() => {
+      expect(screen.getByText("Infinie Energia Solar")).toBeInTheDocument();
+    });
+
+    // 1. As 5 Grandes Etapas da Jornada
+    expect(screen.getByText("Linha do Tempo da sua Jornada na GD")).toBeInTheDocument();
+    expect(screen.getByText("Contrato & Boas-Vindas")).toBeInTheDocument();
+    expect(screen.getByText("Briefing & Identidade Visual")).toBeInTheDocument();
+    expect(screen.getByText("Roteiros & Planejamento Trimestral")).toBeInTheDocument();
+    expect(screen.getByText("Chips Virtuais & Robô IA Ativado")).toBeInTheDocument();
+    expect(screen.getByText("Tráfego Pago & Máquina de Vendas")).toBeInTheDocument();
+
+    // 2. Acesso direto ao Grupo do WhatsApp do Projeto
+    const btnGrupo = screen.getByRole("link", { name: /abrir grupo/i });
+    expect(btnGrupo).toHaveAttribute("href", "https://chat.whatsapp.com/grupo-maquina-infinie");
+
+    // 3. Acesso direto à Pasta Geral no Google Drive
+    const btnDrive = screen.getByRole("link", { name: /acessar drive/i });
+    expect(btnDrive).toHaveAttribute("href", "https://drive.google.com/drive/folders/pasta-infinie");
+
+    // 4. Gatilho Inteligente de Avaliação no Google Meu Negócio
+    expect(screen.getByText("Como está sendo sua experiência com a Geração Digital?")).toBeInTheDocument();
+    const btnGoogleReview = screen.getByRole("link", { name: /avaliar no google/i });
+    expect(btnGoogleReview).toHaveAttribute("href", "https://g.page/r/geracaodigital/review");
+
+    // 5. Downloads rápidos PDF/DOCX quando disponíveis
+    expect(screen.getByRole("link", { name: /pdf oficial/i })).toHaveAttribute("href", "https://drive.google.com/doc-b.pdf");
+    expect(screen.getByRole("link", { name: /roteiros pdf/i })).toHaveAttribute("href", "https://drive.google.com/roteiros.pdf");
   });
 });
 

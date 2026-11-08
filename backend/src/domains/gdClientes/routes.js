@@ -48,6 +48,7 @@ import {
 } from "../../services/gdCommercialPresentationWorkflowService.js";
 import { minerarConversasWhatsApp } from "../../services/gdWhatsAppChatMinerService.js";
 import { construirEAtivarAgenteInbound } from "../../services/gdAgentBuilderService.js";
+import { processarReguaCustomerSuccess } from "../../services/gdCustomerSuccessSchedulerService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
@@ -248,6 +249,7 @@ const JSONB_CAMPOS = [
   "vexto_briefing_chips",
   "vexto_briefing_pilares",
   "vexto_briefing_mineracao",
+  "cs_toques_historico",
 ];
 const valorSql = (campo, valor) => (JSONB_CAMPOS.includes(campo) && valor !== null ? JSON.stringify(valor) : valor);
 const colunaSql = (campo, n) => (JSONB_CAMPOS.includes(campo) ? `$${n}::jsonb` : `$${n}`);
@@ -665,48 +667,110 @@ export function registerGdClientesRoutes(app, {
     }
   });
 
-  // Consulta pública da linha do tempo do cliente por token revogável.
-  // Não requer autenticação de usuário; validação feita exclusivamente via SHA-256 do token.
+  // Funções sanitizadoras públicas para o Portal do Cliente (Frente 7)
+  function sanitizarBriefingDocumentosPublico(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const docs = raw.documentos || {};
+    return {
+      briefing: {
+        docx_url: docs.briefing?.docxUrl || null,
+        pdf_url: docs.briefing?.pdfUrl || null,
+      },
+      identidade_visual: {
+        docx_url: docs.identidade_visual?.docxUrl || null,
+        pdf_url: docs.identidade_visual?.pdfUrl || null,
+      },
+      roteiro: {
+        docx_url: docs.roteiro?.docxUrl || null,
+        pdf_url: docs.roteiro?.pdfUrl || null,
+      },
+      planejamento: {
+        docx_url: docs.planejamento?.docxUrl || null,
+        pdf_url: docs.planejamento?.pdfUrl || null,
+      },
+      drive_pasta_url: raw.pastaUrl || null,
+    };
+  }
+
+  function extrairStatusChipsPublico(chips) {
+    if (!chips) return { total: 0, ativos: 0, prontos: false };
+    const list = Array.isArray(chips) ? chips : (chips.chips || []);
+    const ativos = list.filter((c) => c.status === "ATIVO" || c.ativo === true).length;
+    return {
+      total: list.length,
+      ativos,
+      prontos: list.length > 0 && ativos === list.length,
+    };
+  }
+
+  // Consulta pública da linha do tempo do cliente por token revogável ou slug.
+  // Não requer autenticação de usuário; validação feita via SHA-256 do token ou portal_slug.
   // Retorna apenas dados públicos/sanitizados: sem dados sigilosos, notas, motivos, atores ou rótulos internos.
-  app.get("/api/gd/public/portal/:token", async (req, res) => {
+  const handlerPortalPublico = async (req, res) => {
     try {
-      const rawToken = req.params.token;
-      if (!rawToken || typeof rawToken !== "string" || !rawToken.trim()) {
+      const rawParam = (req.params.slug || req.params.token || "").trim();
+      if (!rawParam) {
         res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
         return;
       }
 
-      const tokenHash = hashPortalToken(rawToken.trim());
       const db = pool();
+      let clienteId = null;
 
-      const { rows: tokenRows } = await db.query(
-        `SELECT id, cliente_id
-           FROM public.gd_cliente_portal_tokens
-          WHERE token_sha256 = $1
-            AND revogado_em IS NULL`,
-        [tokenHash]
-      );
+      // 1. Tenta resolver por token sha256
+      try {
+        const tokenHash = hashPortalToken(rawParam);
+        const { rows: tokenRows } = await db.query(
+          `SELECT id, cliente_id
+             FROM public.gd_cliente_portal_tokens
+            WHERE token_sha256 = $1
+              AND revogado_em IS NULL`,
+          [tokenHash]
+        );
 
-      if (tokenRows.length === 0) {
+        if (tokenRows.length > 0) {
+          const { id: tokenId, cliente_id } = tokenRows[0];
+          clienteId = cliente_id;
+
+          // Atualiza último acesso do token
+          await db.query(
+            `UPDATE public.gd_cliente_portal_tokens
+                SET ultimo_acesso_em = now()
+              WHERE id = $1`,
+            [tokenId]
+          );
+        }
+      } catch {
+        // Formato não base64url ou inválido para hash, segue para verificação de slug
+      }
+
+      // 2. Se não achou por token ativo, tenta resolver por portal_slug
+      if (!clienteId) {
+        const { rows: slugRows } = await db.query(
+          `SELECT id
+             FROM public.gd_clientes
+            WHERE dono_client_id = $1
+              AND (portal_slug = $2 OR LOWER(portal_slug) = LOWER($2))`,
+          [GD_DONO, rawParam]
+        );
+
+        if (slugRows.length > 0) {
+          clienteId = slugRows[0].id;
+        }
+      }
+
+      if (!clienteId) {
         res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
         return;
       }
-
-      const { id: tokenId, cliente_id: clienteId } = tokenRows[0];
-
-      // Atualiza último acesso
-      await db.query(
-        `UPDATE public.gd_cliente_portal_tokens
-            SET ultimo_acesso_em = now()
-          WHERE id = $1`,
-        [tokenId]
-      );
 
       const [clienteRes, estadosRes, eventosRes] = await Promise.all([
         db.query(
           `SELECT nome, estado_atual, estado_desde, estado_data_estimada,
                   proposal_id, drive_url, escopo,
-                  contrato_url, briefing_url, ficha_vexo_url, planejamento_url
+                  contrato_url, briefing_url, ficha_vexo_url, planejamento_url,
+                  grupo_cliente_url, onboarding_concluido_em, portal_slug,
+                  vexto_briefing_status, vexto_briefing_chips, briefing_documentos
              FROM public.gd_clientes
             WHERE id = $1 AND dono_client_id = $2`,
           [clienteId, GD_DONO]
@@ -744,6 +808,12 @@ export function registerGdClientesRoutes(app, {
         briefing_url: c.briefing_url || null,
         ficha_vexo_url: c.ficha_vexo_url || null,
         planejamento_url: c.planejamento_url || null,
+        grupo_cliente_url: c.grupo_cliente_url || null,
+        onboarding_concluido_em: c.onboarding_concluido_em || null,
+        portal_slug: c.portal_slug || null,
+        vexto_briefing_status: c.vexto_briefing_status || null,
+        briefing_documentos: sanitizarBriefingDocumentosPublico(c.briefing_documentos),
+        chips_configurados: extrairStatusChipsPublico(c.vexto_briefing_chips),
       };
 
       const estados = estadosRes.rows.map((r) => ({
@@ -763,11 +833,55 @@ export function registerGdClientesRoutes(app, {
 
       const suporte = {
         whatsapp: process.env.GD_SUPORTE_WHATSAPP || "5534997719779",
+        google_review_url: process.env.GD_GOOGLE_REVIEW_URL || "https://g.page/r/geracaodigital/review",
+        instagram_url: process.env.GD_INSTAGRAM_URL || "https://instagram.com/geracaodigital",
       };
 
       res.json({ cliente, estados, eventos, suporte });
     } catch (err) {
-      responderErro(res, err, "GET /api/gd/public/portal/:token");
+      responderErro(res, err, "GET /api/gd/public/portal/:slug");
+    }
+  };
+
+  app.get("/api/gd/public/portal/:token", handlerPortalPublico);
+  app.get("/api/gd/public/portal/:slug", handlerPortalPublico);
+
+  // ─── Customer Success: Disparo manual da régua de cuidado (Frente 7) ───────
+  app.post("/api/gd/cs/processar", ...guarda, async (req, res) => {
+    try {
+      const { cliente_id, force_tipo, intervalo_dias } = req.body || {};
+      const resultado = await processarReguaCustomerSuccess({
+        pool: pool(),
+        clienteId: cliente_id || null,
+        forceTipo: force_tipo || null,
+        intervaloDias: intervalo_dias ? Number(intervalo_dias) : undefined,
+        evolutionSender: evolutionMessageSender,
+      });
+      res.json(resultado);
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/cs/processar");
+    }
+  });
+
+  // ─── Customer Success: Histórico de toques do cliente (Frente 7) ───────────
+  app.get("/api/gd/clientes/:id/cs-historico", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const db = pool();
+      const { rows } = await db.query(
+        `SELECT id, nome, cs_regua_ativa, cs_ultimo_toque_em,
+                cs_avaliacao_google_enviada_em, cs_proximo_toque_em,
+                COALESCE(cs_toques_historico, '[]'::jsonb) AS cs_toques_historico
+           FROM public.gd_clientes
+          WHERE id = $1 AND dono_client_id = $2`,
+        [req.params.id, GD_DONO]
+      );
+      if (rows.length === 0) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+      res.json({ cliente: rows[0] });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/:id/cs-historico");
     }
   });
 

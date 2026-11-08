@@ -209,6 +209,37 @@ export const lerVextoBriefingPromptGerado = (b) => texto(b, "VEXTO_BRIEFING_PROM
 export const lerVextoBriefingStatus = (b) => texto(b, "VEXTO_BRIEFING_STATUS_INVALIDO", "Status do Briefing Vexo", 50);
 export const lerVextoBriefingAgenteId = (b) => texto(b, "VEXTO_BRIEFING_AGENTE_ID_INVALIDO", "ID do Agente Vexo", 100);
 
+export function lerPortalSlug(bruto) {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido("PORTAL_SLUG_INVALIDO", "Slug do portal precisa ser texto.");
+  const s = bruto.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+  if (!s || s.length > 100) throw new CampoInvalido("PORTAL_SLUG_INVALIDO", "Slug do portal inválido, até 100 caracteres.");
+  return s;
+}
+
+export function lerCsReguaAtiva(bruto) {
+  if (bruto == null) return true;
+  if (typeof bruto !== "boolean") throw new CampoInvalido("CS_REGUA_ATIVA_INVALIDA", "cs_regua_ativa precisa ser boolean.");
+  return bruto;
+}
+
+export const lerCsUltimoToqueEm = (b) => lerDataOpcional(b, "CS_DATA_INVALIDA", "Data do último toque de CS");
+export const lerCsAvaliacaoGoogleEnviadaEm = (b) => lerDataOpcional(b, "CS_DATA_INVALIDA", "Data da avaliação Google");
+export const lerCsProximoToqueEm = (b) => lerDataOpcional(b, "CS_DATA_INVALIDA", "Data do próximo toque de CS");
+
+export function lerCsToquesHistorico(bruto) {
+  if (bruto == null) return [];
+  if (typeof bruto === "string") {
+    try {
+      bruto = JSON.parse(bruto);
+    } catch {
+      throw new CampoInvalido("CS_HISTORICO_INVALIDO", "cs_toques_historico precisa ser JSON válido.");
+    }
+  }
+  if (!Array.isArray(bruto)) throw new CampoInvalido("CS_HISTORICO_INVALIDO", "cs_toques_historico precisa ser lista.");
+  return bruto;
+}
+
 export function lerCnpjAConfirmar(bruto) {
   if (bruto == null) return false;
   if (typeof bruto !== "boolean") throw new CampoInvalido("CNPJ_A_CONFIRMAR_INVALIDO", "cnpj_a_confirmar precisa ser true ou false.");
@@ -258,4 +289,10 @@ export const CAMPOS_OPCIONAIS = {
   vexto_briefing_prompt_gerado: lerVextoBriefingPromptGerado,
   vexto_briefing_status: lerVextoBriefingStatus,
   vexto_briefing_agente_id: lerVextoBriefingAgenteId,
+  portal_slug: lerPortalSlug,
+  cs_regua_ativa: lerCsReguaAtiva,
+  cs_ultimo_toque_em: lerCsUltimoToqueEm,
+  cs_toques_historico: lerCsToquesHistorico,
+  cs_avaliacao_google_enviada_em: lerCsAvaliacaoGoogleEnviadaEm,
+  cs_proximo_toque_em: lerCsProximoToqueEm,
 };
