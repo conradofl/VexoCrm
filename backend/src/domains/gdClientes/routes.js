@@ -36,6 +36,12 @@ import {
   processarLembretesBriefing,
   GD_CAIO_WHATSAPP_PADRAO,
 } from "../../services/gdBriefingReminderService.js";
+import { executarSinteseEGeracaoBriefing } from "../../services/gdBriefingSynthesizerService.js";
+import {
+  enviarDocumentosParaAprovacaoInterna,
+  enviarDocumentosParaAprovacaoCliente,
+  processarMensagemAprovacaoWhatsApp,
+} from "../../services/gdApprovalFlowService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 
@@ -131,6 +137,10 @@ const SELECT_CLIENTE = `
          c.briefing_meet_url, c.briefing_calendar_event_id,
          c.briefing_lembrete_vespera_agendado_para, c.briefing_lembrete_vespera_enviado_em,
          c.briefing_lembrete_1h_agendado_para, c.briefing_lembrete_1h_enviado_em,
+         c.briefing_documentos, c.briefing_aprovacao_interna_status,
+         c.briefing_aprovacao_interna_ressalvas, c.briefing_aprovacao_interna_em,
+         c.briefing_aprovacao_cliente_status, c.briefing_aprovacao_cliente_em,
+         c.briefing_transcricao, c.briefing_formulario_respostas,
          c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
          c.estado_data_estimada, c.created_at, c.updated_at,
          e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
@@ -180,6 +190,14 @@ function clienteDe(linha) {
     briefing_lembrete_vespera_enviado_em: linha.briefing_lembrete_vespera_enviado_em ?? null,
     briefing_lembrete_1h_agendado_para: linha.briefing_lembrete_1h_agendado_para ?? null,
     briefing_lembrete_1h_enviado_em: linha.briefing_lembrete_1h_enviado_em ?? null,
+    briefing_documentos: linha.briefing_documentos ?? null,
+    briefing_aprovacao_interna_status: linha.briefing_aprovacao_interna_status ?? null,
+    briefing_aprovacao_interna_ressalvas: linha.briefing_aprovacao_interna_ressalvas ?? null,
+    briefing_aprovacao_interna_em: linha.briefing_aprovacao_interna_em ?? null,
+    briefing_aprovacao_cliente_status: linha.briefing_aprovacao_cliente_status ?? null,
+    briefing_aprovacao_cliente_em: linha.briefing_aprovacao_cliente_em ?? null,
+    briefing_transcricao: linha.briefing_transcricao ?? null,
+    briefing_formulario_respostas: linha.briefing_formulario_respostas ?? null,
     escopo: linha.escopo,
     escopo_original: linha.escopo_original,
     origem: linha.origem,
@@ -204,8 +222,8 @@ function lerOpcionais(body) {
   return lidos;
 }
 
-// escopo e briefing_slots_oferecidos são jsonb: vão como texto JSON e o SQL faz o cast.
-const JSONB_CAMPOS = ["escopo", "briefing_slots_oferecidos"];
+// escopo, briefing_slots_oferecidos, briefing_documentos e briefing_formulario_respostas são jsonb
+const JSONB_CAMPOS = ["escopo", "briefing_slots_oferecidos", "briefing_documentos", "briefing_formulario_respostas"];
 const valorSql = (campo, valor) => (JSONB_CAMPOS.includes(campo) && valor !== null ? JSON.stringify(valor) : valor);
 const colunaSql = (campo, n) => (JSONB_CAMPOS.includes(campo) ? `$${n}::jsonb` : `$${n}`);
 
@@ -358,6 +376,10 @@ export function registerGdClientesRoutes(app, {
   calendarSlotFinder = findAvailableBriefingSlots,
   calendarEventCreator = createBriefingCalendarEvent,
   reminderProcessor = processarLembretesBriefing,
+  briefingSynthesizer = executarSinteseEGeracaoBriefing,
+  internalApprovalSender = enviarDocumentosParaAprovacaoInterna,
+  clientApprovalSender = enviarDocumentosParaAprovacaoCliente,
+  approvalMessageProcessor = processarMensagemAprovacaoWhatsApp,
 } = {}) {
   const guarda = [requireFirebaseAuth, requireGdClientesAccess];
   const pool = () => {
@@ -1437,6 +1459,186 @@ export function registerGdClientesRoutes(app, {
         });
       } catch (err) {
         responderErro(res, err, "POST /api/gd/briefing/processar-lembretes");
+      }
+    }
+  );
+
+  // ─── Briefing: Síntese Multidocumento dos 4 Documentos com Gemini ─────────
+  app.post(
+    "/api/gd/clientes/:id/briefing/sintetizar",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+        const resultado = await briefingSynthesizer({
+          clienteId,
+          pool: db,
+          transcricao: req.body?.transcricao || null,
+          respostasFormulario: req.body?.respostas_formulario || null,
+          contrato: req.body?.contrato || null,
+          templateGd: req.body?.template_gd || null,
+          model: req.body?.model || "gemini-flash-latest",
+          apiKey: req.body?.api_key || null,
+          driveUploader: driveFileUploader,
+          actor: ator,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/sintetizar");
+      }
+    }
+  );
+
+  // ─── Briefing: Enviar os 4 Documentos no Grupo Interno (PASTA: {CLIENTE}) ──
+  app.post(
+    "/api/gd/clientes/:id/briefing/enviar-aprovacao-interna",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const resultado = await internalApprovalSender({
+          clienteId,
+          pool: db,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          actor: ator,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/enviar-aprovacao-interna");
+      }
+    }
+  );
+
+  // ─── Briefing: Enviar no Grupo do Cliente (MÁQUINA DE VENDAS: {CLIENTE}) ────
+  app.post(
+    "/api/gd/clientes/:id/briefing/enviar-aprovacao-cliente",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const resultado = await clientApprovalSender({
+          clienteId,
+          pool: db,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          actor: ator,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/enviar-aprovacao-cliente");
+      }
+    }
+  );
+
+  // ─── Briefing: Webhook/Processador de Aprovação no WhatsApp ─────────────────
+  app.post(
+    "/api/gd/briefing/webhook-aprovacao",
+    async (req, res) => {
+      try {
+        const db = pool();
+        const body = req.body || {};
+        const groupJid = body.group_jid || body.remoteJid || body.data?.key?.remoteJid;
+        const text =
+          body.text ||
+          body.message ||
+          body.data?.message?.conversation ||
+          body.data?.message?.extendedTextMessage?.text;
+        const senderJid = body.sender_jid || body.data?.key?.participant || groupJid;
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          body.instance ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const resultado = await approvalMessageProcessor({
+          pool: db,
+          groupJid,
+          text,
+          senderJid,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          actor: { id: "webhook_whatsapp", tipo: "goclaw" },
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/briefing/webhook-aprovacao");
+      }
+    }
+  );
+
+  // ─── Briefing: Consulta de Documentos e Status de Aprovação ────────────────
+  app.get(
+    "/api/gd/clientes/:id/briefing/documentos",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          nome: cliente.nome,
+          estado_atual: cliente.estado_atual,
+          drive_url: cliente.drive_url,
+          briefing_documentos: cliente.briefing_documentos || null,
+          aprovacao_interna: {
+            status: cliente.briefing_aprovacao_interna_status || "NAO_INICIADO",
+            ressalvas: cliente.briefing_aprovacao_interna_ressalvas || null,
+            aprovado_em: cliente.briefing_aprovacao_interna_em || null,
+          },
+          aprovacao_cliente: {
+            status: cliente.briefing_aprovacao_cliente_status || "NAO_INICIADO",
+            aprovado_em: cliente.briefing_aprovacao_cliente_em || null,
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos");
       }
     }
   );

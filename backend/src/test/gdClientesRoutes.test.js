@@ -37,6 +37,10 @@ const MIGRATION_BRIEFING = readFileSync(
   resolve("supabase/migrations/20261108110000_gd_clientes_briefing_scheduling.sql"),
   "utf8"
 );
+const MIGRATION_FRENTE5 = readFileSync(
+  resolve("supabase/migrations/20261108120000_gd_clientes_briefing_docs_approval.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -100,6 +104,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION_WHATSAPP);
   await db.exec(MIGRATION_CALENDAR);
   await db.exec(MIGRATION_BRIEFING);
+  await db.exec(MIGRATION_FRENTE5);
 
   const app = express();
   app.use(express.json());

@@ -165,6 +165,25 @@ export function lerBriefingSlotsOferecidos(bruto) {
   }
 }
 
+export function lerJsonOpcional(bruto, code, rotulo) {
+  if (bruto == null) return null;
+  if (typeof bruto === "object") return bruto;
+  try {
+    return JSON.parse(bruto);
+  } catch {
+    throw new CampoInvalido(code, `${rotulo} precisa ser JSON válido.`);
+  }
+}
+
+export const lerBriefingDocumentos = (b) => lerJsonOpcional(b, "BRIEFING_DOCUMENTOS_INVALIDOS", "Documentos de briefing");
+export const lerBriefingFormularioRespostas = (b) => lerJsonOpcional(b, "BRIEFING_FORMULARIO_INVALIDO", "Respostas do formulário de briefing");
+export const lerBriefingTranscricao = (b) => texto(b, "BRIEFING_TRANSCRICAO_INVALIDA", "Transcrição do briefing", 200000);
+export const lerBriefingAprovacaoInternaStatus = (b) => texto(b, "BRIEFING_APROVACAO_INTERNA_STATUS_INVALIDO", "Status da aprovação interna", 50);
+export const lerBriefingAprovacaoInternaRessalvas = (b) => texto(b, "BRIEFING_RESSALVAS_INVALIDAS", "Ressalvas da aprovação interna", 5000);
+export const lerBriefingAprovacaoInternaEm = (b) => lerDataOpcional(b, "BRIEFING_APROVACAO_INTERNA_EM_INVALIDO", "Data da aprovação interna");
+export const lerBriefingAprovacaoClienteStatus = (b) => texto(b, "BRIEFING_APROVACAO_CLIENTE_STATUS_INVALIDO", "Status da aprovação do cliente", 50);
+export const lerBriefingAprovacaoClienteEm = (b) => lerDataOpcional(b, "BRIEFING_APROVACAO_CLIENTE_EM_INVALIDO", "Data da aprovação do cliente");
+
 export function lerCnpjAConfirmar(bruto) {
   if (bruto == null) return false;
   if (typeof bruto !== "boolean") throw new CampoInvalido("CNPJ_A_CONFIRMAR_INVALIDO", "cnpj_a_confirmar precisa ser true ou false.");
@@ -199,4 +218,12 @@ export const CAMPOS_OPCIONAIS = {
   briefing_lembrete_vespera_enviado_em: (b) => lerDataOpcional(b, "LEMBRETE_VESPERA_INVALIDO", "Data de envio do lembrete de véspera"),
   briefing_lembrete_1h_agendado_para: (b) => lerDataOpcional(b, "LEMBRETE_1H_INVALIDO", "Data do lembrete de 1 hora"),
   briefing_lembrete_1h_enviado_em: (b) => lerDataOpcional(b, "LEMBRETE_1H_INVALIDO", "Data de envio do lembrete de 1 hora"),
+  briefing_documentos: lerBriefingDocumentos,
+  briefing_aprovacao_interna_status: lerBriefingAprovacaoInternaStatus,
+  briefing_aprovacao_interna_ressalvas: lerBriefingAprovacaoInternaRessalvas,
+  briefing_aprovacao_interna_em: lerBriefingAprovacaoInternaEm,
+  briefing_aprovacao_cliente_status: lerBriefingAprovacaoClienteStatus,
+  briefing_aprovacao_cliente_em: lerBriefingAprovacaoClienteEm,
+  briefing_transcricao: lerBriefingTranscricao,
+  briefing_formulario_respostas: lerBriefingFormularioRespostas,
 };

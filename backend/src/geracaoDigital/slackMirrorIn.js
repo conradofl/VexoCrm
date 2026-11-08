@@ -1,6 +1,7 @@
 import fetch from "node-fetch"; // Assumindo node-fetch ou fetch nativo (Node 18+)
 import { getGdRedisClient } from "./redisClient.js";
 import { processarRespostaBriefingNoWhatsApp } from "../services/gdBriefingReminderService.js";
+import { processarMensagemAprovacaoWhatsApp } from "../services/gdApprovalFlowService.js";
 
 // Função para processar a chegada de mensagem do WhatsApp e mandar para o Slack
 export async function processEvolutionMessageToSlack(pool, payload) {
@@ -77,6 +78,17 @@ export async function processEvolutionMessageToSlack(pool, payload) {
   if (!fromMe && text && remoteJid && remoteJid.endsWith("@g.us")) {
     processarRespostaBriefingNoWhatsApp({ pool, groupJid: remoteJid, text, instanceName: instance }).catch((err) => {
       console.warn("[gd-mirror-in] Falha ao processar resposta de briefing:", err.message);
+    });
+
+    // Intercepta comandos de aprovação de briefing e planejamento no WhatsApp
+    processarMensagemAprovacaoWhatsApp({
+      pool,
+      groupJid: remoteJid,
+      text,
+      senderJid: data.key?.participant || remoteJid,
+      instanceName: instance,
+    }).catch((err) => {
+      console.warn("[gd-mirror-in] Falha ao processar comando de aprovação:", err.message);
     });
   }
 
