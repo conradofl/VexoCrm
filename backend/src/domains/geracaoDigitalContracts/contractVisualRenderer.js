@@ -1,0 +1,883 @@
+// backend/src/domains/geracaoDigitalContracts/contractVisualRenderer.js
+//
+// Módulo de renderização visual de alta fidelidade para contratos da Geração Digital (GD).
+// Reflete com 100% de precisão o design do modelo oficial docx, utilizando as cores oficiais,
+// componentes estruturados (boxes, tabelas roxas, alíneas estilizadas) e fechamento rigoroso em 2 páginas.
+
+import PDFDocument from "pdfkit";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
+import {
+  prepareContractDados,
+  formatCnpj,
+  formatTelefone,
+  formatBrl,
+  toExtenseOrdinal,
+  calculateScheduleTotals,
+} from "./contractMerge.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Diretório de assets oficiais extraídos do modelo docx
+export const ASSETS_DIR = path.resolve(__dirname, "../../assets/contractTemplate");
+
+/**
+ * Resolve com segurança o caminho de um arquivo de asset com múltiplos fallbacks.
+ */
+export function getImageAssetPath(fileName) {
+  const directPath = path.join(ASSETS_DIR, fileName);
+  if (fs.existsSync(directPath)) return directPath;
+
+  const cwdPath = path.resolve(process.cwd(), "src/assets/contractTemplate", fileName);
+  if (fs.existsSync(cwdPath)) return cwdPath;
+
+  const backendCwdPath = path.resolve(process.cwd(), "backend/src/assets/contractTemplate", fileName);
+  if (fs.existsSync(backendCwdPath)) return backendCwdPath;
+
+  return directPath;
+}
+
+// 1. Cores Oficiais Geração Digital (GD)
+export const GD_COLORS = {
+  primary: "#6B21A8",      // Roxo Primário: títulos principais, headers de tabela e caixas
+  secondary: "#C026D3",    // Magenta / Rosa: subtítulo, rótulo "CONTRATANTE", marcadores de alíneas
+  highlightBg: "#F3E8FF",  // Lavanda / Fundo Destaque: fundo das barras de cláusulas e subheaders
+  softBorder: "#E9D5FF",   // Borda Suave
+  textDark: "#1F2937",     // Texto escuro
+  textMuted: "#6B7280",    // Cinza auxiliar para labels secundários e rodapé
+  white: "#FFFFFF",
+  boxBg: "#FAFAFE",
+  tableRowAlt: "#FAF5FF",
+};
+
+// Aliases para retrocompatibilidade
+export const CONTRACT_PDF_COLORS = {
+  primaryDark: GD_COLORS.primary,
+  primary: GD_COLORS.primary,
+  secondary: GD_COLORS.secondary,
+  accentLight: GD_COLORS.softBorder,
+  boxBg: GD_COLORS.highlightBg,
+  tableSubBg: GD_COLORS.highlightBg,
+  tableAltBg: GD_COLORS.tableRowAlt,
+  textDark: GD_COLORS.textDark,
+  textMuted: GD_COLORS.textMuted,
+  white: GD_COLORS.white,
+};
+
+// Métricas padrão de página A4 e margens oficiais
+export const PAGE_METRICS = {
+  width: 595.28,
+  height: 841.89,
+  margins: { top: 36, bottom: 36, left: 42, right: 42 },
+  contentWidth: 511.28, // 595.28 - (42 * 2)
+};
+
+/**
+ * Identifica e normaliza cabeçalhos de cláusula (ex: "CLÁUSULA PRIMEIRA | DAS PARTES").
+ */
+export function normalizeClauseHeader(line) {
+  if (!line || typeof line !== "string") return null;
+  const match = line.match(/^(?:CLÁUSULA|Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*(?:[–\-:|]\s*(.*))?$/i);
+  if (!match) return null;
+  let ordinal = match[1].trim();
+  const num = parseInt(ordinal, 10);
+  if (!isNaN(num) && num > 0) {
+    ordinal = toExtenseOrdinal(num);
+  }
+  const cleanTitle = (match[2] || "").trim();
+  return {
+    ordinal: ordinal.toUpperCase(),
+    title: cleanTitle.toUpperCase(),
+    fullHeader: `CLÁUSULA ${ordinal.toUpperCase()}   |   ${cleanTitle.toUpperCase()}`,
+  };
+}
+
+/**
+ * Renderiza parágrafos com suporte a marcação de negrito (**texto** ou <b>texto</b>).
+ * Configura doc.x e doc.y previamente para evitar saltos de continuação no PDFKit.
+ */
+export function renderFormattedParagraph(doc, text, options = {}) {
+  if (!text) return;
+  const regex = /(\*\*.*?\*\*|<b>.*?<\/b>)/g;
+  const parts = String(text).split(regex);
+  const tokens = parts.filter(Boolean).map((part) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+      return { text: part.slice(2, -2), bold: true };
+    }
+    if (/^<b>(.*?)<\/b>$/i.test(part)) {
+      return { text: part.replace(/^<b>|<\/b>$/gi, ""), bold: true };
+    }
+    return { text: part, bold: false };
+  });
+
+  if (tokens.length === 0) return;
+
+  const { x, y, ...textOptions } = options;
+  if (x !== undefined) doc.x = x;
+  if (y !== undefined) doc.y = y;
+
+  tokens.forEach((token, idx) => {
+    const isLast = idx === tokens.length - 1;
+    doc.font(token.bold ? "Helvetica-Bold" : "Helvetica");
+    doc.text(token.text, {
+      ...textOptions,
+      continued: !isLast,
+    });
+  });
+}
+
+/**
+ * a) drawHeader(doc) com tipografia, cores e traço divisório.
+ */
+export function drawHeader(doc) {
+  const startX = 42;
+  const contentW = 511;
+  const startY = doc.page.margins.top || 36;
+
+  // Título principal em negrito roxo escuro (15pt)
+  doc.font("Helvetica-Bold")
+     .fontSize(15)
+     .fillColor(GD_COLORS.primary)
+     .text("CONTRATO DE PRESTAÇÃO DE SERVIÇOS", startX, startY, {
+       align: "center",
+       width: contentW,
+     });
+
+  doc.moveDown(0.2);
+
+  // Subtítulo em magenta com espaçamento de caracteres (10pt)
+  doc.font("Helvetica-Bold")
+     .fontSize(10)
+     .fillColor(GD_COLORS.secondary)
+     .text("MARKETING DIGITAL & AUTOMAÇÃO", startX, doc.y, {
+       align: "center",
+       width: contentW,
+       characterSpacing: 1.5,
+     });
+
+  doc.moveDown(0.35);
+
+  // Linha divisória de degradê abaixo do cabeçalho
+  const dividerY = doc.y;
+  const image1Path = getImageAssetPath("image1.png");
+
+  if (fs.existsSync(image1Path)) {
+    const imgW = 140;
+    const imgH = 2.5;
+    const imgX = (doc.page.width - imgW) / 2;
+    try {
+      doc.image(image1Path, imgX, dividerY, { width: imgW, height: imgH });
+      doc.y = dividerY + imgH + 8;
+    } catch {
+      doc.rect(imgX, dividerY, imgW, 1.5).fill(GD_COLORS.secondary);
+      doc.y = dividerY + 1.5 + 8;
+    }
+  } else {
+    const lineW = 140;
+    const lineX = (doc.page.width - lineW) / 2;
+    doc.rect(lineX, dividerY, lineW, 1.5).fill(GD_COLORS.secondary);
+    doc.y = dividerY + 1.5 + 8;
+  }
+}
+
+/**
+ * b) drawClauseHeader(doc, title) com barra lateral roxa e fundo #F3E8FF.
+ * Suporta tanto drawClauseHeader(doc, title) quanto drawClauseHeader(doc, ordinal, title).
+ */
+export function drawClauseHeader(doc, ordinalOrTitle, title) {
+  let ordinal = "";
+  let cleanTitle = "";
+
+  if (title !== undefined) {
+    ordinal = String(ordinalOrTitle || "").trim();
+    cleanTitle = String(title || "").trim();
+  } else if (ordinalOrTitle) {
+    const parsed = normalizeClauseHeader(String(ordinalOrTitle));
+    if (parsed) {
+      ordinal = parsed.ordinal;
+      cleanTitle = parsed.title;
+    } else {
+      cleanTitle = String(ordinalOrTitle).trim();
+    }
+  }
+
+  const startX = 42;
+  const barW = 511;
+  const barH = 17;
+  const curY = doc.y;
+
+  // Fundo lavanda / destaque (#F3E8FF)
+  doc.rect(startX, curY, barW, barH).fill(GD_COLORS.highlightBg);
+
+  // Barra lateral roxa sólida à esquerda (#6B21A8)
+  const lateralBarW = 3.5;
+  doc.rect(startX, curY, lateralBarW, barH).fill(GD_COLORS.primary);
+
+  // Borda suave inferior/externa (#E9D5FF)
+  doc.rect(startX, curY, barW, barH)
+     .strokeColor(GD_COLORS.softBorder)
+     .lineWidth(0.5)
+     .stroke();
+
+  // Texto: CLÁUSULA ORDINAL   |   TÍTULO
+  const textX = startX + 8;
+  const textY = curY + 3.8;
+
+  if (ordinal) {
+    const ordNormalized = ordinal.replace(/^(?:CLÁUSULA|CLAUSULA)\s+/i, "").trim().toUpperCase();
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+       .text(`CLÁUSULA ${ordNormalized}`, textX, textY, { continued: true });
+    doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.softBorder)
+       .text("   |   ", { continued: true });
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+       .text(cleanTitle.toUpperCase(), { continued: false });
+  } else {
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+       .text(cleanTitle.toUpperCase(), textX, textY, { continued: false });
+  }
+
+  doc.y = curY + barH + 5;
+  doc.x = startX;
+}
+
+/**
+ * Normaliza os dados das partes (objeto ou array de linhas de texto).
+ */
+export function normalizePartesBoxData(data, fallbackRole = "") {
+  if (!data) return { title: fallbackRole, fields: [] };
+
+  if (Array.isArray(data)) {
+    const title = data[0] || fallbackRole;
+    const fields = [];
+    for (let i = 1; i < data.length; i++) {
+      const line = data[i].trim();
+      if (!line) continue;
+      const colonIdx = line.indexOf(":");
+      if (colonIdx > 0) {
+        const rawLabel = line.slice(0, colonIdx).trim() + ":";
+        let rawVal = line.slice(colonIdx + 1).trim();
+        if (/cnpj/i.test(rawLabel)) rawVal = formatCnpj(rawVal);
+        if (/telefone/i.test(rawLabel)) rawVal = formatTelefone(rawVal);
+        fields.push({ label: rawLabel, value: rawVal });
+      } else {
+        fields.push({ label: "", value: line });
+      }
+    }
+    return { title, fields };
+  }
+
+  // Objeto estruturado
+  const title = data.razao_social || data.nome || fallbackRole;
+  const fields = [];
+  if (data.cnpj) {
+    fields.push({ label: "CNPJ:", value: formatCnpj(data.cnpj) });
+  }
+  const rep = data.representante || data.representante_nome || data.responsavel_nome || data.responsavel || "";
+  if (rep) {
+    const repLabel = data.responsavel_nome ? "Responsável:" : "Representante:";
+    fields.push({ label: repLabel, value: rep });
+  }
+  if (data.endereco) {
+    const endStr = typeof data.endereco === "object"
+      ? [
+          data.endereco.logradouro ? `${data.endereco.logradouro}${data.endereco.numero ? `, ${data.endereco.numero}` : ""}` : "",
+          data.endereco.bairro || "",
+          data.endereco.cidade && data.endereco.uf ? `${data.endereco.cidade} – ${data.endereco.uf}` : (data.endereco.cidade || ""),
+          data.endereco.cep ? `CEP ${data.endereco.cep}` : "",
+        ].filter(Boolean).join(", ")
+      : String(data.endereco);
+    fields.push({ label: "Endereço:", value: endStr });
+  }
+  if (data.telefone) {
+    fields.push({ label: "Telefone:", value: formatTelefone(data.telefone) });
+  }
+  if (data.email) {
+    fields.push({ label: "E-mail:", value: String(data.email) });
+  }
+  return { title, fields };
+}
+
+/**
+ * c) drawPartesBoxes(doc, contratada, contratante) com caixas estilizadas em 2 colunas.
+ */
+export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
+  const c1 = normalizePartesBoxData(contratadaInput, "AGÊNCIA GERAÇÃO DIGITAL LTDA");
+  const c2 = normalizePartesBoxData(contratanteInput, "CONTRATANTE");
+
+  const startX = 42;
+  const colWidth = 249;
+  const gap = 13;
+  const col1X = startX;
+  const col2X = startX + colWidth + gap;
+  const headerH = 16;
+  const padding = 6;
+  const innerW = colWidth - (padding * 2);
+
+  // Calcula a altura necessária para acomodar os campos
+  const calcFieldsH = (title, fields) => {
+    let h = 12; // título da razão social
+    for (const f of fields) {
+      const fullText = (f.label ? f.label + " " : "") + f.value;
+      if (fullText.length > 44) h += 19;
+      else h += 10.5;
+    }
+    return h;
+  };
+
+  const contentH = Math.max(calcFieldsH(c1.title, c1.fields), calcFieldsH(c2.title, c2.fields), 72) + (padding * 2);
+  const boxY = doc.y;
+
+  // Box 1: CONTRATADA
+  doc.rect(col1X, boxY, colWidth, headerH).fill(GD_COLORS.primary);
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
+     .text("CONTRATADA", col1X + padding, boxY + 4, { width: innerW });
+  doc.rect(col1X, boxY + headerH, colWidth, contentH).fill(GD_COLORS.boxBg);
+  doc.rect(col1X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+
+  let tY1 = boxY + headerH + padding;
+  doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.primary)
+     .text(c1.title, col1X + padding, tY1, { width: innerW });
+  tY1 += 12;
+  for (const field of c1.fields) {
+    if (field.label) {
+      doc.font("Helvetica-Bold").fontSize(7.2).fillColor(GD_COLORS.primary)
+         .text(field.label, col1X + padding, tY1, { continued: true });
+      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
+         .text(" " + field.value, { width: innerW });
+    } else {
+      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
+         .text(field.value, col1X + padding, tY1, { width: innerW });
+    }
+    const fullLen = (field.label ? field.label + " " : "") + field.value;
+    tY1 += fullLen.length > 44 ? 19 : 10.5;
+  }
+
+  // Box 2: CONTRATANTE
+  doc.rect(col2X, boxY, colWidth, headerH).fill(GD_COLORS.primary);
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
+     .text("CONTRATANTE", col2X + padding, boxY + 4, { width: innerW });
+  doc.rect(col2X, boxY + headerH, colWidth, contentH).fill(GD_COLORS.boxBg);
+  doc.rect(col2X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+
+  let tY2 = boxY + headerH + padding;
+  doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.primary)
+     .text(c2.title, col2X + padding, tY2, { width: innerW });
+  tY2 += 12;
+  for (const field of c2.fields) {
+    if (field.label) {
+      doc.font("Helvetica-Bold").fontSize(7.2).fillColor(GD_COLORS.primary)
+         .text(field.label, col2X + padding, tY2, { continued: true });
+      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
+         .text(" " + field.value, { width: innerW });
+    } else {
+      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
+         .text(field.value, col2X + padding, tY2, { width: innerW });
+    }
+    const fullLen = (field.label ? field.label + " " : "") + field.value;
+    tY2 += fullLen.length > 44 ? 19 : 10.5;
+  }
+
+  doc.y = boxY + headerH + contentH + 6;
+  doc.x = startX;
+}
+
+/**
+ * d) drawPricingTable(doc, dados) com a tabela em roxo e valores formatados em BRL.
+ */
+export function drawPricingTable(doc, dados = {}, options = {}) {
+  const startX = 42;
+  const tblW = 511;
+  const col1W = 340;
+  const col2W = tblW - col1W; // 171
+  const tblY = doc.y;
+
+  // Extração e cálculo de valores monetários
+  let valorTotalStr = formatBrl(dados.valor_total || options.valorTotal || "") || (options.valorTotal || "R$ 0,00");
+
+  let composicaoLabel = options.composicaoLabel || "Em reais (conforme condições de pagamento)";
+  let emReaisVal = options.emReaisVal || "";
+  let permutaVal = options.permutaVal || dados.condicao_permuta || "Não aplicável";
+
+  // Se o contrato tem parcelas estruturadas, segrega moeda corrente e permuta
+  if (!emReaisVal && Array.isArray(dados.parcelas) && dados.parcelas.length > 0) {
+    const totals = calculateScheduleTotals(dados.parcelas);
+    emReaisVal = formatBrl(totals.totalDinheiro);
+    if (totals.totalPermuta > 0) {
+      permutaVal = formatBrl(totals.totalPermuta);
+    }
+  } else if (!emReaisVal) {
+    if (dados.cronograma_pagamento) {
+      emReaisVal = formatBrl(dados.cronograma_pagamento) || String(dados.cronograma_pagamento);
+    } else if (dados.valor_parcela && dados.num_parcelas) {
+      emReaisVal = `${dados.num_parcelas}x de ${formatBrl(dados.valor_parcela)}`;
+    } else {
+      emReaisVal = valorTotalStr;
+    }
+  }
+
+  if (typeof emReaisVal === "number") {
+    emReaisVal = formatBrl(emReaisVal);
+  } else if (typeof emReaisVal === "string" && !emReaisVal.includes("R$") && !isNaN(Number(emReaisVal.replace(/[^\d.,-]/g, "").replace(",", ".")))) {
+    emReaisVal = formatBrl(emReaisVal);
+  }
+
+  if (typeof permutaVal === "number") {
+    permutaVal = formatBrl(permutaVal);
+  } else if (typeof permutaVal === "string" && permutaVal !== "Não aplicável" && !permutaVal.includes("R$") && !isNaN(Number(permutaVal.replace(/[^\d.,-]/g, "").replace(",", ".")))) {
+    permutaVal = formatBrl(permutaVal);
+  }
+
+  emReaisVal = String(emReaisVal || valorTotalStr);
+  permutaVal = String(permutaVal || "Não aplicável");
+
+  const hRow1 = 18;
+  const hRow2 = 14;
+  const hRow3 = 14;
+  const hRow4 = 14;
+  const totalH = hRow1 + hRow2 + hRow3 + hRow4;
+
+  // Linha 1: Compromisso do Período (Header Roxo Sólido #6B21A8, texto branco)
+  doc.rect(startX, tblY, tblW, hRow1).fill(GD_COLORS.primary);
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
+     .text("Compromisso do Período", startX + 8, tblY + 4.5, { width: col1W - 16 });
+  doc.text(valorTotalStr, startX + col1W, tblY + 4.5, { width: col2W - 10, align: "right" });
+
+  // Linha 2: COMPOSIÇÃO DO PERÍODO (Subcabeçalho #F3E8FF, texto roxo)
+  const y2 = tblY + hRow1;
+  doc.rect(startX, y2, tblW, hRow2).fill(GD_COLORS.highlightBg);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+     .text("COMPOSIÇÃO DO PERÍODO", startX + 8, y2 + 3.2, { width: tblW - 16 });
+
+  // Linha 3: Em reais (conforme condições de pagamento)
+  const y3 = y2 + hRow2;
+  doc.rect(startX, y3, tblW, hRow3).fill(GD_COLORS.white);
+  doc.font("Helvetica").fontSize(8).fillColor(GD_COLORS.textDark)
+     .text(composicaoLabel, startX + 8, y3 + 3.2, { width: col1W - 16 });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+     .text(emReaisVal, startX + col1W, y3 + 3.2, { width: col2W - 10, align: "right" });
+
+  // Linha 4: Em permuta
+  const y4 = y3 + hRow3;
+  doc.rect(startX, y4, tblW, hRow4).fill(GD_COLORS.tableRowAlt);
+  doc.font("Helvetica").fontSize(8).fillColor(GD_COLORS.textDark)
+     .text("Em permuta", startX + 8, y4 + 3.2, { width: col1W - 16 });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+     .text(permutaVal, startX + col1W, y4 + 3.2, { width: col2W - 10, align: "right" });
+
+  // Bordas da tabela
+  doc.rect(startX, tblY, tblW, totalH).strokeColor(GD_COLORS.primary).lineWidth(0.75).stroke();
+  doc.moveTo(startX, y2).lineTo(startX + tblW, y2).strokeColor(GD_COLORS.primary).lineWidth(0.5).stroke();
+  doc.moveTo(startX, y3).lineTo(startX + tblW, y3).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+  doc.moveTo(startX, y4).lineTo(startX + tblW, y4).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+
+  doc.y = tblY + totalH + 8;
+  doc.x = startX;
+}
+
+/**
+ * e) drawSignaturesAndWitnesses(doc, dados) com 2 colunas de assinaturas e 2 testemunhas.
+ */
+export function drawSignaturesAndWitnesses(doc, dados = {}) {
+  const startX = 42;
+  const colW = 235;
+  const gap = 41;
+  const col1X = startX;
+  const col2X = startX + colW + gap;
+
+  const contratadaNome = dados.contratada_razao_social || "AGÊNCIA GERAÇÃO DIGITAL LTDA";
+  const contratadaRep = dados.contratada_representante || "Caio Vinícius Almeida de Oliveira";
+  const contratanteNome = dados.razao_social || dados.assinatura_contratante || "CONTRATANTE";
+  const contratanteRep = dados.representante_nome || dados.responsavel_nome || dados.representante || "";
+
+  const sigY = doc.y + 8;
+
+  // Assinatura Contratada
+  doc.moveTo(col1X + 10, sigY).lineTo(col1X + colW - 10, sigY)
+     .strokeColor(GD_COLORS.softBorder).lineWidth(0.75).stroke();
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+     .text(contratadaNome, col1X, sigY + 6, { width: colW, align: "center" });
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textDark)
+     .text(contratadaRep, col1X, sigY + 16, { width: colW, align: "center" });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.secondary)
+     .text("CONTRATADA", col1X, sigY + 26, { width: colW, align: "center" });
+
+  // Assinatura Contratante
+  doc.moveTo(col2X + 10, sigY).lineTo(col2X + colW - 10, sigY)
+     .strokeColor(GD_COLORS.softBorder).lineWidth(0.75).stroke();
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+     .text(contratanteNome, col2X, sigY + 6, { width: colW, align: "center" });
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textDark)
+     .text(contratanteRep, col2X, sigY + 16, { width: colW, align: "center" });
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.secondary)
+     .text("CONTRATANTE", col2X, sigY + 26, { width: colW, align: "center" });
+
+  // Testemunhas
+  const witY = sigY + 42;
+
+  // Testemunha 1
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+     .text("Testemunha 1", col1X, witY, { width: colW, align: "left" });
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
+     .text("Nome: ____________________________________", col1X, witY + 10, { width: colW, align: "left" });
+  doc.text("CPF:     ____________________________________", col1X, witY + 20, { width: colW, align: "left" });
+
+  // Testemunha 2
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+     .text("Testemunha 2", col2X, witY, { width: colW, align: "left" });
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
+     .text("Nome: ____________________________________", col2X, witY + 10, { width: colW, align: "left" });
+  doc.text("CPF:     ____________________________________", col2X, witY + 20, { width: colW, align: "left" });
+
+  doc.y = witY + 34;
+  doc.x = startX;
+}
+
+/**
+ * f) drawFooter(doc, pageNumber, totalPages, isFirstPage)
+ * Inclui a arte image3.png na página 1 e dados de contato oficiais em ambas as páginas.
+ */
+export function drawFooter(doc, pageNumber = 1, totalPages = 2, isFirstPage = false) {
+  const startX = 42;
+  const contentW = 511;
+
+  // Na página 1: Inserir a imagem oficial image3.png com redes sociais e logo da Geração Digital
+  if (isFirstPage) {
+    const image3Path = getImageAssetPath("image3.png");
+    if (fs.existsSync(image3Path)) {
+      const imgW = 285;
+      const imgH = 60;
+      const imgX = (doc.page.width - imgW) / 2;
+      const imgY = 736;
+      try {
+        doc.image(image3Path, imgX, imgY, { width: imgW, height: imgH });
+      } catch (err) {
+        console.warn("[drawFooter] Aviso ao renderizar image3.png:", err.message);
+      }
+    }
+  }
+
+  // Linha divisória superior do rodapé
+  const footerLineY = 804;
+  doc.moveTo(startX, footerLineY)
+     .lineTo(startX + contentW, footerLineY)
+     .strokeColor(GD_COLORS.softBorder)
+     .lineWidth(0.5)
+     .stroke();
+
+  // Linha de contato oficial:
+  // www.mktgeracaodigital.com.br • comercial@mktgeracaodigital.com.br • (34) 99771-9779          Página X de Y
+  const textY = 808;
+  doc.font("Helvetica-Bold").fontSize(7).fillColor(GD_COLORS.primary)
+     .text("www.mktgeracaodigital.com.br", startX, textY, { continued: true });
+  doc.font("Helvetica").fontSize(7).fillColor(GD_COLORS.textMuted)
+     .text("   •   comercial@mktgeracaodigital.com.br   •   (34) 99771-9779", { continued: false });
+
+  // Numeração de página à direita
+  doc.font("Helvetica").fontSize(7).fillColor(GD_COLORS.textMuted)
+     .text(`Página ${pageNumber} de ${totalPages}`, startX, textY, {
+       width: contentW,
+       align: "right",
+     });
+}
+
+/**
+ * Renderização executiva do PDF do contrato com 100% de fidelidade visual.
+ * Rigorosamente 2 páginas com margens ajustadas (topo/base: 36pt, laterais: 42pt).
+ */
+export async function renderContractPdf(templateConteudo, dados = {}) {
+  const preparedDados = prepareContractDados(dados);
+
+  // Aplicação da mesclagem (mail merge)
+  let mergedContent = templateConteudo || "";
+  for (const [key, value] of Object.entries(preparedDados || {})) {
+    const regex = new RegExp(`{{${key}}}`, "g");
+    const val = value != null ? String(value).trim() : "";
+    mergedContent = mergedContent.replace(regex, val || "______________________________");
+  }
+  mergedContent = mergedContent.replace(/\{\{[^}]+\}\}/g, "______________________________");
+
+  // Auto-máscara preventiva em CNPJ e Telefone no corpo do texto
+  mergedContent = mergedContent.replace(/(CNPJ:\s*)(\d{14})/gi, (_, p1, p2) => p1 + formatCnpj(p2));
+  mergedContent = mergedContent.replace(/(Telefone:\s*)(\d{10,13})/gi, (_, p1, p2) => p1 + formatTelefone(p2));
+
+  // Inicializa o PDF com as margens oficiais (topo 36, base 36, laterais 42)
+  const doc = new PDFDocument({
+    size: "A4",
+    margins: PAGE_METRICS.margins,
+    bufferPages: true,
+  });
+
+  const buffers = [];
+  doc.on("data", buffers.push.bind(buffers));
+
+  let finalPageCount = 1;
+  const pdfBufferPromise = new Promise((resolve) => {
+    doc.on("end", () => {
+      const pdfData = Buffer.concat(buffers);
+      pdfData.pageCount = finalPageCount;
+      resolve(pdfData);
+    });
+  });
+
+  const lines = mergedContent.split("\n");
+  const totalLines = lines.length;
+  let i = 0;
+  let tituloRenderizado = false;
+  let inClausulaPrimeira = false;
+  let inClausulaTerceira = false;
+  let inClausulaQuarta = false;
+  let pastClausulaSexta = false;
+  let signaturesRendered = false;
+  let alineaLetterIdx = 0;
+
+  while (i < totalLines) {
+    const rawLine = lines[i];
+    const p = rawLine.trim();
+
+    if (p === "") {
+      i++;
+      continue;
+    }
+
+    // 1. Título principal e subtítulo (apenas no início do documento)
+    if (!tituloRenderizado && p === p.toUpperCase() && p.length > 8 && !p.startsWith("CLÁUSULA") && !p.startsWith("Cláusula")) {
+      drawHeader(doc);
+      tituloRenderizado = true;
+
+      // Pula subtítulo se já tiver sido desenhado no drawHeader
+      let nextIdx = i + 1;
+      while (nextIdx < totalLines && lines[nextIdx].trim() === "") nextIdx++;
+      if (nextIdx < totalLines) {
+        const nextP = lines[nextIdx].trim();
+        if (nextP.includes("&") || (nextP === nextP.toUpperCase() && !nextP.startsWith("CLÁUSULA") && !nextP.startsWith("Cláusula"))) {
+          i = nextIdx + 1;
+          continue;
+        }
+      }
+      i++;
+      continue;
+    }
+
+    // 2. Cabeçalho de cláusula padronizado: CLÁUSULA [NÚMERO]   |   [TÍTULO]
+    const clauseInfo = normalizeClauseHeader(p);
+    if (clauseInfo) {
+      const isQuartaOrHigher = [
+        "QUARTA", "QUINTA", "SEXTA", "SÉTIMA", "OITAVA", "NONA", "DÉCIMA"
+      ].includes(clauseInfo.ordinal) || ["4", "5", "6", "7"].some(n => clauseInfo.ordinal.includes(n));
+
+      // Quebra forçada controlada doc.addPage() entre a Cláusula 3 e a Cláusula 4
+      if (isQuartaOrHigher && doc.bufferedPageRange().count === 1) {
+        doc.addPage();
+        doc.y = PAGE_METRICS.margins.top;
+      }
+
+      inClausulaPrimeira = clauseInfo.ordinal === "PRIMEIRA" || clauseInfo.title.includes("PARTES");
+      inClausulaTerceira = clauseInfo.ordinal === "TERCEIRA" || clauseInfo.title.includes("OBRIGAÇÕES");
+      inClausulaQuarta = clauseInfo.ordinal === "QUARTA" || clauseInfo.title.includes("PREÇO");
+      if (clauseInfo.ordinal === "SEXTA" || clauseInfo.title.includes("FORO")) {
+        pastClausulaSexta = true;
+      }
+      alineaLetterIdx = 0;
+
+      doc.moveDown(0.2);
+      drawClauseHeader(doc, clauseInfo.ordinal, clauseInfo.title);
+      i++;
+      continue;
+    }
+
+    // 3. Cláusula Primeira: caixas das partes em 2 colunas paralelas
+    if (inClausulaPrimeira && (p === "CONTRATADA" || p === "**CONTRATADA**")) {
+      const contratadaLines = [];
+      i++;
+      while (i < totalLines && lines[i].trim() !== "CONTRATANTE" && lines[i].trim() !== "**CONTRATANTE**" && !normalizeClauseHeader(lines[i].trim())) {
+        if (lines[i].trim()) contratadaLines.push(lines[i].trim());
+        i++;
+      }
+
+      const contratanteLines = [];
+      if (i < totalLines && (lines[i].trim() === "CONTRATANTE" || lines[i].trim() === "**CONTRATANTE**")) {
+        i++;
+        while (i < totalLines && !lines[i].trim().startsWith("Por este instrumento") && !normalizeClauseHeader(lines[i].trim())) {
+          if (lines[i].trim()) contratanteLines.push(lines[i].trim());
+          i++;
+        }
+      }
+
+      const contratadaParam = contratadaLines.length > 0 ? contratadaLines : {
+        razao_social: preparedDados.contratada_razao_social,
+        cnpj: preparedDados.contratada_cnpj,
+        representante: preparedDados.contratada_representante,
+        endereco: preparedDados.contratada_endereco,
+        telefone: preparedDados.contratada_telefone,
+        email: preparedDados.contratada_email,
+      };
+
+      const contratanteParam = contratanteLines.length > 0 ? contratanteLines : {
+        razao_social: preparedDados.razao_social,
+        cnpj: preparedDados.cnpj,
+        representante_nome: preparedDados.representante_nome,
+        endereco: preparedDados.endereco,
+        telefone: preparedDados.telefone,
+        email: preparedDados.email,
+      };
+
+      drawPartesBoxes(doc, contratadaParam, contratanteParam);
+      inClausulaPrimeira = false;
+      continue;
+    }
+
+    // 4. Cláusula Terceira: Subtítulos e alíneas estilizadas em magenta/roxo a), b), c)...
+    if (inClausulaTerceira && /^Compete\s+à\s+/i.test(p)) {
+      doc.moveDown(0.15);
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+         .text(p, 42, doc.y, { width: 511 });
+      doc.moveDown(0.15);
+      alineaLetterIdx = 0;
+      i++;
+      continue;
+    }
+
+    if (inClausulaTerceira && !normalizeClauseHeader(p)) {
+      const letter = String.fromCharCode(97 + alineaLetterIdx) + ")";
+      alineaLetterIdx++;
+
+      const cleanItemText = p.replace(/^([a-z]\)|\d+[.)]|\-|\•)\s*/i, "").trim();
+      const itemY = doc.y;
+      const itemX = 42 + 4;
+      const textX = itemX + 14;
+      const textW = 511 - 18;
+
+      doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.secondary)
+         .text(letter, itemX, itemY, { width: 14 });
+
+      doc.font("Helvetica").fontSize(7.6).fillColor(GD_COLORS.textDark);
+      renderFormattedParagraph(doc, cleanItemText, {
+        x: textX,
+        y: itemY,
+        width: textW,
+        lineGap: 0.8,
+        paragraphGap: 1.2,
+      });
+
+      doc.x = 42;
+      i++;
+      continue;
+    }
+
+    // 5. Cláusula Quarta: Tabela de Preço e Condições
+    if (inClausulaQuarta && (p.startsWith("Compromisso do Período") || p === "COMPOSIÇÃO DO PERÍODO")) {
+      let valorTotalStr = preparedDados.valor_total || "";
+      let composicaoLabel = "Em reais (conforme condições de pagamento)";
+      let composicaoVal = "";
+      let permutaLabel = "Em permuta";
+      let permutaVal = preparedDados.condicao_permuta || "Não aplicável";
+
+      while (i < totalLines && !normalizeClauseHeader(lines[i].trim()) && !lines[i].trim().startsWith("CLÁUSULA QUINTA") && !lines[i].trim().startsWith("Cláusula Quinta")) {
+        const lp = lines[i].trim();
+        if (lp.startsWith("Compromisso do Período")) {
+          const parts = lp.split(/:(.*)/s);
+          if (parts[1] && parts[1].trim()) valorTotalStr = parts[1].trim();
+          else if (i + 1 < totalLines && lines[i + 1].trim() && !lines[i + 1].trim().startsWith("COMPOSIÇÃO")) {
+            valorTotalStr = lines[i + 1].trim();
+            i++;
+          }
+        } else if (lp.startsWith("Em reais")) {
+          const parts = lp.split(/:(.*)/s);
+          composicaoLabel = parts[0].trim();
+          if (parts[1] && parts[1].trim()) composicaoVal = parts[1].trim();
+          else if (i + 1 < totalLines && lines[i + 1].trim() && !lines[i + 1].trim().startsWith("Em permuta")) {
+            composicaoVal = lines[i + 1].trim();
+            i++;
+          }
+        } else if (lp.startsWith("Em permuta")) {
+          const parts = lp.split(/:(.*)/s);
+          permutaLabel = parts[0].trim();
+          if (parts[1] && parts[1].trim()) permutaVal = parts[1].trim();
+          else if (i + 1 < totalLines && lines[i + 1].trim()) {
+            permutaVal = lines[i + 1].trim();
+            i++;
+          }
+        }
+        i++;
+      }
+
+      drawPricingTable(doc, preparedDados, {
+        valorTotal: valorTotalStr,
+        composicaoLabel,
+        emReaisVal: composicaoVal,
+        permutaVal,
+      });
+
+      inClausulaQuarta = false;
+      continue;
+    }
+
+    // 6. Bloco de Assinaturas e Testemunhas
+    const isUnderline = /^[_\s]{10,}$/.test(p);
+    const isSigSectionStart = pastClausulaSexta && (isUnderline || p === "CONTRATADA" || p === "CONTRATANTE" || p.startsWith("Testemunha"));
+    if (isSigSectionStart && !signaturesRendered) {
+      drawSignaturesAndWitnesses(doc, preparedDados);
+      signaturesRendered = true;
+      while (i < totalLines) i++;
+      break;
+    }
+
+    // 7. Linha de Data/Local centralizada ("Uberlândia – MG, 16 de outubro de 2026.")
+    if (pastClausulaSexta && /\b\d{1,2}\s+de\s+[a-zçã]+\s+de\s+\d{4}\b/i.test(p)) {
+      doc.moveDown(0.4);
+      doc.font("Helvetica").fontSize(8).fillColor(GD_COLORS.primary)
+         .text(p, 42, doc.y, { align: "center", width: 511 });
+      doc.moveDown(0.4);
+      i++;
+      continue;
+    }
+
+    // 8. Linhas de assinatura legadas
+    const isLegacySigLabel = /^(Contratada|Contratante):/i.test(p);
+    if (isUnderline || isLegacySigLabel) {
+      doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark);
+      doc.text(p, { align: "center", lineGap: 1.5, width: 511 });
+      if (isLegacySigLabel) doc.moveDown(1.5);
+      i++;
+      continue;
+    }
+
+    // 9. Parágrafos comuns
+    const isItem = /^([A-Z]\.|[-•]|\d+[ºª.]?)\s/.test(p);
+    doc.fontSize(isItem ? 7.8 : 8).fillColor(GD_COLORS.textDark);
+    renderFormattedParagraph(doc, p, {
+      align: "left",
+      lineGap: isItem ? 0.8 : 1.2,
+      paragraphGap: isItem ? 1.2 : 2.2,
+      width: 511,
+    });
+
+    i++;
+  }
+
+  // Se o documento não teve assinaturas pelo bloco estruturado, renderiza fallback se houver dados
+  const jaTemAssinaturas = lines.some((l) => /^(Contratada|Contratante):/i.test(l.trim()));
+  if (!signaturesRendered && !jaTemAssinaturas && (preparedDados.assinatura_contratada || preparedDados.assinatura_contratante)) {
+    doc.moveDown(1.2);
+    doc.font("Helvetica").fontSize(8.5);
+    doc.text("____________________________________________________", { align: "center" });
+    doc.text(`Contratada: ${preparedDados.assinatura_contratada || ""}`.trimEnd(), { align: "center" });
+    doc.moveDown(1.8);
+    doc.text("____________________________________________________", { align: "center" });
+    doc.text(`Contratante: ${preparedDados.assinatura_contratante || preparedDados.razao_social || ""}`.trimEnd(), { align: "center" });
+  }
+
+  // Aplicação do Rodapé Oficial em todas as páginas
+  const range = doc.bufferedPageRange();
+  finalPageCount = range.count;
+
+  for (let pIdx = range.start; pIdx < range.start + range.count; pIdx++) {
+    doc.switchToPage(pIdx);
+    const pageNum = pIdx - range.start + 1;
+    drawFooter(doc, pageNum, finalPageCount, pageNum === 1);
+  }
+
+  doc.end();
+  return await pdfBufferPromise;
+}
