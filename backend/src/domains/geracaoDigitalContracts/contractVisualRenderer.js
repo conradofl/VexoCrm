@@ -38,28 +38,33 @@ export function getImageAssetPath(fileName) {
   return directPath;
 }
 
-// 1. Cores Oficiais Geração Digital (GD)
+// 1. Paleta de Cores Fidedigna ao Modelo Word GD
 export const GD_COLORS = {
-  primary: "#6B21A8",      // Roxo Primário: títulos principais, headers de tabela e caixas
-  secondary: "#C026D3",    // Magenta / Rosa: subtítulo, rótulo "CONTRATANTE", marcadores de alíneas
-  highlightBg: "#F3E8FF",  // Lavanda / Fundo Destaque: fundo das barras de cláusulas e subheaders
-  softBorder: "#E9D5FF",   // Borda Suave
-  textDark: "#1F2937",     // Texto escuro
-  textMuted: "#6B7280",    // Cinza auxiliar para labels secundários e rodapé
+  deepPurple: "#4A1370",  // Título principal, títulos de empresas, títulos de cláusula, valores na tabela
+  primary: "#7B1FB0",     // "CLÁUSULA ORDINAL", rótulos nos boxes (CNPJ:, Telefone:), cabeçalhos de tabela
+  magenta: "#C2208E",     // Subtítulo "MARKETING DIGITAL & AUTOMAÇÃO", alíneas a), b), c), tag CONTRATANTE/CONTRATADA
+  lightLilac: "#DCC7EC",  // Borda suave, separador " | ", fundo suave
+  highlightBg: "#FAF5FF", // Fundo lavanda das barras de cláusula e linhas alternadas
+  textDark: "#1F2937",    // Texto escuro padrão de leitura
+  textMuted: "#6E6878",   // Cinza elegante dos dados de rodapé e linhas de testemunhas
   white: "#FFFFFF",
   boxBg: "#FAFAFE",
+
+  // Aliases auxiliares para retrocompatibilidade
+  softBorder: "#DCC7EC",
+  secondary: "#C2208E",
   tableRowAlt: "#FAF5FF",
 };
 
 // Aliases para retrocompatibilidade
 export const CONTRACT_PDF_COLORS = {
-  primaryDark: GD_COLORS.primary,
+  primaryDark: GD_COLORS.deepPurple,
   primary: GD_COLORS.primary,
-  secondary: GD_COLORS.secondary,
-  accentLight: GD_COLORS.softBorder,
+  secondary: GD_COLORS.magenta,
+  accentLight: GD_COLORS.lightLilac,
   boxBg: GD_COLORS.highlightBg,
   tableSubBg: GD_COLORS.highlightBg,
-  tableAltBg: GD_COLORS.tableRowAlt,
+  tableAltBg: GD_COLORS.highlightBg,
   textDark: GD_COLORS.textDark,
   textMuted: GD_COLORS.textMuted,
   white: GD_COLORS.white,
@@ -72,6 +77,21 @@ export const PAGE_METRICS = {
   margins: { top: 36, bottom: 36, left: 42, right: 42 },
   contentWidth: 511.28, // 595.28 - (42 * 2)
 };
+
+/**
+ * 3. Topo Gradiente em Todas as Páginas
+ * Desenha image2.png cobrindo toda a largura superior (595.28 x 6.0 pt).
+ */
+export function drawTopGradient(doc) {
+  const image2Path = getImageAssetPath("image2.png");
+  if (fs.existsSync(image2Path)) {
+    try {
+      doc.image(image2Path, 0, 0, { width: 595.28, height: 6.0 });
+    } catch (err) {
+      console.warn("[drawTopGradient] Aviso ao renderizar image2.png:", err.message);
+    }
+  }
+}
 
 /**
  * Identifica e normaliza cabeçalhos de cláusula (ex: "CLÁUSULA PRIMEIRA | DAS PARTES").
@@ -128,17 +148,17 @@ export function renderFormattedParagraph(doc, text, options = {}) {
 }
 
 /**
- * a) drawHeader(doc) com tipografia, cores e traço divisório.
+ * a) drawHeader(doc) com tipografia, cores e traço divisório degradê.
  */
 export function drawHeader(doc) {
   const startX = 42;
-  const contentW = 511;
+  const contentW = 511.28;
   const startY = doc.page.margins.top || 36;
 
-  // Título principal em negrito roxo escuro (15pt)
+  // Título principal em negrito deepPurple (15pt)
   doc.font("Helvetica-Bold")
      .fontSize(15)
-     .fillColor(GD_COLORS.primary)
+     .fillColor(GD_COLORS.deepPurple)
      .text("CONTRATO DE PRESTAÇÃO DE SERVIÇOS", startX, startY, {
        align: "center",
        width: contentW,
@@ -149,7 +169,7 @@ export function drawHeader(doc) {
   // Subtítulo em magenta com espaçamento de caracteres (10pt)
   doc.font("Helvetica-Bold")
      .fontSize(10)
-     .fillColor(GD_COLORS.secondary)
+     .fillColor(GD_COLORS.magenta)
      .text("MARKETING DIGITAL & AUTOMAÇÃO", startX, doc.y, {
        align: "center",
        width: contentW,
@@ -170,19 +190,19 @@ export function drawHeader(doc) {
       doc.image(image1Path, imgX, dividerY, { width: imgW, height: imgH });
       doc.y = dividerY + imgH + 8;
     } catch {
-      doc.rect(imgX, dividerY, imgW, 1.5).fill(GD_COLORS.secondary);
+      doc.rect(imgX, dividerY, imgW, 1.5).fill(GD_COLORS.magenta);
       doc.y = dividerY + 1.5 + 8;
     }
   } else {
     const lineW = 140;
     const lineX = (doc.page.width - lineW) / 2;
-    doc.rect(lineX, dividerY, lineW, 1.5).fill(GD_COLORS.secondary);
+    doc.rect(lineX, dividerY, lineW, 1.5).fill(GD_COLORS.magenta);
     doc.y = dividerY + 1.5 + 8;
   }
 }
 
 /**
- * b) drawClauseHeader(doc, title) com barra lateral roxa e fundo #F3E8FF.
+ * b) drawClauseHeader(doc, title) com barra lateral roxa (#7B1FB0) e fundo #FAF5FF.
  * Suporta tanto drawClauseHeader(doc, title) quanto drawClauseHeader(doc, ordinal, title).
  */
 export function drawClauseHeader(doc, ordinalOrTitle, title) {
@@ -203,20 +223,20 @@ export function drawClauseHeader(doc, ordinalOrTitle, title) {
   }
 
   const startX = 42;
-  const barW = 511;
+  const barW = 511.28;
   const barH = 17;
   const curY = doc.y;
 
-  // Fundo lavanda / destaque (#F3E8FF)
+  // Fundo lavanda / destaque (#FAF5FF)
   doc.rect(startX, curY, barW, barH).fill(GD_COLORS.highlightBg);
 
-  // Barra lateral roxa sólida à esquerda (#6B21A8)
+  // Barra lateral roxa sólida à esquerda (#7B1FB0) de 3.5pt de espessura
   const lateralBarW = 3.5;
   doc.rect(startX, curY, lateralBarW, barH).fill(GD_COLORS.primary);
 
-  // Borda suave inferior/externa (#E9D5FF)
+  // Borda suave inferior/externa (#DCC7EC)
   doc.rect(startX, curY, barW, barH)
-     .strokeColor(GD_COLORS.softBorder)
+     .strokeColor(GD_COLORS.lightLilac)
      .lineWidth(0.5)
      .stroke();
 
@@ -228,12 +248,12 @@ export function drawClauseHeader(doc, ordinalOrTitle, title) {
     const ordNormalized = ordinal.replace(/^(?:CLÁUSULA|CLAUSULA)\s+/i, "").trim().toUpperCase();
     doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
        .text(`CLÁUSULA ${ordNormalized}`, textX, textY, { continued: true });
-    doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.softBorder)
+    doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.lightLilac)
        .text("   |   ", { continued: true });
-    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.deepPurple)
        .text(cleanTitle.toUpperCase(), { continued: false });
   } else {
-    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+    doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.deepPurple)
        .text(cleanTitle.toUpperCase(), textX, textY, { continued: false });
   }
 
@@ -299,17 +319,20 @@ export function normalizePartesBoxData(data, fallbackRole = "") {
 }
 
 /**
- * c) drawPartesBoxes(doc, contratada, contratante) com caixas estilizadas em 2 colunas.
+ * 4. Caixas das Partes (Cláusula Primeira)
+ * - colWidth = 244, gap = 12, startX = 42.
+ * - Cabeçalhos CONTRATADA e CONTRATANTE com fundo #7B1FB0 e texto branco.
+ * - Labels dos campos (CNPJ:, Representante:, Endereço:, Telefone:, E-mail:) em negrito #7B1FB0, com valores em #1F2937.
  */
 export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
   const c1 = normalizePartesBoxData(contratadaInput, "AGÊNCIA GERAÇÃO DIGITAL LTDA");
   const c2 = normalizePartesBoxData(contratanteInput, "CONTRATANTE");
 
   const startX = 42;
-  const colWidth = 249;
-  const gap = 13;
+  const colWidth = 244;
+  const gap = 12;
   const col1X = startX;
-  const col2X = startX + colWidth + gap;
+  const col2X = startX + colWidth + gap; // 42 + 244 + 12 = 298
   const headerH = 16;
   const padding = 6;
   const innerW = colWidth - (padding * 2);
@@ -319,7 +342,7 @@ export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
     let h = 12; // título da razão social
     for (const f of fields) {
       const fullText = (f.label ? f.label + " " : "") + f.value;
-      if (fullText.length > 44) h += 19;
+      if (fullText.length > 42) h += 19;
       else h += 10.5;
     }
     return h;
@@ -329,53 +352,53 @@ export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
   const boxY = doc.y;
 
   // Box 1: CONTRATADA
-  doc.rect(col1X, boxY, colWidth, headerH).fill(GD_COLORS.primary);
+  doc.rect(col1X, boxY, colWidth, headerH).fill(GD_COLORS.primary); // #7B1FB0
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
      .text("CONTRATADA", col1X + padding, boxY + 4, { width: innerW });
   doc.rect(col1X, boxY + headerH, colWidth, contentH).fill(GD_COLORS.boxBg);
-  doc.rect(col1X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+  doc.rect(col1X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
 
   let tY1 = boxY + headerH + padding;
-  doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.primary)
+  doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text(c1.title, col1X + padding, tY1, { width: innerW });
   tY1 += 12;
   for (const field of c1.fields) {
     if (field.label) {
-      doc.font("Helvetica-Bold").fontSize(7.2).fillColor(GD_COLORS.primary)
+      doc.font("Helvetica-Bold").fontSize(7.2).fillColor(GD_COLORS.primary) // #7B1FB0
          .text(field.label, col1X + padding, tY1, { continued: true });
-      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
+      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark) // #1F2937
          .text(" " + field.value, { width: innerW });
     } else {
       doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
          .text(field.value, col1X + padding, tY1, { width: innerW });
     }
     const fullLen = (field.label ? field.label + " " : "") + field.value;
-    tY1 += fullLen.length > 44 ? 19 : 10.5;
+    tY1 += fullLen.length > 42 ? 19 : 10.5;
   }
 
   // Box 2: CONTRATANTE
-  doc.rect(col2X, boxY, colWidth, headerH).fill(GD_COLORS.primary);
+  doc.rect(col2X, boxY, colWidth, headerH).fill(GD_COLORS.primary); // #7B1FB0
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
      .text("CONTRATANTE", col2X + padding, boxY + 4, { width: innerW });
   doc.rect(col2X, boxY + headerH, colWidth, contentH).fill(GD_COLORS.boxBg);
-  doc.rect(col2X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+  doc.rect(col2X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
 
   let tY2 = boxY + headerH + padding;
-  doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.primary)
+  doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text(c2.title, col2X + padding, tY2, { width: innerW });
   tY2 += 12;
   for (const field of c2.fields) {
     if (field.label) {
-      doc.font("Helvetica-Bold").fontSize(7.2).fillColor(GD_COLORS.primary)
+      doc.font("Helvetica-Bold").fontSize(7.2).fillColor(GD_COLORS.primary) // #7B1FB0
          .text(field.label, col2X + padding, tY2, { continued: true });
-      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
+      doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark) // #1F2937
          .text(" " + field.value, { width: innerW });
     } else {
       doc.font("Helvetica").fontSize(7.2).fillColor(GD_COLORS.textDark)
          .text(field.value, col2X + padding, tY2, { width: innerW });
     }
     const fullLen = (field.label ? field.label + " " : "") + field.value;
-    tY2 += fullLen.length > 44 ? 19 : 10.5;
+    tY2 += fullLen.length > 42 ? 19 : 10.5;
   }
 
   doc.y = boxY + headerH + contentH + 6;
@@ -387,9 +410,9 @@ export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
  */
 export function drawPricingTable(doc, dados = {}, options = {}) {
   const startX = 42;
-  const tblW = 511;
+  const tblW = 511.28;
   const col1W = 340;
-  const col2W = tblW - col1W; // 171
+  const col2W = tblW - col1W; // 171.28
   const tblY = doc.y;
 
   // Extração e cálculo de valores monetários
@@ -437,13 +460,13 @@ export function drawPricingTable(doc, dados = {}, options = {}) {
   const hRow4 = 14;
   const totalH = hRow1 + hRow2 + hRow3 + hRow4;
 
-  // Linha 1: Compromisso do Período (Header Roxo Sólido #6B21A8, texto branco)
+  // Linha 1: Compromisso do Período (Header Roxo Sólido #7B1FB0, texto branco)
   doc.rect(startX, tblY, tblW, hRow1).fill(GD_COLORS.primary);
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
      .text("Compromisso do Período", startX + 8, tblY + 4.5, { width: col1W - 16 });
   doc.text(valorTotalStr, startX + col1W, tblY + 4.5, { width: col2W - 10, align: "right" });
 
-  // Linha 2: COMPOSIÇÃO DO PERÍODO (Subcabeçalho #F3E8FF, texto roxo)
+  // Linha 2: COMPOSIÇÃO DO PERÍODO (Subcabeçalho #FAF5FF, texto roxo #7B1FB0)
   const y2 = tblY + hRow1;
   doc.rect(startX, y2, tblW, hRow2).fill(GD_COLORS.highlightBg);
   doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
@@ -454,22 +477,22 @@ export function drawPricingTable(doc, dados = {}, options = {}) {
   doc.rect(startX, y3, tblW, hRow3).fill(GD_COLORS.white);
   doc.font("Helvetica").fontSize(8).fillColor(GD_COLORS.textDark)
      .text(composicaoLabel, startX + 8, y3 + 3.2, { width: col1W - 16 });
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text(emReaisVal, startX + col1W, y3 + 3.2, { width: col2W - 10, align: "right" });
 
   // Linha 4: Em permuta
   const y4 = y3 + hRow3;
-  doc.rect(startX, y4, tblW, hRow4).fill(GD_COLORS.tableRowAlt);
+  doc.rect(startX, y4, tblW, hRow4).fill(GD_COLORS.highlightBg);
   doc.font("Helvetica").fontSize(8).fillColor(GD_COLORS.textDark)
      .text("Em permuta", startX + 8, y4 + 3.2, { width: col1W - 16 });
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text(permutaVal, startX + col1W, y4 + 3.2, { width: col2W - 10, align: "right" });
 
   // Bordas da tabela
   doc.rect(startX, tblY, tblW, totalH).strokeColor(GD_COLORS.primary).lineWidth(0.75).stroke();
   doc.moveTo(startX, y2).lineTo(startX + tblW, y2).strokeColor(GD_COLORS.primary).lineWidth(0.5).stroke();
-  doc.moveTo(startX, y3).lineTo(startX + tblW, y3).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
-  doc.moveTo(startX, y4).lineTo(startX + tblW, y4).strokeColor(GD_COLORS.softBorder).lineWidth(0.5).stroke();
+  doc.moveTo(startX, y3).lineTo(startX + tblW, y3).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
+  doc.moveTo(startX, y4).lineTo(startX + tblW, y4).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
 
   doc.y = tblY + totalH + 8;
   doc.x = startX;
@@ -494,38 +517,38 @@ export function drawSignaturesAndWitnesses(doc, dados = {}) {
 
   // Assinatura Contratada
   doc.moveTo(col1X + 10, sigY).lineTo(col1X + colW - 10, sigY)
-     .strokeColor(GD_COLORS.softBorder).lineWidth(0.75).stroke();
-  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+     .strokeColor(GD_COLORS.lightLilac).lineWidth(0.75).stroke();
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text(contratadaNome, col1X, sigY + 6, { width: colW, align: "center" });
   doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textDark)
      .text(contratadaRep, col1X, sigY + 16, { width: colW, align: "center" });
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.secondary)
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.magenta) // #C2208E
      .text("CONTRATADA", col1X, sigY + 26, { width: colW, align: "center" });
 
   // Assinatura Contratante
   doc.moveTo(col2X + 10, sigY).lineTo(col2X + colW - 10, sigY)
-     .strokeColor(GD_COLORS.softBorder).lineWidth(0.75).stroke();
-  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
+     .strokeColor(GD_COLORS.lightLilac).lineWidth(0.75).stroke();
+  doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text(contratanteNome, col2X, sigY + 6, { width: colW, align: "center" });
   doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textDark)
      .text(contratanteRep, col2X, sigY + 16, { width: colW, align: "center" });
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.secondary)
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.magenta) // #C2208E
      .text("CONTRATANTE", col2X, sigY + 26, { width: colW, align: "center" });
 
   // Testemunhas
   const witY = sigY + 42;
 
   // Testemunha 1
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text("Testemunha 1", col1X, witY, { width: colW, align: "left" });
-  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted) // #6E6878
      .text("Nome: ____________________________________", col1X, witY + 10, { width: colW, align: "left" });
   doc.text("CPF:     ____________________________________", col1X, witY + 20, { width: colW, align: "left" });
 
   // Testemunha 2
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.deepPurple) // #4A1370
      .text("Testemunha 2", col2X, witY, { width: colW, align: "left" });
-  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted) // #6E6878
      .text("Nome: ____________________________________", col2X, witY + 10, { width: colW, align: "left" });
   doc.text("CPF:     ____________________________________", col2X, witY + 20, { width: colW, align: "left" });
 
@@ -534,55 +557,71 @@ export function drawSignaturesAndWitnesses(doc, dados = {}) {
 }
 
 /**
+ * 2. Eliminação Total do Loop de Paginação (Garantia de 2 Páginas)
  * f) drawFooter(doc, pageNumber, totalPages, isFirstPage)
- * Inclui a arte image3.png na página 1 e dados de contato oficiais em ambas as páginas.
+ * - Define doc.page.margins.bottom = 0 para desativar auto-pagebreak do PDFKit.
+ * - Linha divisória em y = 746.
+ * - Texto de contato em y = 750.
+ * - Inserção na base em todas as páginas:
+ *   - image3.png em x = 24, y = 766, w = 320, h = 66
+ *   - image4.png em x = 420, y = 774, w = 120, h = 50
+ * - Restaura doc.page.margins.bottom = savedBottomMargin ao concluir.
  */
 export function drawFooter(doc, pageNumber = 1, totalPages = 2, isFirstPage = false) {
+  const savedBottomMargin = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0; // Previne qualquer auto-pagebreak espúrio do PDFKit
+
   const startX = 42;
-  const contentW = 511;
+  const contentW = 511.28;
 
-  // Na página 1: Inserir a imagem oficial image3.png com redes sociais e logo da Geração Digital
-  if (isFirstPage) {
-    const image3Path = getImageAssetPath("image3.png");
-    if (fs.existsSync(image3Path)) {
-      const imgW = 285;
-      const imgH = 60;
-      const imgX = (doc.page.width - imgW) / 2;
-      const imgY = 736;
-      try {
-        doc.image(image3Path, imgX, imgY, { width: imgW, height: imgH });
-      } catch (err) {
-        console.warn("[drawFooter] Aviso ao renderizar image3.png:", err.message);
-      }
-    }
-  }
-
-  // Linha divisória superior do rodapé
-  const footerLineY = 804;
+  // 1. Linha divisória do rodapé em y = 746
+  const footerLineY = 746;
   doc.moveTo(startX, footerLineY)
      .lineTo(startX + contentW, footerLineY)
-     .strokeColor(GD_COLORS.softBorder)
+     .strokeColor(GD_COLORS.lightLilac)
      .lineWidth(0.5)
      .stroke();
 
-  // Linha de contato oficial:
-  // www.mktgeracaodigital.com.br • comercial@mktgeracaodigital.com.br • (34) 99771-9779          Página X de Y
-  const textY = 808;
-  doc.font("Helvetica-Bold").fontSize(7).fillColor(GD_COLORS.primary)
+  // 2. Linha de contato oficial e paginação em y = 750
+  const textY = 750;
+  doc.font("Helvetica-Bold").fontSize(7.5).fillColor(GD_COLORS.primary)
      .text("www.mktgeracaodigital.com.br", startX, textY, { continued: true });
-  doc.font("Helvetica").fontSize(7).fillColor(GD_COLORS.textMuted)
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
      .text("   •   comercial@mktgeracaodigital.com.br   •   (34) 99771-9779", { continued: false });
 
-  // Numeração de página à direita
-  doc.font("Helvetica").fontSize(7).fillColor(GD_COLORS.textMuted)
+  doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
      .text(`Página ${pageNumber} de ${totalPages}`, startX, textY, {
        width: contentW,
        align: "right",
      });
+
+  // 3. Imagens na base em todas as páginas:
+  // image3.png (constelação de ícones) em x = 24, y = 766, largura: 320, altura: 66
+  const image3Path = getImageAssetPath("image3.png");
+  if (fs.existsSync(image3Path)) {
+    try {
+      doc.image(image3Path, 24, 766, { width: 320, height: 66 });
+    } catch (err) {
+      console.warn("[drawFooter] Aviso ao renderizar image3.png:", err.message);
+    }
+  }
+
+  // image4.png (logo com foguete GERAÇÃO DIGITAL) em x = 420, y = 774, largura: 120, altura: 50
+  const image4Path = getImageAssetPath("image4.png");
+  if (fs.existsSync(image4Path)) {
+    try {
+      doc.image(image4Path, 420, 774, { width: 120, height: 50 });
+    } catch (err) {
+      console.warn("[drawFooter] Aviso ao renderizar image4.png:", err.message);
+    }
+  }
+
+  // Restaura margem inferior original
+  doc.page.margins.bottom = savedBottomMargin;
 }
 
 /**
- * Renderização executiva do PDF do contrato com 100% de fidelidade visual.
+ * 5. Distribuição Rigorosa das Cláusulas por Página & Renderização Executiva
  * Rigorosamente 2 páginas com margens ajustadas (topo/base: 36pt, laterais: 42pt).
  */
 export async function renderContractPdf(templateConteudo, dados = {}) {
@@ -619,6 +658,11 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
       resolve(pdfData);
     });
   });
+
+  // Topo Gradiente na Página 1
+  drawTopGradient(doc);
+  doc.y = PAGE_METRICS.margins.top;
+  doc.x = PAGE_METRICS.margins.left;
 
   const lines = mergedContent.split("\n");
   const totalLines = lines.length;
@@ -666,10 +710,12 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
         "QUARTA", "QUINTA", "SEXTA", "SÉTIMA", "OITAVA", "NONA", "DÉCIMA"
       ].includes(clauseInfo.ordinal) || ["4", "5", "6", "7"].some(n => clauseInfo.ordinal.includes(n));
 
-      // Quebra forçada controlada doc.addPage() entre a Cláusula 3 e a Cláusula 4
+      // Quebra forçada controlada doc.addPage() imediatamente antes da Cláusula 4
       if (isQuartaOrHigher && doc.bufferedPageRange().count === 1) {
         doc.addPage();
+        drawTopGradient(doc);
         doc.y = PAGE_METRICS.margins.top;
+        doc.x = PAGE_METRICS.margins.left;
       }
 
       inClausulaPrimeira = clauseInfo.ordinal === "PRIMEIRA" || clauseInfo.title.includes("PARTES");
@@ -730,8 +776,8 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
     // 4. Cláusula Terceira: Subtítulos e alíneas estilizadas em magenta/roxo a), b), c)...
     if (inClausulaTerceira && /^Compete\s+à\s+/i.test(p)) {
       doc.moveDown(0.15);
-      doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.primary)
-         .text(p, 42, doc.y, { width: 511 });
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.deepPurple)
+         .text(p, 42, doc.y, { width: 511.28 });
       doc.moveDown(0.15);
       alineaLetterIdx = 0;
       i++;
@@ -746,9 +792,9 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
       const itemY = doc.y;
       const itemX = 42 + 4;
       const textX = itemX + 14;
-      const textW = 511 - 18;
+      const textW = 511.28 - 18;
 
-      doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.secondary)
+      doc.font("Helvetica-Bold").fontSize(7.6).fillColor(GD_COLORS.magenta)
          .text(letter, itemX, itemY, { width: 14 });
 
       doc.font("Helvetica").fontSize(7.6).fillColor(GD_COLORS.textDark);
@@ -826,8 +872,8 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
     // 7. Linha de Data/Local centralizada ("Uberlândia – MG, 16 de outubro de 2026.")
     if (pastClausulaSexta && /\b\d{1,2}\s+de\s+[a-zçã]+\s+de\s+\d{4}\b/i.test(p)) {
       doc.moveDown(0.4);
-      doc.font("Helvetica").fontSize(8).fillColor(GD_COLORS.primary)
-         .text(p, 42, doc.y, { align: "center", width: 511 });
+      doc.font("Helvetica-Bold").fontSize(8).fillColor(GD_COLORS.deepPurple)
+         .text(p, 42, doc.y, { align: "center", width: 511.28 });
       doc.moveDown(0.4);
       i++;
       continue;
@@ -837,7 +883,7 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
     const isLegacySigLabel = /^(Contratada|Contratante):/i.test(p);
     if (isUnderline || isLegacySigLabel) {
       doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark);
-      doc.text(p, { align: "center", lineGap: 1.5, width: 511 });
+      doc.text(p, { align: "center", lineGap: 1.5, width: 511.28 });
       if (isLegacySigLabel) doc.moveDown(1.5);
       i++;
       continue;
@@ -850,7 +896,7 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
       align: "left",
       lineGap: isItem ? 0.8 : 1.2,
       paragraphGap: isItem ? 1.2 : 2.2,
-      width: 511,
+      width: 511.28,
     });
 
     i++;
@@ -868,12 +914,13 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
     doc.text(`Contratante: ${preparedDados.assinatura_contratante || preparedDados.razao_social || ""}`.trimEnd(), { align: "center" });
   }
 
-  // Aplicação do Rodapé Oficial em todas as páginas
+  // Aplicação do Rodapé Oficial e Topo Gradiente em todas as páginas
   const range = doc.bufferedPageRange();
   finalPageCount = range.count;
 
   for (let pIdx = range.start; pIdx < range.start + range.count; pIdx++) {
     doc.switchToPage(pIdx);
+    drawTopGradient(doc);
     const pageNum = pIdx - range.start + 1;
     drawFooter(doc, pageNum, finalPageCount, pageNum === 1);
   }

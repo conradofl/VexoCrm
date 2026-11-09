@@ -26,19 +26,22 @@ import {
 describe("Design System & Alta Fidelidade Visual do Contrato GD (contractVisualRenderer)", () => {
   describe("1. Paleta de Cores e Constantes Oficiais GD", () => {
     it("valida hex codes das cores oficiais da Geração Digital", () => {
-      expect(GD_COLORS.primary).toBe("#6B21A8"); // Roxo Primário
-      expect(GD_COLORS.secondary).toBe("#C026D3"); // Magenta / Rosa
-      expect(GD_COLORS.highlightBg).toBe("#F3E8FF"); // Lavanda / Fundo Destaque
-      expect(GD_COLORS.softBorder).toBe("#E9D5FF"); // Borda Suave
+      expect(GD_COLORS.deepPurple).toBe("#4A1370"); // Título principal, títulos de empresas, títulos de cláusula, valores na tabela
+      expect(GD_COLORS.primary).toBe("#7B1FB0"); // "CLÁUSULA ORDINAL", rótulos nos boxes (CNPJ:, Telefone:), cabeçalhos de tabela
+      expect(GD_COLORS.magenta).toBe("#C2208E"); // Subtítulo "MARKETING DIGITAL & AUTOMAÇÃO", alíneas a), b), c), tag CONTRATANTE/CONTRATADA
+      expect(GD_COLORS.lightLilac).toBe("#DCC7EC"); // Borda suave, separador " | ", fundo suave
+      expect(GD_COLORS.highlightBg).toBe("#FAF5FF"); // Fundo lavanda das barras de cláusula e linhas alternadas
       expect(GD_COLORS.textDark).toBe("#1F2937");
-      expect(GD_COLORS.textMuted).toBe("#6B7280");
+      expect(GD_COLORS.textMuted).toBe("#6E6878");
       expect(GD_COLORS.white).toBe("#FFFFFF");
+      expect(GD_COLORS.boxBg).toBe("#FAFAFE");
 
       // Compatibilidade retroativa
-      expect(CONTRACT_PDF_COLORS.primary).toBe("#6B21A8");
-      expect(CONTRACT_PDF_COLORS.secondary).toBe("#C026D3");
-      expect(CONTRACT_PDF_COLORS.accentLight).toBe("#E9D5FF");
-      expect(CONTRACT_PDF_COLORS.boxBg).toBe("#F3E8FF");
+      expect(CONTRACT_PDF_COLORS.primaryDark).toBe("#4A1370");
+      expect(CONTRACT_PDF_COLORS.primary).toBe("#7B1FB0");
+      expect(CONTRACT_PDF_COLORS.secondary).toBe("#C2208E");
+      expect(CONTRACT_PDF_COLORS.accentLight).toBe("#DCC7EC");
+      expect(CONTRACT_PDF_COLORS.boxBg).toBe("#FAF5FF");
     });
 
     it("assets oficiais image1.png e image3.png existem e são resolvidos pelo asset resolver", () => {
@@ -249,3 +252,4 @@ CPF: ______________________________________________`;
     });
   });
 });
+
