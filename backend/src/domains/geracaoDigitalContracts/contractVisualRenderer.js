@@ -157,24 +157,24 @@ export function drawHeader(doc) {
 
   // Título principal em negrito deepPurple (15pt)
   doc.font("Helvetica-Bold")
-     .fontSize(15)
-     .fillColor(GD_COLORS.deepPurple)
-     .text("CONTRATO DE PRESTAÇÃO DE SERVIÇOS", startX, startY, {
-       align: "center",
-       width: contentW,
-     });
+    .fontSize(15)
+    .fillColor(GD_COLORS.deepPurple)
+    .text("CONTRATO DE PRESTAÇÃO DE SERVIÇOS", startX, startY, {
+      align: "center",
+      width: contentW,
+    });
 
   doc.moveDown(0.2);
 
   // Subtítulo em magenta com espaçamento de caracteres (10pt)
   doc.font("Helvetica-Bold")
-     .fontSize(10)
-     .fillColor(GD_COLORS.magenta)
-     .text("MARKETING DIGITAL & AUTOMAÇÃO", startX, doc.y, {
-       align: "center",
-       width: contentW,
-       characterSpacing: 1.5,
-     });
+    .fontSize(10)
+    .fillColor(GD_COLORS.magenta)
+    .text("MARKETING DIGITAL & AUTOMAÇÃO", startX, doc.y, {
+      align: "center",
+      width: contentW,
+      characterSpacing: 1.5,
+    });
 
   doc.moveDown(0.35);
 
@@ -236,9 +236,9 @@ export function drawClauseHeader(doc, ordinalOrTitle, title) {
 
   // Borda suave inferior/externa (#DCC7EC)
   doc.rect(startX, curY, barW, barH)
-     .strokeColor(GD_COLORS.lightLilac)
-     .lineWidth(0.5)
-     .stroke();
+    .strokeColor(GD_COLORS.lightLilac)
+    .lineWidth(0.5)
+    .stroke();
 
   // Texto: CLÁUSULA ORDINAL   |   TÍTULO
   const textX = startX + 8;
@@ -247,14 +247,14 @@ export function drawClauseHeader(doc, ordinalOrTitle, title) {
   if (ordinal) {
     const ordNormalized = ordinal.replace(/^(?:CLÁUSULA|CLAUSULA)\s+/i, "").trim().toUpperCase();
     doc.font("Helvetica-Bold").fontSize(10).fillColor(GD_COLORS.primary)
-       .text(`CLÁUSULA ${ordNormalized}`, textX, textY, { continued: true });
+      .text(`CLÁUSULA ${ordNormalized}`, textX, textY, { continued: true });
     doc.font("Helvetica").fontSize(10).fillColor(GD_COLORS.lightLilac)
-       .text("   |   ", { continued: true });
+      .text("   |   ", { continued: true });
     doc.font("Helvetica-Bold").fontSize(10).fillColor(GD_COLORS.deepPurple)
-       .text(cleanTitle.toUpperCase(), { continued: false });
+      .text(cleanTitle.toUpperCase(), { continued: false });
   } else {
     doc.font("Helvetica-Bold").fontSize(10).fillColor(GD_COLORS.deepPurple)
-       .text(cleanTitle.toUpperCase(), textX, textY, { continued: false });
+      .text(cleanTitle.toUpperCase(), textX, textY, { continued: false });
   }
 
   doc.y = curY + barH + 5;
@@ -301,11 +301,11 @@ export function normalizePartesBoxData(data, fallbackRole = "") {
   if (data.endereco) {
     const endStr = typeof data.endereco === "object"
       ? [
-          data.endereco.logradouro ? `${data.endereco.logradouro}${data.endereco.numero ? `, ${data.endereco.numero}` : ""}` : "",
-          data.endereco.bairro || "",
-          data.endereco.cidade && data.endereco.uf ? `${data.endereco.cidade} – ${data.endereco.uf}` : (data.endereco.cidade || ""),
-          data.endereco.cep ? `CEP ${data.endereco.cep}` : "",
-        ].filter(Boolean).join(", ")
+        data.endereco.logradouro ? `${data.endereco.logradouro}${data.endereco.numero ? `, ${data.endereco.numero}` : ""}` : "",
+        data.endereco.bairro || "",
+        data.endereco.cidade && data.endereco.uf ? `${data.endereco.cidade} – ${data.endereco.uf}` : (data.endereco.cidade || ""),
+        data.endereco.cep ? `CEP ${data.endereco.cep}` : "",
+      ].filter(Boolean).join(", ")
       : String(data.endereco);
     fields.push({ label: "Endereço:", value: endStr });
   }
@@ -354,23 +354,23 @@ export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
   // Box 1: CONTRATADA
   doc.rect(col1X, boxY, colWidth, headerH).fill(GD_COLORS.primary); // #7B1FB0
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
-     .text("CONTRATADA", col1X + padding, boxY + 4, { width: innerW });
+    .text("CONTRATADA", col1X + padding, boxY + 4, { width: innerW });
   doc.rect(col1X, boxY + headerH, colWidth, contentH).fill(GD_COLORS.boxBg);
   doc.rect(col1X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
 
   let tY1 = boxY + headerH + padding;
   doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text(c1.title, col1X + padding, tY1, { width: innerW });
+    .text(c1.title, col1X + padding, tY1, { width: innerW });
   tY1 += 13.5;
   for (const field of c1.fields) {
     if (field.label) {
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary) // #7B1FB0
-         .text(field.label, col1X + padding, tY1, { continued: true });
+        .text(field.label, col1X + padding, tY1, { continued: true });
       doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark) // #1F2937
-         .text(" " + field.value, { width: innerW });
+        .text(" " + field.value, { width: innerW });
     } else {
       doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark)
-         .text(field.value, col1X + padding, tY1, { width: innerW });
+        .text(field.value, col1X + padding, tY1, { width: innerW });
     }
     const fullLen = (field.label ? field.label + " " : "") + field.value;
     tY1 += fullLen.length > 42 ? 24 : 13.5;
@@ -379,23 +379,23 @@ export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
   // Box 2: CONTRATANTE
   doc.rect(col2X, boxY, colWidth, headerH).fill(GD_COLORS.primary); // #7B1FB0
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.white)
-     .text("CONTRATANTE", col2X + padding, boxY + 4, { width: innerW });
+    .text("CONTRATANTE", col2X + padding, boxY + 4, { width: innerW });
   doc.rect(col2X, boxY + headerH, colWidth, contentH).fill(GD_COLORS.boxBg);
   doc.rect(col2X, boxY, colWidth, headerH + contentH).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
 
   let tY2 = boxY + headerH + padding;
   doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text(c2.title, col2X + padding, tY2, { width: innerW });
+    .text(c2.title, col2X + padding, tY2, { width: innerW });
   tY2 += 13.5;
   for (const field of c2.fields) {
     if (field.label) {
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary) // #7B1FB0
-         .text(field.label, col2X + padding, tY2, { continued: true });
+        .text(field.label, col2X + padding, tY2, { continued: true });
       doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark) // #1F2937
-         .text(" " + field.value, { width: innerW });
+        .text(" " + field.value, { width: innerW });
     } else {
       doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark)
-         .text(field.value, col2X + padding, tY2, { width: innerW });
+        .text(field.value, col2X + padding, tY2, { width: innerW });
     }
     const fullLen = (field.label ? field.label + " " : "") + field.value;
     tY2 += fullLen.length > 42 ? 24 : 13.5;
@@ -406,13 +406,13 @@ export function drawPartesBoxes(doc, contratadaInput, contratanteInput) {
 }
 
 /**
- * d) drawPricingTable(doc, dados) com a tabela em roxo e valores formatados em BRL.
+ * d) drawPricingTable(doc, dados) com colunas rebalanceadas e altura dinâmica de células.
  */
 export function drawPricingTable(doc, dados = {}, options = {}) {
   const startX = 42;
   const tblW = 511.28;
-  const col1W = 340;
-  const col2W = tblW - col1W; // 171.28
+  const col1W = 290; // Rebalanceado para acomodar labels
+  const col2W = tblW - col1W; // 221.28pt (acomoda "Contrato semestral com pagamento mensal" em 1 linha)
   const tblY = doc.y;
 
   // Extração e cálculo de valores monetários
@@ -454,40 +454,54 @@ export function drawPricingTable(doc, dados = {}, options = {}) {
   emReaisVal = String(emReaisVal || valorTotalStr);
   permutaVal = String(permutaVal || "Não aplicável");
 
-  const hRow1 = 22;
-  const hRow2 = 16;
-  const hRow3 = 16;
-  const hRow4 = 16;
+  // Cálculo Dinâmico de Altura para Evitar Qualquer Sobreposição
+  const hRow1 = 24;
+  const hRow2 = 18;
+
+  doc.font("Helvetica").fontSize(9.0);
+  const hLabel3 = doc.heightOfString(composicaoLabel, { width: col1W - 16 });
+  doc.font("Helvetica-Bold").fontSize(9.5);
+  const hVal3 = doc.heightOfString(emReaisVal, { width: col2W - 16 });
+  const hRow3 = Math.max(hLabel3, hVal3, 14) + 8; // Padding superior e inferior
+
+  doc.font("Helvetica").fontSize(9.0);
+  const hLabel4 = doc.heightOfString("Em permuta", { width: col1W - 16 });
+  doc.font("Helvetica-Bold").fontSize(9.5);
+  const hVal4 = doc.heightOfString(permutaVal, { width: col2W - 16 });
+  const hRow4 = Math.max(hLabel4, hVal4, 14) + 8;
+
   const totalH = hRow1 + hRow2 + hRow3 + hRow4;
 
+  const y1 = tblY;
+  const y2 = y1 + hRow1;
+  const y3 = y2 + hRow2;
+  const y4 = y3 + hRow3;
+
   // Linha 1: Compromisso do Período (Header Roxo Sólido #7B1FB0, texto branco)
-  doc.rect(startX, tblY, tblW, hRow1).fill(GD_COLORS.primary);
+  doc.rect(startX, y1, tblW, hRow1).fill(GD_COLORS.primary);
   doc.font("Helvetica-Bold").fontSize(10.5).fillColor(GD_COLORS.white)
-     .text("Compromisso do Período", startX + 8, tblY + 5.5, { width: col1W - 16 });
+     .text("Compromisso do Período", startX + 8, y1 + (hRow1 - 10.5) / 2, { width: col1W - 16 });
   doc.font("Helvetica-Bold").fontSize(11.5).fillColor(GD_COLORS.white)
-     .text(valorTotalStr, startX + col1W, tblY + 5, { width: col2W - 10, align: "right" });
+     .text(valorTotalStr, startX + col1W, y1 + (hRow1 - 11.5) / 2, { width: col2W - 10, align: "right" });
 
   // Linha 2: COMPOSIÇÃO DO PERÍODO (Subcabeçalho #FAF5FF, texto roxo #7B1FB0)
-  const y2 = tblY + hRow1;
   doc.rect(startX, y2, tblW, hRow2).fill(GD_COLORS.highlightBg);
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.primary)
-     .text("COMPOSIÇÃO DO PERÍODO", startX + 8, y2 + 3.8, { width: tblW - 16 });
+     .text("COMPOSIÇÃO DO PERÍODO", startX + 8, y2 + (hRow2 - 8.5) / 2, { width: tblW - 16 });
 
   // Linha 3: Em reais (conforme condições de pagamento)
-  const y3 = y2 + hRow2;
   doc.rect(startX, y3, tblW, hRow3).fill(GD_COLORS.white);
   doc.font("Helvetica").fontSize(9.0).fillColor(GD_COLORS.textDark)
-     .text(composicaoLabel, startX + 8, y3 + 3.5, { width: col1W - 16 });
-  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text(emReaisVal, startX + col1W, y3 + 3.5, { width: col2W - 10, align: "right" });
+     .text(composicaoLabel, startX + 8, y3 + (hRow3 - hLabel3) / 2, { width: col1W - 16 });
+  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple)
+     .text(emReaisVal, startX + col1W, y3 + (hRow3 - hVal3) / 2, { width: col2W - 10, align: "right" });
 
   // Linha 4: Em permuta
-  const y4 = y3 + hRow3;
   doc.rect(startX, y4, tblW, hRow4).fill(GD_COLORS.highlightBg);
   doc.font("Helvetica").fontSize(9.0).fillColor(GD_COLORS.textDark)
-     .text("Em permuta", startX + 8, y4 + 3.5, { width: col1W - 16 });
-  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text(permutaVal, startX + col1W, y4 + 3.5, { width: col2W - 10, align: "right" });
+     .text("Em permuta", startX + 8, y4 + (hRow4 - hLabel4) / 2, { width: col1W - 16 });
+  doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple)
+     .text(permutaVal, startX + col1W, y4 + (hRow4 - hVal4) / 2, { width: col2W - 10, align: "right" });
 
   // Bordas da tabela
   doc.rect(startX, tblY, tblW, totalH).strokeColor(GD_COLORS.primary).lineWidth(0.75).stroke();
@@ -495,7 +509,8 @@ export function drawPricingTable(doc, dados = {}, options = {}) {
   doc.moveTo(startX, y3).lineTo(startX + tblW, y3).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
   doc.moveTo(startX, y4).lineTo(startX + tblW, y4).strokeColor(GD_COLORS.lightLilac).lineWidth(0.5).stroke();
 
-  doc.y = tblY + totalH + 8;
+  // Respiro confortável abaixo da tabela para que a Cláusula Quinta não fique colada
+  doc.y = tblY + totalH + 14;
   doc.x = startX;
 }
 
@@ -518,39 +533,39 @@ export function drawSignaturesAndWitnesses(doc, dados = {}) {
 
   // Assinatura Contratada
   doc.moveTo(col1X + 10, sigY).lineTo(col1X + colW - 10, sigY)
-     .strokeColor(GD_COLORS.lightLilac).lineWidth(0.75).stroke();
+    .strokeColor(GD_COLORS.lightLilac).lineWidth(0.75).stroke();
   doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text(contratadaNome, col1X, sigY + 6, { width: colW, align: "center" });
+    .text(contratadaNome, col1X, sigY + 6, { width: colW, align: "center" });
   doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark)
-     .text(contratadaRep, col1X, sigY + 18, { width: colW, align: "center" });
+    .text(contratadaRep, col1X, sigY + 18, { width: colW, align: "center" });
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.magenta) // #C2208E
-     .text("CONTRATADA", col1X, sigY + 29, { width: colW, align: "center" });
+    .text("CONTRATADA", col1X, sigY + 29, { width: colW, align: "center" });
 
   // Assinatura Contratante
   doc.moveTo(col2X + 10, sigY).lineTo(col2X + colW - 10, sigY)
-     .strokeColor(GD_COLORS.lightLilac).lineWidth(0.75).stroke();
+    .strokeColor(GD_COLORS.lightLilac).lineWidth(0.75).stroke();
   doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text(contratanteNome, col2X, sigY + 6, { width: colW, align: "center" });
+    .text(contratanteNome, col2X, sigY + 6, { width: colW, align: "center" });
   doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textDark)
-     .text(contratanteRep, col2X, sigY + 18, { width: colW, align: "center" });
+    .text(contratanteRep, col2X, sigY + 18, { width: colW, align: "center" });
   doc.font("Helvetica-Bold").fontSize(8.5).fillColor(GD_COLORS.magenta) // #C2208E
-     .text("CONTRATANTE", col2X, sigY + 29, { width: colW, align: "center" });
+    .text("CONTRATANTE", col2X, sigY + 29, { width: colW, align: "center" });
 
   // Testemunhas
   const witY = sigY + 46;
 
   // Testemunha 1
   doc.font("Helvetica-Bold").fontSize(9.0).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text("Testemunha 1", col1X, witY, { width: colW, align: "left" });
+    .text("Testemunha 1", col1X, witY, { width: colW, align: "left" });
   doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textMuted) // #6E6878
-     .text("Nome: ____________________________________", col1X, witY + 12, { width: colW, align: "left" });
+    .text("Nome: ____________________________________", col1X, witY + 12, { width: colW, align: "left" });
   doc.text("CPF:     ____________________________________", col1X, witY + 24, { width: colW, align: "left" });
 
   // Testemunha 2
   doc.font("Helvetica-Bold").fontSize(9.0).fillColor(GD_COLORS.deepPurple) // #4A1370
-     .text("Testemunha 2", col2X, witY, { width: colW, align: "left" });
+    .text("Testemunha 2", col2X, witY, { width: colW, align: "left" });
   doc.font("Helvetica").fontSize(8.5).fillColor(GD_COLORS.textMuted) // #6E6878
-     .text("Nome: ____________________________________", col2X, witY + 12, { width: colW, align: "left" });
+    .text("Nome: ____________________________________", col2X, witY + 12, { width: colW, align: "left" });
   doc.text("CPF:     ____________________________________", col2X, witY + 24, { width: colW, align: "left" });
 
   doc.y = witY + 38;
@@ -578,23 +593,23 @@ export function drawFooter(doc, pageNumber = 1, totalPages = 2, isFirstPage = fa
   // 1. Linha divisória do rodapé em y = 746
   const footerLineY = 746;
   doc.moveTo(startX, footerLineY)
-     .lineTo(startX + contentW, footerLineY)
-     .strokeColor(GD_COLORS.lightLilac)
-     .lineWidth(0.5)
-     .stroke();
+    .lineTo(startX + contentW, footerLineY)
+    .strokeColor(GD_COLORS.lightLilac)
+    .lineWidth(0.5)
+    .stroke();
 
   // 2. Linha de contato oficial e paginação em y = 750
   const textY = 750;
   doc.font("Helvetica-Bold").fontSize(7.5).fillColor(GD_COLORS.primary)
-     .text("www.mktgeracaodigital.com.br", startX, textY, { continued: true });
+    .text("www.mktgeracaodigital.com.br", startX, textY, { continued: true });
   doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
-     .text("   •   comercial@mktgeracaodigital.com.br   •   (34) 99771-9779", { continued: false });
+    .text("   •   comercial@mktgeracaodigital.com.br   •   (34) 99771-9779", { continued: false });
 
   doc.font("Helvetica").fontSize(7.5).fillColor(GD_COLORS.textMuted)
-     .text(`Página ${pageNumber} de ${totalPages}`, startX, textY, {
-       width: contentW,
-       align: "right",
-     });
+    .text(`Página ${pageNumber} de ${totalPages}`, startX, textY, {
+      width: contentW,
+      align: "right",
+    });
 
   // 3. Imagens na base em todas as páginas:
   // image3.png (constelação de ícones) em x = 24, y = 766, largura: 320, altura: 66
@@ -778,7 +793,7 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
     if (inClausulaTerceira && /^Compete\s+à\s+/i.test(p)) {
       doc.moveDown(0.15);
       doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple)
-         .text(p, 42, doc.y, { width: 511.28 });
+        .text(p, 42, doc.y, { width: 511.28 });
       doc.moveDown(0.15);
       alineaLetterIdx = 0;
       i++;
@@ -796,7 +811,7 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
       const textW = 511.28 - 20;
 
       doc.font("Helvetica-Bold").fontSize(9.0).fillColor(GD_COLORS.magenta)
-         .text(letter, itemX, itemY, { width: 16 });
+        .text(letter, itemX, itemY, { width: 16 });
 
       doc.font("Helvetica").fontSize(9.0).fillColor(GD_COLORS.textDark);
       renderFormattedParagraph(doc, cleanItemText, {
@@ -874,7 +889,7 @@ export async function renderContractPdf(templateConteudo, dados = {}) {
     if (pastClausulaSexta && /\b\d{1,2}\s+de\s+[a-zçã]+\s+de\s+\d{4}\b/i.test(p)) {
       doc.moveDown(0.4);
       doc.font("Helvetica-Bold").fontSize(9.5).fillColor(GD_COLORS.deepPurple)
-         .text(p, 42, doc.y, { align: "center", width: 511.28 });
+        .text(p, 42, doc.y, { align: "center", width: 511.28 });
       doc.moveDown(0.4);
       i++;
       continue;
