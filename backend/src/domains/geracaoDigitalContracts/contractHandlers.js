@@ -1,11 +1,11 @@
 import PDFDocument from "pdfkit";
 import { pgDatabasePool as db } from "../../services/database.js";
-import { resolveTenantUuid } from "./tenantResolver.js";
+import { resolveTenantUuid, GD_TENANT_UUID } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
 import { saveContractBuffer, getContractBuffer, CONTRACT_MAX_BYTES } from "../../services/storage.js";
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
-import { assembleContractFromBlocks, buildCronograma } from "./contractMerge.js";
+import { assembleContractFromBlocks, buildCronograma, parseTemplateContentToClauses } from "./contractMerge.js";
 
 // Helper for formatting date
 function formatExtenseDate() {
@@ -315,7 +315,7 @@ export async function updateContract(req, res) {
 // para o documento. Lança Error com code para o chamador traduzir em HTTP.
 export async function buildContractPdfBuffer(tenantId, id) {
   const { rows: contractRows } = await db.query(
-    "SELECT * FROM gd_contracts WHERE id = $1 AND tenant_id = $2",
+    "SELECT * FROM gd_contracts WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000') ORDER BY (CASE WHEN tenant_id = $2 THEN 0 ELSE 1 END) LIMIT 1",
     [id, tenantId]
   );
   if (contractRows.length === 0) {
@@ -359,14 +359,23 @@ export async function buildContractPdfBuffer(tenantId, id) {
   let templateQuery;
   let templateParams;
   if (contract.template_id) {
-    templateQuery = "SELECT * FROM gd_contract_templates WHERE id = $1 AND tenant_id = $2";
+    templateQuery =
+      "SELECT * FROM gd_contract_templates WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000') ORDER BY (CASE WHEN tenant_id = $2 THEN 0 ELSE 1 END) LIMIT 1";
     templateParams = [contract.template_id, tenantId];
   } else {
-    templateQuery = "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1";
+    templateQuery =
+      "SELECT * FROM gd_contract_templates WHERE (tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000') AND ativo = true ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END), created_at DESC LIMIT 1";
     templateParams = [tenantId];
   }
 
-  const { rows: templateRows } = await db.query(templateQuery, templateParams);
+  let { rows: templateRows } = await db.query(templateQuery, templateParams);
+  if (templateRows.length === 0 && contract.template_id) {
+    const fallbackRes = await db.query(
+      "SELECT * FROM gd_contract_templates WHERE (tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000') AND ativo = true ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END), created_at DESC LIMIT 1",
+      [tenantId]
+    );
+    templateRows = fallbackRes.rows;
+  }
   if (templateRows.length === 0) {
     const e = new Error("Template de contrato não encontrado");
     e.code = "TEMPLATE_NOT_FOUND";
@@ -419,7 +428,7 @@ async function finalizeContractPdfResponse(res, tenantId, id, dados, pdfData) {
     `UPDATE gd_contracts
      SET status = CASE WHEN status = 'assinado' THEN status ELSE 'gerado' END,
          updated_at = NOW()
-     WHERE id = $1 AND tenant_id = $2`,
+     WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000')`,
     [id, tenantId]
   );
   res.setHeader("Content-Type", "application/pdf");

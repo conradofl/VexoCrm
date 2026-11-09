@@ -26,6 +26,12 @@ import {
   GD_DONO,
 } from "./gdClientes/campos.js";
 import { buildCronograma } from "./geracaoDigitalContracts/contractMerge.js";
+import { sendTextMessageViaEvolution } from "../services/evolution.js";
+
+let _evolutionSender = sendTextMessageViaEvolution;
+export function _setEvolutionSenderForTesting(fn) {
+  _evolutionSender = fn || sendTextMessageViaEvolution;
+}
 
 // Recorrência: dois vocabulários para a mesma ideia. O catálogo (gd_products)
 // grava "pontual"; o wizard grava "unico". Comparar por string solta fazia todo
@@ -3993,6 +3999,44 @@ Condições: ${condicoes}`;
           });
         } catch (slackErr) {
           console.warn("[Cartorio GD] Erro ao enviar aviso no Slack:", slackErr.message);
+        }
+      }
+
+      // 7. Notificação WhatsApp da Diretoria (Caio e Conrado) para 1ª assinatura via GOV.BR
+      const diretoriaWhatsAppNumeros = [
+        process.env.GD_CAIO_WHATSAPP || "5534997719779",
+        process.env.GD_CONRADO_WHATSAPP || "5534991751267",
+      ];
+      const responsavelNomeTexto = (responsavel_nome || signer_name || razao_social).trim();
+      const mensagemDiretoria =
+        `📄 *Novo Contrato Comercial Gerado!* 🚀\n\n` +
+        `*Empresa:* ${razao_social.trim()}\n` +
+        `*CNPJ:* ${cnpj}\n` +
+        `*Responsável:* ${responsavelNomeTexto}\n` +
+        `*Origem:* Proposta Comercial Aceita\n\n` +
+        `O cliente já deu o aceite nos termos. Conforme o protocolo GD, o contrato deve receber a *1ª assinatura da Diretoria (Caio)* via GOV.BR antes de seguir para o cliente.\n\n` +
+        `👉 *Visualizar / Baixar Contrato para Assinatura:*\n` +
+        `https://crm.vexoia.com/api/gd/contracts/${contract.id}/pdf`;
+
+      const evolutionInstance =
+        process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+        process.env.GD_EVOLUTION_INSTANCE ||
+        "vexo-adm-vexo-atende";
+
+      for (const numero of diretoriaWhatsAppNumeros) {
+        try {
+          await _evolutionSender({
+            instanceName: evolutionInstance,
+            number: numero,
+            text: mensagemDiretoria,
+            webhookToken:
+              process.env.GD_EVOLUTION_TOKEN ||
+              process.env.GD_EVOLUTION_API_TOKEN ||
+              process.env.EVOLUTION_API_KEY,
+            baseUrl: process.env.GD_EVOLUTION_URL || process.env.EVOLUTION_API_URL,
+          });
+        } catch (waErr) {
+          console.warn(`[Cartorio GD] Erro ao enviar aviso de contrato no WhatsApp (${numero}):`, waErr.message);
         }
       }
 

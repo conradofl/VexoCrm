@@ -19,6 +19,7 @@ import {
   createContractTemplate,
   updateContractTemplate,
   deleteContractTemplate,
+  generateContractPdf,
 } from "../domains/geracaoDigitalContracts/contractHandlers.js";
 
 const TENANT_A = "a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab";
@@ -275,6 +276,55 @@ E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias
             return { rows: [{ id: item.id }] };
           }
 
+          // 6. Contratos e dados para generateContractPdf / buildContractPdfBuffer
+          if (text.includes("FROM gd_contracts")) {
+            return {
+              rows: [
+                {
+                  id: "ct-100",
+                  tenant_id: TENANT_A,
+                  dados: {
+                    razao_social: "Empresa Solar Ltda",
+                    cnpj: "12345678000199",
+                  },
+                },
+              ],
+            };
+          }
+          if (text.includes("FROM tenant_modules")) {
+            return {
+              rows: [
+                {
+                  config: {
+                    contratada: {
+                      razao_social: "Geração Digital",
+                      cnpj: "40.508.817/0001-90",
+                    },
+                  },
+                },
+              ],
+            };
+          }
+          if (text.includes("FROM gd_contract_templates") && (text.includes("00000000-0000-0000-0000-000000000000") || text.includes("ORDER BY"))) {
+            return {
+              rows: [
+                {
+                  id: "tpl-modular-pdf",
+                  tenant_id: "00000000-0000-0000-0000-000000000000",
+                  nome: "Modelo Modular Ativo",
+                  conteudo: "CONTRATO DE PRESTAÇÃO DE SERVIÇOS\\nContratante: {{razao_social}}\\nContratada: {{contratada_razao_social}}",
+                  clausulas: [
+                    { id: "c1", titulo: "Cláusula 1 - Objeto", conteudo: "Prestação de serviços para {{razao_social}}", ativo: true },
+                  ],
+                  ativo: true,
+                },
+              ],
+            };
+          }
+          if (text.startsWith("UPDATE gd_contracts")) {
+            return { rows: [] };
+          }
+
           return { rows: [] };
         }),
       };
@@ -377,6 +427,46 @@ E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias
       await deleteContractTemplate(reqLegitimo, resLegitimo);
       expect(resLegitimo.statusCode).toBe(200);
       expect(tplA.ativo).toBe(false);
+    });
+
+    it("generateContractPdf: devolve 200 com buffer de PDF válido sem ReferenceError de parseTemplateContentToClauses", async () => {
+      const headers = {};
+      const res = {
+        statusCode: 200,
+        sentData: null,
+        headersSent: false,
+        setHeader(k, v) {
+          headers[k.toLowerCase()] = v;
+        },
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+        send(data) {
+          this.sentData = data;
+          this.headersSent = true;
+          return this;
+        },
+        json(data) {
+          this.sentData = data;
+          this.headersSent = true;
+          return this;
+        },
+      };
+
+      const req = {
+        params: { id: "ct-100" },
+        query: { client_id: TENANT_A },
+        authAccess: { role: "internal", isAdmin: true, clientId: TENANT_A, clientIds: [TENANT_A] },
+      };
+
+      await generateContractPdf(req, res);
+      expect(res.statusCode).toBe(200);
+      expect(headers["content-type"]).toBe("application/pdf");
+      expect(headers["content-disposition"]).toBe('inline; filename="contrato-ct-100.pdf"');
+      expect(Buffer.isBuffer(res.sentData)).toBe(true);
+      expect(res.sentData.slice(0, 4).toString()).toBe("%PDF");
+      expect(res.sentData.length).toBeGreaterThan(100);
     });
   });
 });

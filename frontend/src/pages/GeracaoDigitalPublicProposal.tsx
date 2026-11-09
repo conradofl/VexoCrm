@@ -1304,16 +1304,16 @@ export default function GeracaoDigitalPublicProposal() {
                     {/* CNPJ + Telefone */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div className="space-y-1">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-[11px] font-medium text-slate-300">
+                        <Label className="flex items-center justify-between min-h-[22px] mb-1.5 text-[11px] font-medium text-slate-300">
+                          <span>
                             CNPJ da Empresa <span className="text-red-400">*</span>
-                          </Label>
+                          </span>
                           {cnpj && (
                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${validarCnpjMatematico(cnpj) ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
                               {validarCnpjMatematico(cnpj) ? "✓ Válido" : "Inválido"}
                             </span>
                           )}
-                        </div>
+                        </Label>
                         <Input
                           value={cnpj}
                           onChange={(e) => setCnpj(e.target.value)}
@@ -1323,8 +1323,10 @@ export default function GeracaoDigitalPublicProposal() {
                       </div>
 
                       <div className="space-y-1">
-                        <Label className="text-[11px] font-medium text-slate-300">
-                          Telefone / WhatsApp <span className="text-red-400">*</span>
+                        <Label className="flex items-center justify-between min-h-[22px] mb-1.5 text-[11px] font-medium text-slate-300">
+                          <span>
+                            Telefone / WhatsApp <span className="text-red-400">*</span>
+                          </span>
                         </Label>
                         <Input
                           value={telefone}
@@ -1354,8 +1356,10 @@ export default function GeracaoDigitalPublicProposal() {
                     {/* CPF + E-mail Contrato */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div className="space-y-1">
-                        <Label className="text-[11px] font-medium text-slate-300">
-                          CPF do Responsável <span className="text-slate-500 text-[10px]">(Opcional)</span>
+                        <Label className="flex items-center justify-between min-h-[22px] mb-1.5 text-[11px] font-medium text-slate-300">
+                          <span>
+                            CPF do Responsável <span className="text-slate-500 text-[10px]">(Opcional)</span>
+                          </span>
                         </Label>
                         <Input
                           value={responsavelCpf}
@@ -1366,8 +1370,10 @@ export default function GeracaoDigitalPublicProposal() {
                       </div>
 
                       <div className="space-y-1">
-                        <Label className="text-[11px] font-medium text-slate-300">
-                          E-mail para Envio <span className="text-red-400">*</span>
+                        <Label className="flex items-center justify-between min-h-[22px] mb-1.5 text-[11px] font-medium text-slate-300">
+                          <span>
+                            E-mail para Envio <span className="text-red-400">*</span>
+                          </span>
                         </Label>
                         <Input
                           type="email"

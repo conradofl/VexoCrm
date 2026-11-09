@@ -4,7 +4,10 @@ import http from "http";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
-import { registerGeracaoDigitalRoutes } from "../domains/geracaoDigitalRoutes.js";
+import { registerGeracaoDigitalRoutes, _setEvolutionSenderForTesting } from "../domains/geracaoDigitalRoutes.js";
+import { registerContractRoutes } from "../domains/geracaoDigitalContracts/contractRoutes.js";
+import { buildContractPdfBuffer } from "../domains/geracaoDigitalContracts/contractHandlers.js";
+import { _setPgDatabasePoolForTesting } from "../services/database.js";
 
 const MIGRATION_ESTADOS = readFileSync(
   resolve("supabase/migrations/20261102120000_create_gd_estados_clientes.sql"),
@@ -90,23 +93,27 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
     await db.exec(MIGRATION_FRENTE5);
     await db.exec(MIGRATION_FRENTE6);
 
-    // Template ativo padrão para a GD
+    // Template ativo padrão para a GD (com cláusulas estruturadas)
     await db.exec(`
-      INSERT INTO public.gd_contract_templates (id, tenant_id, nome, conteudo, ativo)
+      INSERT INTO public.gd_contract_templates (id, tenant_id, nome, conteudo, clausulas, ativo)
       VALUES (
         '11111111-2222-3333-4444-555555555555',
         '00000000-0000-0000-0000-000000000000',
         'Template GD Padrão',
         'CONTRATO DE PRESTAÇÃO DE SERVIÇOS\\n\\nContratante: {{razao_social}}, CNPJ: {{cnpj}}',
+        '[{"id": "clausula-1", "titulo": "Cláusula 1 - Objeto", "conteudo": "Prestação de serviços digitais para {{razao_social}}"}]'::jsonb,
         true
       ) ON CONFLICT DO NOTHING;
     `);
+
+    _setPgDatabasePoolForTesting(poolDe(db));
 
     const app = express();
     app.use(express.json());
 
     const noopAuth = (req, _res, next) => next();
     registerGeracaoDigitalRoutes(app, poolDe(db), noopAuth, () => noopAuth);
+    registerContractRoutes(app);
 
     server = http.createServer(app);
     await new Promise((r) => server.listen(0, r));
@@ -114,6 +121,8 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
   });
 
   afterAll(async () => {
+    _setPgDatabasePoolForTesting(null);
+    _setEvolutionSenderForTesting(null);
     if (server) await new Promise((r) => server.close(r));
     if (db) await db.close();
   });
@@ -208,6 +217,12 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
       return originalFetch(url, init);
+    });
+
+    const evoCalls = [];
+    _setEvolutionSenderForTesting(async (params) => {
+      evoCalls.push(params);
+      return { success: true };
     });
 
     const payload = {
@@ -308,6 +323,29 @@ describe("Chat GD · Proposta e Contrato — Aceite da Proposta e Agente Cartór
         }),
       })
     );
+
+    // 6. Comprova disparos automáticos no WhatsApp da diretoria (Caio e Conrado)
+    expect(evoCalls).toHaveLength(2);
+    expect(evoCalls.map((c) => c.number)).toEqual(["5534997719779", "5534991751267"]);
+    for (const call of evoCalls) {
+      expect(call.text).toContain("📄 *Novo Contrato Comercial Gerado!* 🚀");
+      expect(call.text).toContain("*Empresa:* Clínica Sorriso Perfeito Ltda");
+      expect(call.text).toContain("*CNPJ:* 00.000.000/0001-91");
+      expect(call.text).toContain("*Responsável:* Ana Paula Silva");
+      expect(call.text).toContain("*Origem:* Proposta Comercial Aceita");
+      expect(call.text).toContain("1ª assinatura da Diretoria (Caio)");
+      expect(call.text).toContain(`https://crm.vexoia.com/api/gd/contracts/${contratoNoBanco.id}/pdf`);
+    }
+
+    // 7. Comprova geração do PDF do contrato gerando buffer de PDF válido (sem ReferenceError de parseTemplateContentToClauses)
+    const builtPdf = await buildContractPdfBuffer(
+      "00000000-0000-0000-0000-000000000000",
+      contratoNoBanco.id
+    );
+    expect(builtPdf).toBeDefined();
+    expect(Buffer.isBuffer(builtPdf.pdfData)).toBe(true);
+    expect(builtPdf.pdfData.slice(0, 4).toString()).toBe("%PDF");
+    expect(builtPdf.pdfData.length).toBeGreaterThan(100);
 
     delete process.env.SLACK_WEBHOOK_URL;
   });
