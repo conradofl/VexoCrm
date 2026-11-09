@@ -70,7 +70,7 @@ describe("Design System & Alta Fidelidade Visual do Contrato GD (contractVisualR
   });
 
   describe("2. Componentes Visuais com PDFKit", () => {
-    it("drawHeader: renderiza título 15pt, subtítulo 10pt e linha divisória sem lançar erro", () => {
+    it("drawHeader: renderiza título 14pt, subtítulo 9pt e linha divisória sem lançar erro", () => {
       const doc = new PDFDocument({ size: "A4", margins: PAGE_METRICS.margins });
       const initialY = doc.y;
       expect(() => drawHeader(doc)).not.toThrow();
