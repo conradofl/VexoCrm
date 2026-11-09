@@ -24,10 +24,12 @@ export interface GdPrazo {
 export interface GdCliente {
   id: string;
   nome: string;
+  portal_slug?: string | null;
   cnpj: string | null;
   cnpj_a_confirmar: boolean;
   aprovador_nome: string | null;
   aprovador_telefone: string | null;
+  google_calendar_email?: string | null;
   drive_url: string | null;
   contrato_url?: string | null;
   briefing_url?: string | null;
@@ -84,7 +86,7 @@ export interface GdEvento {
 export const CAMPOS_EDITAVEIS = [
   "nome", "cnpj", "cnpj_a_confirmar", "aprovador_nome", "aprovador_telefone",
   "drive_url", "contrato_url", "briefing_url", "ficha_vexo_url", "planejamento_url",
-  "escopo", "escopo_original",
+  "escopo", "escopo_original", "portal_slug",
 ] as const;
 export type CampoEditavel = (typeof CAMPOS_EDITAVEIS)[number];
 

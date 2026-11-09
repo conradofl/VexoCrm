@@ -45,6 +45,10 @@ const MIGRATION_FRENTE6 = readFileSync(
   resolve("supabase/migrations/20261108160000_gd_clientes_vexto_briefing_and_chips.sql"),
   "utf8"
 );
+const MIGRATION_PORTAL_SLUG = readFileSync(
+  resolve("supabase/migrations/20261108180000_gd_clientes_customer_success_and_portal_slug.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   superadmin: { uid: "uid-fundador", role: "superadmin", isAdmin: true, clientIds: [] },
@@ -110,6 +114,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION_BRIEFING);
   await db.exec(MIGRATION_FRENTE5);
   await db.exec(MIGRATION_FRENTE6);
+  await db.exec(MIGRATION_PORTAL_SLUG);
 
   const app = express();
   app.use(express.json());
@@ -445,5 +450,35 @@ describe("leitura", () => {
     } finally {
       await db.exec(MIGRATION_TRILHA);
     }
+  });
+
+  describe("Portal Público — resolução por slug e normalização do nome", () => {
+    it("resolve cliente por portal_slug explícito", async () => {
+      const c = await novoCliente("Cliente Com Slug", "ATIVO");
+      await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { portal_slug: "meu-slug-personalizado" } });
+
+      const res = await fetch(`${base}/api/gd/public/portal/meu-slug-personalizado`);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.cliente.nome).toBe("Cliente Com Slug");
+      expect(data.cliente.portal_slug).toBe("meu-slug-personalizado");
+    });
+
+    it("resolve cliente pelo slug normalizado de c.nome e auto-preenche portal_slug caso estivesse nulo", async () => {
+      const c = await novoCliente("Padaria Pão de Mel", "ATIVO");
+      // Verifica que no banco portal_slug está nulo inicialmente
+      const checkAntes = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
+      expect(checkAntes.rows[0].portal_slug).toBeNull();
+
+      // Acessa pelo slug normalizado (ex: padaria-pao-de-mel)
+      const res = await fetch(`${base}/api/gd/public/portal/padaria-pao-de-mel`);
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.cliente.nome).toBe("Padaria Pão de Mel");
+
+      // Verifica que auto-preencheu portal_slug no banco
+      const checkDepois = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
+      expect(checkDepois.rows[0].portal_slug).toBe("padaria-pao-de-mel");
+    });
   });
 });

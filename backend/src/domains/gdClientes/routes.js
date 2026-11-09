@@ -136,7 +136,7 @@ class ErroDeRota extends Error {
 
 const SELECT_CLIENTE = `
   SELECT c.id, c.nome, c.cnpj, c.cnpj_a_confirmar, c.aprovador_nome, c.aprovador_telefone,
-         c.google_calendar_email,
+         c.google_calendar_email, c.portal_slug,
          c.drive_url, c.contrato_url, c.briefing_url, c.ficha_vexo_url, c.planejamento_url,
          c.grupo_interno_jid, c.grupo_interno_url, c.grupo_cliente_jid, c.grupo_cliente_url,
          c.onboarding_concluido_em,
@@ -177,6 +177,7 @@ function clienteDe(linha) {
   return {
     id: linha.id,
     nome: linha.nome,
+    portal_slug: linha.portal_slug ?? null,
     cnpj: linha.cnpj,
     cnpj_a_confirmar: linha.cnpj_a_confirmar,
     aprovador_nome: linha.aprovador_nome,
@@ -744,10 +745,10 @@ export function registerGdClientesRoutes(app, {
         // Formato não base64url ou inválido para hash, segue para verificação de slug
       }
 
-      // 2. Se não achou por token ativo, tenta resolver por portal_slug
+      // 2. Se não achou por token ativo, tenta resolver por portal_slug ou slug normalizado do nome
       if (!clienteId) {
         const { rows: slugRows } = await db.query(
-          `SELECT id
+          `SELECT id, nome, portal_slug
              FROM public.gd_clientes
             WHERE dono_client_id = $1
               AND (portal_slug = $2 OR LOWER(portal_slug) = LOWER($2))`,
@@ -756,6 +757,63 @@ export function registerGdClientesRoutes(app, {
 
         if (slugRows.length > 0) {
           clienteId = slugRows[0].id;
+        } else {
+          // Busca clientes do dono para tentar matching pelo slug normalizado de c.nome
+          const { rows: clientesRows } = await db.query(
+            `SELECT id, nome, portal_slug
+               FROM public.gd_clientes
+              WHERE dono_client_id = $1`,
+            [GD_DONO]
+          );
+
+          const normalizarSlug = (str) =>
+            String(str || "")
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-+|-+$/g, "");
+
+          const targetSlug = normalizarSlug(rawParam);
+          const rawParamLower = rawParam.toLowerCase();
+
+          const matched = clientesRows.find((c) => {
+            if (c.portal_slug) {
+              const slugSalvo = c.portal_slug.toLowerCase();
+              if (slugSalvo === rawParamLower || normalizarSlug(slugSalvo) === targetSlug) {
+                return true;
+              }
+            }
+            const nomeNormalizado = normalizarSlug(c.nome);
+            const nomeSimples = String(c.nome || "")
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-+|-+$/g, "");
+
+            return (
+              nomeNormalizado === targetSlug ||
+              nomeSimples === targetSlug ||
+              nomeSimples === rawParamLower
+            );
+          });
+
+          if (matched) {
+            clienteId = matched.id;
+            // Auto-preenche portal_slug no banco caso estivesse nulo
+            if (!matched.portal_slug) {
+              const novoSlug = normalizarSlug(matched.nome) || targetSlug;
+              try {
+                await db.query(
+                  `UPDATE public.gd_clientes
+                      SET portal_slug = $1
+                    WHERE id = $2 AND portal_slug IS NULL`,
+                  [novoSlug, matched.id]
+                );
+              } catch (err) {
+                console.warn("[handlerPortalPublico] Falha ao auto-preencher portal_slug:", err?.message || err);
+              }
+            }
+          }
         }
       }
 

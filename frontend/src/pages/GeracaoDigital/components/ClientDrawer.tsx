@@ -3,26 +3,27 @@ import {
   X,
   ExternalLink,
   FolderOpen,
-  Hash,
   Phone,
   Mail,
-  Calendar,
-  Layers,
-  TrendingUp,
-  FileText,
   UserCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { PortfolioClient } from "./PortfolioTable";
 
 interface ClientDrawerProps {
   client: PortfolioClient | null;
   onClose: () => void;
-  onOpenIdentityWizard: (client: PortfolioClient) => void;
+  onOpenIdentityWizard?: (client: PortfolioClient) => void;
 }
 
-export function ClientDrawer({ client, onClose, onOpenIdentityWizard }: ClientDrawerProps) {
+function isValidDriveUrl(url?: string | null): boolean {
+  if (!url || typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return false;
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://");
+}
+
+export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
   if (!client) return null;
 
   return (
@@ -44,7 +45,7 @@ export function ClientDrawer({ client, onClose, onOpenIdentityWizard }: ClientDr
         <button
           type="button"
           onClick={onClose}
-          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg transition-colors"
+          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -59,16 +60,27 @@ export function ClientDrawer({ client, onClose, onOpenIdentityWizard }: ClientDr
           </p>
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-              <UserCheck className="w-4 h-4 text-purple-600" />
+              <UserCheck className="w-4 h-4 text-purple-600 shrink-0" />
               <span className="font-semibold">{client.contactName}</span>
             </div>
             <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-              <Phone className="w-4 h-4 text-emerald-600" />
-              <span>{client.contactWhatsapp}</span>
+              <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+              {client.contactWhatsapp && client.contactWhatsapp !== "—" ? (
+                <a
+                  href={`https://wa.me/${client.contactWhatsapp.replace(/\D/g, "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:underline hover:text-emerald-600 transition-colors"
+                >
+                  {client.contactWhatsapp}
+                </a>
+              ) : (
+                <span>{client.contactWhatsapp}</span>
+              )}
             </div>
             {client.contactEmail && (
               <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                <Mail className="w-4 h-4 text-blue-600" />
+                <Mail className="w-4 h-4 text-blue-600 shrink-0" />
                 <span>{client.contactEmail}</span>
               </div>
             )}
@@ -81,11 +93,15 @@ export function ClientDrawer({ client, onClose, onOpenIdentityWizard }: ClientDr
             Serviços Contratados
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {client.products.map((p, i) => (
-              <Badge key={i} variant="outline" className="text-xs py-1 px-2.5">
-                {p}
-              </Badge>
-            ))}
+            {client.products && client.products.length > 0 ? (
+              client.products.map((p, i) => (
+                <Badge key={i} variant="outline" className="text-xs py-1 px-2.5">
+                  {p}
+                </Badge>
+              ))
+            ) : (
+              <span className="text-slate-400 text-xs">Nenhum produto cadastrado</span>
+            )}
           </div>
         </div>
 
@@ -114,38 +130,15 @@ export function ClientDrawer({ client, onClose, onOpenIdentityWizard }: ClientDr
             Acessos Operacionais
           </p>
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenIdentityWizard(client)}
-            className="w-full justify-start gap-2 h-10 border-slate-200 dark:border-slate-800 font-bold"
-          >
-            <FileText className="w-4 h-4 text-indigo-500" />
-            Abrir Wizard de Identidade Visual
-          </Button>
-
-          {client.driveFolderUrl && (
+          {isValidDriveUrl(client.driveFolderUrl) && (
             <a
-              href={client.driveFolderUrl}
+              href={client.driveFolderUrl!}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors font-medium text-slate-700 dark:text-slate-300"
             >
               <FolderOpen className="w-4 h-4 text-blue-500" />
               <span>Pasta de Ativos no Google Drive</span>
-              <ExternalLink className="w-3.5 h-3.5 ml-auto text-slate-400" />
-            </a>
-          )}
-
-          {client.slackChannel && (
-            <a
-              href={`https://geracaodigital.slack.com/messages/${client.slackChannel}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors font-medium text-slate-700 dark:text-slate-300"
-            >
-              <Hash className="w-4 h-4 text-emerald-500" />
-              <span>Canal no Slack (#{client.slackChannel})</span>
               <ExternalLink className="w-3.5 h-3.5 ml-auto text-slate-400" />
             </a>
           )}
