@@ -289,18 +289,24 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
         },
         body: JSON.stringify({ client_id: clientId }),
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.error?.message || errJson?.error || "Erro ao notificar diretoria.");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.success === false) {
+        const errorMsg = typeof data?.error === "string" ? data.error : (data?.error?.message || "Falha ao enviar notificação para a diretoria.");
+        toast({
+          title: "Erro no WhatsApp",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        return;
       }
       toast({
         title: "Diretoria notificada!",
-        description: "Caio e Conrado foram notificados no WhatsApp.",
+        description: data?.instance ? `Notificado via ${data.instance}` : "Caio e Conrado foram notificados no WhatsApp.",
       });
     } catch (err: any) {
       console.error(err);
       toast({
-        title: "Erro ao notificar diretoria",
+        title: "Erro no WhatsApp",
         description: err.message,
         variant: "destructive",
       });

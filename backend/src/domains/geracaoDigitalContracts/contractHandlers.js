@@ -675,11 +675,16 @@ export async function notificarDiretoriaWhatsapp(req, res) {
       null;
 
     if (!evolutionInstance) {
-      const instRes = await db.query(
-        `SELECT name FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`
-      );
-      evolutionInstance = instRes.rows[0]?.name || "vexo-adm";
+      try {
+        const instRes = await db.query(
+          `SELECT name FROM public.lead_client_evolution_instances 
+           WHERE active = true AND (client_id = 'geracao-digital' OR client_id = 'vexo-adm' OR is_default = true)
+           ORDER BY (CASE WHEN client_id = 'geracao-digital' THEN 0 ELSE 1 END), is_default DESC LIMIT 1`
+        );
+        evolutionInstance = instRes.rows[0]?.name;
+      } catch (_) {}
     }
+    evolutionInstance = evolutionInstance || "geracao-digital-comercial-gabriel";
 
     const diretoriaWhatsAppNumeros = [
       process.env.GD_CAIO_WHATSAPP || "5534997719779",
@@ -709,6 +714,16 @@ export async function notificarDiretoriaWhatsapp(req, res) {
         console.warn(`[notificarDiretoria] Erro ao enviar para ${numero}:`, err.message);
         resultados.push({ numero, status: "error", error: err.message });
       }
+    }
+
+    const erros = resultados.filter((r) => r.status === "error");
+    if (erros.length === diretoriaWhatsAppNumeros.length) {
+      return res.status(400).json({
+        success: false,
+        error: `Falha no envio via chip "${evolutionInstance}": ${erros[0]?.error || "Instância desconectada ou erro na Evolution"}`,
+        instance: evolutionInstance,
+        resultados,
+      });
     }
 
     res.json({ success: true, instance: evolutionInstance, resultados });

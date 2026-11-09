@@ -152,7 +152,7 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     expect(sentCalls[0].text).toContain("Solaris Tech");
   });
 
-  it("usa fallback vexo-adm (e NUNCA vexo-adm-vexo-atende) quando não há instância configurada", async () => {
+  it("usa fallback geracao-digital-comercial-gabriel quando não há instância configurada", async () => {
     const contract = {
       id: "ct-003",
       tenant_id: TENANT_ID,
@@ -182,9 +182,8 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
 
     expect(getStatus()).toBe(200);
     const json = getJson();
-    expect(json.instance).toBe("vexo-adm");
-    expect(json.instance).not.toBe("vexo-adm-vexo-atende");
-    expect(sentCalls[0].instanceName).toBe("vexo-adm");
+    expect(json.instance).toBe("geracao-digital-comercial-gabriel");
+    expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-gabriel");
   });
 
   it("registra erro no array resultados quando falha o envio para um dos números, sem interromper os demais", async () => {
@@ -221,6 +220,36 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     expect(json.resultados[0].status).toBe("error");
     expect(json.resultados[0].error).toBe("Erro simulado Evolution WhatsApp");
     expect(json.resultados[1].status).toBe("sent");
+  });
+
+  it("retorna status 400 e success false quando todos os envios falham na Evolution", async () => {
+    const contract = {
+      id: "ct-005",
+      tenant_id: TENANT_ID,
+      dados: { razao_social: "Empresa Erro Total" },
+    };
+
+    mockDb = {
+      query: vi.fn().mockImplementation(async (sql) => {
+        if (sql.includes("FROM public.gd_contracts")) return { rows: [contract] };
+        return { rows: [] };
+      }),
+    };
+    _setPgDatabasePoolForTesting(mockDb);
+
+    vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockImplementation(async () => {
+      throw new Error("Evolution API offline / instância desconectada");
+    });
+
+    const { req, res, getStatus, getJson } = makeReqRes("ct-005");
+    await notificarDiretoriaWhatsapp(req, res);
+
+    expect(getStatus()).toBe(400);
+    const json = getJson();
+    expect(json.success).toBe(false);
+    expect(json.error).toContain("Falha no envio via chip");
+    expect(json.error).toContain("Evolution API offline");
+    expect(json.resultados).toHaveLength(2);
   });
 
   it("registra a rota POST /api/gd/contracts/:id/notificar-diretoria", async () => {
