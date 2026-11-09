@@ -2,6 +2,7 @@ import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid, GD_TENANT_UUID } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
 import { saveContractBuffer, getContractBuffer, CONTRACT_MAX_BYTES } from "../../services/storage.js";
+import { sendTextMessageViaEvolution } from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
 import {
@@ -639,6 +640,81 @@ export async function downloadSignedContract(req, res) {
     if (!res.headersSent) {
       sendError(res, 500, "INTERNAL_ERROR", "Erro ao baixar contrato assinado");
     }
+  }
+}
+
+export async function notificarDiretoriaWhatsapp(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+    const { id } = req.params;
+
+    const { rows: contractRows } = await db.query(
+      `SELECT * FROM public.gd_contracts WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000') LIMIT 1`,
+      [id, tenantId]
+    );
+    if (contractRows.length === 0) {
+      return sendError(res, 404, "NOT_FOUND", "Contrato não encontrado.");
+    }
+
+    const contract = contractRows[0];
+    const dados = typeof contract.dados === "string" ? JSON.parse(contract.dados) : (contract.dados || {});
+    const empresa = dados.razao_social || dados.empresa || "Cliente";
+    const cnpj = dados.cnpj || "-";
+    const responsavel = dados.responsavel_nome || dados.representante || "-";
+
+    const { rows: modRows } = await db.query(
+      `SELECT config FROM public.tenant_modules WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    const cfg = modRows[0]?.config || {};
+    let evolutionInstance =
+      cfg?.gd?.juridico?.evolution_instance ||
+      process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+      process.env.GD_EVOLUTION_INSTANCE ||
+      null;
+
+    if (!evolutionInstance) {
+      const instRes = await db.query(
+        `SELECT name FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`
+      );
+      evolutionInstance = instRes.rows[0]?.name || "vexo-adm";
+    }
+
+    const diretoriaWhatsAppNumeros = [
+      process.env.GD_CAIO_WHATSAPP || "5534997719779",
+      process.env.GD_CONRADO_WHATSAPP || "5534991751267",
+    ];
+
+    const mensagemDiretoria =
+      `📄 *Novo Contrato Comercial Gerado!* 🚀\n\n` +
+      `*Empresa:* ${empresa}\n` +
+      `*CNPJ:* ${cnpj}\n` +
+      `*Responsável:* ${responsavel}\n` +
+      `*Origem:* Proposta Comercial Aceita\n\n` +
+      `O cliente já deu o aceite nos termos. Conforme o protocolo GD, o contrato deve receber a *1ª assinatura da Diretoria (Caio)* via GOV.BR antes de seguir para o cliente.\n\n` +
+      `👉 *Visualizar / Baixar Contrato para Assinatura:*\n` +
+      `https://crm.vexoia.com/api/gd/contracts/${id}/pdf`;
+
+    const resultados = [];
+    for (const numero of diretoriaWhatsAppNumeros) {
+      try {
+        await sendTextMessageViaEvolution({
+          instanceName: evolutionInstance,
+          number: numero,
+          text: mensagemDiretoria,
+        });
+        resultados.push({ numero, status: "sent" });
+      } catch (err) {
+        console.warn(`[notificarDiretoria] Erro ao enviar para ${numero}:`, err.message);
+        resultados.push({ numero, status: "error", error: err.message });
+      }
+    }
+
+    res.json({ success: true, instance: evolutionInstance, resultados });
+  } catch (error) {
+    console.error("[notificarDiretoriaWhatsapp] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", error.message || "Erro ao notificar diretoria.");
   }
 }
 

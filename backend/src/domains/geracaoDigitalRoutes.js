@@ -3875,12 +3875,13 @@ Condições: ${condicoes}`;
 
       // Busca dados da contratada
       let contratada = {};
+      let cfg = {};
       try {
         const modRes = await client.query(
           `SELECT config FROM public.tenant_modules WHERE tenant_id = $1`,
           [tenantId]
         );
-        const cfg = modRes.rows[0]?.config || {};
+        cfg = modRes.rows[0]?.config || {};
         contratada = cfg.contratada || cfg?.gd?.contratada || {};
       } catch (_) {}
 
@@ -4018,10 +4019,24 @@ Condições: ${condicoes}`;
         `👉 *Visualizar / Baixar Contrato para Assinatura:*\n` +
         `https://crm.vexoia.com/api/gd/contracts/${contract.id}/pdf`;
 
-      const evolutionInstance =
+      // Busca a instância ativa configurada no tenant ou padrão no banco
+      let evolutionInstance =
+        cfg?.gd?.juridico?.evolution_instance ||
         process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
         process.env.GD_EVOLUTION_INSTANCE ||
-        "vexo-adm-vexo-atende";
+        null;
+
+      if (!evolutionInstance) {
+        try {
+          const instRes = await client.query(
+            `SELECT name FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`
+          );
+          if (instRes.rows.length > 0) {
+            evolutionInstance = instRes.rows[0].name;
+          }
+        } catch (_) {}
+      }
+      evolutionInstance = evolutionInstance || "vexo-adm";
 
       for (const numero of diretoriaWhatsAppNumeros) {
         try {

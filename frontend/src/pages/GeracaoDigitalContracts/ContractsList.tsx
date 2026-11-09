@@ -24,6 +24,7 @@ import {
   Upload,
   FileCheck,
   ChevronDown,
+  MessageSquare,
 } from "lucide-react";
 import { getStableColor } from "@/lib/stableColor";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<{ id: string; proposalId?: string | null; dados: any } | null>(null);
   const [creatingStandaloneKey, setCreatingStandaloneKey] = useState<string | null>(null);
+  const [notificandoId, setNotificandoId] = useState<string | null>(null);
 
   // Busca e troca de aba voltam para a primeira página.
   useEffect(() => { setPage(1); }, [busca, showArquivados]);
@@ -274,6 +276,39 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     });
   };
 
+  // Notifica a diretoria (Caio e Conrado) no WhatsApp sobre o contrato comercial.
+  const handleNotificarDiretoria = async (contract: any) => {
+    try {
+      setNotificandoId(contract.id);
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/gd/contracts/${contract.id}/notificar-diretoria?client_id=${clientId || ""}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error?.message || errJson?.error || "Erro ao notificar diretoria.");
+      }
+      toast({
+        title: "Diretoria notificada!",
+        description: "Caio e Conrado foram notificados no WhatsApp.",
+      });
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro ao notificar diretoria",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setNotificandoId(null);
+    }
+  };
+
   // Cada botão do contrato, separado, para a MESMA ação aparecer onde fizer sentido: no cartão aberto (todos),
   // na linha da lista (só as de uso diário) e na linha aberta (as demais).
   const botoesAssinado = (contract: any, compact = false) => (
@@ -330,6 +365,20 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     </>
   );
 
+  const botaoNotificarDiretoria = (contract: any, compact = false) => (
+    <>
+      <Button
+        size="sm"
+        className={cn("bg-emerald-600 hover:bg-emerald-500 text-white font-medium", compact ? "" : "w-full")}
+        onClick={() => handleNotificarDiretoria(contract)}
+        disabled={notificandoId === contract.id}
+      >
+        <MessageSquare className="h-4 w-4 mr-2" />
+        {notificandoId === contract.id ? "Notificando..." : "Notificar no WhatsApp"}
+      </Button>
+    </>
+  );
+
   const botaoEditar = (contract: any, compact = false) => (
     <>
       <Button
@@ -378,6 +427,7 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     <>
       {botoesAssinado(contract, compact)}
       {botaoJuridico(contract, compact)}
+      {botaoNotificarDiretoria(contract, compact)}
       {botaoEditar(contract, compact)}
       {botaoPdf(contract, compact)}
       {botaoArquivar(contract, compact)}
@@ -392,10 +442,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     </>
   );
 
-  /** O resto (assinado, editar, arquivar): ao expandir a linha. */
+  /** O resto (assinado, notificar diretoria, editar, arquivar): ao expandir a linha. */
   const acoesSecundarias = (contract: any, compact = false) => (
     <>
       {botoesAssinado(contract, compact)}
+      {botaoNotificarDiretoria(contract, compact)}
       {botaoEditar(contract, compact)}
       {botaoArquivar(contract, compact)}
     </>

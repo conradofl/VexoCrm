@@ -18,6 +18,7 @@ import {
   generateContractPdf,
   uploadSignedContract,
   downloadSignedContract,
+  notificarDiretoriaWhatsapp,
 } from "./contractHandlers.js";
 import { extractContractData } from "./contractExtract.js";
 import {
@@ -40,6 +41,7 @@ export function registerContractRoutes(app) {
   app.put("/api/gd/juridico-settings", requireFirebaseAuth, saveJuridicoSettings);
   app.get("/api/gd/evolution-instances", requireFirebaseAuth, listEvolutionInstances);
   app.post("/api/gd/contracts/:id/enviar-juridico", requireFirebaseAuth, guardContratoVexo, sendContractToJuridico);
+  app.post("/api/gd/contracts/:id/notificar-diretoria", requireFirebaseAuth, guardContratoVexo, notificarDiretoriaWhatsapp);
   app.get("/api/gd/contract-templates", requireFirebaseAuth, listContractTemplates);
   app.get("/api/gd/contract-templates/:id", requireFirebaseAuth, getContractTemplate);
   app.post("/api/gd/contract-templates", requireFirebaseAuth, createContractTemplate);

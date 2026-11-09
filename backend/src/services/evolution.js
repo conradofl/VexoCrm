@@ -2273,9 +2273,14 @@ export async function sendTextMessageViaEvolution({
 
   const effectiveBaseUrl =
     normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     "https://vexo-evolution-api.xdvm8y.easypanel.host";
-  const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_API_TOKEN ||
+    process.env.GD_EVOLUTION_TOKEN;
 
   if (!apiKey) {
     throw new Error("Chave de autenticação da Evolution não configurada");
