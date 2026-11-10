@@ -2280,7 +2280,8 @@ export async function sendTextMessageViaEvolution({
     webhookToken ||
     process.env.EVOLUTION_API_KEY ||
     process.env.GD_EVOLUTION_API_TOKEN ||
-    process.env.GD_EVOLUTION_TOKEN;
+    process.env.GD_EVOLUTION_TOKEN ||
+    getEvolutionAdminConfig().apiKey;
 
   if (!apiKey) {
     throw new Error("Chave de autenticação da Evolution não configurada");
@@ -2309,11 +2310,26 @@ export async function sendTextMessageViaEvolution({
     },
   };
 
-  const res = await fetch(endpoint, {
+  let res = await fetch(endpoint, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   });
+
+  if ((res.status === 401 || res.status === 403) && webhookToken) {
+    const adminKey = getEvolutionAdminConfig().apiKey;
+    if (adminKey && adminKey !== apiKey) {
+      console.warn(`[sendTextMessageViaEvolution] Token da instância retornou HTTP ${res.status}, tentando com master key...`);
+      res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...buildEvolutionAuthHeaders(adminKey),
+        },
+        body: JSON.stringify(payload),
+      });
+    }
+  }
 
   const resText = await res.text();
   if (!res.ok) {

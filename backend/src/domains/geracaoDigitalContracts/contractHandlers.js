@@ -725,6 +725,7 @@ export async function notificarDiretoriaWhatsapp(req, res) {
       let enviado = false;
       let ultimoErro = null;
       let usedInstance = defaultInstanceSlug;
+      const tentativas = [];
 
       const attempted = new Set();
       for (const inst of candidateInstances) {
@@ -755,18 +756,26 @@ export async function notificarDiretoriaWhatsapp(req, res) {
           break;
         } catch (err) {
           ultimoErro = err.message;
+          tentativas.push({ slug, error: err.message });
           console.warn(`[notificarDiretoria] Falha no envio para ${numero} via "${slug}":`, err.message);
         }
       }
 
       if (!enviado) {
-        resultados.push({ numero, status: "error", error: ultimoErro, instance: usedInstance });
+        const lastAttempt = tentativas[tentativas.length - 1];
+        resultados.push({
+          numero,
+          status: "error",
+          error: ultimoErro || "Instância desconectada ou erro na Evolution",
+          instance: lastAttempt?.slug || usedInstance,
+          tentativas,
+        });
       }
     }
 
     const erros = resultados.filter((r) => r.status === "error");
     if (erros.length === diretoriaWhatsAppNumeros.length) {
-      const failingInstance = resultados[0]?.instance || defaultInstanceSlug || "whatsapp";
+      const failingInstance = erros[0]?.instance || defaultInstanceSlug || "whatsapp";
       return res.status(400).json({
         success: false,
         error: `Falha no envio via chip "${failingInstance}": ${erros[0]?.error || "Instância desconectada ou erro na Evolution"}`,
