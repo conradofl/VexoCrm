@@ -56,7 +56,16 @@ export function registerContractRoutes(app) {
   app.get("/api/gd/contracts/:id", requireFirebaseAuth, guardContratoVexo, getContract);
   app.put("/api/gd/contracts/:id", requireFirebaseAuth, requireVexoCommercialAccess, guardContratoVexo, updateContract);
   
-  app.get("/api/gd/contracts/:id/pdf", requireFirebaseAuth, guardContratoVexo, generateContractPdf);
+  // Acesso ao PDF do contrato: aceita autenticação via header (CRM web) ou acesso direto via link (WhatsApp da diretoria/cliente).
+  // O guardContratoVexo garante que contratos restritos (owner_company = 'vexo') continuem bloqueados.
+  const optionalAuthForPdf = (req, res, next) => {
+    if (req.headers.authorization) {
+      return requireFirebaseAuth(req, res, next);
+    }
+    next();
+  };
+
+  app.get("/api/gd/contracts/:id/pdf", optionalAuthForPdf, guardContratoVexo, generateContractPdf);
 
   // Contrato assinado externamente (ex: gov.br): upload e download byte a byte com trava de tenant
   app.post(

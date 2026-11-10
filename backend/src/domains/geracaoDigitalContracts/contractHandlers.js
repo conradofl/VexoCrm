@@ -447,8 +447,25 @@ export async function buildContractPdfBuffer(tenantId, id) {
 
 export async function generateContractPdf(req, res) {
   try {
-    const tenantId = await resolveTenantUuid(req, res);
-    if (!tenantId) return;
+    let tenantId = null;
+    if (req.headers.authorization) {
+      tenantId = await resolveTenantUuid(req, res);
+      if (!tenantId) return;
+    } else {
+      // Acesso direto via link sem header Authorization (ex: link recebido no WhatsApp da diretoria ou cliente)
+      const { rows } = await db.query(
+        "SELECT id, tenant_id, owner_company FROM public.gd_contracts WHERE id = $1",
+        [req.params.id]
+      );
+      if (rows.length === 0) {
+        return sendError(res, 404, "NOT_FOUND", "Contrato não encontrado");
+      }
+      if (String(rows[0].owner_company || "").trim().toLowerCase() === "vexo") {
+        return sendError(res, 403, "FORBIDDEN", "Comercial Vexo é restrito ao administrador");
+      }
+      tenantId = rows[0].tenant_id || GD_TENANT_UUID;
+    }
+
     const { id } = req.params;
 
     let built;

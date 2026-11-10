@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { sendContractToJuridico } from "../domains/geracaoDigitalContracts/juridicoHandlers.js";
 import * as evolutionModule from "../services/evolution.js";
 import * as contractHandlersModule from "../domains/geracaoDigitalContracts/contractHandlers.js";
+import { generateContractPdf } from "../domains/geracaoDigitalContracts/contractHandlers.js";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { resolveCampaignImportSelectionStrict } from "../campaign/dispatch.js";
 
@@ -244,6 +245,146 @@ describe("sendContractToJuridico e resolveCampaignImportSelectionStrict", () => 
       };
       const result = resolveCampaignImportSelectionStrict(campaign);
       expect(result).toBe("__all__");
+    });
+  });
+
+  describe("generateContractPdf via link público/WhatsApp (sem header Authorization)", () => {
+    it("permite visualização direta do PDF sem header Authorization para contratos da GD", async () => {
+      const dbMock = {
+        query: vi.fn(async (sql, params) => {
+          if (sql.includes("SELECT id, tenant_id, owner_company FROM public.gd_contracts")) {
+            return {
+              rows: [{ id: "ct-123", tenant_id: TENANT_ID, owner_company: "geracao-digital" }],
+            };
+          }
+          if (sql.includes("SELECT * FROM gd_contracts WHERE id = $1")) {
+            return {
+              rows: [
+                {
+                  id: "ct-123",
+                  tenant_id: TENANT_ID,
+                  dados: { texto_final: "Contrato de Prestação de Serviços GD", razao_social: "Cliente Teste" },
+                },
+              ],
+            };
+          }
+          if (sql.includes("tenant_contratada_config")) {
+            return { rows: [] };
+          }
+          if (sql.includes("UPDATE gd_contracts")) {
+            return { rows: [] };
+          }
+          return { rows: [] };
+        }),
+      };
+      _setPgDatabasePoolForTesting(dbMock);
+
+      const headers = {};
+      let sentData = null;
+      const req = {
+        params: { id: "ct-123" },
+        headers: {},
+      };
+      const res = {
+        setHeader(name, val) {
+          headers[name] = val;
+        },
+        getHeader(name) {
+          return headers[name] || null;
+        },
+        send(data) {
+          sentData = data;
+          return this;
+        },
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+      };
+
+      await generateContractPdf(req, res);
+
+      expect(headers["Content-Type"]).toBe("application/pdf");
+      expect(sentData).toBeTruthy();
+    });
+
+    it("bloqueia contratos restritos à Vexo com 403 mesmo sem header", async () => {
+      let statusCode = 200;
+      let jsonResult = null;
+      const headers = {};
+      const dbMock = {
+        query: vi.fn(async (sql) => {
+          if (sql.includes("SELECT id, tenant_id, owner_company FROM public.gd_contracts")) {
+            return {
+              rows: [{ id: "ct-vexo", tenant_id: TENANT_ID, owner_company: "vexo" }],
+            };
+          }
+          return { rows: [] };
+        }),
+      };
+      _setPgDatabasePoolForTesting(dbMock);
+
+      const req = {
+        params: { id: "ct-vexo" },
+        headers: {},
+      };
+      const res = {
+        status(code) {
+          statusCode = code;
+          return this;
+        },
+        json(data) {
+          jsonResult = data;
+          return this;
+        },
+        setHeader(name, val) {
+          headers[name] = val;
+        },
+        getHeader(name) {
+          return headers[name] || null;
+        },
+        send: vi.fn(),
+      };
+
+      await generateContractPdf(req, res);
+
+      expect(statusCode).toBe(403);
+      expect(jsonResult?.error?.code).toBe("FORBIDDEN");
+    });
+
+    it("responde 404 para contrato inexistente sem header", async () => {
+      let statusCode = 200;
+      let jsonResult = null;
+      const headers = {};
+      const dbMock = {
+        query: vi.fn(async () => ({ rows: [] })),
+      };
+      _setPgDatabasePoolForTesting(dbMock);
+
+      const req = {
+        params: { id: "ct-inexistente" },
+        headers: {},
+      };
+      const res = {
+        status(code) {
+          statusCode = code;
+          return this;
+        },
+        json(data) {
+          jsonResult = data;
+          return this;
+        },
+        setHeader(name, val) {
+          headers[name] = val;
+        },
+        getHeader(name) {
+          return headers[name] || null;
+        },
+        send: vi.fn(),
+      };
+
+      await generateContractPdf(req, res);
+
+      expect(statusCode).toBe(404);
+      expect(jsonResult?.error?.code).toBe("NOT_FOUND");
     });
   });
 });
