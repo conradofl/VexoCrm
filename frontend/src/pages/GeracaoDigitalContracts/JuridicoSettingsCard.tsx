@@ -219,8 +219,8 @@ export function JuridicoSettingsCard() {
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 h-9 text-sm text-slate-800 dark:text-slate-100"
                 >
                   <option value="">— padrão do sistema —</option>
-                  {(instances || []).map((i) => (
-                    <option key={i.name} value={i.name}>
+                  {(instances || []).map((i: any) => (
+                    <option key={i.technical_name || i.name} value={i.technical_name || i.name}>
                       {i.name} {i.client_id ? `(${i.client_id})` : ""}
                     </option>
                   ))}

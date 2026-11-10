@@ -22,6 +22,7 @@ export interface JuridicoSettings {
 
 export interface EvolutionInstance {
   name: string;
+  technical_name?: string;
   client_id: string;
 }
 

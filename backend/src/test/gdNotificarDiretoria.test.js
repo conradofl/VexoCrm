@@ -269,4 +269,193 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     expect(notifRoute).toBeDefined();
     expect(notifRoute.handlers).toContain(notificarDiretoriaWhatsapp);
   });
+
+  it("converte rótulo humano amigável para slug técnico extraído do webhook da instância", async () => {
+    const contract = {
+      id: "ct-006",
+      tenant_id: TENANT_ID,
+      dados: { razao_social: "Empresa Slug Test" },
+    };
+
+    mockDb = {
+      query: vi.fn().mockImplementation(async (sql, params) => {
+        if (sql.includes("FROM public.gd_contracts")) return { rows: [contract] };
+        if (sql.includes("FROM public.tenant_modules")) {
+          return {
+            rows: [
+              {
+                config: {
+                  gd: {
+                    juridico: {
+                      evolution_instance: "Comercial - Gabriel",
+                    },
+                  },
+                },
+              },
+            ],
+          };
+        }
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                name: "Comercial - Gabriel",
+                dispatch_webhook_url: "https://evolution.example.com/message/sendText/geracao-digital-comercial-gabriel",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    _setPgDatabasePoolForTesting(mockDb);
+
+    const { req, res, getStatus, getJson } = makeReqRes("ct-006");
+    await notificarDiretoriaWhatsapp(req, res);
+
+    expect(getStatus()).toBe(200);
+    const json = getJson();
+    expect(json.success).toBe(true);
+    expect(json.instance).toBe("geracao-digital-comercial-gabriel");
+    expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-gabriel");
+  });
+
+  it("aplica fallback automático para geracao-digital-comercial-gabriel se a instância falhar com erro/404", async () => {
+    const contract = {
+      id: "ct-007",
+      tenant_id: TENANT_ID,
+      dados: { razao_social: "Empresa Fallback Test" },
+    };
+
+    mockDb = {
+      query: vi.fn().mockImplementation(async (sql) => {
+        if (sql.includes("FROM public.gd_contracts")) return { rows: [contract] };
+        if (sql.includes("FROM public.tenant_modules")) {
+          return {
+            rows: [
+              {
+                config: {
+                  gd: {
+                    juridico: {
+                      evolution_instance: "chip-secundario",
+                    },
+                  },
+                },
+              },
+            ],
+          };
+        }
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return {
+            rows: [
+              {
+                name: "chip-secundario",
+                dispatch_webhook_url: "https://evolution.example.com/message/sendText/chip-secundario",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    _setPgDatabasePoolForTesting(mockDb);
+
+    // Mock onde "chip-secundario" falha (ex: HTTP 404), mas o fallback funciona
+    vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockImplementation(async ({ instanceName }) => {
+      if (instanceName === "chip-secundario") {
+        throw new Error("Evolution 404: Instance not found");
+      }
+      return { success: true };
+    });
+
+    const { req, res, getStatus, getJson } = makeReqRes("ct-007");
+    await notificarDiretoriaWhatsapp(req, res);
+
+    expect(getStatus()).toBe(200);
+    const json = getJson();
+    expect(json.success).toBe(true);
+    expect(json.resultados).toHaveLength(2);
+    expect(json.resultados[0].status).toBe("sent");
+    expect(json.resultados[0].fallback).toBe(true);
+    expect(json.resultados[0].instance).toBe("geracao-digital-comercial-gabriel");
+  });
+
+  it("substitui instâncias com espaços ou vexo-adm obrigatoriamente por geracao-digital-comercial-gabriel", async () => {
+    const contract = {
+      id: "ct-008",
+      tenant_id: TENANT_ID,
+      dados: { razao_social: "Empresa Vexo Adm Test" },
+    };
+
+    mockDb = {
+      query: vi.fn().mockImplementation(async (sql) => {
+        if (sql.includes("FROM public.gd_contracts")) return { rows: [contract] };
+        if (sql.includes("FROM public.tenant_modules")) {
+          return {
+            rows: [
+              {
+                config: {
+                  gd: {
+                    juridico: {
+                      evolution_instance: "vexo-adm",
+                    },
+                  },
+                },
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    _setPgDatabasePoolForTesting(mockDb);
+
+    const { req, res, getStatus, getJson } = makeReqRes("ct-008");
+    await notificarDiretoriaWhatsapp(req, res);
+
+    expect(getStatus()).toBe(200);
+    const json = getJson();
+    expect(json.instance).toBe("geracao-digital-comercial-gabriel");
+    expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-gabriel");
+  });
+
+  it("listEvolutionInstances retorna technical_name extraído da dispatch_webhook_url", async () => {
+    const { listEvolutionInstances } = await import("../domains/geracaoDigitalContracts/juridicoHandlers.js");
+    mockDb = {
+      query: vi.fn().mockResolvedValue({
+        rows: [
+          {
+            name: "Comercial - Gabriel",
+            client_id: "geracao-digital",
+            dispatch_webhook_url: "https://evolution.example.com/message/sendText/geracao-digital-comercial-gabriel",
+          },
+          {
+            name: "instancia-sem-url",
+            client_id: "geracao-digital",
+            dispatch_webhook_url: null,
+          },
+        ],
+      }),
+    };
+    _setPgDatabasePoolForTesting(mockDb);
+
+    const { req, res, getStatus, getJson } = makeReqRes("qualquer");
+    await listEvolutionInstances(req, res);
+
+    expect(getStatus()).toBe(200);
+    const json = getJson();
+    expect(json.success).toBe(true);
+    expect(json.data).toEqual([
+      {
+        name: "Comercial - Gabriel",
+        technical_name: "geracao-digital-comercial-gabriel",
+        client_id: "geracao-digital",
+      },
+      {
+        name: "instancia-sem-url",
+        technical_name: "instancia-sem-url",
+        client_id: "geracao-digital",
+      },
+    ]);
+  });
 });

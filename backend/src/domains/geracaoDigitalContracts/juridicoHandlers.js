@@ -9,6 +9,7 @@
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
+import { extractEvolutionInstanceSlug } from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque buildContractPdfBuffer é function declaration (tem hoisting).
 // NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { buildContractPdfBuffer } from "./contractHandlers.js";
@@ -125,15 +126,28 @@ export async function listEvolutionInstances(req, res) {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
 
-    let queryStr = "SELECT name, client_id FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC, name ASC";
+    let queryStr = `SELECT name, client_id, dispatch_webhook_url 
+   FROM public.lead_client_evolution_instances 
+   WHERE active = true 
+   ORDER BY (CASE WHEN client_id = 'geracao-digital' THEN 0 ELSE 1 END), is_default DESC, name ASC`;
     let params = [];
     const access = req.authAccess || {};
     if (access.role !== "internal" && Array.isArray(access.clientIds) && access.clientIds.length > 0) {
-      queryStr = "SELECT name, client_id FROM public.lead_client_evolution_instances WHERE client_id = ANY($1) AND active = true ORDER BY is_default DESC, name ASC";
+      queryStr = `SELECT name, client_id, dispatch_webhook_url 
+   FROM public.lead_client_evolution_instances 
+   WHERE client_id = ANY($1) AND active = true 
+   ORDER BY (CASE WHEN client_id = 'geracao-digital' THEN 0 ELSE 1 END), is_default DESC, name ASC`;
       params = [access.clientIds];
     }
     const { rows } = await db.query(queryStr, params);
-    res.json({ success: true, data: rows.map((r) => ({ name: r.name, client_id: r.client_id })) });
+    res.json({
+      success: true,
+      data: rows.map((r) => ({
+        name: r.name,
+        technical_name: extractEvolutionInstanceSlug(r.dispatch_webhook_url) || r.name,
+        client_id: r.client_id,
+      })),
+    });
   } catch (error) {
     console.error("[listEvolutionInstances] Error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Erro ao listar as instâncias de WhatsApp.");
