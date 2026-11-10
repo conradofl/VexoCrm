@@ -3,16 +3,16 @@
 
 export const SQL_CANONICAL_PHONE = (col) => `
   CASE
-    WHEN ${col} LIKE '%@%' THEN ${col}
-    WHEN length(regexp_replace(${col}, '\\D', '', 'g')) = 12 AND regexp_replace(${col}, '\\D', '', 'g') ~ '^55[1-9]{2}[6-9]'
-      THEN '55' || substr(regexp_replace(${col}, '\\D', '', 'g'), 3, 2) || '9' || substr(regexp_replace(${col}, '\\D', '', 'g'), 5)
-    WHEN length(regexp_replace(${col}, '\\D', '', 'g')) = 10 AND regexp_replace(${col}, '\\D', '', 'g') ~ '^[1-9]{2}[6-9]'
-      THEN '55' || substr(regexp_replace(${col}, '\\D', '', 'g'), 1, 2) || '9' || substr(regexp_replace(${col}, '\\D', '', 'g'), 3)
-    WHEN length(regexp_replace(${col}, '\\D', '', 'g')) = 10 AND regexp_replace(${col}, '\\D', '', 'g') ~ '^[1-9]{2}[2-5]'
-      THEN '55' || regexp_replace(${col}, '\\D', '', 'g')
-    WHEN length(regexp_replace(${col}, '\\D', '', 'g')) = 11 AND regexp_replace(${col}, '\\D', '', 'g') ~ '^[1-9]{2}9'
-      THEN '55' || regexp_replace(${col}, '\\D', '', 'g')
-    ELSE regexp_replace(${col}, '\\D', '', 'g')
+    WHEN ${col} LIKE '%@g.us' OR ${col} LIKE '%@lid' THEN ${col}
+    WHEN length(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')) = 12 AND regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g') ~ '^55[1-9]{2}[6-9]'
+      THEN '55' || substr(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g'), 3, 2) || '9' || substr(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g'), 5)
+    WHEN length(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')) = 10 AND regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g') ~ '^[1-9]{2}[6-9]'
+      THEN '55' || substr(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g'), 1, 2) || '9' || substr(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g'), 3)
+    WHEN length(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')) = 10 AND regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g') ~ '^[1-9]{2}[2-5]'
+      THEN '55' || regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')
+    WHEN length(regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')) = 11 AND regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g') ~ '^[1-9]{2}9'
+      THEN '55' || regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')
+    ELSE regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')
   END
 `;
 
@@ -40,8 +40,11 @@ export const SQL_CANONICAL_PHONE_JID = (col) =>
 export function toCanonicalPhone(raw) {
   if (raw === null || raw === undefined) return "";
   const s = String(raw).trim();
-  if (s.includes("@")) return s;
-  const digits = s.replace(/\D/g, "");
+  if (!s) return "";
+  const lower = s.toLowerCase();
+  if (lower.includes("@g.us") || lower.includes("@lid")) return s;
+  const clean = s.replace(/@(s\.whatsapp\.net|c\.us)$/i, "");
+  const digits = clean.replace(/\D/g, "");
   if (!digits) return "";
 
   // 12 dígitos: 55 + DDD [1-9][1-9] + celular [6-9] (sem o 9) -> 55 + DDD + 9 + restante

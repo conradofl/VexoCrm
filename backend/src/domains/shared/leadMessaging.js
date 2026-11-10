@@ -1,4 +1,5 @@
 import { buildPhoneLookupVariants, sanitizePhone } from "../../services/leadImport.js";
+import { toCanonicalPhoneFromJid } from "../../services/canonicalPhone.js";
 import { supabase as liveSupabase, pgDatabasePool } from "../../services/database.js";
 import { maskPhoneForLog } from "../../services/tenant.js";
 import { resolveInstanceIdentifier } from "../../services/evolution.js";
@@ -73,11 +74,11 @@ export function createLeadMessaging({
     const normalizedMessage = normalizeString ? normalizeString(messageText) : String(messageText || "").trim();
     if (!normalizedMessage) return null;
 
-    const isJid = String(phone).includes("@");
-    const canonicalPhone = isJid ? phone : (sanitizePhone(phone) || phone);
-    const phoneVariants = isJid
+    const isGroupOrLid = String(phone).includes("@g.us") || String(phone).includes("@lid");
+    const canonicalPhone = isGroupOrLid ? phone : toCanonicalPhoneFromJid(phone);
+    const phoneVariants = isGroupOrLid
       ? [phone]
-      : Array.from(new Set([phone, canonicalPhone, ...buildPhoneLookupVariants(phone)].filter(Boolean)));
+      : Array.from(new Set([phone, canonicalPhone, ...buildPhoneLookupVariants(phone), ...buildPhoneLookupVariants(canonicalPhone)].filter(Boolean)));
 
     // REGRA DE CANONIZAÇÃO: lead_id = SEMPRE o lead do CRM do tenant (leads.id da tabela
     // leadsTableName), nunca lead_import_items.id. campaign_id carrega a atribuição de
