@@ -9,6 +9,7 @@ import {
 } from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
+import { resolveCandidateEvolutionInstances } from "./contractEvolutionResolver.js";
 import {
   assembleContractFromBlocks,
   buildCronograma,
@@ -647,6 +648,8 @@ export async function downloadSignedContract(req, res) {
   }
 }
 
+export { resolveCandidateEvolutionInstances };
+
 export async function notificarDiretoriaWhatsapp(req, res) {
   try {
     const tenantId = await resolveTenantUuid(req, res);
@@ -678,45 +681,7 @@ export async function notificarDiretoriaWhatsapp(req, res) {
       process.env.GD_EVOLUTION_INSTANCE ||
       null;
 
-    let technicalInstance = null;
-
-    // 1. Tenta buscar o slug técnico diretamente da tabela de chips do banco
-    try {
-      const instRes = await db.query(
-        `SELECT name, dispatch_webhook_url 
-         FROM public.lead_client_evolution_instances 
-         WHERE active = true 
-         ORDER BY 
-           (CASE WHEN name = $1 THEN 0 WHEN client_id = 'geracao-digital' THEN 1 ELSE 2 END),
-           is_default DESC LIMIT 1`,
-        [requestedInstance || ""]
-      );
-      if (instRes.rows[0]?.dispatch_webhook_url) {
-        technicalInstance = extractEvolutionInstanceSlug(instRes.rows[0].dispatch_webhook_url);
-      }
-      if (!technicalInstance && instRes.rows[0]?.name && !instRes.rows[0].name.includes(" ")) {
-        technicalInstance = instRes.rows[0].name;
-      }
-    } catch (_) {}
-
-    // 2. Se ainda não resolveu, tenta via helper canônico de instâncias
-    if (!technicalInstance && requestedInstance) {
-      try {
-        const { canonicalName } = await resolveInstanceIdentifier({
-          clientId: "geracao-digital",
-          identifier: requestedInstance,
-          pool: db,
-        });
-        if (canonicalName && !canonicalName.includes(" ")) {
-          technicalInstance = canonicalName;
-        }
-      } catch (_) {}
-    }
-
-    // 3. Se tiver espaços, caracteres inválidos ou for "vexo-adm", usa obrigatoriamente o chip oficial da GD
-    if (!technicalInstance || technicalInstance.includes(" ") || technicalInstance.includes("vexo-adm")) {
-      technicalInstance = "geracao-digital-comercial-gabriel";
-    }
+    const candidateInstances = await resolveCandidateEvolutionInstances(db, requestedInstance);
 
     const diretoriaWhatsAppNumeros = [
       process.env.GD_CAIO_WHATSAPP || "5534997719779",
@@ -734,57 +699,63 @@ export async function notificarDiretoriaWhatsapp(req, res) {
       `https://crm.vexoia.com/api/gd/contracts/${id}/pdf`;
 
     const resultados = [];
+    let successfulInstance = null;
+
     for (const numero of diretoriaWhatsAppNumeros) {
       let enviado = false;
       let ultimoErro = null;
+      let usedInstance = candidateInstances[0] || "evolution";
 
-      // Tentativa 1: pelo chip técnico resolvido
-      try {
-        await sendTextMessageViaEvolution({
-          instanceName: technicalInstance,
-          number: numero,
-          text: mensagemDiretoria,
-        });
-        resultados.push({ numero, status: "sent", instance: technicalInstance });
-        enviado = true;
-      } catch (err) {
-        ultimoErro = err.message;
-        console.warn(`[notificarDiretoria] Falha no envio para ${numero} via "${technicalInstance}":`, err.message);
-      }
+      const attempted = new Set();
+      for (const inst of candidateInstances) {
+        if (!inst || attempted.has(inst)) continue;
+        attempted.add(inst);
 
-      // Tentativa 2 (Fallback Garantido): se deu 404 ou não existe, dispara pelo chip oficial da GD
-      if (!enviado && technicalInstance !== "geracao-digital-comercial-gabriel") {
         try {
-          console.warn(`[notificarDiretoria] Acionando fallback garantido "geracao-digital-comercial-gabriel" para ${numero}...`);
           await sendTextMessageViaEvolution({
-            instanceName: "geracao-digital-comercial-gabriel",
+            instanceName: inst,
             number: numero,
             text: mensagemDiretoria,
           });
-          resultados.push({ numero, status: "sent", instance: "geracao-digital-comercial-gabriel", fallback: true });
+          usedInstance = inst;
+          if (!successfulInstance) successfulInstance = inst;
+          resultados.push({
+            numero,
+            status: "sent",
+            instance: inst,
+            fallback: inst !== candidateInstances[0],
+          });
           enviado = true;
-        } catch (errFallback) {
-          ultimoErro = errFallback.message;
-          console.warn(`[notificarDiretoria] Fallback também falhou para ${numero}:`, errFallback.message);
+          break;
+        } catch (err) {
+          ultimoErro = err.message;
+          console.warn(`[notificarDiretoria] Falha no envio para ${numero} via "${inst}":`, err.message);
         }
       }
 
       if (!enviado) {
-        resultados.push({ numero, status: "error", error: ultimoErro, instance: technicalInstance });
+        resultados.push({ numero, status: "error", error: ultimoErro, instance: usedInstance });
       }
     }
 
     const erros = resultados.filter((r) => r.status === "error");
     if (erros.length === diretoriaWhatsAppNumeros.length) {
+      const failingInstance = resultados[0]?.instance || candidateInstances[0] || "whatsapp";
       return res.status(400).json({
         success: false,
-        error: `Falha no envio via chip "${technicalInstance}": ${erros[0]?.error || "Instância desconectada ou erro na Evolution"}`,
-        instance: technicalInstance,
+        error: `Falha no envio via chip "${failingInstance}": ${erros[0]?.error || "Instância desconectada ou erro na Evolution"}`,
+        instance: failingInstance,
         resultados,
       });
     }
 
-    res.json({ success: true, instance: technicalInstance, resultados });
+    const successInstance = successfulInstance || candidateInstances[0];
+    res.json({
+      success: true,
+      message: "Notificações enviadas com sucesso para a Diretoria.",
+      instance: successInstance,
+      resultados,
+    });
   } catch (error) {
     console.error("[notificarDiretoriaWhatsapp] Error:", error);
     sendError(res, 500, "INTERNAL_ERROR", error.message || "Erro ao notificar diretoria.");

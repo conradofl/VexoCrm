@@ -3,6 +3,10 @@ import { notificarDiretoriaWhatsapp } from "../domains/geracaoDigitalContracts/c
 import * as evolutionModule from "../services/evolution.js";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 
+vi.mock("../access/middlewares.js", () => ({
+  requireFirebaseAuth: (req, res, next) => (next ? next() : undefined),
+}));
+
 const TENANT_ID = "11111111-2222-3333-4444-555555555555";
 
 describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
@@ -152,7 +156,7 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     expect(sentCalls[0].text).toContain("Solaris Tech");
   });
 
-  it("usa fallback geracao-digital-comercial-gabriel quando não há instância configurada", async () => {
+  it("usa fallback para instâncias ativas do tenant quando não há instância configurada", async () => {
     const contract = {
       id: "ct-003",
       tenant_id: TENANT_ID,
@@ -170,7 +174,17 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
           return { rows: [] };
         }
         if (sql.includes("FROM public.lead_client_evolution_instances")) {
-          return { rows: [] };
+          return {
+            rows: [
+              {
+                name: "Comercial - Hostery",
+                dispatch_webhook_url: "https://evolution.example.com/message/sendText/geracao-digital-comercial-hostery",
+                client_id: "geracao-digital",
+                connection_state: "open",
+                is_default: true,
+              },
+            ],
+          };
         }
         return { rows: [] };
       }),
@@ -182,8 +196,8 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
 
     expect(getStatus()).toBe(200);
     const json = getJson();
-    expect(json.instance).toBe("geracao-digital-comercial-gabriel");
-    expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-gabriel");
+    expect(json.instance).toBe("geracao-digital-comercial-hostery");
+    expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-hostery");
   });
 
   it("registra erro no array resultados quando falha o envio para um dos números, sem interromper os demais", async () => {
@@ -196,6 +210,9 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     mockDb = {
       query: vi.fn().mockImplementation(async (sql) => {
         if (sql.includes("FROM public.gd_contracts")) return { rows: [contract] };
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return { rows: [{ name: "instancia-ativa" }] };
+        }
         return { rows: [] };
       }),
     };
@@ -232,6 +249,9 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     mockDb = {
       query: vi.fn().mockImplementation(async (sql) => {
         if (sql.includes("FROM public.gd_contracts")) return { rows: [contract] };
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          return { rows: [{ name: "instancia-ativa" }] };
+        }
         return { rows: [] };
       }),
     };
@@ -320,7 +340,7 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-gabriel");
   });
 
-  it("aplica fallback automático para geracao-digital-comercial-gabriel se a instância falhar com erro/404", async () => {
+  it("aplica fallback automático para a próxima instância conectada se a primeira falhar com erro/404", async () => {
     const contract = {
       id: "ct-007",
       tenant_id: TENANT_ID,
@@ -337,7 +357,7 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
                 config: {
                   gd: {
                     juridico: {
-                      evolution_instance: "chip-secundario",
+                      evolution_instance: "chip-desconectado",
                     },
                   },
                 },
@@ -346,11 +366,24 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
           };
         }
         if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          if (sql.includes("name = $1")) {
+            return {
+              rows: [
+                {
+                  name: "chip-desconectado",
+                  dispatch_webhook_url: "https://evolution.example.com/message/sendText/chip-desconectado",
+                },
+              ],
+            };
+          }
           return {
             rows: [
               {
-                name: "chip-secundario",
-                dispatch_webhook_url: "https://evolution.example.com/message/sendText/chip-secundario",
+                name: "Comercial - Hostery",
+                dispatch_webhook_url: "https://evolution.example.com/message/sendText/geracao-digital-comercial-hostery",
+                client_id: "geracao-digital",
+                connection_state: "open",
+                is_default: true,
               },
             ],
           };
@@ -360,9 +393,9 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     };
     _setPgDatabasePoolForTesting(mockDb);
 
-    // Mock onde "chip-secundario" falha (ex: HTTP 404), mas o fallback funciona
+    // Mock onde "chip-desconectado" falha (HTTP 404), mas o fallback Hostery funciona
     vi.spyOn(evolutionModule, "sendTextMessageViaEvolution").mockImplementation(async ({ instanceName }) => {
-      if (instanceName === "chip-secundario") {
+      if (instanceName === "chip-desconectado") {
         throw new Error("Evolution 404: Instance not found");
       }
       return { success: true };
@@ -377,10 +410,10 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
     expect(json.resultados).toHaveLength(2);
     expect(json.resultados[0].status).toBe("sent");
     expect(json.resultados[0].fallback).toBe(true);
-    expect(json.resultados[0].instance).toBe("geracao-digital-comercial-gabriel");
+    expect(json.resultados[0].instance).toBe("geracao-digital-comercial-hostery");
   });
 
-  it("substitui instâncias com espaços ou vexo-adm obrigatoriamente por geracao-digital-comercial-gabriel", async () => {
+  it("prioriza instância configurada vexo-adm e mantém fallback ativo caso falhe", async () => {
     const contract = {
       id: "ct-008",
       tenant_id: TENANT_ID,
@@ -405,6 +438,29 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
             ],
           };
         }
+        if (sql.includes("FROM public.lead_client_evolution_instances")) {
+          if (sql.includes("name = $1")) {
+            return {
+              rows: [
+                {
+                  name: "Vexo atende",
+                  dispatch_webhook_url: "https://evolution.example.com/message/sendText/vexo-adm",
+                  client_id: "vexo-adm",
+                },
+              ],
+            };
+          }
+          return {
+            rows: [
+              {
+                name: "Comercial - Hostery",
+                dispatch_webhook_url: "https://evolution.example.com/message/sendText/geracao-digital-comercial-hostery",
+                client_id: "geracao-digital",
+                connection_state: "open",
+              },
+            ],
+          };
+        }
         return { rows: [] };
       }),
     };
@@ -415,8 +471,9 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
 
     expect(getStatus()).toBe(200);
     const json = getJson();
-    expect(json.instance).toBe("geracao-digital-comercial-gabriel");
-    expect(sentCalls[0].instanceName).toBe("geracao-digital-comercial-gabriel");
+    expect(json.success).toBe(true);
+    expect(json.instance).toBe("vexo-adm");
+    expect(sentCalls[0].instanceName).toBe("vexo-adm");
   });
 
   it("listEvolutionInstances retorna technical_name extraído da dispatch_webhook_url", async () => {

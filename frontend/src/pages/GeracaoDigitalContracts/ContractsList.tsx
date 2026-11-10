@@ -265,12 +265,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     const empresa = contract.dados?.razao_social || "este contrato";
     if (!window.confirm(`Enviar o contrato de "${empresa}" para o jurídico revisar?`)) return;
     enviarJuridico.mutate(contract.id, {
-      onSuccess: (r: any) => {
-        const wa =
-          r?.whatsapp === "sent" ? " WhatsApp avisado." :
-          r?.whatsapp === "not_configured" ? " (WhatsApp não configurado)" :
-          r?.whatsapp === "error" ? " (falha no aviso por WhatsApp)" : "";
-        toast({ title: "Enviado ao jurídico", description: `PDF publicado no Slack.${wa}` });
+      onSuccess: () => {
+        toast({
+          title: "Enviado com sucesso!",
+          description: "Contrato enviado para o WhatsApp da diretoria (Caio e Conrado).",
+        });
       },
       onError: (err: any) => toast({ title: "Erro ao enviar", description: err.message, variant: "destructive" }),
     });

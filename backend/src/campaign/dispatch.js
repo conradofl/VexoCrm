@@ -170,7 +170,9 @@ export function resolveCampaignImportSelectionStrict(campaign) {
   if (selection === "__crm__" || selection === "__all__") return selection;
   if (Array.isArray(selection) && selection.length > 0) return selection;
   if (typeof selection === "string" && selection.trim() !== "") return selection;
-  if (hasBancoAudienceCriteria(campaign)) return null; // ausencia: quem chamou precisa recusar
+  if (hasBancoAudienceCriteria(campaign)) {
+    return campaign?.import_id || "__crm__";
+  }
   return "__all__";
 }
 

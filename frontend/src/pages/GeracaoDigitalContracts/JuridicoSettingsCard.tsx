@@ -214,16 +214,31 @@ export function JuridicoSettingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Instância que envia</Label>
                 <select
-                  value={form.evolution_instance}
+                  value={
+                    (instances || []).find(
+                      (i: any) =>
+                        (i.technical_name && i.technical_name === form.evolution_instance) ||
+                        (i.name && i.name === form.evolution_instance)
+                    )?.technical_name ||
+                    (instances || []).find(
+                      (i: any) =>
+                        (i.technical_name && i.technical_name === form.evolution_instance) ||
+                        (i.name && i.name === form.evolution_instance)
+                    )?.name ||
+                    form.evolution_instance
+                  }
                   onChange={(e) => setForm((f) => ({ ...f, evolution_instance: e.target.value }))}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 h-9 text-sm text-slate-800 dark:text-slate-100"
                 >
                   <option value="">— padrão do sistema —</option>
-                  {(instances || []).map((i: any) => (
-                    <option key={i.technical_name || i.name} value={i.technical_name || i.name}>
-                      {i.name} {i.client_id ? `(${i.client_id})` : ""}
-                    </option>
-                  ))}
+                  {(instances || []).map((i: any) => {
+                    const val = i.technical_name || i.name;
+                    return (
+                      <option key={val} value={val}>
+                        {i.name} {i.client_id ? `(${i.client_id})` : ""}
+                      </option>
+                    );
+                  })}
                 </select>
                 <span className="text-[10px] text-slate-500">Instância WhatsApp conectada.</span>
               </div>
