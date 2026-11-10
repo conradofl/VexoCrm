@@ -40,9 +40,12 @@ describe("useClientPortal sem backend do portal", () => {
 });
 
 describe("rota /portal/:slug", () => {
-  it("fica atrás de ProtectedRoute só para interno", () => {
+  // Desde 09/11/2026 /portal/:slug é o portal do cliente GD e abre sem login. O que protege o dado não é mais a
+  // rota da tela: o servidor só responde a slug com sufixo secreto (backend: portalSlug.js e gdClientesRoutes.test.js).
+  it("abre o portal do cliente GD, e o protótipo antigo não está em rota pública", () => {
     const app = readFileSync(resolve(process.cwd(), "src/App.tsx"), "utf8");
-    expect(app).toMatch(/path="\/portal\/:slug"\s*element=\{\s*<ProtectedRoute allowedRoles=\{\["internal"\]\}>\s*<ClientPortal \/>/);
+    expect(app).toMatch(/path="\/portal\/:slug"\s*element=\{\s*<GeracaoDigitalPortalCliente \/>/);
+    expect(app).not.toMatch(/path="\/portal\/:slug"\s*element=\{\s*<ClientPortal \/>/);
   });
 
   it("o hook não importa o protótipo de forma estática (senão ele volta para o bundle)", () => {
