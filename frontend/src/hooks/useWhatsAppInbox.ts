@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
+import { orderChatsForTab } from "@/lib/inbox/chatOrder";
 
 export interface WhatsAppChat {
   id: string;
@@ -37,6 +38,28 @@ export interface WhatsAppChat {
   agentMutedReason?: string | null;
   /** Foto do perfil do WhatsApp (URL temporária da Evolution). */
   profilePic?: string | null;
+  /** Estado de trabalho calculado no servidor. Só vem nas abas de estado. */
+  workState?: WorkState | null;
+  /** Instante (ISO) da última mensagem do lead. É dele que sai o tempo de espera. */
+  waitingSince?: string | null;
+  /** O lead nunca escreveu: só há mensagem nossa (disparo sem resposta). */
+  leadNeverSpoke?: boolean;
+}
+
+export type WorkState = "esperam" | "com_lead" | "robo" | "esfriaram";
+
+export interface WorkStateCounts {
+  esperam: number;
+  com_lead: number;
+  robo: number;
+  esfriaram: number;
+}
+
+/** Quem responde sozinho em cada chip, pela mesma regra do portão do webhook. */
+export interface ChipAgentInfo {
+  kind: "agente" | "empresa" | "nenhum";
+  agentName: string | null;
+  reason: string;
 }
 
 export interface WhatsAppCounts {
@@ -47,6 +70,7 @@ export interface WhatsAppCounts {
   archived: number;
   paused?: number;
   myUnopened?: number;
+  work?: WorkStateCounts;
 }
 
 export interface WhatsAppMessage {
@@ -77,6 +101,7 @@ interface WhatsAppChatsPage {
   items: WhatsAppChat[];
   total: number;
   counts?: WhatsAppCounts;
+  chipAgents?: Record<string, ChipAgentInfo>;
   nextOffset: number;
   hasMore: boolean;
 }
@@ -199,10 +224,8 @@ export function useWhatsAppChats(
       deduped.set(item.id, item);
     }
 
-    const list = Array.from(deduped.values());
-    // Reordenar por mensagem mais recente para que novas mensagens subam para o topo
-    return list.sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-  }, [olderItems, recentChatsQuery.data?.items]);
+    return orderChatsForTab(Array.from(deduped.values()), tab);
+  }, [olderItems, recentChatsQuery.data?.items, tab]);
 
   const total = recentChatsQuery.data?.total ?? items.length;
   const counts = recentChatsQuery.data?.counts || { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0 };
@@ -217,6 +240,7 @@ export function useWhatsAppChats(
     items,
     total,
     counts,
+    chipAgents: recentChatsQuery.data?.chipAgents ?? {},
     hasMore,
     isLoading,
     error,
