@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
+import { AgentHasDependentsError } from "@/lib/agentDependents";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -202,6 +203,60 @@ export function useArchiveFupCompany() {
       apiCall<{ success: boolean }>(`/api/followup/companies/${id}`, getIdToken, {
         method: "DELETE",
       }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fup-companies"] }),
+  });
+}
+
+// Arquivados: a lista principal os esconde; esta alimenta a seção "Arquivados"
+// da tela do Agente IA. A chave começa com "fup-companies" de propósito, para
+// arquivar ou excluir atualizar as duas listas de uma vez.
+export interface FupArchivedCompany {
+  id: string;
+  name: string;
+  tenant_id: string | null;
+  archived_at: string;
+}
+
+export function useArchivedFupCompanies(tenantId?: string) {
+  const { isAuthenticated, getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["fup-companies", "archived", tenantId],
+    enabled: isAuthenticated && !!tenantId,
+    queryFn: () =>
+      apiCall<{ companies: FupArchivedCompany[] }>(
+        `/api/followup/companies/archived?tenantId=${encodeURIComponent(tenantId || "")}`,
+        getIdToken
+      ).then((r) => r.companies),
+    staleTime: 30_000,
+  });
+}
+
+// Exclusão definitiva. Não usa apiCall porque precisa do corpo da recusa: no
+// 409 AGENT_HAS_DEPENDENTS o servidor diz o que o agente carrega, e a tela
+// mostra isso em vez de um erro genérico.
+export function useDeleteFupCompanyPermanently() {
+  const { getIdToken } = useAuth();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuário não autenticado.");
+      const res = await fetchApi(`/api/followup/companies/${id}/permanent`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) return readApiJson<{ success: boolean }>(res, "excluir agente");
+      if (res.status === 409) {
+        const body = await res.clone().json().catch(() => null);
+        if (body?.error?.code === "AGENT_HAS_DEPENDENTS") {
+          throw new AgentHasDependentsError(
+            body.error.message || "Agente ainda carrega dados.",
+            Array.isArray(body.error.dependents) ? body.error.dependents : []
+          );
+        }
+      }
+      throw new Error(await readApiErrorMessage(res, "Erro ao excluir agente"));
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fup-companies"] }),
   });
 }
