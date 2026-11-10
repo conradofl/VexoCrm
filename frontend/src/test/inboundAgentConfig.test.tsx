@@ -90,6 +90,8 @@ function mockCompanies(companies: any[]) {
     useCreateFupCompany: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useUpdateFupCompany: () => ({ mutateAsync: updateMutateAsync, isPending: false }),
     useArchiveFupCompany: () => ({ mutate: archiveMutate, isPending: false }),
+    useArchivedFupCompanies: () => ({ data: [], isLoading: false }),
+    useDeleteFupCompanyPermanently: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   }));
 }
 
