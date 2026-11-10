@@ -643,12 +643,19 @@ export default function WhatsAppInbox({
     return [...normalMessages, ...notesForChat].sort((a, b) => {
       const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
       if (timeDiff !== 0) return timeDiff;
-      // Desempate por createdAt com milissegundos
+      // Desempate 1: messageTimestamp com milissegundos (se disponível)
+      const aMsgTime = "messageTimestamp" in a && a.messageTimestamp ? new Date(a.messageTimestamp).getTime() : 0;
+      const bMsgTime = "messageTimestamp" in b && b.messageTimestamp ? new Date(b.messageTimestamp).getTime() : 0;
+      if (aMsgTime !== bMsgTime) return aMsgTime - bMsgTime;
+      // Desempate 2: createdAt com milissegundos
       const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       if (aCreated !== bCreated) return aCreated - bCreated;
-      // Desempate final por ID determinístico
-      return String(a.id).localeCompare(String(b.id));
+      // Desempate final por ID numérico (ou ordenação natural para IDs string)
+      const numA = Number(a.id);
+      const numB = Number(b.id);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
     });
   }, [rawMessages, internalNotes, selectedChatId]);
 

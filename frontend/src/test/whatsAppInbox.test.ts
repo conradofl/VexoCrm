@@ -355,17 +355,73 @@ describe("parseDossierSummary com resumos reais de produção", () => {
     const sorted = [...rawMessages].sort((a, b) => {
       const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
       if (timeDiff !== 0) return timeDiff;
+      const aMsgTime = "messageTimestamp" in a && a.messageTimestamp ? new Date(a.messageTimestamp).getTime() : 0;
+      const bMsgTime = "messageTimestamp" in b && b.messageTimestamp ? new Date(b.messageTimestamp).getTime() : 0;
+      if (aMsgTime !== bMsgTime) return aMsgTime - bMsgTime;
       const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       if (aCreated !== bCreated) return aCreated - bCreated;
-      return String(a.id).localeCompare(String(b.id));
+      const numA = Number(a.id);
+      const numB = Number(b.id);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
     });
 
     expect(sorted[0].id).toBe("msg-bot-outbound");
     expect(sorted[1].id).toBe("msg-lead-reply");
   });
 
-  it("desempata por ID lexicográfico quando timestamp e createdAt forem rigorosamente idênticos", () => {
+  it("desempata por ID numérico preservando a ordem mesmo na transição de dígitos (ex: 9999 vs 10000)", () => {
+    const messages = [
+      { id: "10000", body: "Segunda", timestamp: 1729098900, createdAt: "2026-10-16T14:15:00.000Z" },
+      { id: "9999", body: "Primeira", timestamp: 1729098900, createdAt: "2026-10-16T14:15:00.000Z" },
+    ];
+
+    const sorted = [...messages].sort((a, b) => {
+      const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
+      if (timeDiff !== 0) return timeDiff;
+      const aMsgTime = "messageTimestamp" in a && a.messageTimestamp ? new Date(a.messageTimestamp).getTime() : 0;
+      const bMsgTime = "messageTimestamp" in b && b.messageTimestamp ? new Date(b.messageTimestamp).getTime() : 0;
+      if (aMsgTime !== bMsgTime) return aMsgTime - bMsgTime;
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      const numA = Number(a.id);
+      const numB = Number(b.id);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+    });
+
+    expect(sorted[0].id).toBe("9999");
+    expect(sorted[1].id).toBe("10000");
+  });
+
+  it("desempata por messageTimestamp com milissegundos quando timestamp em segundos for idêntico", () => {
+    const messages = [
+      { id: "1", body: "Primeira", timestamp: 1729098900, messageTimestamp: "2026-10-16T14:15:00.100Z" },
+      { id: "2", body: "Segunda", timestamp: 1729098900, messageTimestamp: "2026-10-16T14:15:00.500Z" },
+    ];
+
+    const sorted = [...messages].sort((a, b) => {
+      const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
+      if (timeDiff !== 0) return timeDiff;
+      const aMsgTime = "messageTimestamp" in a && a.messageTimestamp ? new Date(a.messageTimestamp).getTime() : 0;
+      const bMsgTime = "messageTimestamp" in b && b.messageTimestamp ? new Date(b.messageTimestamp).getTime() : 0;
+      if (aMsgTime !== bMsgTime) return aMsgTime - bMsgTime;
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      const numA = Number(a.id);
+      const numB = Number(b.id);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+    });
+
+    expect(sorted[0].id).toBe("1");
+    expect(sorted[1].id).toBe("2");
+  });
+
+  it("desempata por ordenação natural quando IDs forem strings alfanuméricas", () => {
     const messages = [
       { id: "msg-z", body: "Z", timestamp: 1729098900, createdAt: "2026-10-16T14:15:00.000Z" },
       { id: "msg-a", body: "A", timestamp: 1729098900, createdAt: "2026-10-16T14:15:00.000Z" },
@@ -374,10 +430,16 @@ describe("parseDossierSummary com resumos reais de produção", () => {
     const sorted = [...messages].sort((a, b) => {
       const timeDiff = Number(a.timestamp || 0) - Number(b.timestamp || 0);
       if (timeDiff !== 0) return timeDiff;
+      const aMsgTime = "messageTimestamp" in a && a.messageTimestamp ? new Date(a.messageTimestamp).getTime() : 0;
+      const bMsgTime = "messageTimestamp" in b && b.messageTimestamp ? new Date(b.messageTimestamp).getTime() : 0;
+      if (aMsgTime !== bMsgTime) return aMsgTime - bMsgTime;
       const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       if (aCreated !== bCreated) return aCreated - bCreated;
-      return String(a.id).localeCompare(String(b.id));
+      const numA = Number(a.id);
+      const numB = Number(b.id);
+      if (!Number.isNaN(numA) && !Number.isNaN(numB)) return numA - numB;
+      return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
     });
 
     expect(sorted[0].id).toBe("msg-a");
