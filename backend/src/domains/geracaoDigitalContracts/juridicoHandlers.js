@@ -23,7 +23,12 @@ export async function getTenantContratadaConfig(tenantId) {
 }
 
 async function readGdConfig(tenantId) {
-  const { rows } = await db.query("SELECT config FROM public.tenant_modules WHERE tenant_id = $1", [tenantId]);
+  const { rows } = await db.query(
+    `SELECT config FROM public.tenant_modules 
+     WHERE tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000' 
+     ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END) LIMIT 1`,
+    [tenantId]
+  );
   const config = rows[0]?.config || {};
   const rawContratada = config.contratada || config?.gd?.contratada || {};
   const contratada = {
@@ -121,33 +126,32 @@ export async function saveJuridicoSettings(req, res) {
   }
 }
 
-// Instâncias de WhatsApp já conectadas — alimenta o dropdown do painel.
+// Instâncias de WhatsApp da Geração Digital — alimenta o dropdown do painel jurídico.
 export async function listEvolutionInstances(req, res) {
   try {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
 
-    let queryStr = `SELECT name, client_id, dispatch_webhook_url 
+    // Apenas instâncias pertencentes à Geração Digital devem aparecer no box de seleção
+    const queryStr = `SELECT name, client_id, dispatch_webhook_url, connection_state, chip_state 
    FROM public.lead_client_evolution_instances 
-   WHERE active = true 
-   ORDER BY (CASE WHEN client_id = 'geracao-digital' THEN 0 ELSE 1 END), is_default DESC, name ASC`;
-    let params = [];
-    const access = req.authAccess || {};
-    if (access.role !== "internal" && Array.isArray(access.clientIds) && access.clientIds.length > 0) {
-      queryStr = `SELECT name, client_id, dispatch_webhook_url 
-   FROM public.lead_client_evolution_instances 
-   WHERE client_id = ANY($1) AND active = true 
-   ORDER BY (CASE WHEN client_id = 'geracao-digital' THEN 0 ELSE 1 END), is_default DESC, name ASC`;
-      params = [access.clientIds];
-    }
-    const { rows } = await db.query(queryStr, params);
+   WHERE active = true AND client_id = 'geracao-digital' 
+   ORDER BY (CASE WHEN connection_state IN ('open', 'connected', 'online') OR chip_state = 'connected' THEN 0 ELSE 1 END), is_default DESC, name ASC`;
+
+    const { rows } = await db.query(queryStr);
     res.json({
       success: true,
-      data: rows.map((r) => ({
-        name: r.name,
-        technical_name: extractEvolutionInstanceSlug(r.dispatch_webhook_url) || r.name,
-        client_id: r.client_id,
-      })),
+      data: (rows || []).map((r) => {
+        const isConnected =
+          ["open", "connected", "online"].includes(String(r.connection_state || "").toLowerCase()) ||
+          r.chip_state === "connected";
+        return {
+          name: r.name,
+          technical_name: extractEvolutionInstanceSlug(r.dispatch_webhook_url) || r.name,
+          client_id: r.client_id,
+          connected: isConnected,
+        };
+      }),
     });
   } catch (error) {
     console.error("[listEvolutionInstances] Error:", error);
@@ -339,26 +343,33 @@ export async function sendContractToJuridico(req, res) {
       let waJuridicoEnviado = false;
       const attemptedJuridico = new Set();
       for (const inst of candidateInstances) {
-        if (!inst || attemptedJuridico.has(inst)) continue;
-        attemptedJuridico.add(inst);
+        const slug = typeof inst === "string" ? inst : (inst.slug || String(inst));
+        const baseUrl = typeof inst === "object" ? inst.baseUrl : null;
+        const webhookToken = typeof inst === "object" ? inst.webhookToken : null;
+
+        if (!slug || attemptedJuridico.has(slug)) continue;
+        attemptedJuridico.add(slug);
         try {
           await sendTextMessageViaEvolution({
-            instanceName: inst,
+            instanceName: slug,
+            baseUrl: baseUrl || undefined,
+            webhookToken: webhookToken || undefined,
             number: juridico.whatsapp_number,
             text: mensagemWhatsApp,
           });
           waJuridicoEnviado = true;
           break;
         } catch (waErr) {
-          console.warn(`[sendContractToJuridico] WhatsApp do jurídico via Evolution ("${inst}") falhou:`, waErr?.message || waErr);
+          console.warn(`[sendContractToJuridico] WhatsApp do jurídico via Evolution ("${slug}") falhou:`, waErr?.message || waErr);
         }
       }
 
       if (!waJuridicoEnviado) {
         try {
+          const fallbackSlug = candidateInstances[0]?.slug || candidateInstances[0] || juridico.evolution_instance;
           await sendWhatsapp({
             number: juridico.whatsapp_number,
-            instance: candidateInstances[0] || juridico.evolution_instance,
+            instance: typeof fallbackSlug === "string" ? fallbackSlug : String(fallbackSlug),
             text: mensagemWhatsApp,
           });
         } catch (waFallbackErr) {
@@ -378,28 +389,35 @@ export async function sendContractToJuridico(req, res) {
       const attempted = new Set();
 
       for (const inst of candidateInstances) {
-        if (!inst || attempted.has(inst)) continue;
-        attempted.add(inst);
+        const slug = typeof inst === "string" ? inst : (inst.slug || String(inst));
+        const baseUrl = typeof inst === "object" ? inst.baseUrl : null;
+        const webhookToken = typeof inst === "object" ? inst.webhookToken : null;
+
+        if (!slug || attempted.has(slug)) continue;
+        attempted.add(slug);
 
         try {
           await sendTextMessageViaEvolution({
-            instanceName: inst,
+            instanceName: slug,
+            baseUrl: baseUrl || undefined,
+            webhookToken: webhookToken || undefined,
             number: numero,
             text: mensagemWhatsApp,
           });
           enviado = true;
           break;
         } catch (err) {
-          console.warn(`[sendContractToJuridico] Falha no envio para ${numero} via "${inst}":`, err?.message || err);
+          console.warn(`[sendContractToJuridico] Falha no envio para ${numero} via "${slug}":`, err?.message || err);
         }
       }
 
       if (!enviado) {
         try {
+          const fallbackSlug = candidateInstances[0]?.slug || candidateInstances[0] || juridico.evolution_instance;
           await sendWhatsapp({
             number: numero,
             text: mensagemWhatsApp,
-            instance: candidateInstances[0] || juridico.evolution_instance,
+            instance: typeof fallbackSlug === "string" ? fallbackSlug : String(fallbackSlug),
           });
         } catch (errSw) {
           console.warn(`[sendContractToJuridico] Fallback sendWhatsapp falhou para ${numero}:`, errSw?.message || errSw);

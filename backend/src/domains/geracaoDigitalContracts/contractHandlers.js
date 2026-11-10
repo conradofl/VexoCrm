@@ -671,7 +671,9 @@ export async function notificarDiretoriaWhatsapp(req, res) {
     const responsavel = dados.responsavel_nome || dados.representante || "-";
 
     const { rows: modRows } = await db.query(
-      `SELECT config FROM public.tenant_modules WHERE tenant_id = $1`,
+      `SELECT config FROM public.tenant_modules 
+       WHERE tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000' 
+       ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END) LIMIT 1`,
       [tenantId]
     );
     const cfg = modRows[0]?.config || {};
@@ -700,36 +702,43 @@ export async function notificarDiretoriaWhatsapp(req, res) {
 
     const resultados = [];
     let successfulInstance = null;
+    const defaultInstanceSlug = candidateInstances[0]?.slug || String(candidateInstances[0] || "evolution");
 
     for (const numero of diretoriaWhatsAppNumeros) {
       let enviado = false;
       let ultimoErro = null;
-      let usedInstance = candidateInstances[0] || "evolution";
+      let usedInstance = defaultInstanceSlug;
 
       const attempted = new Set();
       for (const inst of candidateInstances) {
-        if (!inst || attempted.has(inst)) continue;
-        attempted.add(inst);
+        const slug = typeof inst === "string" ? inst : (inst.slug || String(inst));
+        const baseUrl = typeof inst === "object" ? inst.baseUrl : null;
+        const webhookToken = typeof inst === "object" ? inst.webhookToken : null;
+
+        if (!slug || attempted.has(slug)) continue;
+        attempted.add(slug);
 
         try {
           await sendTextMessageViaEvolution({
-            instanceName: inst,
+            instanceName: slug,
+            baseUrl: baseUrl || undefined,
+            webhookToken: webhookToken || undefined,
             number: numero,
             text: mensagemDiretoria,
           });
-          usedInstance = inst;
-          if (!successfulInstance) successfulInstance = inst;
+          usedInstance = slug;
+          if (!successfulInstance) successfulInstance = slug;
           resultados.push({
             numero,
             status: "sent",
-            instance: inst,
-            fallback: inst !== candidateInstances[0],
+            instance: slug,
+            fallback: slug !== defaultInstanceSlug,
           });
           enviado = true;
           break;
         } catch (err) {
           ultimoErro = err.message;
-          console.warn(`[notificarDiretoria] Falha no envio para ${numero} via "${inst}":`, err.message);
+          console.warn(`[notificarDiretoria] Falha no envio para ${numero} via "${slug}":`, err.message);
         }
       }
 
@@ -740,7 +749,7 @@ export async function notificarDiretoriaWhatsapp(req, res) {
 
     const erros = resultados.filter((r) => r.status === "error");
     if (erros.length === diretoriaWhatsAppNumeros.length) {
-      const failingInstance = resultados[0]?.instance || candidateInstances[0] || "whatsapp";
+      const failingInstance = resultados[0]?.instance || defaultInstanceSlug || "whatsapp";
       return res.status(400).json({
         success: false,
         error: `Falha no envio via chip "${failingInstance}": ${erros[0]?.error || "Instância desconectada ou erro na Evolution"}`,
@@ -749,7 +758,7 @@ export async function notificarDiretoriaWhatsapp(req, res) {
       });
     }
 
-    const successInstance = successfulInstance || candidateInstances[0];
+    const successInstance = successfulInstance || defaultInstanceSlug;
     res.json({
       success: true,
       message: "Notificações enviadas com sucesso para a Diretoria.",

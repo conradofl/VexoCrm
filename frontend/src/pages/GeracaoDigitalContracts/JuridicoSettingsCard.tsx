@@ -227,15 +227,33 @@ export function JuridicoSettingsCard() {
                     )?.name ||
                     form.evolution_instance
                   }
-                  onChange={(e) => setForm((f) => ({ ...f, evolution_instance: e.target.value }))}
+                  onChange={(e) => {
+                    const newVal = e.target.value;
+                    const updatedForm = { ...form, evolution_instance: newVal };
+                    setForm(updatedForm);
+                    save.mutate(updatedForm, {
+                      onSuccess: () =>
+                        toast({
+                          title: "Instância de envio atualizada",
+                          description: newVal ? "Chip configurado para envio com sucesso." : "Definido para o padrão do sistema.",
+                        }),
+                      onError: (err: any) =>
+                        toast({
+                          title: "Erro ao salvar instância",
+                          description: err.message,
+                          variant: "destructive",
+                        }),
+                    });
+                  }}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 h-9 text-sm text-slate-800 dark:text-slate-100"
                 >
-                  <option value="">— padrão do sistema —</option>
+                  <option value="">— padrão do sistema (conectado) —</option>
                   {(instances || []).map((i: any) => {
                     const val = i.technical_name || i.name;
+                    const statusTag = i.connected ? "● (conectado)" : "○ (desconectado)";
                     return (
                       <option key={val} value={val}>
-                        {i.name} {i.client_id ? `(${i.client_id})` : ""}
+                        {i.name} {statusTag}
                       </option>
                     );
                   })}

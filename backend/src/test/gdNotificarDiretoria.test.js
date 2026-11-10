@@ -507,11 +507,13 @@ describe("GD Contratos — Notificação no WhatsApp da Diretoria", () => {
         name: "Comercial - Gabriel",
         technical_name: "geracao-digital-comercial-gabriel",
         client_id: "geracao-digital",
+        connected: false,
       },
       {
         name: "instancia-sem-url",
         technical_name: "instancia-sem-url",
         client_id: "geracao-digital",
+        connected: false,
       },
     ]);
   });
