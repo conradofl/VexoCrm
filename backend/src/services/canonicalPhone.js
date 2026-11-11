@@ -17,6 +17,31 @@ export const SQL_CANONICAL_PHONE = (col) => `
 `;
 
 /**
+ * Grafias cruas de um telefone JÁ CANÔNICO (${col}), como text[]: as únicas formas só de dígitos que
+ * SQL_CANONICAL_PHONE leva de volta a esse mesmo número.
+ *   celular  55 DD 9 XXXXXXXX   -> o próprio | sem 55 | sem o 9 | sem 55 e sem o 9
+ *                                  (as duas "sem o 9" só quando o dígito depois do 9 é 6-9: é a
+ *                                  única situação em que a expressão canônica devolve o 9)
+ *   fixo     55 DD [2-5]XXXXXXX -> o próprio | sem 55
+ *   qualquer outra coisa         -> só o próprio
+ *
+ * Serve para achar uma linha por IGUALDADE num índice comum sobre a coluna crua
+ * (`telefone = ANY(...)`), em vez de aplicar a expressão canônica em cada linha da tabela.
+ *
+ * LIMITE, de propósito: só acha telefone gravado só com dígitos numa dessas grafias. Máscara
+ * ("(34) 9..."), zero na frente ("034...") e número sem DDD (8 ou 9 dígitos) ficam de fora.
+ * test/canonicalPhoneSpellings.test.js amarra esta lista à expressão canônica: mudou uma, o teste
+ * cobra a outra.
+ */
+export const SQL_CANONICAL_PHONE_SPELLINGS = (col) => `array_remove(ARRAY[
+    ${col},
+    CASE WHEN ${col} ~ '^55[1-9]{2}9[0-9]{8}$' THEN substr(${col}, 3) END,
+    CASE WHEN ${col} ~ '^55[1-9]{2}9[6-9][0-9]{7}$' THEN '55' || substr(${col}, 3, 2) || substr(${col}, 6) END,
+    CASE WHEN ${col} ~ '^55[1-9]{2}9[6-9][0-9]{7}$' THEN substr(${col}, 3, 2) || substr(${col}, 6) END,
+    CASE WHEN ${col} ~ '^55[1-9]{2}[2-5][0-9]{7}$' THEN substr(${col}, 3) END
+  ], NULL)`;
+
+/**
  * Canônico + JID: tira o sufixo de um JID de telefone do WhatsApp ("5534...@s.whatsapp.net", "...@c.us")
  * ANTES de canonicalizar, para o JID casar com o telefone puro equivalente. "@lid" NÃO é telefone (é um
  * identificador interno do WhatsApp, sem número por trás): continua com o "@" e nunca casa com telefone.

@@ -1730,6 +1730,20 @@ export default function WhatsAppInbox({
                 <div className="p-6 text-center text-xs text-muted-foreground">
                   Carregando conversas...
                 </div>
+              ) : chatsQuery.error && filteredChats.length === 0 ? (
+                <div role="alert" data-testid="chats-error" className="p-6 text-center text-xs text-destructive space-y-2">
+                  <p className="font-medium">Não foi possível carregar as conversas.</p>
+                  <p className="text-muted-foreground">
+                    {chatsQuery.error instanceof Error ? chatsQuery.error.message : "Erro desconhecido."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => chatsQuery.refetch()}
+                    className="underline underline-offset-2 text-foreground hover:text-primary"
+                  >
+                    Tentar de novo
+                  </button>
+                </div>
               ) : filteredChats.length === 0 ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">
                   Nenhuma conversa encontrada.
