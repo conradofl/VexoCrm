@@ -962,7 +962,7 @@ export function registerGdClientesRoutes(app, {
           try {
             driveSetupResult = await driveFolderSetup({
               clientName: cliente.nome,
-              makePublic: false,
+              makePublic: true,
               allowMockFallback: true,
             });
             if (driveSetupResult?.driveLink) {
@@ -991,6 +991,20 @@ export function registerGdClientesRoutes(app, {
             urlInterno = invite?.inviteUrl || null;
           } catch (e) {
             console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo interno (${jidInterno}):`, e.message);
+          }
+
+          // Mensagem inicial no grupo interno para subir no WhatsApp
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: jidInterno,
+              text: `📁 *PASTA OPERACIONAL GD: ${cliente.nome.toUpperCase()}*\n\n` +
+                    `Grupo interno da equipe Geração Digital para alinhamento estratégico e operacional.\n\n` +
+                    `🔗 *Pasta no Google Drive:* ${driveUrlFinal || "Acessar via CRM"}\n` +
+                    `👤 *Aprovador:* ${cliente.aprovador_nome || "Não informado"} (${clienteTelefone || "Sem telefone"})`,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao enviar mensagem no grupo interno (${jidInterno}):`, e.message);
           }
 
           // 2.1 Associação automática do grupo interno à Comunidade WhatsApp "GD — Operação Interna"
