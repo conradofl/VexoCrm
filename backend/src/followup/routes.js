@@ -35,6 +35,7 @@ import { resolveChipDailyLimit } from "../services/chipQuota.js";
 import { fetchDynamicPrompt, fetchTemplate } from "../chatbot-ai-engine.js";
 import { auditAgentInstructionSources, validateAutonomousPrompt, checkAgentEnableGuard } from "../services/agentInstructionAudit.js";
 import { findChipExclusivityConflict } from "../services/chipExclusivity.js";
+import { deleteAgentPermanently, listArchivedAgents } from "../services/agentPermanentDelete.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -615,6 +616,67 @@ function normalizeInstanceList(list, fallback) {
       return res.json({ success: true });
     } catch (err) {
       return sendErr(res, 500, "COMPANY_ARCHIVE_FAILED", err.message);
+    }
+  });
+
+  // GET /api/followup/companies/archived — agentes arquivados (só id, nome,
+  // tenant e data). A lista principal continua escondendo arquivado; esta
+  // existe para a tela mostrar o que está acumulado e oferecer excluir.
+  // Escopo: admin vê o tenant pedido (ou todos); os demais só os próprios
+  // tenants, e o tenantId da query apenas estreita dentro deles.
+  router.get("/companies/archived", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    try {
+      const requestedTenantId = str(req.query.tenantId);
+      let tenantIds;
+      if (isAdminAccess(req)) {
+        tenantIds = requestedTenantId ? [requestedTenantId] : null;
+      } else {
+        const own = authorizedTenantIds(req);
+        tenantIds = requestedTenantId ? own.filter((t) => t === requestedTenantId) : own;
+      }
+      const companies = await listArchivedAgents({ query, tenantIds });
+      return res.json({ success: true, companies });
+    } catch (err) {
+      return sendErr(res, 500, "COMPANIES_ARCHIVED_LIST_FAILED", err.message);
+    }
+  });
+
+  // DELETE /api/followup/companies/:id/permanent — exclusão DEFINITIVA.
+  //
+  // Rota própria, e não um parâmetro do DELETE acima: aquele continua só
+  // arquivando, byte a byte, e nenhum parâmetro perdido ou sobrando no caminho
+  // transforma arquivar em apagar (nem o contrário). Só apaga agente sem
+  // nenhuma linha dependente; com dependente responde 409 com a contagem por
+  // tabela, para a tela explicar e oferecer arquivar.
+  router.delete("/companies/:id/permanent", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
+    const id = str(req.params.id);
+    if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+    try {
+      const result = await deleteAgentPermanently({
+        pool: getPool(),
+        id,
+        canAccessTenant: (tenantId) => hasTenantAccess(req, tenantId),
+      });
+      if (result.status === "not_found") {
+        return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
+      }
+      if (result.status === "has_dependents") {
+        const resumo = result.dependents.map((d) => `${d.table}: ${d.count}`).join(", ");
+        console.error("[followup/routes][AGENT_HAS_DEPENDENTS]", id, resumo);
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: "AGENT_HAS_DEPENDENTS",
+            message: `Este agente ainda carrega dados (${resumo}) e não pode ser excluído definitivamente.`,
+            dependents: result.dependents,
+            archived: Boolean(result.agent.archived_at),
+          },
+        });
+      }
+      console.log("[followup/routes] agente excluído definitivamente:", id, "tenant:", result.agent.tenant_id, "por:", req.user?.uid || "desconhecido");
+      return res.json({ success: true, deleted: { id: result.agent.id, name: result.agent.name } });
+    } catch (err) {
+      return sendErr(res, 500, "COMPANY_DELETE_FAILED", err.message);
     }
   });
 

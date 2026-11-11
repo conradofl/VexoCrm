@@ -82,6 +82,8 @@ vi.mock("@/hooks/useFollowupAdmin", () => ({
   useCreateFupCompany: () => ({ mutateAsync: vi.fn() }),
   useUpdateFupCompany: () => ({ mutateAsync: vi.fn() }),
   useArchiveFupCompany: () => ({ mutate: vi.fn(), isPending: false }),
+  useArchivedFupCompanies: () => ({ data: [], isLoading: false }),
+  useDeleteFupCompanyPermanently: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/hooks/useReports", () => ({
