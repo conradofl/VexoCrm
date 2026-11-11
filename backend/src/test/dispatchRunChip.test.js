@@ -51,7 +51,7 @@ const SCHEMA = `
     lead_import_item_id uuid, evolution_instance_id uuid, phone text NOT NULL, status text, error_message text,
     sent_at timestamptz, created_at timestamptz DEFAULT now()
   );
-  CREATE TABLE lead_client_evolution_instances (id uuid PRIMARY KEY, client_id text, name text, chip_state text DEFAULT 'cold', daily_limit_override int);
+  CREATE TABLE lead_client_evolution_instances (id uuid PRIMARY KEY, client_id text, name text, active boolean NOT NULL DEFAULT true, chip_state text DEFAULT 'cold', daily_limit_override int);
   CREATE TABLE evolution_instance_daily_usage (instance_id uuid, date date, sent_count int);
   CREATE TABLE lead_messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text, phone text, direction text, engagement_signal text, message_timestamp timestamptz, delivered_at timestamptz, created_at timestamptz DEFAULT now());
 `;
