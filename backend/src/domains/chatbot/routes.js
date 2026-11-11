@@ -41,8 +41,13 @@ import { registerFollowupReply } from "../../services/followupReplyHook.js";
 import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
 import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceService.js";
 
-import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH } from "../../services/inboxSqlMatchers.js";
-import { fetchWorkStateCounts, fetchWorkStatePage, isWorkStateTab, resolveRobotChips } from "../../services/inboxWorkState.js";
+const SQL_NUMBER_CHANGE_MATCH = (col) => `(
+  ${col} ~* 'estamos\\s+desativando\\s+esse\\s+n[úu]mero|chama\\s+meu\\s+vendedor|nos\\s+chame\\s+no\\s+(contato|n[úu]mero|link)|novo\\s+n[úu]mero|troca\\s+de\\s+n[úu]mero'
+)`;
+
+const SQL_AUTOMATION_MATCH = (col) => `(
+  ${col} ~* 'digite\\s+(apenas\\s+)?(o\\s+)?(n[úu]mero|\\d)|(escolha|selecione|escreva)\\s+(uma\\s+)?(das\\s+)?opç[õo]|escolha\\s+(um\\s+)?(dos\\s+)?n[úu]meros?|opç[ãa]o\\s+(desejada|inv[áa]lida)|\\bmenu\\b|atendimento\\s+autom[áa]tico|protocolo\\s+de\\s+atendimento|resposta\\s+autom[áa]tica|\\[mensagem\\s+autom[áa]tica\\]|((esse\\s+|o\\s+)?(atendimento|chamado|contato)\\s+(est[áa]\\s+)?(sendo\\s+)?transferid[oa]\\s+para|(vou\\s+te\\s+transferir|transferindo|transferid[oa])\\s+para\\s+(um\\s+|o\\s+|a\\s+|noss[oa]\\s+)?(atendente|consultor[a]?|especialista|setor|departamento|escrit[óo]rio|equipe|humano|suporte|operador[a]?))|n[ãa]o\\s+(consegui\\s+identificar|entendi)\\s+(a\\s+)?(sua\\s+)?resposta|agradece(mos)?\\s+(o\\s+)?seu\\s+contato|agradecemos\\s+a\\s+prefer[êe]ncia|bem[- ]vindo\\(a\\)|hor[áa]rios?\\s+de\\s+atendimento|nosso\\s+(showroom|card[áa]pio|cat[áa]logo|site)|finalizarei\\s+nossa\\s+intera[çc][ãa]o|vou\\s+encerrar\\s+esse\\s+atendimento|atendimento\\s+foi\\s+finalizado|responder\\s+a\\s+nossa\\s+pesquisa'
+)`;
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
@@ -639,49 +644,18 @@ export function registerChatbotRoutes(app, deps) {
 
       // Pausa manual vencida não aparece como pausada em lugar nenhum da tela: mesma
       // fonte do prazo e mesma expressão do portão (agentMuteGuard), inclusive no erro.
-      const inboxTenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
-      const pauseExpiryDays = resolveAgentPauseExpiryDays(inboxTenantSettings);
+      const pauseExpiryDays = resolveAgentPauseExpiryDays(
+        await getLeadClientN8nSettings(clientId).catch(() => null)
+      );
       const pauseExpiredSql = agentPauseExpiredSql(pauseExpiryDays, "cs");
-
-      // Em quais chips o robô responde, pela mesma regra do portão do webhook. Falha de
-      // leitura = nenhum chip: na dúvida a conversa fica com a pessoa, nunca "com o robô".
-      let robotInfo = { robotChips: [], byChip: {} };
-      try {
-        const [agentsRes, chipRows] = await Promise.all([
-          pgDatabasePool.query(
-            `SELECT name, evolution_instance, evolution_instances, inbound_enabled, agent_kind, archived_at
-               FROM public.followup_companies
-              WHERE tenant_id = $1 AND archived_at IS NULL`,
-            [clientId]
-          ),
-          getLeadClientEvolutionInstances(clientId),
-        ]);
-        robotInfo = resolveRobotChips({
-          settings: inboxTenantSettings,
-          agents: agentsRes?.rows || [],
-          instances: chipRows || [],
-        });
-      } catch (robotErr) {
-        console.warn("[whatsapp/chats] não foi possível resolver os chips do robô:", robotErr?.message || robotErr);
-      }
-      const workStateOptions = {
-        clientId,
-        now: new Date(),
-        robotChips: robotInfo.robotChips,
-        chipAliases: instanceAliases,
-        pauseExpiredSql,
-      };
-      const runInboxQuery = (sql, params) => pgDatabasePool.query(sql, params);
 
       const queryParams = [clientId];
 
-      // Escopo de chip: só mensagens daquele chip. Mensagem sem chip gravado não entra em
-      // chip nenhum (antes entrava em todos, e o filtro mostrava conversa que não era dele).
       let instanceFilter = "";
       if (instanceAliases && instanceAliases.length > 0) {
         queryParams.push(instanceAliases);
         const idx = queryParams.length;
-        instanceFilter = `AND instance_name = ANY(\$${idx})`;
+        instanceFilter = `AND (instance_name = ANY(\$${idx}) OR instance_name IS NULL)`;
       }
 
       let tabCondition = "";
@@ -752,9 +726,6 @@ export function registerChatbotRoutes(app, deps) {
         }
       }
 
-      // Abas novas (estados de trabalho). Com busca digitada a rota continua buscando em tudo.
-      const useWorkState = !search && isWorkStateTab(rawTab);
-
       let total = 0;
       let items = [];
       let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0, myUnopened: 0 };
@@ -763,7 +734,7 @@ export function registerChatbotRoutes(app, deps) {
       try {
         // 1. Apura contadores gerais para as abas
         const opIdentifiersForCount = operatorIdentifiers.length > 0 ? operatorIdentifiers : ["__NONE__"];
-        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND instance_name = ANY($2)" : "";
+        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND (instance_name = ANY($2) OR instance_name IS NULL)" : "";
         const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
         countsParams.push(opIdentifiersForCount);
         const opParamIdx = countsParams.length;
@@ -840,11 +811,6 @@ export function registerChatbotRoutes(app, deps) {
           };
         }
 
-        // 1b. Estados de trabalho (Esperam você / Com o lead / Robô cuida / Esfriaram).
-        // O contador e a lista de cada estado saem da MESMA consulta (inboxWorkState.js).
-        lastQueryInfo = { step: "workStateCounts (estados de trabalho)", sql: null, params: [clientId] };
-        counts.work = await fetchWorkStateCounts(runInboxQuery, workStateOptions);
-
         // 2. Count total para a listagem atual
         const countQueryText = `
           WITH pre_canonical AS (
@@ -881,11 +847,9 @@ export function registerChatbotRoutes(app, deps) {
           ${searchFilter}
         `;
 
-        if (!useWorkState) {
-          lastQueryInfo = { step: "countQuery (total da aba atual)", sql: countQueryText, params: queryParams };
-          const countRes = await pgDatabasePool.query(countQueryText, queryParams);
-          total = countRes.rows[0]?.total || 0;
-        }
+        lastQueryInfo = { step: "countQuery (total da aba atual)", sql: countQueryText, params: queryParams };
+        const countRes = await pgDatabasePool.query(countQueryText, queryParams);
+        total = countRes.rows[0]?.total || 0;
 
         // 3. Query paginada de itens
         const queryParamsWithPaging = [...queryParams, limit, offset];
@@ -971,7 +935,9 @@ export function registerChatbotRoutes(app, deps) {
           LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
         `;
 
-        const mapChatRow = (row) => {
+        lastQueryInfo = { step: "queryText (itens paginados)", sql: queryText, params: queryParamsWithPaging };
+        const result = await pgDatabasePool.query(queryText, queryParamsWithPaging);
+        items = result.rows.map((row) => {
           const timestampVal = row.effective_timestamp ? Math.floor(new Date(row.effective_timestamp).getTime() / 1000) : null;
           const hasLead = Boolean(row.lead_name || row.lead_origin || row.source_campaign_id);
           const classified = classifyConversation(row.message_text, { hasLeadInCrm: hasLead, hasHumanReply: false });
@@ -1011,23 +977,8 @@ export function registerChatbotRoutes(app, deps) {
             },
             leadOrigin: row.lead_origin || null,
             sourceCampaignId: row.source_campaign_id || null,
-            workState: row.work_state || null,
-            waitingSince: row.last_in_at ? new Date(row.last_in_at).toISOString() : null,
-            leadNeverSpoke: row.lead_never_spoke === true,
           };
-        };
-
-        if (useWorkState) {
-          // Total = o contador do próprio estado, vindo da mesma consulta da lista.
-          total = counts.work?.[rawTab] || 0;
-          lastQueryInfo = { step: "workStatePage (itens do estado de trabalho)", sql: null, params: [clientId, rawTab, limit, offset] };
-          const rows = await fetchWorkStatePage(runInboxQuery, { ...workStateOptions, state: rawTab, limit, offset, leadsTable });
-          items = rows.map(mapChatRow);
-        } else {
-          lastQueryInfo = { step: "queryText (itens paginados)", sql: queryText, params: queryParamsWithPaging };
-          const result = await pgDatabasePool.query(queryText, queryParamsWithPaging);
-          items = result.rows.map(mapChatRow);
-        }
+        });
       } catch (pgErr) {
         const safeParams = (lastQueryInfo.params || []).map((param) => {
           if (typeof param === "string" && search && param.toLowerCase().includes(search.toLowerCase())) {
@@ -1063,7 +1014,6 @@ export function registerChatbotRoutes(app, deps) {
         items,
         total: total || items.length,
         counts,
-        chipAgents: robotInfo.byChip,
         nextOffset: offset + items.length,
         hasMore: offset + items.length < (total || items.length),
       });

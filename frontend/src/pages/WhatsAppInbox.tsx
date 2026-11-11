@@ -134,15 +134,6 @@ import { sanitizePhone } from "@/lib/phone";
 import { formatHeaderCount, parseDossierSummary } from "@/lib/messageFormatting";
 import { isLeadStalled, computeLeadDaysIdle } from "@/lib/leads/stalledLeads";
 import { useLeadReactivationSettings } from "@/hooks/useLeadReactivation";
-import {
-  ChipScopeSelect,
-  ConversationListItem,
-  InboxFooterFilters,
-  InboxStateTabs,
-  type ChipOption,
-  type FooterFilter,
-  type InboxTab,
-} from "@/components/inbox/InboxColumn";
 
 function formatScheduleDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -335,13 +326,6 @@ function OriginBadge({
   return null;
 }
 
-const EMPTY_TAB_TEXT: Partial<Record<InboxTab, string>> = {
-  esperam: "Ninguém esperando você nos últimos 7 dias.",
-  com_lead: "Nenhuma conversa aguardando o lead.",
-  robo: "Nenhuma conversa com o robô respondendo.",
-  esfriaram: "Nenhuma conversa esfriou sem resposta.",
-};
-
 interface WhatsAppInboxProps {
   title?: string;
   subtitle?: string;
@@ -365,13 +349,7 @@ export default function WhatsAppInbox({
   const [selectedInstanceNames, setSelectedInstanceNames] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [compositionMode, setCompositionMode] = useState<"whatsapp" | "internal_note">("whatsapp");
-  const [inboxTab, setInboxTab] = useState<InboxTab>("esperam");
-  // Relógio da lista: o tempo de espera anda sozinho, sem depender de nova busca.
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNowTick(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
+  const [inboxTab, setInboxTab] = useState<"fila" | "aguardando" | "minhas" | "hoje" | "automacao" | "arquivadas" | "pausadas" | "grupos" | "todas">("fila");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -514,6 +492,7 @@ export default function WhatsAppInbox({
   const [bulkConfirmCount, setBulkConfirmCount] = useState(0);
   const [bulkConfirmPhones, setBulkConfirmPhones] = useState<string[]>([]);
   const [bulkLeadConfirmOpen, setBulkLeadConfirmOpen] = useState(false);
+  const [showOlderAwaiting, setShowOlderAwaiting] = useState(false);
   const [undoArchiveState, setUndoArchiveState] = useState<{ count: number; phones: string[] } | null>(null);
   const undoTimeoutRef = useRef<any>(null);
 
@@ -803,55 +782,6 @@ export default function WhatsAppInbox({
     return chats;
   }, [chats, inboxTab, itemsByPhone]);
   const totalChatsCount = chatsQuery.total ?? chats.length;
-
-  const chipOptions = useMemo<ChipOption[]>(
-    () =>
-      evolutionInstances.map((inst) => ({
-        value: inst.dispatch_webhook_url
-          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop() ?? inst.name
-          : inst.name,
-        name: inst.name,
-        // Sem estado informado, não afirmar que está desconectado.
-        connected: !inst.connection_state || inst.connection_state === "open",
-      })),
-    [evolutionInstances]
-  );
-
-  const footerFilters: FooterFilter[] = [
-    {
-      key: "esfriaram",
-      label: "Esfriaram",
-      title: "O lead falou por último há mais de 7 dias e ninguém respondeu. Mais parado primeiro.",
-      count: chatsQuery.counts?.work?.esfriaram,
-    },
-    { key: "minhas", label: "Minhas", title: "Conversas atribuídas a você", count: chatsQuery.counts?.myUnopened },
-    {
-      key: "hoje",
-      label: "Hoje",
-      title: "Pendências para hoje ou atrasadas (mensagens agendadas e lembretes pessoais)",
-      count: hojeBadgeCount,
-    },
-    {
-      key: "pausadas",
-      label: "Pausadas",
-      title: "Conversas com o agente pausado. A pausa só sai pelo Reativar agente.",
-      count: chatsQuery.counts?.paused,
-    },
-    { key: "grupos", label: "Grupos", title: "Grupos de WhatsApp", count: chatsQuery.counts?.groups },
-    {
-      key: "automacao",
-      label: "Automações",
-      title: "Robôs e autoatendimentos detectados do outro lado",
-      count: chatsQuery.counts?.automations,
-    },
-    {
-      key: "arquivadas",
-      label: "Arquivadas",
-      title: "Conversas arquivadas manualmente",
-      count: chatsQuery.counts?.archived,
-    },
-    { key: "todas", label: "Todas", title: "Todas as conversas (incluindo grupos e arquivadas)" },
-  ];
 
   const handleReabrirAtendimento = async () => {
     if (!selectedChat || !clientId) return;
@@ -1470,8 +1400,219 @@ export default function WhatsAppInbox({
                 </span>
               </div>
 
-              {/* Três estados de trabalho; os demais filtros ficam no rodapé da coluna */}
-              <InboxStateTabs active={inboxTab} counts={chatsQuery.counts?.work} onChange={setInboxTab} />
+              {/* Abas de Navegação do Inbox */}
+              <div className="flex flex-col gap-1 rounded-xl bg-background p-1 border border-border/70 text-[11px]">
+                {/* Linha 1: Fila | Espera | Minhas | Hoje | Todas */}
+                <div className="grid grid-cols-5 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("fila")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center",
+                      inboxTab === "fila"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Fila de trabalho limpa (sem grupos e sem automações)"
+                  >
+                    Fila
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("aguardando")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
+                      inboxTab === "aguardando"
+                        ? "bg-amber-600 text-white shadow-xs"
+                        : "text-amber-700 dark:text-amber-400 hover:text-foreground"
+                    )}
+                    title="Leads que responderam e estão aguardando nossa resposta"
+                  >
+                    <span>Espera</span>
+                    {(chatsQuery.counts?.awaiting ?? 0) > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "aguardando"
+                            ? "bg-white text-amber-800"
+                            : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
+                        )}
+                      >
+                        {chatsQuery.counts?.awaiting}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("minhas")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
+                      inboxTab === "minhas"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Conversas atribuídas a você"
+                  >
+                    <span>Minhas</span>
+                    {Boolean(chatsQuery.counts?.myUnopened && chatsQuery.counts.myUnopened > 0) && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "minhas"
+                            ? "bg-white text-primary"
+                            : "bg-primary/20 text-primary dark:text-primary-foreground"
+                        )}
+                        title={`${chatsQuery.counts?.myUnopened} novos leads atribuídos não abertos`}
+                      >
+                        {chatsQuery.counts?.myUnopened}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("hoje")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
+                      inboxTab === "hoje"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Pendências para hoje ou atrasadas (mensagens agendadas e lembretes pessoais)"
+                  >
+                    <span>Hoje</span>
+                    {hojeBadgeCount > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "hoje"
+                            ? "bg-white text-primary"
+                            : "bg-primary/20 text-primary dark:text-primary-foreground"
+                        )}
+                        title={`${hojeBadgeCount} pendências para hoje ou atrasadas`}
+                      >
+                        {hojeBadgeCount}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("todas")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center",
+                      inboxTab === "todas"
+                        ? "bg-primary text-primary-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Todas as conversas (incluindo grupos e arquivadas)"
+                  >
+                    Todas
+                  </button>
+                </div>
+
+                {/* Linha 2: Automações | Arquivadas | Pausadas | Grupos */}
+                <div className="grid grid-cols-4 gap-1 border-t border-border/40 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("automacao")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
+                      inboxTab === "automacao"
+                        ? "bg-purple-600 text-white shadow-xs"
+                        : "text-purple-700 dark:text-purple-400 hover:text-foreground"
+                    )}
+                    title="Robôs e autoatendimentos detectados"
+                  >
+                    <span>Automações</span>
+                    {(chatsQuery.counts?.automations ?? 0) > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "automacao"
+                            ? "bg-white text-purple-800"
+                            : "bg-purple-500/20 text-purple-700 dark:text-purple-300"
+                        )}
+                      >
+                        {chatsQuery.counts?.automations}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("arquivadas")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
+                      inboxTab === "arquivadas"
+                        ? "bg-slate-700 text-white shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Conversas arquivadas manualmente"
+                  >
+                    <span>Arquivadas</span>
+                    {(chatsQuery.counts?.archived ?? 0) > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "arquivadas"
+                            ? "bg-white text-slate-800"
+                            : "bg-slate-500/20 text-slate-700 dark:text-slate-300"
+                        )}
+                      >
+                        {chatsQuery.counts?.archived}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("pausadas")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
+                      inboxTab === "pausadas"
+                        ? "bg-amber-600 text-white shadow-xs"
+                        : "text-amber-700 dark:text-amber-400 hover:text-foreground"
+                    )}
+                    title="Conversas com o agente pausado. A pausa só sai pelo Reativar agente."
+                  >
+                    <span>Pausadas</span>
+                    {(chatsQuery.counts?.paused ?? 0) > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "pausadas"
+                            ? "bg-white text-amber-800"
+                            : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
+                        )}
+                      >
+                        {chatsQuery.counts?.paused}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInboxTab("grupos")}
+                    className={cn(
+                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
+                      inboxTab === "grupos"
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "text-blue-700 dark:text-blue-400 hover:text-foreground"
+                    )}
+                    title="Grupos de WhatsApp"
+                  >
+                    <span>Grupos</span>
+                    {(chatsQuery.counts?.groups ?? 0) > 0 && (
+                      <span
+                        className={cn(
+                          "rounded-full px-1 text-[9px] font-bold leading-tight",
+                          inboxTab === "grupos"
+                            ? "bg-white text-blue-800"
+                            : "bg-blue-500/20 text-blue-700 dark:text-blue-300"
+                        )}
+                      >
+                        {chatsQuery.counts?.groups}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
 
               {/* Barra de Busca em Tempo Real */}
               <div className="relative">
@@ -1484,13 +1625,31 @@ export default function WhatsAppInbox({
                 />
               </div>
 
-              {/* Escopo de chip: de qual chip são as conversas listadas */}
-              <ChipScopeSelect
-                value={selectedInstanceNames[0] || null}
-                options={chipOptions}
-                chipAgents={chatsQuery.chipAgents}
-                onChange={(val) => setSelectedInstanceNames(val ? [val] : [])}
-              />
+              {/* Seletor Dropdown de Chips */}
+              <div className="flex items-center gap-2 pt-1 pb-1">
+                <Smartphone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <Select
+                  value={selectedInstanceNames[0] || "all"}
+                  onValueChange={(val) => setSelectedInstanceNames(val === "all" ? [] : [val])}
+                >
+                  <SelectTrigger className="h-7 text-xs rounded-lg border-border/80 bg-background w-full">
+                    <SelectValue placeholder="Todos os chips conectados" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">📱 Todos os chips conectados</SelectItem>
+                    {evolutionInstances.map((inst) => {
+                      const urlName = inst.dispatch_webhook_url
+                        ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop() ?? inst.name
+                        : inst.name;
+                      return (
+                        <SelectItem key={urlName} value={urlName}>
+                          🟢 {inst.name}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Barra de Seleção em Massa ou Cabeçalho de Itens */}
@@ -1565,7 +1724,7 @@ export default function WhatsAppInbox({
             <div
               ref={chatsContainerRef}
               onScroll={handleChatsScroll}
-              className="flex-1 overflow-y-auto"
+              className="flex-1 overflow-y-auto divide-y divide-border/40"
             >
               {chatsQuery.isLoading ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">
@@ -1573,7 +1732,7 @@ export default function WhatsAppInbox({
                 </div>
               ) : filteredChats.length === 0 ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">
-                  {EMPTY_TAB_TEXT[inboxTab] || "Nenhuma conversa encontrada."}
+                  Nenhuma conversa encontrada.
                 </div>
               ) : (() => {
                 const renderChatCard = (chat: WhatsAppChat) => {
@@ -1615,91 +1774,278 @@ export default function WhatsAppInbox({
                     !isAttended
                   );
 
-                  const reminder = cardPendingReminders[0];
-                  const waitTab = inboxTab === "esperam" || inboxTab === "esfriaram";
-
                   return (
-                    <ConversationListItem
+                    <button
                       key={chat.id}
-                      id={chat.id}
-                      label={chat.name || phoneLabel}
-                      preview={chat.leadNeverSpoke ? `Sem resposta · ${getPreview(chat)}` : getPreview(chat)}
-                      avatar={<ChatAvatar label={chat.name || phoneLabel} picture={chat.profilePic} size="md" />}
-                      selected={isSelected}
-                      checked={selectedChatIds.has(chat.id)}
-                      onSelect={() => setSelectedChatId(chat.id)}
-                      onToggleCheck={() => toggleSelectChat(chat.id)}
-                      waitingSince={chat.waitingSince}
-                      showWait={waitTab}
-                      fallbackTime={formatChatDate(chat.timestamp)}
-                      now={nowTick}
-                      flags={{
-                        unreadCount: chat.unreadCount,
-                        attentionReason: precisaAtencao ? motivoAtencao : null,
-                        isNumberChange: chat.isNumberChange,
-                        isAgentMuted: Boolean(chat.agentMutedAt),
-                        agentMutedReason: chat.agentMutedReason,
-                        isAutomation: chat.state === "automacao",
-                        automationReason: chat.stateReason,
-                        isArchived: chat.state === "arquivada" || chat.archived,
-                        isGroup: chat.isGroup,
-                        isTransferred: Boolean(chat.lastMessage?.meta?.is_handoff_bridge),
-                        transferredTo: chat.lastMessage?.meta?.transferred_to_chip || null,
-                        isAttended:
-                          isAttended &&
-                          !isAwaitingReply &&
-                          chat.state !== "automacao" &&
-                          chat.state !== "arquivada" &&
-                          !chat.archived &&
-                          !chat.isGroup,
-                        attendedBy: chat.attendedBy,
-                        noLead: !chat.isGroup && !rawId.includes("@g.us") && !lead,
-                        scheduleText: cardHasActiveSchedule
-                          ? formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)
-                          : null,
-                        reminder: reminder
-                          ? {
-                              title: reminder.title,
-                              overdue: Boolean(reminder.isOverdue),
-                              when: formatScheduleDate(reminder.remindAt),
-                            }
-                          : null,
-                        stalledDays:
-                          lead && isLeadStalled(lead, reactivationStalledDays) ? computeLeadDaysIdle(lead) : null,
-                        fromCampaign: chat.leadOrigin === "campaign",
-                        campaignName: chat.sourceCampaignId ? campaignNames.get(chat.sourceCampaignId) ?? null : null,
-                        leadNeverSpoke: chat.leadNeverSpoke,
-                      }}
+                      type="button"
+                      onClick={() => setSelectedChatId(chat.id)}
+                      className={cn(
+                        "flex w-full items-start gap-2.5 p-2.5 text-left transition-all hover:bg-muted/50 cursor-pointer",
+                        isSelected && "bg-emerald-500/10 border-l-4 border-l-emerald-500 pl-2",
+                        precisaAtencao && !isSelected && "bg-rose-500/5 border-l-2 border-l-rose-500 pl-2"
+                      )}
                     >
-                      {inboxTab === "hoje" && cardSummary?.todayDue?.hasScheduledToday && (
-                        <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] text-indigo-800 dark:text-indigo-300">
-                          <Clock3 className="h-3 w-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                          <span className="font-bold">Vai ser enviado ao cliente:</span>
-                          <span className="truncate">mensagem agendada para {formatScheduleDate(cardSummary.todayDue.scheduledAt)}</span>
+                      {/* Checkbox de Seleção Individual */}
+                      <div
+                        className="flex items-center self-center shrink-0 pr-0.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                      >
+                        <Checkbox
+                          checked={selectedChatIds.has(chat.id)}
+                          onCheckedChange={() => toggleSelectChat(chat.id)}
+                          className="h-4 w-4 rounded-sm border-border/80 data-[state=checked]:bg-primary"
+                          aria-label={`Selecionar ${chat.name || phoneLabel}`}
+                        />
+                      </div>
+
+                      <ChatAvatar label={chat.name || phoneLabel} picture={chat.profilePic} size="md" />
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                          <p
+                            className={cn(
+                              "truncate text-xs font-bold",
+                              isSelected
+                                ? "text-emerald-700 dark:text-emerald-300"
+                                : precisaAtencao
+                                ? "text-rose-700 dark:text-rose-300"
+                                : "text-foreground"
+                            )}
+                          >
+                            {chat.name || phoneLabel}
+                          </p>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {formatChatDate(chat.timestamp)}
+                          </span>
                         </div>
-                      )}
-                      {inboxTab === "hoje" && cardSummary?.todayDue?.hasReminderToday && (
-                        <div className={cn(
-                          "mt-1 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px]",
-                          cardSummary.todayDue.isReminderOverdue
-                            ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300"
-                            : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-                        )}>
-                          <Bell className={cn("h-3 w-3 shrink-0", cardSummary.todayDue.isReminderOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
-                          <span className="font-bold">{cardSummary.todayDue.isReminderOverdue ? "Venceu:" : "Só para você:"}</span>
-                          <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
+
+                        <p className="truncate text-[11px] text-muted-foreground leading-snug">
+                          {getPreview(chat)}
+                        </p>
+
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {chat.unreadCount > 0 && (
+                            <span className="rounded-full bg-emerald-500 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+                              {chat.unreadCount}
+                            </span>
+                          )}
+                          {chat.isNumberChange && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
+                              title="Contato informou novo número / mudança de telefone"
+                            >
+                              <Phone className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                              <span>Novo Número</span>
+                            </span>
+                          )}
+                          {chat.agentMutedAt && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 border border-slate-500/30 px-1.5 py-0.5 text-[9px] font-semibold text-slate-700 dark:text-slate-300"
+                              title={chat.agentMutedReason ? `Agente pausado: ${chat.agentMutedReason}` : "Agente pausado · conversa pessoal"}
+                            >
+                              <BotOff className="h-2.5 w-2.5 text-slate-600 dark:text-slate-400 shrink-0" />
+                              <span>Agente pausado · {chat.agentMutedReason || "conversa pessoal"}</span>
+                            </span>
+                          )}
+                          {chat.state === "automacao" && !chat.isNumberChange && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 text-[9px] font-bold text-purple-700 dark:text-purple-300"
+                              title={chat.stateReason || "Robô / Autoatendimento detectado"}
+                            >
+                              <Bot className="h-2.5 w-2.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                              <span>Automação</span>
+                            </span>
+                          )}
+                          {(chat.state === "arquivada" || chat.archived) && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 border border-slate-500/30 px-1.5 py-0.5 text-[9px] font-bold text-slate-700 dark:text-slate-300"
+                            >
+                              <Archive className="h-2.5 w-2.5 shrink-0" />
+                              <span>Arquivada</span>
+                            </span>
+                          )}
+                          {chat.isGroup && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 text-[9px] font-bold text-blue-700 dark:text-blue-300"
+                            >
+                              <Users className="h-2.5 w-2.5 shrink-0" />
+                              <span>Grupo</span>
+                            </span>
+                          )}
+                          {precisaAtencao && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 dark:text-rose-300"
+                              title={`Atenção humana necessária: ${motivoAtencao}`}
+                            >
+                              <ShieldAlert className="h-2.5 w-2.5 text-rose-600 dark:text-rose-400 shrink-0" />
+                              <span>Atenção Humana</span>
+                            </span>
+                          )}
+                          {Boolean(chat.lastMessage?.meta?.is_handoff_bridge) && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
+                              title={
+                                chat.lastMessage?.meta?.transferred_to_chip
+                                  ? `Conversa transferida para ${chat.lastMessage.meta.transferred_to_chip}`
+                                  : "Conversa transferida para outro chip"
+                              }
+                            >
+                              <span>🤝</span>
+                              <span>Transferido para {chat.lastMessage?.meta?.transferred_to_chip || "outro chip"}</span>
+                            </span>
+                          )}
+                          {isAwaitingReply && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                              Aguardando resposta
+                            </span>
+                          )}
+                          {isAttended && !isAwaitingReply && chat.state !== "automacao" && chat.state !== "arquivada" && !chat.archived && !chat.isGroup && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300"
+                              title={chat.attendedBy ? `Atendido por ${chat.attendedBy}` : "Atendimento registrado"}
+                            >
+                              <CheckCheck className="h-2.5 w-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span>Atendido</span>
+                            </span>
+                          )}
+                          {!chat.isGroup && !rawId.includes("@g.us") && !lead && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-300"
+                              title="Contato ainda não cadastrado na base de Leads do CRM"
+                            >
+                              <UserPlus className="h-2.5 w-2.5 shrink-0" />
+                              <span>Sem Lead</span>
+                            </span>
+                          )}
+                          {cardHasActiveSchedule && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
+                              title={`Vai ser enviado ao cliente: mensagem agendada para ${formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)}`}
+                            >
+                              <Clock3 className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                              <span>📤 Envio {formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)}</span>
+                            </span>
+                          )}
+                          {cardHasPendingReminder && (
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
+                                cardPendingReminders[0].isOverdue
+                                  ? "bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300"
+                                  : "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300"
+                              )}
+                              title={
+                                cardPendingReminders[0].isOverdue
+                                  ? `VENCEU: lembrete pessoal "${cardPendingReminders[0].title}" venceu em ${formatScheduleDate(cardPendingReminders[0].remindAt)}`
+                                  : `Só para você: lembrete pessoal "${cardPendingReminders[0].title}" para ${formatScheduleDate(cardPendingReminders[0].remindAt)}`
+                              }
+                            >
+                              <Bell className={cn("h-2.5 w-2.5 shrink-0", cardPendingReminders[0].isOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
+                              <span>{cardPendingReminders[0].isOverdue ? `⏰ Venceu · ${cardPendingReminders[0].title}` : `📌 ${cardPendingReminders[0].title}`}</span>
+                            </span>
+                          )}
+                          {lead && isLeadStalled(lead, reactivationStalledDays) && (
+                            <span
+                              data-testid={`lead-stalled-badge-${chat.id}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300"
+                              title={`Lead parado há ${computeLeadDaysIdle(lead)} dias sem resposta`}
+                            >
+                              <span>⚠️ Parado há {computeLeadDaysIdle(lead)}d</span>
+                            </span>
+                          )}
+                          <OriginBadge
+                            origin={chat.leadOrigin ?? null}
+                            campaignId={chat.sourceCampaignId ?? null}
+                            campaignNames={campaignNames}
+                          />
                         </div>
-                      )}
-                    </ConversationListItem>
+                        {inboxTab === "hoje" && cardSummary?.todayDue?.hasScheduledToday && (
+                          <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] text-indigo-800 dark:text-indigo-300">
+                            <Clock3 className="h-3 w-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                            <span className="font-bold">Vai ser enviado ao cliente:</span>
+                            <span className="truncate">mensagem agendada para {formatScheduleDate(cardSummary.todayDue.scheduledAt)}</span>
+                          </div>
+                        )}
+                        {inboxTab === "hoje" && cardSummary?.todayDue?.hasReminderToday && (
+                          <div className={cn(
+                            "mt-1 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px]",
+                            cardSummary.todayDue.isReminderOverdue
+                              ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300"
+                              : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                          )}>
+                            <Bell className={cn("h-3 w-3 shrink-0", cardSummary.todayDue.isReminderOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
+                            <span className="font-bold">{cardSummary.todayDue.isReminderOverdue ? "Venceu:" : "Só para você:"}</span>
+                            <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
+                          </div>
+                        )}
+                      </div>
+                    </button>
                   );
                 };
+
+                if (inboxTab === "aguardando") {
+                  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+                  const recentAwaitingChats = filteredChats.filter(
+                    (c) => Boolean(c.timestamp && c.timestamp * 1000 >= sevenDaysAgoMs)
+                  );
+                  const olderAwaitingChats = filteredChats.filter(
+                    (c) => !c.timestamp || c.timestamp * 1000 < sevenDaysAgoMs
+                  );
+
+                  return (
+                    <div className="flex flex-col divide-y divide-border/30">
+                      {/* Seção 1: Últimos 7 dias */}
+                      <div className="px-3 py-1.5 bg-muted/40 text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+                        <span>Últimos 7 dias ({recentAwaitingChats.length})</span>
+                      </div>
+                      <div className="divide-y divide-border/40">
+                        {recentAwaitingChats.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-muted-foreground">
+                            Nenhuma conversa recente nos últimos 7 dias.
+                          </div>
+                        ) : (
+                          recentAwaitingChats.map(renderChatCard)
+                        )}
+                      </div>
+
+                      {/* Seção 2: Mais antigas (Recolhidas por padrão) */}
+                      {olderAwaitingChats.length > 0 && (
+                        <div className="border-t border-border/60">
+                          <button
+                            type="button"
+                            onClick={() => setShowOlderAwaiting((v) => !v)}
+                            className="w-full px-3 py-2 bg-muted/20 hover:bg-muted/40 text-[11px] font-semibold text-muted-foreground flex items-center justify-between transition-colors cursor-pointer"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <Clock3 className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                              <span>Mais antigas ({olderAwaitingChats.length})</span>
+                            </div>
+                            <span className="text-[10px] text-primary flex items-center gap-0.5">
+                              {showOlderAwaiting ? "Recolher" : "Expandir"}
+                              {showOlderAwaiting ? (
+                                <ChevronUp className="h-3.5 w-3.5" />
+                              ) : (
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              )}
+                            </span>
+                          </button>
+                          {showOlderAwaiting && (
+                            <div className="divide-y divide-border/40 bg-muted/5">
+                              {olderAwaitingChats.map(renderChatCard)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
 
                 return filteredChats.map(renderChatCard);
               })()}
             </div>
-
-            {/* Rodapé: filtros que saíram das abas. Nenhum deixou de existir. */}
-            <InboxFooterFilters active={inboxTab} filters={footerFilters} onChange={setInboxTab} />
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════════════
