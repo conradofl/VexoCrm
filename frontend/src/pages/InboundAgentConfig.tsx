@@ -715,12 +715,12 @@ export default function InboundAgentConfig() {
         </div>
       ) : (
         <div className="space-y-8 max-w-3xl">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-400 dark:text-slate-500">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <p className="min-w-0 text-xs text-slate-400 dark:text-slate-500">
               Agentes <span className="mx-1">›</span> <span className="text-foreground font-medium">{activeCompany.name}</span>
             </p>
             {!isPlaceholderCompany && (
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <ArchiveAgentButton
                   agent={activeCompany}
                   chips={chips}
