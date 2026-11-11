@@ -478,9 +478,17 @@ CPF: ______________________________________________`,
     });
 
     function makeMockRes() {
+      const headers = {};
       const res = {
         statusCode: 200,
         body: null,
+        // sendError aplica CORS antes de responder e lê/grava cabeçalho: o dublê precisa ter os dois.
+        getHeader(k) {
+          return headers[String(k).toLowerCase()];
+        },
+        setHeader(k, v) {
+          headers[String(k).toLowerCase()] = v;
+        },
         status(code) {
           this.statusCode = code;
           return this;
@@ -580,6 +588,9 @@ CPF: ______________________________________________`,
         statusCode: 200,
         sentData: null,
         headersSent: false,
+        getHeader(k) {
+          return headers[String(k).toLowerCase()];
+        },
         setHeader(k, v) {
           headers[k.toLowerCase()] = v;
         },
@@ -600,6 +611,8 @@ CPF: ______________________________________________`,
       };
 
       const req = {
+        // Com Authorization a rota resolve o tenant pelo login; sem ele cai no acesso por link (outro caminho).
+        headers: { authorization: "Bearer teste" },
         params: { id: "ct-100" },
         query: { client_id: TENANT_A },
         authAccess: { role: "internal", isAdmin: true, clientId: TENANT_A, clientIds: [TENANT_A] },
