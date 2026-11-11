@@ -7,10 +7,12 @@ import { PGlite } from "@electric-sql/pglite";
 import {
   AWAITING_WINDOW_DAYS,
   WORK_STATES,
+  buildWorkConvCte,
   fetchWorkStateCounts,
   fetchWorkStatePage,
   resolveRobotChips,
 } from "../services/inboxWorkState.js";
+import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
 
 const TENANT = "geracao-digital";
 const NOW = new Date("2026-11-10T18:00:00Z");
@@ -293,5 +295,47 @@ describe("resolveRobotChips — mesma regra do portão do webhook", () => {
     expect(byChip["gd-comercial-hostery"].kind).toBe("empresa");
     expect(byChip["gd-pessoal-caio"].kind).toBe("nenhum");
     expect(byChip["gd-comercial-gabriel"]).toMatchObject({ kind: "nenhum", reason: "agente_so_de_campanha" });
+  });
+});
+
+// A consulta calcula "só os dígitos" do telefone uma vez por mensagem e monta o canônico a
+// partir dessa coluna. A regra tem que continuar sendo, letra por letra, a de
+// SQL_CANONICAL_PHONE: mesmo resultado para toda forma de telefone que chega em mensagem.
+describe("telefone canônico da consulta = SQL_CANONICAL_PHONE", () => {
+  const FORMAS = [
+    "5534999990001",
+    "553499990001",
+    "34999990001",
+    "3499990001",
+    "553432345678",
+    "3432345678",
+    "5534950000005",
+    "553450000005",
+    "5534999990001@s.whatsapp.net",
+    "553499990001@S.WHATSAPP.NET",
+    "5534999990001@c.us",
+    "120363049633060243@g.us",
+    "98765432101234@lid",
+    "+55 (34) 99999-0001",
+    "034999990001",
+    "14155552671",
+    "999990001",
+    "",
+  ];
+
+  it("toda forma de telefone dá o mesmo canônico pelos dois caminhos", async () => {
+    for (const phone of FORMAS) await msg(phone, "inbound", ago({ hours: 1 }), { tenant: "formas" });
+    const { rows } = await db.query(
+      `WITH ${buildWorkConvCte({})}
+       SELECT p.raw_phone, p.canonical_phone, (${SQL_CANONICAL_PHONE("p.raw_phone")}) AS esperado
+         FROM pre_canonical p ORDER BY p.raw_phone`,
+      ["formas", new Date().toISOString(), []]
+    );
+    expect(rows).toHaveLength(FORMAS.length);
+    expect(rows.filter((r) => r.canonical_phone !== r.esperado)).toEqual([]);
+  });
+
+  it("a limpeza do telefone aparece uma vez só na consulta (não uma por uso)", () => {
+    expect(buildWorkConvCte({}).match(/regexp_replace\(regexp_replace\(/g)).toHaveLength(1);
   });
 });

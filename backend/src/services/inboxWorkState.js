@@ -32,6 +32,18 @@ export function isWorkStateTab(tab) {
 
 const EFFECTIVE_TS = "COALESCE(message_timestamp, delivered_at, created_at)";
 
+// A expressão canônica repete a limpeza do telefone ("só os dígitos") mais de dez vezes por
+// linha. Aqui a limpeza roda UMA vez por mensagem e a expressão passa a ler a coluna pronta.
+// A regra continua sendo a de SQL_CANONICAL_PHONE: o texto abaixo é o dela, com o trecho
+// repetido trocado pelo nome da coluna. Se a expressão mudar de forma e a troca não cobrir
+// tudo, o módulo se recusa a carregar em vez de calcular telefone por duas regras.
+const SQL_PHONE_DIGITS = (col) =>
+  `regexp_replace(regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '', 'i'), '\\D', '', 'g')`;
+const SQL_CANONICAL_FROM_DIGITS = SQL_CANONICAL_PHONE("phone").split(SQL_PHONE_DIGITS("phone")).join("phone_digits");
+if (SQL_CANONICAL_FROM_DIGITS.includes("regexp_replace") || !SQL_CANONICAL_FROM_DIGITS.includes("phone_digits")) {
+  throw new Error("inboxWorkState: SQL_CANONICAL_PHONE mudou de forma; revise SQL_PHONE_DIGITS.");
+}
+
 /**
  * CTE `work_conv`: uma linha por conversa da fila de trabalho, já com o estado.
  *
@@ -49,34 +61,46 @@ export function buildWorkConvCte({ hasChipScope = false, pauseExpiredSql = "fals
     : "";
 
   return `
+    msg AS (
+      -- Colunas estreitas (sem texto nem meta) e os dígitos do telefone calculados uma vez.
+      -- OFFSET 0 é a cerca: sem ela o Postgres achata este bloco e recalcula a limpeza em
+      -- cada uso da coluna (docs/DIAGNOSTICO-LISTA-LEADS-SQL.md, mesmo defeito dos cartões).
+      SELECT
+        id,
+        phone,
+        direction,
+        ${EFFECTIVE_TS} AS effective_timestamp,
+        instance_name,
+        ${SQL_PHONE_DIGITS("phone")} AS phone_digits
+      FROM public.lead_messages
+      WHERE client_id = $1
+      OFFSET 0
+    ),
     pre_canonical AS (
       SELECT
         id,
-        ${SQL_CANONICAL_PHONE("phone")} AS canonical_phone,
+        ${SQL_CANONICAL_FROM_DIGITS} AS canonical_phone,
         phone AS raw_phone,
-        message_text,
         direction,
-        sender_type,
-        delivered_at,
-        created_at,
-        message_timestamp,
-        ${EFFECTIVE_TS} AS effective_timestamp,
-        campaign_id,
-        contact_name,
-        is_group,
-        meta,
+        effective_timestamp,
         instance_name
-      FROM public.lead_messages
-      WHERE client_id = $1
+      FROM msg
     ),
-    latest_messages AS (
+    latest_ids AS (
       SELECT DISTINCT ON (canonical_phone)
-        id, canonical_phone AS phone, raw_phone, message_text, direction, sender_type,
-        delivered_at, created_at, message_timestamp, effective_timestamp,
-        campaign_id, contact_name, is_group, meta
+        id, canonical_phone, raw_phone, effective_timestamp
       FROM pre_canonical
       ${chipScope}
       ORDER BY canonical_phone, effective_timestamp DESC NULLS LAST, id DESC
+    ),
+    latest_messages AS (
+      -- Texto, meta e o resto só da ÚLTIMA mensagem de cada conversa, pela chave primária.
+      SELECT
+        lm.id, l.canonical_phone AS phone, l.raw_phone, lm.message_text, lm.direction, lm.sender_type,
+        lm.delivered_at, lm.created_at, lm.message_timestamp, l.effective_timestamp,
+        lm.campaign_id, lm.contact_name, lm.is_group, lm.meta
+      FROM latest_ids l
+      JOIN public.lead_messages lm ON lm.id = l.id
     ),
     last_inbound AS (
       SELECT DISTINCT ON (canonical_phone)
