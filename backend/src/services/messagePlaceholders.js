@@ -54,15 +54,52 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     "";
 
   // 3. Resolução de Links e Agendamento
-  const schedulingLink =
+  let schedulingLink =
     normalizeString(extraObj.scheduling_link) ||
     normalizeString(extraObj.link) ||
+    normalizeString(extraObj.linkUrl) ||
+    normalizeString(extraObj.url) ||
     normalizeString(leadObj.scheduling_link) ||
     normalizeString(leadObj.link) ||
+    normalizeString(leadObj.linkUrl) ||
+    normalizeString(leadObj.url) ||
     normalizeString(leadObj.normalized_data?.scheduling_link) ||
     normalizeString(leadObj.normalized_data?.link) ||
+    normalizeString(leadObj.normalized_data?.linkUrl) ||
     normalizeString(leadObj.normalizedData?.scheduling_link) ||
+    normalizeString(leadObj.normalizedData?.link) ||
     "";
+
+  // Se o link contiver chaves {{ ou }}, ele NÃO é um link resolvido (é uma variável crua)
+  if (schedulingLink && (schedulingLink.includes("{{") || schedulingLink.includes("}}"))) {
+    schedulingLink = "";
+  }
+
+  const hasLinkPlaceholder = /\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/i.test(raw);
+  if (!schedulingLink && hasLinkPlaceholder) {
+    const rawFallback =
+      normalizeString(extraObj.tenantUrl) ||
+      normalizeString(extraObj.tenant_url) ||
+      normalizeString(extraObj.fallbackLink) ||
+      normalizeString(extraObj.fallback_link) ||
+      normalizeString(leadObj.tenantUrl) ||
+      normalizeString(leadObj.tenant_url) ||
+      normalizeString(leadObj.campaignLink) ||
+      normalizeString(leadObj.campaign_link) ||
+      normalizeString(extraObj.campaignLink) ||
+      normalizeString(extraObj.campaign_link);
+
+    const fallbackTenantUrl = (rawFallback && !rawFallback.includes("{{")) ? rawFallback : "";
+
+    const cleanTel = telResolvido ? String(telResolvido).replace(/\D/g, "") : "";
+    if (fallbackTenantUrl) {
+      schedulingLink = fallbackTenantUrl;
+    } else if (cleanTel) {
+      schedulingLink = `https://wa.me/${cleanTel}`;
+    } else {
+      schedulingLink = "https://mktgeracaodigital.com.br";
+    }
+  }
 
   // 4. Substituições principais
   raw = raw
@@ -70,11 +107,11 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
     .replace(/\{\{\s*(?:nome|name|lead_name|cliente)\s*\}\}/gi, nomeResolvido)
     .replace(/\{\{\s*(?:telefone|phone|celular)\s*\}\}/gi, telResolvido);
 
-  if (schedulingLink) {
+  if (schedulingLink && !schedulingLink.includes("{{")) {
     if (/^https?:\/\//i.test(schedulingLink)) {
-      raw = raw.replace(/https?:\/\/\s*\{\{\s*(?:scheduling_link|link|agendamento)\s*\}\}/gi, schedulingLink);
+      raw = raw.replace(/https?:\/\/\s*\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/gi, schedulingLink);
     }
-    raw = raw.replace(/\{\{\s*(?:scheduling_link|link|agendamento)\s*\}\}/gi, schedulingLink);
+    raw = raw.replace(/\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/gi, schedulingLink);
     raw = raw.replace(/https?:\/\/https?:\/\//gi, "https://");
   }
 

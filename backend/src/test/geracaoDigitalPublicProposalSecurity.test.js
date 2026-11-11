@@ -64,6 +64,7 @@ export const CLASSIFIED_INTERNAL_OR_SENSITIVE_COLUMNS = [
   "arquivada",        // [INTERNA] Flag de arquivamento no CRM
   "meeting_notes",    // [SIGILOSA] Anotações de reunião comercial / SDR / fechamento
   "repasse_vexo_pct", // [SIGILOSA] Margem de repasse comercial / comissionamento
+  "dados_cadastrais", // [INTERNA] Dados cadastrais enviados no aceite da proposta
 ];
 
 /** Extrai todas as colunas declaradas no schema de gd_proposals */

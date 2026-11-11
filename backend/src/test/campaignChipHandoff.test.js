@@ -588,5 +588,69 @@ describe("Passagem de Bastão entre Chips na Campanha (Transbordo / Handoff Ativ
       expect(loggedErrors.some((msg) => msg.includes("ALERTA CRÍTICO") && msg.includes("42703"))).toBe(true);
       consoleErrorSpy.mockRestore();
     });
+
+    it("Teste 7: Passo com {{scheduling_link}} sem agenda prévia no lead resolve link e ativa handoff com sucesso", async () => {
+      mockCampaignData = {
+        id: "camp-handoff-link",
+        name: "Campanha com Link de Agendamento",
+        analytics_meta: {
+          sequence: [
+            { id: "step-1", order: 1, type: "text", text: "Olá! Quer agendar?", triggerMode: "immediate", enabled: true },
+            { id: "step-2", order: 2, type: "text", text: "👉 Show! Clica aqui no link para garantir a sua vaga agora:\n\n{{scheduling_link}}", triggerMode: "after_reply", enabled: true },
+          ],
+          dispatchOptions: {
+            waitForReply: true,
+            evolutionInstanceId: "chip-a-batedor-uuid",
+            handoffEnabled: true,
+            handoffChipId: "chip-b-fechador-uuid",
+            handoffChipIds: ["chip-b-fechador-uuid"],
+            handoffBridgingText: "Passando para nosso consultor!",
+            handoffOpenerText: "Olá {{nome}}, assumindo por aqui!",
+          },
+        },
+      };
+
+      mockDispatchData = {
+        id: "disp-link-1",
+        evolution_instance_id: "chip-a-batedor-uuid",
+        steps: mockCampaignData.analytics_meta.sequence,
+        dispatch_options: mockCampaignData.analytics_meta.dispatchOptions,
+      };
+
+      const campaignMatch = {
+        id: "camp-handoff-link",
+        leadImportItem: {
+          id: "item-lead-link",
+          progress: {
+            waitForReply: true,
+            status: "aguardando_usuario",
+            nextStepIndex: 1,
+            sentSteps: [0],
+            dispatchId: "disp-link-1",
+            leadName: "Roberto",
+          },
+          normalized_data: {
+            nome: "Roberto",
+            telefone: "5534984400049",
+            // Sem scheduling_link propositalmente
+          },
+        },
+      };
+
+      const result = await continueCampaignLeadFromReply({
+        clientId: "tenant-vexo",
+        phone: "5534984400049",
+        campaignMatch,
+        replyPayload: {
+          instance: "chip-batedor",
+          text: "1",
+        },
+        delayMs: 1,
+      });
+
+      expect(result.continued).toBe(true);
+      expect(result.handoff?.executed).toBe(true);
+      expect(result.handoff?.transferredTo).toBe("CHIP FECHADOR");
+    });
   });
 });

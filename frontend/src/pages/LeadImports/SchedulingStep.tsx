@@ -11,6 +11,7 @@ import { InfoTip } from "@/components/InfoTip";
 import { cn } from "@/lib/utils";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { formatSendWindowNotice } from "@/lib/sendWindow";
+import { resolveDispatchChipIds } from "@/lib/campaignDispatchRequest";
 import { RECURRENCE_NO_LIMIT_REASON, type RecurrenceEndType, type RecurrencePattern } from "@/lib/campaignRecurrence";
 import { RecurrencePanel, type RecurrencePanelProps } from "./RecurrencePanel";
 import type { CampaignDispatchOptions } from "@/hooks/useCampanhas";
@@ -222,21 +223,10 @@ export function SchedulingStep({
     return new Set(evolutionInstanceOptions.map((i) => i.id));
   }, [evolutionInstanceOptions]);
 
-  const rawDispatchChipIds = useMemo(() => {
-    if (Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0) {
-      return dispatchOptions.dispatchChipIds;
-    }
-    return dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : [];
-  }, [dispatchOptions.dispatchChipIds, dispatchOptions.evolutionInstanceId]);
-
-  const selectedDispatchChipIds = useMemo(() => {
-    const valid = rawDispatchChipIds.filter((id) => validEvolutionInstanceIds.has(id));
-    if (valid.length === 0 && evolutionInstanceOptions.length > 0) {
-      const def = evolutionInstanceOptions.find((i) => i.isDefault) || evolutionInstanceOptions[0];
-      return def ? [def.id] : [];
-    }
-    return valid;
-  }, [rawDispatchChipIds, validEvolutionInstanceIds, evolutionInstanceOptions]);
+  const selectedDispatchChipIds = useMemo(
+    () => resolveDispatchChipIds(dispatchOptions, evolutionInstanceOptions),
+    [dispatchOptions.dispatchChipIds, dispatchOptions.evolutionInstanceId, evolutionInstanceOptions]
+  );
 
   const selectedDispatchChips = useMemo(() => {
     return evolutionInstanceOptions.filter((i) => selectedDispatchChipIds.includes(i.id));
@@ -245,9 +235,7 @@ export function SchedulingStep({
   const toggleDispatchChipId = (id: string) => {
     if (!validEvolutionInstanceIds.has(id)) return;
     setDispatchOptions((curr) => {
-      const currentList = (Array.isArray(curr.dispatchChipIds) && curr.dispatchChipIds.length > 0
-        ? curr.dispatchChipIds
-        : (curr.evolutionInstanceId ? [curr.evolutionInstanceId] : [])).filter((item) => validEvolutionInstanceIds.has(item));
+      const currentList = resolveDispatchChipIds(curr, evolutionInstanceOptions);
       const exists = currentList.includes(id);
       let nextList = exists ? currentList.filter((item) => item !== id) : [...currentList, id];
       if (nextList.length === 0) {
@@ -408,6 +396,7 @@ export function SchedulingStep({
                     <button
                       key={inst.id}
                       type="button"
+                      aria-pressed={isSelected}
                       onClick={() => toggleDispatchChipId(inst.id)}
                       className={cn(
                         "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none",

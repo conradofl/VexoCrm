@@ -15,6 +15,10 @@ function makeQueryRecorder(rows) {
     filters,
     select: () => builder,
     order: () => builder,
+    limit: (...args) => {
+      filters.push(["limit", ...args]);
+      return builder;
+    },
     not: (...args) => {
       filters.push(["not", ...args]);
       return builder;
@@ -127,6 +131,7 @@ describe("GET /api/lead-import-items — escopo de tenant", () => {
       const itemsQuery = tables.find((t) => t.table === "lead_import_items");
       expect(itemsQuery.builder.filters).toContainEqual(["eq", "client_id", TENANT_A]);
       expect(itemsQuery.builder.filters).toContainEqual(["eq", "import_id", "import-1"]);
+      expect(itemsQuery.builder.filters.some((f) => f[0] === "limit")).toBe(false);
     }
   });
 
@@ -169,6 +174,8 @@ describe("GET /api/lead-import-items — escopo de tenant", () => {
     );
     expect(resSem.body.items).toHaveLength(120);
     expect(resSem.body.page).toBeUndefined();
+    const semLimitFilters = semLimit.tables.find((t) => t.table === "lead_import_items").builder.filters;
+    expect(semLimitFilters).toContainEqual(["limit", 500]);
 
     const comLimit = makeHarness({ rows });
     const resCom = makeRes();

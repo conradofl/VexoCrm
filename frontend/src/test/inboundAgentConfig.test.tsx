@@ -90,6 +90,8 @@ function mockCompanies(companies: any[]) {
     useCreateFupCompany: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useUpdateFupCompany: () => ({ mutateAsync: updateMutateAsync, isPending: false }),
     useArchiveFupCompany: () => ({ mutate: archiveMutate, isPending: false }),
+    useArchivedFupCompanies: () => ({ data: [], isLoading: false }),
+    useDeleteFupCompanyPermanently: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   }));
 }
 
@@ -148,7 +150,7 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
     expect(enableSwitch).toHaveAttribute("aria-checked", "false");
   });
 
-  it("quando o robô global do tenant está desligado, exibe banner honesto com link para Padrões da Empresa", async () => {
+  it("quando o robô global do tenant está desligado, exibe banner honesto de transparência", async () => {
     currentMockClients = [
       {
         id: "sonhare",
@@ -172,12 +174,7 @@ describe("InboundAgentConfig — Passo 1 (Quem é este agente)", () => {
 
     // Banner de aviso visível
     expect(screen.getByText("Atendimento geral da empresa desligado")).toBeTruthy();
-    expect(screen.getByText(/O robô geral da empresa está desligado, mas este agente responderá normalmente por ter chip próprio/)).toBeTruthy();
-
-    const linkButton = screen.getByRole("button", { name: "Padrões da Empresa" });
-    expect(linkButton).toBeTruthy();
-    fireEvent.click(linkButton);
-    expect(mockNavigate).toHaveBeenCalledWith("/crm/padroes-da-empresa");
+    expect(screen.getByText(/Chatbot Global/)).toBeTruthy();
   });
 });
 

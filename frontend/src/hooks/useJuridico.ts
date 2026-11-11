@@ -22,7 +22,9 @@ export interface JuridicoSettings {
 
 export interface EvolutionInstance {
   name: string;
+  technical_name?: string;
   client_id: string;
+  connected?: boolean;
 }
 
 async function authHeaders(getIdToken: () => Promise<string | null>, json = false) {

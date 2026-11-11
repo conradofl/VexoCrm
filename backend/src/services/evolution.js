@@ -2273,9 +2273,15 @@ export async function sendTextMessageViaEvolution({
 
   const effectiveBaseUrl =
     normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     "https://vexo-evolution-api.xdvm8y.easypanel.host";
-  const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_API_TOKEN ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    getEvolutionAdminConfig().apiKey;
 
   if (!apiKey) {
     throw new Error("Chave de autenticação da Evolution não configurada");
@@ -2304,11 +2310,26 @@ export async function sendTextMessageViaEvolution({
     },
   };
 
-  const res = await fetch(endpoint, {
+  let res = await fetch(endpoint, {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   });
+
+  if ((res.status === 401 || res.status === 403) && webhookToken) {
+    const adminKey = getEvolutionAdminConfig().apiKey;
+    if (adminKey && adminKey !== apiKey) {
+      console.warn(`[sendTextMessageViaEvolution] Token da instância retornou HTTP ${res.status}, tentando com master key...`);
+      res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...buildEvolutionAuthHeaders(adminKey),
+        },
+        body: JSON.stringify(payload),
+      });
+    }
+  }
 
   const resText = await res.text();
   if (!res.ok) {
@@ -2505,4 +2526,379 @@ export async function fetchProfilePictureUrlViaEvolution({
     return null;
   }
 }
+
+/**
+ * Cria grupo no WhatsApp via Evolution API.
+ */
+export async function createEvolutionGroup({
+  instanceName,
+  subject,
+  description = "",
+  participants = [],
+  webhookToken = null,
+  baseUrl = null,
+  fetchFn = fetch,
+}) {
+  if (!instanceName) {
+    throw new Error("instanceName é obrigatório para criação de grupo.");
+  }
+  const cleanSubject = String(subject || "").trim().slice(0, 100);
+  if (!cleanSubject) {
+    throw new Error("subject (título do grupo) é obrigatório.");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    process.env.GD_EVOLUTION_API_TOKEN;
+
+  const formattedParticipants = (participants || [])
+    .map((p) => {
+      if (!p) return null;
+      const str = String(p).trim();
+      if (str.includes("@")) return str;
+      let digits = str.replace(/\D/g, "");
+      if (!digits) return null;
+      if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+      return `${digits}@s.whatsapp.net`;
+    })
+    .filter(Boolean);
+
+  const uniqueParticipants = [...new Set(formattedParticipants)];
+  if (uniqueParticipants.length === 0) {
+    throw new Error("Ao menos um participante válido é obrigatório para criar o grupo.");
+  }
+
+  const payload = {
+    subject: cleanSubject,
+    description: description ? String(description).slice(0, 500) : "",
+    participants: uniqueParticipants,
+  };
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const rootUrl = effectiveBaseUrl.replace(/\/+$/, "");
+  let endpoint = `${rootUrl}/group/create/${encodeURIComponent(instanceName)}`;
+
+  let res = await fetchFn(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  // Fallback caso a versão da Evolution API use /group/createGroup
+  if (res.status === 404) {
+    endpoint = `${rootUrl}/group/createGroup/${encodeURIComponent(instanceName)}`;
+    res = await fetchFn(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  }
+
+  const resText = await res.text();
+  let data = null;
+  try {
+    data = resText ? JSON.parse(resText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const errorMsg =
+      data?.response?.message ||
+      data?.message ||
+      (Array.isArray(data?.response) ? data.response.join(", ") : null) ||
+      resText.slice(0, 300);
+    const err = new Error(`Falha ao criar grupo no WhatsApp (HTTP ${res.status}): ${errorMsg}`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  const groupJid =
+    data?.id ||
+    data?.groupId ||
+    data?.groupMetadata?.id ||
+    data?.jid ||
+    data?.group?.id ||
+    null;
+
+  return {
+    success: true,
+    groupJid,
+    data,
+  };
+}
+
+/**
+ * Obtém o código e link de convite de um grupo WhatsApp via Evolution API.
+ */
+export async function getEvolutionGroupInviteCode({
+  instanceName,
+  groupJid,
+  webhookToken = null,
+  baseUrl = null,
+  fetchFn = fetch,
+}) {
+  if (!instanceName || !groupJid) {
+    throw new Error("instanceName e groupJid são obrigatórios para buscar link de convite.");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    process.env.GD_EVOLUTION_API_TOKEN;
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const rootUrl = effectiveBaseUrl.replace(/\/+$/, "");
+  const endpoint = `${rootUrl}/group/inviteCode/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`;
+
+  const res = await fetchFn(endpoint, {
+    method: "GET",
+    headers,
+  });
+
+  const resText = await res.text();
+  let data = null;
+  try {
+    data = resText ? JSON.parse(resText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const errorMsg = data?.response?.message || data?.message || resText.slice(0, 300);
+    const err = new Error(`Falha ao obter link de convite do grupo (HTTP ${res.status}): ${errorMsg}`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  const inviteCode =
+    data?.inviteCode ||
+    data?.code ||
+    data?.invite_code ||
+    (typeof data === "string" ? data : null);
+
+  const inviteUrl =
+    data?.inviteUrl ||
+    data?.link ||
+    (inviteCode ? `https://chat.whatsapp.com/${inviteCode}` : null);
+
+  return {
+    success: true,
+    inviteCode,
+    inviteUrl,
+    data,
+  };
+}
+
+/**
+ * Atualiza a foto de perfil de um grupo no WhatsApp via Evolution API (/group/updateGroupPicture).
+ */
+export async function updateEvolutionGroupPicture({
+  instanceName,
+  groupJid,
+  image,
+  webhookToken = null,
+  baseUrl = null,
+  fetchFn = fetch,
+}) {
+  if (!instanceName || !groupJid || !image) {
+    throw new Error("instanceName, groupJid e image são obrigatórios para atualizar a foto do grupo.");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    process.env.GD_EVOLUTION_API_TOKEN;
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const rootUrl = effectiveBaseUrl.replace(/\/+$/, "");
+  const endpoint = `${rootUrl}/group/updateGroupPicture/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(groupJid)}`;
+
+  const payload = {
+    groupJid,
+    image,
+  };
+
+  let res = await fetchFn(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  // Fallback caso a rota seja PUT em vez de POST
+  if (res.status === 404 || res.status === 405) {
+    res = await fetchFn(endpoint, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  }
+
+  const resText = await res.text();
+  let data = null;
+  try {
+    data = resText ? JSON.parse(resText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const errorMsg = data?.response?.message || data?.message || resText.slice(0, 300);
+    const err = new Error(`Falha ao atualizar foto do grupo no WhatsApp (HTTP ${res.status}): ${errorMsg}`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  return {
+    success: true,
+    groupJid,
+    data,
+  };
+}
+
+/**
+ * Associa um grupo existente como subgrupo de uma Comunidade WhatsApp via Evolution API.
+ */
+export async function linkEvolutionGroupToCommunity({
+  instanceName,
+  communityJid = null,
+  communityName = "GD — Operação Interna",
+  groupJid,
+  webhookToken = null,
+  baseUrl = null,
+  fetchFn = fetch,
+}) {
+  if (!instanceName || !groupJid) {
+    throw new Error("instanceName e groupJid são obrigatórios para vincular grupo à comunidade.");
+  }
+
+  const effectiveBaseUrl =
+    normalizeHttpUrl(baseUrl) ||
+    normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const apiKey =
+    webhookToken ||
+    process.env.EVOLUTION_API_KEY ||
+    process.env.GD_EVOLUTION_TOKEN ||
+    process.env.GD_EVOLUTION_API_TOKEN;
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildEvolutionAuthHeaders(apiKey),
+  };
+
+  const targetCommunity =
+    communityJid ||
+    process.env.GD_COMUNIDADE_INTERNA_JID ||
+    process.env.GD_COMMUNITY_INTERNA_JID ||
+    process.env.GD_COMMUNITY_ID ||
+    communityName ||
+    "GD — Operação Interna";
+
+  const rootUrl = effectiveBaseUrl.replace(/\/+$/, "");
+
+  const payload = {
+    communityJid: targetCommunity,
+    community: targetCommunity,
+    groupJid,
+    subgroups: [groupJid],
+  };
+
+  // 1. Tenta endpoint POST /community/linkGroup/:instance
+  let endpoint = `${rootUrl}/community/linkGroup/${encodeURIComponent(instanceName)}`;
+  let res = await fetchFn(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  // Fallback 1: POST /community/linkSubgroups/:instance
+  if (res.status === 404) {
+    endpoint = `${rootUrl}/community/linkSubgroups/${encodeURIComponent(instanceName)}`;
+    res = await fetchFn(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Fallback 2: POST /community/addSubgroup/:instance
+  if (res.status === 404) {
+    endpoint = `${rootUrl}/community/addSubgroup/${encodeURIComponent(instanceName)}`;
+    res = await fetchFn(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Fallback 3: POST /group/link/:instance
+  if (res.status === 404) {
+    endpoint = `${rootUrl}/group/link/${encodeURIComponent(instanceName)}`;
+    res = await fetchFn(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  }
+
+  const resText = await res.text();
+  let data = null;
+  try {
+    data = resText ? JSON.parse(resText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const errorMsg = data?.response?.message || data?.message || resText.slice(0, 300);
+    const err = new Error(`Falha ao vincular grupo à comunidade WhatsApp (HTTP ${res.status}): ${errorMsg}`);
+    err.status = res.status;
+    err.details = data;
+    throw err;
+  }
+
+  return {
+    success: true,
+    community: targetCommunity,
+    groupJid,
+    data,
+  };
+}
+
 

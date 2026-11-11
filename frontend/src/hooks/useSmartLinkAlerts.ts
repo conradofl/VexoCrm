@@ -5,6 +5,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi, readApiJson } from "@/lib/api";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 
@@ -90,6 +91,7 @@ export function formatPhoneForWhatsApp(phone: string | null | undefined): string
  * Hook global de escuta de cliques em tempo real por tenant.
  */
 export function useSmartLinkAlerts() {
+  const { isAuthenticated, getIdToken } = useAuth();
   const crmContext = useOptionalCrmClient();
   const clientId = crmContext?.selectedClientId || "";
 
@@ -109,6 +111,12 @@ export function useSmartLinkAlerts() {
     queryFn: async () => {
       if (!clientId) return { clicks: [] };
 
+      // A rota exige requireFirebaseAuth: sem o token, cada polling voltava 401.
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuário não autenticado");
+      }
+
       const params = new URLSearchParams({
         clientId,
         limit: "15",
@@ -118,13 +126,15 @@ export function useSmartLinkAlerts() {
         params.set("since", lastSeenTimestampRef.current);
       }
 
-      const res = await fetchApi(`/api/smart-links/live-feed?${params.toString()}`);
+      const res = await fetchApi(`/api/smart-links/live-feed?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) {
         throw new Error(`Erro ao buscar feed de links (${res.status})`);
       }
       return readApiJson<LiveFeedResponse>(res, "smart-links live feed");
     },
-    enabled: Boolean(clientId),
+    enabled: isAuthenticated && Boolean(clientId),
     refetchInterval: 10000, // Polling a cada 10 segundos
     refetchIntervalInBackground: false,
     staleTime: 5000,

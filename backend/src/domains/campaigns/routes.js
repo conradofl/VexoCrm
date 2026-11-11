@@ -502,6 +502,35 @@ export function registerCampaignsRoutes(app, deps) {
 
   setChipQuotaDbPool(pgDatabasePool);
 
+  async function syncMotherCampaignActive(campaignId) {
+    if (!campaignId) return;
+    try {
+      if (pgDatabasePool) {
+        await pgDatabasePool.query(
+          `UPDATE public.campaigns SET status = 'active', archived_at = NULL, updated_at = now() WHERE id = $1 AND status != 'active'`,
+          [campaignId]
+        );
+      } else if (supabase) {
+        const queryBuilder = supabase.from("campaigns");
+        if (typeof queryBuilder?.update === "function") {
+          await queryBuilder
+            .update({
+              status: "active",
+              archived_at: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", campaignId)
+            .neq("status", "active");
+        }
+      }
+    } catch (err) {
+      console.warn("[campaign-dispatch] Falha ao sincronizar status da campanha mãe para active:", {
+        campaignId,
+        error: err?.message || err,
+      });
+    }
+  }
+
   if (pgDatabasePool && process.env.NODE_ENV !== "test") {
     (async () => {
       try {
@@ -3075,11 +3104,13 @@ export function registerCampaignsRoutes(app, deps) {
     const instances = await getLeadClientEvolutionInstances(clientId);
     const instance = instances.find((item) => item.id === instanceId);
     if (!instance) {
-      sendError(res, 400, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found for this tenant");
+      console.warn("[campaign-dispatch] chip recusado: nao existe nesta empresa", { clientId, evolutionInstanceId: instanceId });
+      sendError(res, 400, "EVOLUTION_INSTANCE_NOT_FOUND", "Evolution instance not found for this tenant", { evolutionInstanceId: instanceId });
       return false;
     }
     if (instance.active === false) {
-      sendError(res, 400, "EVOLUTION_INSTANCE_INACTIVE", "Evolution instance is inactive");
+      console.warn("[campaign-dispatch] chip recusado: inativo", { clientId, evolutionInstanceId: instanceId });
+      sendError(res, 400, "EVOLUTION_INSTANCE_INACTIVE", "Evolution instance is inactive", { evolutionInstanceId: instanceId });
       return false;
     }
 
@@ -3582,6 +3613,128 @@ export function registerCampaignsRoutes(app, deps) {
             : [])
     ).filter(Boolean);
 
+    const attemptChipAutoHealing = async (configuredIds) => {
+      if (!Array.isArray(activeInstances) || activeInstances.length === 0) {
+        return null;
+      }
+
+      const configuredIdsSet = new Set((configuredIds || []).map(String));
+      const candidateNames = [
+        ...tenantInstances
+          .filter((inst) => configuredIdsSet.has(String(inst.id)) || String(inst.id) === String(dispatchEvolutionInstanceId))
+          .map((inst) => inst.name),
+        ...(Array.isArray(dispatchCampaignMeta.dispatchOptions?.dispatchChipNames)
+          ? dispatchCampaignMeta.dispatchOptions.dispatchChipNames
+          : []),
+        dispatchCampaignMeta.dispatchOptions?.chipName,
+        dispatchCampaignMeta.dispatchOptions?.chip_name,
+        dispatchCampaignMeta.dispatchOptions?.evolutionInstanceName,
+        dispatchCampaignMeta.dispatchOptions?.evolution_instance_name,
+        ...(Array.isArray(dispatch.dispatch_options?.dispatchChipNames)
+          ? dispatch.dispatch_options.dispatchChipNames
+          : []),
+        dispatch.dispatch_options?.chipName,
+        dispatch.dispatch_options?.chip_name,
+        dispatch.dispatch_options?.evolutionInstanceName,
+        dispatch.dispatch_options?.evolution_instance_name,
+        dispatch.evolution_instance_name,
+        campaign.evolution_instance_name,
+      ]
+        .filter(Boolean)
+        .map((n) => String(n).trim());
+
+      let recoveredInstance = null;
+      // Passo A (Casamento por Nome): Busque nas instâncias ativas se alguma possui o mesmo name amigável
+      if (candidateNames.length > 0) {
+        recoveredInstance = activeInstances.find(
+          (inst) =>
+            inst.name &&
+            candidateNames.some(
+              (cName) => cName.toLowerCase() === String(inst.name).trim().toLowerCase()
+            )
+        );
+      }
+
+      // Passo B (Fallback para Chip Padrão): Se não encontrar por nome, seleciona o chip padrão ou primeiro ativo conectado
+      if (!recoveredInstance) {
+        const openInstances = activeInstances.filter(
+          (inst) => (inst.connection_state || "").toLowerCase() === "open"
+        );
+        if (openInstances.length > 0) {
+          recoveredInstance = openInstances.find((inst) => inst.is_default === true) || openInstances[0];
+        } else if (activeInstances.length > 0) {
+          recoveredInstance = activeInstances.find((inst) => inst.is_default === true) || activeInstances[0];
+        }
+      }
+
+      if (!recoveredInstance) {
+        return null;
+      }
+
+      console.log(`[campaign-dispatch] AUTO-HEALING: Chip remapeado com sucesso para "${recoveredInstance.name}" (${recoveredInstance.id})`);
+
+      const updatedDispatchOptions = {
+        ...(dispatch.dispatch_options || {}),
+        dispatchChipIds: [recoveredInstance.id],
+      };
+      const updatedCampaignMeta = {
+        ...(campaign.analytics_meta || {}),
+      };
+      updatedCampaignMeta.dispatchOptions = {
+        ...(updatedCampaignMeta.dispatchOptions || {}),
+        dispatchChipIds: [recoveredInstance.id],
+      };
+
+      dispatch.evolution_instance_id = recoveredInstance.id;
+      dispatch.dispatch_options = updatedDispatchOptions;
+      campaign.analytics_meta = updatedCampaignMeta;
+      if (dispatchCampaignMeta?.dispatchOptions) {
+        dispatchCampaignMeta.dispatchOptions.dispatchChipIds = [recoveredInstance.id];
+        dispatchCampaignMeta.dispatchOptions.evolutionInstanceId = recoveredInstance.id;
+      }
+
+      try {
+        if (pgDatabasePool) {
+          await pgDatabasePool.query(
+            `UPDATE public.campaign_dispatches
+             SET evolution_instance_id = $1,
+                 dispatch_options = $2::jsonb,
+                 updated_at = now()
+             WHERE id = $3`,
+            [recoveredInstance.id, JSON.stringify(updatedDispatchOptions), dispatchId]
+          );
+          await pgDatabasePool.query(
+            `UPDATE public.campaigns
+             SET analytics_meta = $1::jsonb,
+                 updated_at = now()
+             WHERE id = $2`,
+            [JSON.stringify(updatedCampaignMeta), campaign.id]
+          );
+        }
+        if (db) {
+          await db
+            .from("campaign_dispatches")
+            .update({
+              evolution_instance_id: recoveredInstance.id,
+              dispatch_options: updatedDispatchOptions,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", dispatchId);
+          await db
+            .from("campaigns")
+            .update({
+              analytics_meta: updatedCampaignMeta,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", campaign.id);
+        }
+      } catch (persistErr) {
+        console.error("[campaign-dispatch] AUTO-HEALING: Erro ao persistir remapeamento no banco:", persistErr);
+      }
+
+      return recoveredInstance;
+    };
+
     if (configuredChipIds.length > 0) {
       const matched = configuredChipIds
         .map((id) =>
@@ -3597,18 +3750,23 @@ export function registerCampaignsRoutes(app, deps) {
       if (matched.length > 0) {
         targetInstances = matched;
       } else {
-        const pauseMsg = "Pausado — nenhum dos chips configurados para disparo está conectado. Reconecte os chips em Conexões para retomar.";
-        console.warn("[campaign-dispatch] Nenhum chip configurado ativo para este cliente:", {
-          clientId,
-          dispatchId,
-          configuredChipIds,
-        });
-        await db.from("campaign_dispatches").update({
-          status: "paused",
-          error_message: pauseMsg,
-          updated_at: new Date().toISOString(),
-        }).eq("id", dispatchId);
-        return;
+        const recovered = await attemptChipAutoHealing(configuredChipIds);
+        if (recovered) {
+          targetInstances = [recovered];
+        } else {
+          const pauseMsg = "Pausado — nenhum dos chips configurados para disparo está conectado. Reconecte os chips em Conexões para retomar.";
+          console.warn("[campaign-dispatch] Nenhum chip configurado ativo para este cliente:", {
+            clientId,
+            dispatchId,
+            configuredChipIds,
+          });
+          await db.from("campaign_dispatches").update({
+            status: "paused",
+            error_message: pauseMsg,
+            updated_at: new Date().toISOString(),
+          }).eq("id", dispatchId);
+          return;
+        }
       }
     } else if (dispatchEvolutionInstanceId) {
       const matched = activeInstances.filter(
@@ -3621,51 +3779,56 @@ export function registerCampaignsRoutes(app, deps) {
       if (matched.length > 0) {
         targetInstances = matched;
       } else {
-        // ID configurado não encontrado nas instâncias ativas do tenant
-        if (activeInstances.length === 0) {
-          const pauseMsg = "Pausado — nenhum chip conectado para este cliente. Conecte um chip em Conexões para retomar.";
-          console.warn("[campaign-dispatch] Nenhum chip conectado para este cliente:", {
+        const recovered = await attemptChipAutoHealing([dispatchEvolutionInstanceId]);
+        if (recovered) {
+          targetInstances = [recovered];
+        } else {
+          // ID configurado não encontrado nas instâncias ativas do tenant
+          if (activeInstances.length === 0) {
+            const pauseMsg = "Pausado — nenhum chip conectado para este cliente. Conecte um chip em Conexões para retomar.";
+            console.warn("[campaign-dispatch] Nenhum chip conectado para este cliente:", {
+              clientId,
+              dispatchId,
+              configuredInstanceId: dispatchEvolutionInstanceId,
+            });
+            await db.from("campaign_dispatches").update({
+              status: "paused",
+              error_message: pauseMsg,
+              updated_at: new Date().toISOString(),
+            }).eq("id", dispatchId);
+            return;
+          }
+
+          if (activeInstances.length > 1) {
+            // Mais de um chip ativo: NÃO escolhe sozinho! Pausa o lote e pede a escolha ao usuário.
+            const pauseMsg = `Pausado — chip configurado não encontrado e existem múltiplos chips ativos (${activeInstances.length}). Selecione o chip desejado na campanha para retomar.`;
+            console.warn("[campaign-dispatch] AVISO: Chip configurado não encontrado e existem múltiplos chips ativos. Pausando lote:", {
+              clientId,
+              dispatchId,
+              configuredInstanceId: dispatchEvolutionInstanceId,
+              activeChips: activeInstances.map((i) => ({ id: i.id, name: i.name })),
+            });
+            await db.from("campaign_dispatches").update({
+              status: "paused",
+              error_message: pauseMsg,
+              updated_at: new Date().toISOString(),
+            }).eq("id", dispatchId);
+            return;
+          }
+
+          // Exatamente 1 chip ativo: fallback com log explícito e aviso visível na tela
+          const singleChip = activeInstances[0];
+          const singleChipName = singleChip.name || singleChip.id;
+          chipMismatchWarning = `Chip configurado não encontrado. Enviando por ${singleChipName}.`;
+          console.warn("[campaign-dispatch] AVISO: Chip configurado não encontrado, utilizando o único chip ativo do tenant:", {
             clientId,
             dispatchId,
             configuredInstanceId: dispatchEvolutionInstanceId,
+            usedInstanceId: singleChip.id,
+            usedInstanceName: singleChipName,
           });
-          await db.from("campaign_dispatches").update({
-            status: "paused",
-            error_message: pauseMsg,
-            updated_at: new Date().toISOString(),
-          }).eq("id", dispatchId);
-          return;
+          targetInstances = [singleChip];
         }
-
-        if (activeInstances.length > 1) {
-          // Mais de um chip ativo: NÃO escolhe sozinho! Pausa o lote e pede a escolha ao usuário.
-          const pauseMsg = `Pausado — chip configurado não encontrado e existem múltiplos chips ativos (${activeInstances.length}). Selecione o chip desejado na campanha para retomar.`;
-          console.warn("[campaign-dispatch] AVISO: Chip configurado não encontrado e existem múltiplos chips ativos. Pausando lote:", {
-            clientId,
-            dispatchId,
-            configuredInstanceId: dispatchEvolutionInstanceId,
-            activeChips: activeInstances.map((i) => ({ id: i.id, name: i.name })),
-          });
-          await db.from("campaign_dispatches").update({
-            status: "paused",
-            error_message: pauseMsg,
-            updated_at: new Date().toISOString(),
-          }).eq("id", dispatchId);
-          return;
-        }
-
-        // Exatamente 1 chip ativo: fallback com log explícito e aviso visível na tela
-        const singleChip = activeInstances[0];
-        const singleChipName = singleChip.name || singleChip.id;
-        chipMismatchWarning = `Chip configurado não encontrado. Enviando por ${singleChipName}.`;
-        console.warn("[campaign-dispatch] AVISO: Chip configurado não encontrado, utilizando o único chip ativo do tenant:", {
-          clientId,
-          dispatchId,
-          configuredInstanceId: dispatchEvolutionInstanceId,
-          usedInstanceId: singleChip.id,
-          usedInstanceName: singleChipName,
-        });
-        targetInstances = [singleChip];
       }
     } else {
       targetInstances = activeInstances;
@@ -4496,6 +4659,16 @@ export function registerCampaignsRoutes(app, deps) {
             SUM(
               GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
             ) FILTER (WHERE d.status NOT IN ('done','cancelled'))::int AS leads_pending,
+            -- So o que vai rodar sem clique, com o MESMO criterio do agendador:
+            -- running, scheduled e paused com marcador de janela/cota. Draft,
+            -- failed e interrupted ficam fora — a estimativa nao promete termino
+            -- para campanha parada esperando alguem.
+            SUM(
+              GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
+            ) FILTER (
+              WHERE d.status IN ('running','scheduled')
+                 OR (d.status = 'paused' AND (d.error_message ILIKE '%fora da janela de envio%' OR d.error_message ILIKE '%' || $5::text || '%'))
+            )::int AS leads_will_run,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($2::text[]))::int AS leads_pause_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($3::text[]))::int AS leads_resume_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($4::text[]))::int AS leads_cancel_target,
@@ -4508,7 +4681,7 @@ export function registerCampaignsRoutes(app, deps) {
           WHERE d.client_id = $1
           GROUP BY d.campaign_id, c.name, c.archived_at
         `,
-        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES]
+        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES, QUOTA_PAUSE_MARKER]
       );
 
       const active = [];
@@ -4542,33 +4715,53 @@ export function registerCampaignsRoutes(app, deps) {
 
       // Consulta 2 de 3: quantos leads já responderam, por campanha — uma
       // consulta agrupada com todos os campaign_id de uma vez.
+      // Proteção contra inanição de pool: statement_timeout = 3000 (3s) e fallback seguro devolvendo 0 respostas.
       const campaignIds = grouped.map((r) => r.campaign_id);
       let repliedMap = {};
       if (campaignIds.length > 0) {
         const canonicalPhoneMatch = `(lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})`;
         const lmTimestamp = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
-        const { rows: repliedRows } = await pgDatabasePool.query(
-          `
-            SELECT r.campaign_id, COUNT(DISTINCT r.phone)::int AS replied_count
-            FROM public.campaign_dispatch_runs r
-            WHERE r.client_id = $1
-              AND r.campaign_id = ANY($2::uuid[])
-              AND r.status = 'sent'
-              AND r.phone <> ''
-              AND r.sent_at IS NOT NULL
-              AND EXISTS (
-                SELECT 1 FROM public.lead_messages lm
-                WHERE lm.client_id = r.client_id
-                  AND ${canonicalPhoneMatch}
-                  AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-                  AND ${lmTimestamp} > r.sent_at
-                  AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-              )
-            GROUP BY r.campaign_id
-          `,
-          [authorizedClientId, campaignIds]
-        );
-        repliedMap = Object.fromEntries(repliedRows.map((r) => [r.campaign_id, r.replied_count]));
+        const repliedSql = `
+          SELECT r.campaign_id, COUNT(DISTINCT r.phone)::int AS replied_count
+          FROM public.campaign_dispatch_runs r
+          WHERE r.client_id = $1
+            AND r.campaign_id = ANY($2::uuid[])
+            AND r.status = 'sent'
+            AND r.phone <> ''
+            AND r.sent_at IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM public.lead_messages lm
+              WHERE lm.client_id = r.client_id
+                AND ${canonicalPhoneMatch}
+                AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+                AND ${lmTimestamp} > r.sent_at
+                AND ${lmTimestamp} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+            )
+          GROUP BY r.campaign_id
+        `;
+        try {
+          if (typeof pgDatabasePool.connect === "function") {
+            const client = await pgDatabasePool.connect();
+            try {
+              await client.query("SET statement_timeout = 3000");
+              const { rows: repliedRows } = await client.query(repliedSql, [authorizedClientId, campaignIds]);
+              await client.query("RESET statement_timeout").catch(() => {});
+              repliedMap = Object.fromEntries(repliedRows.map((r) => [r.campaign_id, r.replied_count]));
+            } finally {
+              client.release();
+            }
+          } else {
+            const queryPromise = pgDatabasePool.query(repliedSql, [authorizedClientId, campaignIds]);
+            const { rows: repliedRows } = await Promise.race([
+              queryPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Query statement_timeout 3000ms exceeded")), 3000)),
+            ]);
+            repliedMap = Object.fromEntries(repliedRows.map((r) => [r.campaign_id, r.replied_count]));
+          }
+        } catch (timeoutErr) {
+          console.warn("[dispatch-summary] Falha ou timeout (3000ms) ao consultar replied_count cruzado (fallback seguro 0 respostas):", timeoutErr?.message || timeoutErr);
+          repliedMap = {};
+        }
       }
 
       // Consulta 3 de 3: os quadrados (um por lote), só das campanhas desta
@@ -4603,7 +4796,7 @@ export function registerCampaignsRoutes(app, deps) {
         const status = isArchived ? "arquivada" : aggregateDispatchStatus(row.statuses);
         const statusLabel = isArchived ? "Na Lixeira" : (AGGREGATE_STATUS_LABELS[status] || null);
         const eta = isArchived ? null : estimateDispatchCompletion({
-          pendingLeads: row.leads_pending,
+          pendingLeads: row.leads_will_run,
           dailyLimit,
           sentToday,
           windowDays: sendWindowConfig.days,
@@ -4776,6 +4969,10 @@ export function registerCampaignsRoutes(app, deps) {
           "NO_DISPATCHES_RESUMED",
           "Nenhum lote elegível para retomada (pausado, interrompido ou com falha) foi encontrado."
         );
+      }
+
+      if (action === "resume" && rows.length > 0) {
+        await syncMotherCampaignActive(campaignId);
       }
 
       res.json({
@@ -5477,6 +5674,8 @@ export function registerCampaignsRoutes(app, deps) {
         })
         .eq("id", dispatchId);
 
+      await syncMotherCampaignActive(dispatch.campaign_id);
+
       res.json({
         success: true,
         message: `${retriedCount} lead(s) com falha liberado(s) para reenvio.`,
@@ -5595,6 +5794,8 @@ export function registerCampaignsRoutes(app, deps) {
       if (claimErr || !claimed || claimed.length === 0) {
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
+
+      await syncMotherCampaignActive(dispatch.campaign_id);
 
       res.json({
         success: true,
@@ -5885,17 +6086,23 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (importError) throw importError;
 
-      const newImportItems = originalItems.map((item, index) => ({
-        import_id: importRecord.id,
-        client_id: clientId,
-        row_number: index + 2,
-        telefone: item.telefone,
-        lead_id: item.lead_id || null,
-        imported: item.imported,
-        skip_reason: item.skip_reason,
-        raw_data: item.raw_data,
-        normalized_data: item.normalized_data,
-      }));
+      const newImportItems = originalItems.map((item, index) => {
+        const cleanNormalized = { ...(item.normalized_data || {}) };
+        delete cleanNormalized.progress;
+        delete cleanNormalized.campaign_progress;
+        delete cleanNormalized.status_conversa;
+        return {
+          import_id: importRecord.id,
+          client_id: clientId,
+          row_number: index + 2,
+          telefone: item.telefone,
+          lead_id: item.lead_id || null,
+          imported: item.imported,
+          skip_reason: item.skip_reason,
+          raw_data: item.raw_data,
+          normalized_data: cleanNormalized,
+        };
+      });
 
       const { error: insertItemsError } = await supabase
         .from("lead_import_items").insert(newImportItems);
@@ -5923,11 +6130,24 @@ export function registerCampaignsRoutes(app, deps) {
     }
     try {
       if (pgDatabasePool) {
-        // 1. Remove os runs de campanha associados a esses itens (tanto por lead_import_item_id quanto lead_id)
+        // 1. Remove os runs de campanha associados a esses itens (tanto por lead_import_item_id, lead_id quanto por telefone)
         await pgDatabasePool.query(
           `DELETE FROM public.campaign_dispatch_runs
             WHERE client_id = $1
-              AND (lead_import_item_id = ANY($2::uuid[]) OR lead_id = ANY($2::uuid[]))`,
+              AND (
+                lead_import_item_id = ANY($2::uuid[])
+                OR lead_id = ANY($2::uuid[])
+                OR phone IN (
+                  SELECT regexp_replace(telefone, '\\D', '', 'g')
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+                OR phone IN (
+                  SELECT telefone
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+              )`,
           [clientId, leadImportItemIds]
         );
         // 2. Remove os itens da planilha
@@ -5965,18 +6185,33 @@ export function registerCampaignsRoutes(app, deps) {
     }
     try {
       if (pgDatabasePool) {
-        // 1. Remove os registros de disparo (runs) para que esses contatos voltem a ser elegíveis
+        // 1. Remove os registros de disparo (runs) por item, lead e telefone via subquery atômica
         await pgDatabasePool.query(
           `DELETE FROM public.campaign_dispatch_runs
             WHERE client_id = $1
-              AND (lead_import_item_id = ANY($2::uuid[]) OR lead_id = ANY($2::uuid[]))`,
+              AND (
+                lead_import_item_id = ANY($2::uuid[])
+                OR lead_id = ANY($2::uuid[])
+                OR phone IN (
+                  SELECT regexp_replace(telefone, '\\D', '', 'g')
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+                OR phone IN (
+                  SELECT telefone
+                    FROM public.lead_import_items
+                   WHERE id = ANY($2::uuid[]) AND client_id = $1
+                )
+              )`,
           [clientId, leadImportItemIds]
         );
-        // 2. Limpa o progresso de régua/campanha no JSON de dados normalizados
+        // 2. Limpa o progresso de régua/campanha (tanto progress quanto campaign_progress) no JSON de dados normalizados
         await pgDatabasePool.query(
           `UPDATE public.lead_import_items
-              SET normalized_data = COALESCE(normalized_data, '{}'::jsonb) - 'progress' - 'status_conversa',
-                  status_conversa = NULL
+              SET normalized_data = COALESCE(normalized_data, '{}'::jsonb) - 'progress' - 'campaign_progress' - 'status_conversa',
+                  status_conversa = NULL,
+                  ultima_interacao_bot = NULL,
+                  ultima_interacao_usuario = NULL
             WHERE client_id = $1
               AND id = ANY($2::uuid[])`,
           [clientId, leadImportItemIds]
@@ -6378,6 +6613,9 @@ export function registerCampaignsRoutes(app, deps) {
       }
       if (error) throw error;
       if (!data) return sendError(res, 404, "DISPATCH_NOT_FOUND", "Dispatch not found");
+      if (patch.status === "scheduled") {
+        await syncMotherCampaignActive(existing.campaign_id);
+      }
       res.json({ dispatch: data });
     } catch (err) {
       sendError(res, 500, "DISPATCH_UPDATE_FAILED", err instanceof Error ? err.message : "Failed");
@@ -6475,6 +6713,8 @@ export function registerCampaignsRoutes(app, deps) {
       if (!claimedManual || claimedManual.length === 0) {
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
+
+      await syncMotherCampaignActive(dispatch.campaign_id);
 
       // Propagação em cascata dos lotes subsequentes da mesma campanha
       if (pgDatabasePool) {

@@ -170,7 +170,9 @@ export function resolveCampaignImportSelectionStrict(campaign) {
   if (selection === "__crm__" || selection === "__all__") return selection;
   if (Array.isArray(selection) && selection.length > 0) return selection;
   if (typeof selection === "string" && selection.trim() !== "") return selection;
-  if (hasBancoAudienceCriteria(campaign)) return null; // ausencia: quem chamou precisa recusar
+  // Ausência: quem chamou precisa recusar (CAMPAIGN_WITHOUT_SOURCE). Devolver "__crm__" aqui só fazia a trava passar:
+  // o executor monta o lote com resolveCampaignImportSelection, que devolve null, e null lê todas as planilhas.
+  if (hasBancoAudienceCriteria(campaign)) return null;
   return "__all__";
 }
 
@@ -1512,11 +1514,28 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const matchedImportItem = resolveMatchedImportItemForCampaign(importItems, campaign);
 
       const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
-      const hasProgress = progress && Object.keys(progress).length > 0;
+      const hasProgress = Boolean(progress && Object.keys(progress).length > 0);
+
+      const stepPlan = getCampaignStepPlan(analyticsMeta || {});
+      const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
+      const isWaitForReply =
+        analyticsMeta.dispatchOptions?.waitForReply === true ||
+        hasAfterReplySteps ||
+        progress?.waitForReply === true;
+
+      const nextStepIdx = normalizeCampaignPendingStepIndex(progress?.nextStepIndex);
+      const steps = stepPlan.enabledSteps || [];
+      const hasStepsRemaining = nextStepIdx !== null && nextStepIdx < steps.length;
+      const isStatusWaiting =
+        progress?.status === "aguardando_usuario" ||
+        progress?.status === "pendente" ||
+        progress?.status === "aguardando_resposta" ||
+        progress?.status === "enviando_proximas_etapas";
+
       const hasPendingProgress =
-        progress &&
-        progress.waitForReply === true &&
-        progress.status === "aguardando_usuario";
+        hasProgress &&
+        hasStepsRemaining &&
+        (isStatusWaiting || hasStepsRemaining);
 
       // A.1: Casamento direto por progresso como fonte primária
       const matchedByProgress = Boolean(hasProgress);
@@ -1542,7 +1561,7 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         status: campaign.status || null,
         scheduledFor: campaign.scheduled_for || null,
         lastTriggeredAt: campaign.last_triggered_at || null,
-        waitForReply: analyticsMeta.dispatchOptions?.waitForReply === true,
+        waitForReply: isWaitForReply,
         hasPendingProgress,
         analyticsMeta,
         isInActivePeriod,
@@ -1576,11 +1595,21 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
     })
     .filter(Boolean)
     .sort((left, right) => {
-      // Campanhas em período ativo têm prioridade
-      if (left.isInActivePeriod !== right.isInActivePeriod) return left.isInActivePeriod ? -1 : 1;
+      // 1. Quem tem progresso pendente REAL (aguardando resposta para enviar próximo passo) TEM PRIORIDADE MÁXIMA!
       const leftPending = left.hasPendingProgress ? 0 : 1;
       const rightPending = right.hasPendingProgress ? 0 : 1;
       if (leftPending !== rightPending) return leftPending - rightPending;
+
+      // Se ambos tiverem progresso pendente, a campanha com atualização/envio mais recente vence:
+      if (left.hasPendingProgress && right.hasPendingProgress) {
+        const leftUpdated = toComparableCampaignTimestamp(left.leadImportItem?.progress?.updatedAt || left.lastTriggeredAt);
+        const rightUpdated = toComparableCampaignTimestamp(right.leadImportItem?.progress?.updatedAt || right.lastTriggeredAt);
+        if (leftUpdated !== rightUpdated) return rightUpdated.localeCompare(leftUpdated);
+      }
+
+      // 2. Campanhas em período ativo vêm depois
+      if (left.isInActivePeriod !== right.isInActivePeriod) return left.isInActivePeriod ? -1 : 1;
+
       const leftScore = left.status === "processing" ? 0 : left.waitForReply ? 1 : 2;
       const rightScore = right.status === "processing" ? 0 : right.waitForReply ? 1 : 2;
       if (leftScore !== rightScore) return leftScore - rightScore;
@@ -1589,8 +1618,8 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       return rightDate.localeCompare(leftDate);
     });
 
-  const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply);
-  const processingWaitForReplyMatches = waitForReplyMatches.filter((campaign) => campaign.hasPendingProgress === true);
+  const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply || campaign.hasPendingProgress);
+  const processingWaitForReplyMatches = matches.filter((campaign) => campaign.hasPendingProgress === true);
 
   // Campanha com período ativo que contém este telefone — define qual prompt usar
   const activePeriodCampaign = matches.find((c) => c.isInActivePeriod) || null;
@@ -2225,9 +2254,35 @@ export async function executeCampaignChipHandoff({
   };
 }
 
+// Trava atômica em memória para impedir que webhooks concorrentes disparem o mesmo passo duplicado
+const replyDispatchLocks = new Map();
+const REPLY_DISPATCH_LOCK_TTL_MS = 10_000;
+
 export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch, replyPayload = {} }) {
   if (!supabase || !clientId || !phone || !campaignMatch?.id) {
     return { continued: false, reason: "missing_context" };
+  }
+
+  // Trava de concorrência por lead e campanha
+  const sanitizedPhone = String(phone).replace(/\D/g, "");
+  const lockKey = `${clientId}:${campaignMatch.id}:${sanitizedPhone}`;
+  const nowMs = Date.now();
+  const existingLockTime = replyDispatchLocks.get(lockKey);
+  if (existingLockTime && nowMs - existingLockTime < REPLY_DISPATCH_LOCK_TTL_MS) {
+    console.warn("[continueCampaignLeadFromReply] Concorrência bloqueada: lead já está processando avanço de passo", {
+      clientId,
+      campaignId: campaignMatch.id,
+      phone: maskPhoneForLog(phone),
+      elapsedMs: nowMs - existingLockTime,
+    });
+    return { continued: false, reason: "concurrent_reply_in_progress" };
+  }
+  replyDispatchLocks.set(lockKey, nowMs);
+
+  if (replyDispatchLocks.size > 1000) {
+    for (const [k, ts] of replyDispatchLocks.entries()) {
+      if (nowMs - ts > 60_000) replyDispatchLocks.delete(k);
+    }
   }
 
   let { data: campaign, error: fetchError } = await supabase
@@ -2246,16 +2301,57 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     fetchError = fallback.error;
   }
 
-  if (fetchError) throw fetchError;
-  if (!campaign) return { continued: false, reason: "campaign_not_found" };
+  if (fetchError) {
+    replyDispatchLocks.delete(lockKey);
+    throw fetchError;
+  }
+  if (!campaign) {
+    replyDispatchLocks.delete(lockKey);
+    return { continued: false, reason: "campaign_not_found" };
+  }
+
+  // Trava de campanha pausada: interrompe imediatamente
+  const isPaused =
+    campaign.status === "pausada" ||
+    String(campaign.status || "").toLowerCase() === "pausada" ||
+    campaignMatch?.status === "pausada" ||
+    String(campaignMatch?.status || "").toLowerCase() === "pausada";
+
+  if (isPaused) {
+    replyDispatchLocks.delete(lockKey);
+    console.log("[continueCampaignLeadFromReply] Campanha pausada — interrompendo avanço de lead:", {
+      clientId,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      status: campaign.status,
+    });
+    return { continued: false, reason: "campaign_paused" };
+  }
 
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
   const nextIdxBase = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
+  const matchStepPlan = getCampaignStepPlan(campaignMatch.analyticsMeta || {});
+  const matchSteps = matchStepPlan.enabledSteps || [];
+  const hasStepsRemaining = nextIdxBase !== null && nextIdxBase < matchSteps.length;
+
+  const isStatusWaiting =
+    progress.status === "aguardando_usuario" ||
+    progress.status === "pendente" ||
+    progress.status === "aguardando_resposta" ||
+    progress.status === "enviando_proximas_etapas" ||
+    !progress.status;
+  const isWaitForReply =
+    progress.waitForReply === true ||
+    progress.waitForReply === "true" ||
+    campaignMatch.waitForReply === true ||
+    hasStepsRemaining ||
+    (campaignMatch.analyticsMeta?.sequence && campaignMatch.analyticsMeta.sequence.some((s) => s.enabled && s.triggerMode === "after_reply"));
+
   const hasPendingProgress =
-    progress &&
-    progress.waitForReply === true &&
-    progress.status === "aguardando_usuario" &&
+    Boolean(progress) &&
+    (isWaitForReply || hasStepsRemaining) &&
+    (isStatusWaiting || hasStepsRemaining) &&
     nextIdxBase !== null;
 
   if (!hasPendingProgress) {
@@ -2321,7 +2417,9 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const stepPlan = getCampaignStepPlan(effectiveMeta);
   const analyticsMeta = stepPlan.analyticsMeta;
   const steps = stepPlan.enabledSteps;
-  if (!stepPlan.shouldUseReplyFlow) {
+  const replySteps = stepPlan.replySteps || [];
+  const shouldUseReplyFlow = stepPlan.shouldUseReplyFlow || replySteps.length > 0;
+  if (!shouldUseReplyFlow) {
     return { continued: false, reason: "campaign_not_waiting_reply" };
   }
 
@@ -2493,9 +2591,15 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   });
 
   const lead = {
+    ...(leadImportItem?.normalized_data || {}),
+    ...(leadImportItem || {}),
     id: leadImportItem?.id || null,
     telefone: phone,
-    nome: normalizeString(progress.leadName) || normalizeString(leadImportItem?.nome) || "cliente",
+    phone,
+    nome: normalizeString(progress.leadName) || normalizeString(leadImportItem?.nome) || normalizeString(leadImportItem?.normalized_data?.nome) || "cliente",
+    normalized_data: {
+      ...(leadImportItem?.normalized_data || {}),
+    },
   };
 
   const remainingReplyEntries = steps
@@ -2505,6 +2609,135 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const finalStepEntry = remainingReplyEntries[remainingReplyEntries.length - 1] || null;
   const finalStep = finalStepEntry?.step || null;
   const finalStepIndex = finalStepEntry?.index ?? nextStepIndex;
+
+  const sequenceRequiresSchedulingLink = remainingSteps.some((step) => {
+    const texts = [
+      step.text,
+      step.message,
+      step.caption,
+      step.linkUrl,
+      step.url,
+      ...(Array.isArray(step.textVariants) ? step.textVariants : []),
+    ].filter(Boolean);
+    return texts.some((t) => /\{\{\s*(?:scheduling_link|schedulinglink|link|agendamento)\s*\}\}/i.test(t)) || Boolean(step.linkUrl || step.url);
+  });
+
+  let currentSchedulingLink =
+    normalizeString(lead.scheduling_link) ||
+    normalizeString(lead.normalized_data?.scheduling_link) ||
+    normalizeString(lead.link) ||
+    normalizeString(lead.normalized_data?.link);
+
+  if (currentSchedulingLink && (currentSchedulingLink.includes("{{") || currentSchedulingLink.includes("}}"))) {
+    currentSchedulingLink = "";
+  }
+
+  if ((sequenceRequiresSchedulingLink || !currentSchedulingLink) && !currentSchedulingLink) {
+    let resolvedSchedulingLink = null;
+
+    // 1. Buscar link ativo em crm_consultant_schedules para o clientId
+    if (pgDatabasePool) {
+      try {
+        const consultantRes = await pgDatabasePool.query(
+          "SELECT scheduling_link FROM public.crm_consultant_schedules WHERE client_id = $1 AND active = true ORDER BY name ASC",
+          [clientId]
+        );
+        const activeConsultantLinks = (consultantRes?.rows || [])
+          .map((r) => r.scheduling_link)
+          .filter((link) => Boolean(normalizeString(link)) && !link.includes("{{"));
+
+        if (activeConsultantLinks.length > 0) {
+          resolvedSchedulingLink = activeConsultantLinks[0];
+        }
+      } catch (dbErr) {
+        console.warn("[campaign-dispatch] Erro ao buscar agenda de consultores na continuação:", dbErr?.message || dbErr);
+      }
+    }
+
+    // 2. Se não houver consultores cadastrados, usar fallback inteligente:
+    // a) Link da campanha ou de algum step (DESDE QUE não seja um placeholder cru como {{scheduling_link}})
+    if (!resolvedSchedulingLink) {
+      const rawCampaignLink =
+        normalizeString(campaign.link) ||
+        normalizeString(campaign.link_url) ||
+        normalizeString(campaign.linkUrl) ||
+        normalizeString(campaign.analytics_meta?.link) ||
+        normalizeString(campaign.analytics_meta?.linkUrl) ||
+        normalizeString(effectiveMeta?.link) ||
+        normalizeString(effectiveMeta?.linkUrl);
+      if (rawCampaignLink && !rawCampaignLink.includes("{{")) {
+        resolvedSchedulingLink = rawCampaignLink;
+      } else {
+        const stepLink = remainingSteps
+          .map((s) => s.linkUrl || s.url)
+          .find((l) => Boolean(normalizeString(l)) && !l.includes("{{"));
+        if (stepLink) {
+          resolvedSchedulingLink = stepLink;
+        }
+      }
+    }
+
+    // b) Link do WhatsApp do chip de fechamento (handoffChipId / chipB) (https://wa.me/...)
+    if (!resolvedSchedulingLink) {
+      const analyticsMetaObj = campaign.analytics_meta || campaign.analyticsMeta || effectiveMeta || {};
+      const dispatchOptionsObj = analyticsMetaObj.dispatchOptions || {};
+      const targetHandoffChipId = normalizeString(
+        campaign.handoff_chip_id ||
+        campaign.handoffChipId ||
+        analyticsMetaObj.handoffChipId ||
+        analyticsMetaObj.handoff_chip_id ||
+        dispatchOptionsObj.handoffChipId ||
+        (Array.isArray(dispatchOptionsObj.handoffChipIds) ? dispatchOptionsObj.handoffChipIds[0] : "")
+      );
+
+      if (targetHandoffChipId) {
+        try {
+          const instances = await getLeadClientEvolutionInstances(clientId).catch(() => []);
+          const targetLower = targetHandoffChipId.toLowerCase();
+          const chipB = (instances || []).find((i) => {
+            const slug = extractEvolutionInstanceSlug(i.dispatch_webhook_url);
+            return (
+              String(i.id).toLowerCase() === targetLower ||
+              String(i.name || "").toLowerCase() === targetLower ||
+              (slug && slug.toLowerCase() === targetLower)
+            );
+          });
+          const rawChipPhone = chipB?.phone || chipB?.number || chipB?.telefone || null;
+          if (rawChipPhone) {
+            const cleanChipPhone = String(rawChipPhone).replace(/\D/g, "");
+            if (cleanChipPhone) {
+              resolvedSchedulingLink = `https://wa.me/${cleanChipPhone}`;
+            }
+          }
+        } catch {
+          // ignore fallback lookup errors
+        }
+      }
+    }
+
+    // c) Link institucional da GD
+    if (!resolvedSchedulingLink) {
+      resolvedSchedulingLink = "https://mktgeracaodigital.com.br";
+    }
+
+    if (resolvedSchedulingLink) {
+      lead.scheduling_link = resolvedSchedulingLink;
+      if (!lead.normalized_data) lead.normalized_data = {};
+      lead.normalized_data.scheduling_link = resolvedSchedulingLink;
+      if (leadImportItem) {
+        if (!leadImportItem.normalized_data) leadImportItem.normalized_data = {};
+        leadImportItem.normalized_data.scheduling_link = resolvedSchedulingLink;
+      }
+      for (const step of remainingSteps) {
+        if (step.linkUrl && step.linkUrl.includes("{{")) {
+          step.linkUrl = resolvedSchedulingLink;
+        }
+        if (step.url && step.url.includes("{{")) {
+          step.url = resolvedSchedulingLink;
+        }
+      }
+    }
+  }
 
   if (remainingSteps.length === 0) {
     if (leadImportItem?.id) {

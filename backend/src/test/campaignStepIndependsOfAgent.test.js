@@ -199,4 +199,49 @@ describe("passo de campanha pendente sai pelo caminho 1, qualquer que seja o age
       );
     });
   }
+
+  it("com campanha 'Sem IA (apenas passos)': a resposta dispara o próximo passo (Passo 3) e NÃO descarta em campanha_sem_ia", async () => {
+    const campanhaSemIa = {
+      id: "camp-sem-ia",
+      name: "Campanha Sem IA 3 Passos",
+      analyticsMeta: {
+        sequence: [
+          { id: "s1", type: "text", order: 1, text: "Passo 1", triggerMode: "immediate", enabled: true },
+          { id: "s2", type: "text", order: 2, text: "Passo 2", triggerMode: "after_reply", enabled: true },
+          { id: "s3", type: "text", order: 3, text: "Passo 3", triggerMode: "after_reply", enabled: true },
+        ],
+        dispatchOptions: { waitForReply: true, replyAgent: "passos" },
+      },
+      leadImportItem: {
+        id: "item-lead-sem-ia",
+        progress: { waitForReply: true, status: "aguardando_usuario", nextStepIndex: 2 },
+      },
+    };
+
+    const { webhook, continueCampaignLeadFromReply } = montar({
+      agents: [agentRow({ ligado: false, kind: "campanha" })],
+      campanha: {
+        matches: [campanhaSemIa],
+        waitForReplyMatches: [campanhaSemIa],
+        processingWaitForReplyMatches: [campanhaSemIa],
+        activePeriodCampaign: {
+          id: "camp-sem-ia",
+          name: campanhaSemIa.name,
+          mode: "disparo",
+          analyticsMeta: campanhaSemIa.analyticsMeta,
+        },
+      },
+    });
+
+    const resposta = await respostaDoLead(webhook, "WA-CAMP-SEM-IA-PASSO-3");
+    expect(resposta).toMatchObject({ success: true, status: "campaign_step_dispatched" });
+    expect(continueCampaignLeadFromReply).toHaveBeenCalledTimes(1);
+    expect(continueCampaignLeadFromReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: CLIENT,
+        phone: PHONE,
+        campaignMatch: expect.objectContaining({ id: "camp-sem-ia" }),
+      })
+    );
+  });
 });

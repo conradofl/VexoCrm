@@ -1,21 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Briefcase, ListChecks, Users, Sparkles } from "lucide-react";
+import { Briefcase, ListChecks, Users } from "lucide-react";
 import GeracaoDigitalPitch from "./GeracaoDigitalPitch";
 import GeracaoDigitalBriefings from "./GeracaoDigitalBriefings";
 import ClientPortfolioDashboard from "./GeracaoDigital/ClientPortfolioDashboard";
-import BrandIdentityWizard from "./GeracaoDigital/BrandIdentityWizard";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PageShell, PageShellContext } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
-import type { PortfolioClient } from "./GeracaoDigital/components/PortfolioTable";
 
 export default function GeracaoDigital() {
   const { isInternalUser } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedClientForWizard, setSelectedClientForWizard] = useState<string>("");
 
   const hasAccess = isInternalUser;
 
@@ -31,13 +28,6 @@ export default function GeracaoDigital() {
 
   const handleTabChange = (val: string) => {
     setSearchParams({ tab: val });
-  };
-
-  const handleOpenWizardFromPortfolio = (client?: PortfolioClient) => {
-    if (client?.name) {
-      setSelectedClientForWizard(client.name);
-    }
-    setSearchParams({ tab: "identidade" });
   };
 
   const handleOpenBriefingFromPortfolio = () => {
@@ -56,7 +46,7 @@ export default function GeracaoDigital() {
   }
 
   return (
-    <PageShell title="Geração Digital" subtitle="Cockpit executivo da carteira, hub de briefing e esteira de identidade visual">
+    <PageShell title="Geração Digital" subtitle="Cockpit executivo da carteira e hub de briefing">
       <PageShellContext.Provider value={true}>
         <div className="w-full space-y-6">
           <GeracaoDigitalTabs />
@@ -81,14 +71,6 @@ export default function GeracaoDigital() {
                 </TabsTrigger>
 
                 <TabsTrigger
-                  value="identidade"
-                  className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-xs"
-                >
-                  <Sparkles className="h-3.5 w-3.5 mr-1.5 text-purple-600" />
-                  Identidade Visual & Guia
-                </TabsTrigger>
-
-                <TabsTrigger
                   value="briefings"
                   className="flex-1 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-xs"
                 >
@@ -102,7 +84,6 @@ export default function GeracaoDigital() {
             <TabsContent value="carteira" className="focus-visible:outline-none focus-visible:ring-0">
               <ErrorBoundary>
                 <ClientPortfolioDashboard
-                  onOpenIdentityWizard={handleOpenWizardFromPortfolio}
                   onOpenBriefingHub={handleOpenBriefingFromPortfolio}
                 />
               </ErrorBoundary>
@@ -115,17 +96,7 @@ export default function GeracaoDigital() {
               </ErrorBoundary>
             </TabsContent>
 
-            {/* Aba 3: Wizard de Identidade Visual */}
-            <TabsContent value="identidade" className="focus-visible:outline-none focus-visible:ring-0">
-              <ErrorBoundary>
-                <BrandIdentityWizard
-                  initialClientName={selectedClientForWizard}
-                  onBackToPortfolio={() => setSearchParams({ tab: "carteira" })}
-                />
-              </ErrorBoundary>
-            </TabsContent>
-
-            {/* Aba 4: Briefings Salvos */}
+            {/* Aba 3: Briefings Salvos */}
             <TabsContent value="briefings" className="focus-visible:outline-none focus-visible:ring-0">
               <ErrorBoundary>
                 <GeracaoDigitalBriefings />

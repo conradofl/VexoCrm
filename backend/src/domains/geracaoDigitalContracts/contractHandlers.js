@@ -1,11 +1,56 @@
-import PDFDocument from "pdfkit";
 import { pgDatabasePool as db } from "../../services/database.js";
-import { resolveTenantUuid } from "./tenantResolver.js";
+import { resolveTenantUuid, GD_TENANT_UUID } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
 import { saveContractBuffer, getContractBuffer, CONTRACT_MAX_BYTES } from "../../services/storage.js";
+import {
+  sendTextMessageViaEvolution,
+  resolveInstanceIdentifier,
+  extractEvolutionInstanceSlug,
+} from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque getTenantContratadaConfig é function declaration (tem hoisting).
 import { getTenantContratadaConfig } from "./juridicoHandlers.js";
-import { assembleContractFromBlocks, buildCronograma } from "./contractMerge.js";
+import { resolveCandidateEvolutionInstances } from "./contractEvolutionResolver.js";
+import {
+  assembleContractFromBlocks,
+  buildCronograma,
+  parseTemplateContentToClauses,
+  prepareContractDados,
+  formatCnpj,
+  formatTelefone,
+  formatBrl,
+  toExtenseOrdinal,
+} from "./contractMerge.js";
+import {
+  GD_COLORS,
+  CONTRACT_PDF_COLORS,
+  normalizeClauseHeader,
+  renderFormattedParagraph,
+  drawHeader,
+  drawClauseHeader,
+  drawPartesBoxes,
+  drawPricingTable,
+  drawSignaturesAndWitnesses,
+  drawFooter,
+  renderContractPdf,
+} from "./contractVisualRenderer.js";
+
+export {
+  prepareContractDados,
+  formatCnpj,
+  formatTelefone,
+  formatBrl,
+  GD_COLORS,
+  CONTRACT_PDF_COLORS,
+  normalizeClauseHeader,
+  renderFormattedParagraph,
+  drawHeader,
+  drawClauseHeader,
+  drawPartesBoxes,
+  drawPricingTable,
+  drawSignaturesAndWitnesses,
+  drawFooter,
+  renderContractPdf,
+};
 
 // Helper for formatting date
 function formatExtenseDate() {
@@ -315,7 +360,7 @@ export async function updateContract(req, res) {
 // para o documento. Lança Error com code para o chamador traduzir em HTTP.
 export async function buildContractPdfBuffer(tenantId, id) {
   const { rows: contractRows } = await db.query(
-    "SELECT * FROM gd_contracts WHERE id = $1 AND tenant_id = $2",
+    "SELECT * FROM gd_contracts WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000') ORDER BY (CASE WHEN tenant_id = $2 THEN 0 ELSE 1 END) LIMIT 1",
     [id, tenantId]
   );
   if (contractRows.length === 0) {
@@ -341,11 +386,18 @@ export async function buildContractPdfBuffer(tenantId, id) {
   if (!dados.foro_cidade && dados.contratada_comarca) {
     dados.foro_cidade = dados.contratada_comarca;
   }
+  dados.representante_nome = dados.representante_nome || dados.responsavel_nome || dados.representante || dados.assinatura_contratante || dados.razao_social || "";
+  dados.prazo_meses = dados.prazo_meses || "12";
+  dados.condicao_permuta = dados.condicao_permuta || "Não aplicável";
 
   // Se o contrato tem parcelas estruturadas salvas, garante a formatação atualizada do cronograma
   if (Array.isArray(dados?.parcelas) && dados.parcelas.length > 0) {
     dados.cronograma_pagamento = buildCronograma(dados.parcelas);
   }
+
+  // Aplica máscaras e formatação padrão BRL em dados
+  const formattedDados = prepareContractDados(dados);
+  Object.assign(dados, formattedDados);
 
   // Se o usuário editou o texto final na tela, renderiza diretamente ignorando o template
   if (dados?.texto_final && typeof dados.texto_final === "string" && dados.texto_final.trim()) {
@@ -356,14 +408,23 @@ export async function buildContractPdfBuffer(tenantId, id) {
   let templateQuery;
   let templateParams;
   if (contract.template_id) {
-    templateQuery = "SELECT * FROM gd_contract_templates WHERE id = $1 AND tenant_id = $2";
+    templateQuery =
+      "SELECT * FROM gd_contract_templates WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000') ORDER BY (CASE WHEN tenant_id = $2 THEN 0 ELSE 1 END) LIMIT 1";
     templateParams = [contract.template_id, tenantId];
   } else {
-    templateQuery = "SELECT * FROM gd_contract_templates WHERE tenant_id = $1 AND ativo = true ORDER BY created_at DESC LIMIT 1";
+    templateQuery =
+      "SELECT * FROM gd_contract_templates WHERE (tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000') AND ativo = true ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END), created_at DESC LIMIT 1";
     templateParams = [tenantId];
   }
 
-  const { rows: templateRows } = await db.query(templateQuery, templateParams);
+  let { rows: templateRows } = await db.query(templateQuery, templateParams);
+  if (templateRows.length === 0 && contract.template_id) {
+    const fallbackRes = await db.query(
+      "SELECT * FROM gd_contract_templates WHERE (tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000') AND ativo = true ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END), created_at DESC LIMIT 1",
+      [tenantId]
+    );
+    templateRows = fallbackRes.rows;
+  }
   if (templateRows.length === 0) {
     const e = new Error("Template de contrato não encontrado");
     e.code = "TEMPLATE_NOT_FOUND";
@@ -386,8 +447,25 @@ export async function buildContractPdfBuffer(tenantId, id) {
 
 export async function generateContractPdf(req, res) {
   try {
-    const tenantId = await resolveTenantUuid(req, res);
-    if (!tenantId) return;
+    let tenantId = null;
+    if (req.headers.authorization) {
+      tenantId = await resolveTenantUuid(req, res);
+      if (!tenantId) return;
+    } else {
+      // Acesso direto via link sem header Authorization (ex: link recebido no WhatsApp da diretoria ou cliente)
+      const { rows } = await db.query(
+        "SELECT id, tenant_id, owner_company FROM public.gd_contracts WHERE id = $1",
+        [req.params.id]
+      );
+      if (rows.length === 0) {
+        return sendError(res, 404, "NOT_FOUND", "Contrato não encontrado");
+      }
+      if (String(rows[0].owner_company || "").trim().toLowerCase() === "vexo") {
+        return sendError(res, 403, "FORBIDDEN", "Comercial Vexo é restrito ao administrador");
+      }
+      tenantId = rows[0].tenant_id || GD_TENANT_UUID;
+    }
+
     const { id } = req.params;
 
     let built;
@@ -416,7 +494,7 @@ async function finalizeContractPdfResponse(res, tenantId, id, dados, pdfData) {
     `UPDATE gd_contracts
      SET status = CASE WHEN status = 'assinado' THEN status ELSE 'gerado' END,
          updated_at = NOW()
-     WHERE id = $1 AND tenant_id = $2`,
+     WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000')`,
     [id, tenantId]
   );
   res.setHeader("Content-Type", "application/pdf");
@@ -424,126 +502,7 @@ async function finalizeContractPdfResponse(res, tenantId, id, dados, pdfData) {
   return res.send(pdfData);
 }
 
-// Renderiza parágrafo com suporte a marcação de negrito (**texto** ou <b>texto</b>)
-function renderFormattedParagraph(doc, text, options = {}) {
-  const regex = /(\*\*.*?\*\*|<b>.*?<\/b>)/g;
-  const parts = text.split(regex);
-  const tokens = parts.filter(Boolean).map((part) => {
-    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
-      return { text: part.slice(2, -2), bold: true };
-    }
-    if (/^<b>(.*?)<\/b>$/i.test(part)) {
-      return { text: part.replace(/^<b>|<\/b>$/gi, ""), bold: true };
-    }
-    return { text: part, bold: false };
-  });
 
-  if (tokens.length === 0) {
-    return;
-  }
-
-  tokens.forEach((token, idx) => {
-    const isLast = idx === tokens.length - 1;
-    doc.font(token.bold ? "Helvetica-Bold" : "Helvetica");
-    doc.text(token.text, {
-      ...options,
-      continued: !isLast,
-    });
-  });
-}
-
-// Renderização do documento (mesmo layout do preview da tela).
-export async function renderContractPdf(templateConteudo, dados) {
-  {
-    const mergedContent = applyMerge(templateConteudo, dados);
-
-    // Generate PDF to Buffer instead of direct stream
-    const doc = new PDFDocument({ margin: 56, bufferPages: true });
-    const buffers = [];
-    doc.on('data', buffers.push.bind(buffers));
-    
-    // We wrap doc.end() in a promise to wait for the buffer to finish
-    const pdfBufferPromise = new Promise((resolve) => {
-      doc.on('end', () => {
-        const pdfData = Buffer.concat(buffers);
-        resolve(pdfData);
-      });
-    });
-
-    // Renderização espelhando o preview da tela: alinhado à esquerda, espaçamento
-    // consistente e sem "justify" (que esticava as linhas e desalinhava o texto).
-    const BODY_SIZE = 10.5;
-    const LINE_GAP = 2.5;
-    const linhas = mergedContent.split("\n");
-    let tituloRenderizado = false;
-
-    for (const linha of linhas) {
-      const p = linha.trimEnd();
-
-      if (p.trim() === "") {
-        // Cada linha vazia (Enter) agora gera um espaçamento completo real (~14pt)
-        doc.moveDown(1.0);
-        continue;
-      }
-
-      // Título principal: apenas a primeira linha em caixa alta do documento.
-      if (!tituloRenderizado && p.trim() === p.trim().toUpperCase() && p.trim().length > 10) {
-        doc.font("Helvetica-Bold").fontSize(13).text(p.trim(), { align: "center", lineGap: LINE_GAP });
-        doc.moveDown(1);
-        tituloRenderizado = true;
-        continue;
-      }
-
-      // Cabeçalho de cláusula.
-      if (/^Cláusula\s/i.test(p.trim())) {
-        doc.moveDown(0.4);
-        doc.font("Helvetica-Bold").fontSize(11.5).text(p.trim(), { align: "left", lineGap: LINE_GAP });
-        doc.moveDown(0.25);
-        continue;
-      }
-
-      // Linhas de assinatura centralizadas (traços e rótulos de Contratada/Contratante)
-      const isSignatureUnderline = /^[_\s]{10,}$/.test(p.trim());
-      const isSignatureLabel = /^(Contratada|Contratante):/i.test(p.trim());
-      if (isSignatureUnderline || isSignatureLabel) {
-        doc.font("Helvetica").fontSize(10.5);
-        doc.text(p.trim(), { align: "center", lineGap: LINE_GAP });
-        if (isSignatureLabel) {
-          // Espaço base generoso após o nome para acomodar carimbo/rubrica digital
-          doc.moveDown(2.5);
-        }
-        continue;
-      }
-
-      // Itens de lista (A./B./ "- item" / "1º Pagamento") — sem recuo extra,
-      // mantendo o alinhamento à esquerda igual ao preview.
-      const isItem = /^([A-Z]\.|[-•]|\d+º)\s/.test(p.trim());
-      doc.fontSize(BODY_SIZE);
-      renderFormattedParagraph(doc, p.trim(), {
-        align: "left",
-        lineGap: LINE_GAP,
-        paragraphGap: isItem ? 0 : 2,
-      });
-    }
-
-    // Assinaturas: se o documento já não renderizou assinaturas no corpo do texto,
-    // inclui o bloco de rodapé com suporte aos campos dinâmicos dados.assinatura_contratada / contratante
-    const jaTemAssinaturas = linhas.some((l) => /^(Contratada|Contratante):/i.test(l.trim()));
-    if (!jaTemAssinaturas) {
-      doc.moveDown(3);
-      doc.font("Helvetica").fontSize(10.5);
-      doc.text("____________________________________________________", { align: "center" });
-      doc.text(`Contratada: ${dados.assinatura_contratada || ""}`.trimEnd(), { align: "center" });
-      doc.moveDown(4.5);
-      doc.text("____________________________________________________", { align: "center" });
-      doc.text(`Contratante: ${dados.assinatura_contratante || dados.razao_social || ""}`.trimEnd(), { align: "center" });
-    }
-
-    doc.end();
-
-    return await pdfBufferPromise;
-  }
-}
 
 /**
  * Upload de contrato assinado (ex: assinado via gov.br).
@@ -703,6 +662,138 @@ export async function downloadSignedContract(req, res) {
     if (!res.headersSent) {
       sendError(res, 500, "INTERNAL_ERROR", "Erro ao baixar contrato assinado");
     }
+  }
+}
+
+export { resolveCandidateEvolutionInstances };
+
+export async function notificarDiretoriaWhatsapp(req, res) {
+  try {
+    const tenantId = await resolveTenantUuid(req, res);
+    if (!tenantId) return;
+    const { id } = req.params;
+
+    const { rows: contractRows } = await db.query(
+      `SELECT * FROM public.gd_contracts WHERE id = $1 AND (tenant_id = $2 OR tenant_id = '00000000-0000-0000-0000-000000000000') LIMIT 1`,
+      [id, tenantId]
+    );
+    if (contractRows.length === 0) {
+      return sendError(res, 404, "NOT_FOUND", "Contrato não encontrado.");
+    }
+
+    const contract = contractRows[0];
+    const dados = typeof contract.dados === "string" ? JSON.parse(contract.dados) : (contract.dados || {});
+    const empresa = dados.razao_social || dados.empresa || "Cliente";
+    const cnpj = dados.cnpj || "-";
+    const responsavel = dados.responsavel_nome || dados.representante || "-";
+
+    const { rows: modRows } = await db.query(
+      `SELECT config FROM public.tenant_modules 
+       WHERE tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000' 
+       ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END) LIMIT 1`,
+      [tenantId]
+    );
+    const cfg = modRows[0]?.config || {};
+    const requestedInstance =
+      cfg?.gd?.juridico?.evolution_instance ||
+      process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+      process.env.GD_EVOLUTION_INSTANCE ||
+      null;
+
+    const candidateInstances = await resolveCandidateEvolutionInstances(db, requestedInstance);
+
+    const diretoriaWhatsAppNumeros = [
+      process.env.GD_CAIO_WHATSAPP || "5534997719779",
+      process.env.GD_CONRADO_WHATSAPP || "5534991751267",
+    ];
+
+    const mensagemDiretoria =
+      `📄 *Novo Contrato Comercial Gerado!* 🚀\n\n` +
+      `*Empresa:* ${empresa}\n` +
+      `*CNPJ:* ${cnpj}\n` +
+      `*Responsável:* ${responsavel}\n` +
+      `*Origem:* Proposta Comercial Aceita\n\n` +
+      `O cliente já deu o aceite nos termos. Conforme o protocolo GD, o contrato deve receber a *1ª assinatura da Diretoria (Caio)* via GOV.BR antes de seguir para o cliente.\n\n` +
+      `👉 *Visualizar / Baixar Contrato para Assinatura:*\n` +
+      `https://crm.vexoia.com/api/gd/contracts/${id}/pdf`;
+
+    const resultados = [];
+    let successfulInstance = null;
+    const defaultInstanceSlug = candidateInstances[0]?.slug || String(candidateInstances[0] || "evolution");
+
+    for (const numero of diretoriaWhatsAppNumeros) {
+      let enviado = false;
+      let ultimoErro = null;
+      let usedInstance = defaultInstanceSlug;
+      const tentativas = [];
+
+      const attempted = new Set();
+      for (const inst of candidateInstances) {
+        const slug = typeof inst === "string" ? inst : (inst.slug || String(inst));
+        const baseUrl = typeof inst === "object" ? inst.baseUrl : null;
+        const webhookToken = typeof inst === "object" ? inst.webhookToken : null;
+
+        if (!slug || attempted.has(slug)) continue;
+        attempted.add(slug);
+
+        try {
+          await sendTextMessageViaEvolution({
+            instanceName: slug,
+            baseUrl: baseUrl || undefined,
+            webhookToken: webhookToken || undefined,
+            number: numero,
+            text: mensagemDiretoria,
+          });
+          usedInstance = slug;
+          if (!successfulInstance) successfulInstance = slug;
+          resultados.push({
+            numero,
+            status: "sent",
+            instance: slug,
+            fallback: slug !== defaultInstanceSlug,
+          });
+          enviado = true;
+          break;
+        } catch (err) {
+          ultimoErro = err.message;
+          tentativas.push({ slug, error: err.message });
+          console.warn(`[notificarDiretoria] Falha no envio para ${numero} via "${slug}":`, err.message);
+        }
+      }
+
+      if (!enviado) {
+        const lastAttempt = tentativas[tentativas.length - 1];
+        resultados.push({
+          numero,
+          status: "error",
+          error: ultimoErro || "Instância desconectada ou erro na Evolution",
+          instance: lastAttempt?.slug || usedInstance,
+          tentativas,
+        });
+      }
+    }
+
+    const erros = resultados.filter((r) => r.status === "error");
+    if (erros.length === diretoriaWhatsAppNumeros.length) {
+      const failingInstance = erros[0]?.instance || defaultInstanceSlug || "whatsapp";
+      return res.status(400).json({
+        success: false,
+        error: `Falha no envio via chip "${failingInstance}": ${erros[0]?.error || "Instância desconectada ou erro na Evolution"}`,
+        instance: failingInstance,
+        resultados,
+      });
+    }
+
+    const successInstance = successfulInstance || defaultInstanceSlug;
+    res.json({
+      success: true,
+      message: "Notificações enviadas com sucesso para a Diretoria.",
+      instance: successInstance,
+      resultados,
+    });
+  } catch (error) {
+    console.error("[notificarDiretoriaWhatsapp] Error:", error);
+    sendError(res, 500, "INTERNAL_ERROR", error.message || "Erro ao notificar diretoria.");
   }
 }
 

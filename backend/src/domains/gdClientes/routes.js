@@ -1,0 +1,2035 @@
+// Clientes da Geração Digital: leitura e escrita internas sobre gd_clientes / gd_cliente_eventos
+// (migration 20261102120000). Desenho aprovado pelo dono em 03/11/2026.
+//
+// - Dono FIXO: GD_DONO, a chave texto de leads_clients. Não vem da requisição, não passa pelo
+//   resolveAuthorizedClientId nem pelo tenantResolver (o fallback do uuid-zero fica fora daqui).
+//   Cliente de outro dono responde 404, igual a id inexistente.
+// - Estado só muda por gd_registrar_evento(), com ator_tipo 'humano' e ator_id = uid do Firebase.
+//   Nada disso vem do corpo. 'importacao_inicial' nunca entra por rota (só por src/scripts/gdImportarClientes.js).
+// - Estado pedido passa por duas barreiras: SELECT em gd_estados (existe E ativo) e, se mesmo assim
+//   chegar ao banco, a FK (23503) vira o mesmo 422.
+import crypto from "node:crypto";
+import { requireFirebaseAuth as requireFirebaseAuthPadrao } from "../../access/middlewares.js";
+import { hasInternalPageAccess } from "../../accessGuards.js";
+import { pgDatabasePool } from "../../services/database.js";
+import { sendError } from "../../services/httpInfra.js";
+import {
+  createEvolutionGroup,
+  getEvolutionGroupInviteCode,
+  sendTextMessageViaEvolution,
+  linkEvolutionGroupToCommunity,
+  updateEvolutionGroupPicture,
+} from "../../services/evolution.js";
+import { setupClientDriveFolders, uploadFileToDrive } from "../../services/googleDriveClientSetup.js";
+import { generateAndApplyGdBrandingAvatar } from "../../services/gdBrandingAvatarService.js";
+import { sendSlackMessage } from "../../services/trelloSlackReporter.js";
+import {
+  findAvailableBriefingSlots,
+  createBriefingCalendarEvent,
+  formatBriefingOfferMessage,
+  formatarDataHoraAmigavel,
+  calculateReminderTimes,
+  GD_CALENDAR_AGENCIA,
+  GD_CALENDAR_CAIO,
+} from "../../services/gdCalendarService.js";
+import {
+  processarLembretesBriefing,
+  GD_CAIO_WHATSAPP_PADRAO,
+} from "../../services/gdBriefingReminderService.js";
+import { executarSinteseEGeracaoBriefing } from "../../services/gdBriefingSynthesizerService.js";
+import {
+  enviarDocumentosParaAprovacaoInterna,
+  enviarDocumentosParaAprovacaoCliente,
+  processarMensagemAprovacaoWhatsApp,
+} from "../../services/gdApprovalFlowService.js";
+import {
+  executarFluxoApresentacaoComercial,
+  processarIngestaoLogosNovas,
+} from "../../services/gdCommercialPresentationWorkflowService.js";
+import { minerarConversasWhatsApp } from "../../services/gdWhatsAppChatMinerService.js";
+import { construirEAtivarAgenteInbound } from "../../services/gdAgentBuilderService.js";
+import { processarReguaCustomerSuccess } from "../../services/gdCustomerSuccessSchedulerService.js";
+import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
+import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
+import { temSufixoSecreto } from "./portalSlug.js";
+
+export { GD_DONO, gerarPortalToken, hashPortalToken };
+const PERMISSAO_GD = "geracao_digital.proposals";
+const PAGINA_GD = "implantacao-gd";
+const LIMITE_LISTA = 500;
+// Relógio de quem chama pode estar um pouco à frente; mais que isso é data futura.
+const TOLERANCIA_FUTURO_MS = 5 * 60 * 1000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Três perfis, iguais para leitura e escrita (decisão do dono, 03/11/2026): superadmin; interno
+// administrador; interno com a GD no escopo e com a permissão ou a página da GD.
+// Não reaproveita requireInternalPageAccess: ele recusa role !== "internal", e o fundador chega
+// como "superadmin" (claims.js, buildAccessProfile) e tomaria 403.
+export function podeGerirClientesGd(access) {
+  if (!access) return false;
+  if (access.role === "superadmin") return true;
+  if (access.role !== "internal") return false;
+  if (access.isAdmin) return true;
+  const temGdNoEscopo = access.clientId === GD_DONO || (access.clientIds || []).includes(GD_DONO);
+  if (!temGdNoEscopo) return false;
+  return (access.permissions || []).includes(PERMISSAO_GD) || hasInternalPageAccess(access, PAGINA_GD);
+}
+
+export function requireGdClientesAccess(req, res, next) {
+  const access = req.authAccess;
+  if (access?.error === "TENANT_SETTINGS_READ_FAILED") {
+    sendError(res, 503, "SERVICE_UNAVAILABLE", "Instabilidade temporária ao verificar permissões de acesso. Tente de novo em instantes.");
+    return;
+  }
+  if (!podeGerirClientesGd(access)) {
+    sendError(res, 403, "FORBIDDEN", "Clientes da Geração Digital restritos à equipe da GD");
+    return;
+  }
+  next();
+}
+
+export function isGoclawAuthenticated(req) {
+  const configuredToken = process.env.GOCLAW_READ_TOKEN;
+  if (!configuredToken || typeof configuredToken !== "string" || configuredToken.trim() === "") {
+    return false;
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return false;
+  }
+  const token = authHeader.slice("Bearer ".length).trim();
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(configuredToken.trim());
+  return tokenBuf.length === expectedBuf.length && crypto.timingSafeEqual(tokenBuf, expectedBuf);
+}
+
+export function requireGoclawReadToken(req, res, next) {
+  if (!isGoclawAuthenticated(req)) {
+    res.status(401).json({ error: "Token de acesso do GoClaw inválido ou não configurado." });
+    return;
+  }
+  next();
+}
+
+export function requireGdOrGoclawAuth(requireFirebaseAuth = requireFirebaseAuthPadrao) {
+  return (req, res, next) => {
+    if (isGoclawAuthenticated(req)) {
+      req.authActor = { tipo: "goclaw", id: "goclaw" };
+      return next();
+    }
+    requireFirebaseAuth(req, res, () => {
+      requireGdClientesAccess(req, res, () => {
+        req.authActor = { tipo: "humano", id: req.authAccess?.uid || "humano" };
+        next();
+      });
+    });
+  };
+}
+
+class ErroDeRota extends Error {
+  constructor(status, code, message, details) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+const SELECT_CLIENTE = `
+  SELECT c.id, c.nome, c.cnpj, c.cnpj_a_confirmar, c.aprovador_nome, c.aprovador_telefone,
+         c.google_calendar_email, c.portal_slug,
+         c.drive_url, c.contrato_url, c.briefing_url, c.ficha_vexo_url, c.planejamento_url,
+         c.grupo_interno_jid, c.grupo_interno_url, c.grupo_cliente_jid, c.grupo_cliente_url,
+         c.onboarding_concluido_em,
+         c.briefing_slots_oferecidos, c.briefing_agendado_inicio, c.briefing_agendado_fim,
+         c.briefing_meet_url, c.briefing_calendar_event_id,
+         c.briefing_lembrete_vespera_agendado_para, c.briefing_lembrete_vespera_enviado_em,
+         c.briefing_lembrete_1h_agendado_para, c.briefing_lembrete_1h_enviado_em,
+         c.briefing_documentos, c.briefing_aprovacao_interna_status,
+         c.briefing_aprovacao_interna_ressalvas, c.briefing_aprovacao_interna_em,
+         c.briefing_aprovacao_cliente_status, c.briefing_aprovacao_cliente_em,
+         c.briefing_transcricao, c.briefing_formulario_respostas,
+         c.vexto_briefing_chips, c.vexto_briefing_transbordo_numero,
+         c.vexto_briefing_pilares, c.vexto_briefing_mineracao,
+         c.vexto_briefing_prompt_gerado, c.vexto_briefing_status,
+         c.vexto_briefing_agente_id,
+         c.escopo, c.escopo_original, c.origem, c.estado_atual, c.estado_desde,
+         c.estado_data_estimada, c.created_at, c.updated_at,
+         e.rotulo_interno, e.fase, e.ordem, e.prazo_contagem, e.prazo_horas,
+         CASE WHEN e.prazo_contagem = 'horas_corridas' AND e.prazo_horas IS NOT NULL
+              THEN c.estado_desde + make_interval(hours => e.prazo_horas) END AS prazo_vence_em,
+         now() AS agora
+    FROM public.gd_clientes c
+    LEFT JOIN public.gd_estados e ON e.codigo = c.estado_atual`;
+
+// Prazo só onde a conta é honesta: horas corridas. Horas úteis e fim do dia útil ficam com o
+// Síndico; até lá a tela mostra a regra com vence_em null, sem inventar data.
+function prazoDe(linha) {
+  if (linha.prazo_contagem === "horas_corridas") {
+    if (linha.prazo_horas == null) return { regra: "sem_prazo", horas: null, vence_em: null, atrasado: false, calculo: "sem_prazo" };
+    const vence = new Date(linha.prazo_vence_em);
+    return { regra: "horas_corridas", horas: linha.prazo_horas, vence_em: vence.toISOString(), atrasado: vence < new Date(linha.agora), calculo: "ok" };
+  }
+  if (!linha.prazo_contagem) return null;
+  return { regra: linha.prazo_contagem, horas: linha.prazo_horas, vence_em: null, atrasado: null, calculo: "pendente" };
+}
+
+function clienteDe(linha) {
+  return {
+    id: linha.id,
+    nome: linha.nome,
+    portal_slug: linha.portal_slug ?? null,
+    cnpj: linha.cnpj,
+    cnpj_a_confirmar: linha.cnpj_a_confirmar,
+    aprovador_nome: linha.aprovador_nome,
+    aprovador_telefone: linha.aprovador_telefone,
+    google_calendar_email: linha.google_calendar_email ?? null,
+    drive_url: linha.drive_url,
+    contrato_url: linha.contrato_url ?? null,
+    briefing_url: linha.briefing_url ?? null,
+    ficha_vexo_url: linha.ficha_vexo_url ?? null,
+    planejamento_url: linha.planejamento_url ?? null,
+    grupo_interno_jid: linha.grupo_interno_jid ?? null,
+    grupo_interno_url: linha.grupo_interno_url ?? null,
+    grupo_cliente_jid: linha.grupo_cliente_jid ?? null,
+    grupo_cliente_url: linha.grupo_cliente_url ?? null,
+    onboarding_concluido_em: linha.onboarding_concluido_em ?? null,
+    briefing_slots_oferecidos: linha.briefing_slots_oferecidos ?? null,
+    briefing_agendado_inicio: linha.briefing_agendado_inicio ?? null,
+    briefing_agendado_fim: linha.briefing_agendado_fim ?? null,
+    briefing_meet_url: linha.briefing_meet_url ?? null,
+    briefing_calendar_event_id: linha.briefing_calendar_event_id ?? null,
+    briefing_lembrete_vespera_agendado_para: linha.briefing_lembrete_vespera_agendado_para ?? null,
+    briefing_lembrete_vespera_enviado_em: linha.briefing_lembrete_vespera_enviado_em ?? null,
+    briefing_lembrete_1h_agendado_para: linha.briefing_lembrete_1h_agendado_para ?? null,
+    briefing_lembrete_1h_enviado_em: linha.briefing_lembrete_1h_enviado_em ?? null,
+    briefing_documentos: linha.briefing_documentos ?? null,
+    briefing_aprovacao_interna_status: linha.briefing_aprovacao_interna_status ?? null,
+    briefing_aprovacao_interna_ressalvas: linha.briefing_aprovacao_interna_ressalvas ?? null,
+    briefing_aprovacao_interna_em: linha.briefing_aprovacao_interna_em ?? null,
+    briefing_aprovacao_cliente_status: linha.briefing_aprovacao_cliente_status ?? null,
+    briefing_aprovacao_cliente_em: linha.briefing_aprovacao_cliente_em ?? null,
+    briefing_transcricao: linha.briefing_transcricao ?? null,
+    briefing_formulario_respostas: linha.briefing_formulario_respostas ?? null,
+    vexto_briefing_chips: linha.vexto_briefing_chips ?? null,
+    vexto_briefing_transbordo_numero: linha.vexto_briefing_transbordo_numero ?? null,
+    vexto_briefing_pilares: linha.vexto_briefing_pilares ?? null,
+    vexto_briefing_mineracao: linha.vexto_briefing_mineracao ?? null,
+    vexto_briefing_prompt_gerado: linha.vexto_briefing_prompt_gerado ?? null,
+    vexto_briefing_status: linha.vexto_briefing_status ?? "PENDENTE",
+    vexto_briefing_agente_id: linha.vexto_briefing_agente_id ?? null,
+    escopo: linha.escopo,
+    escopo_original: linha.escopo_original,
+    origem: linha.origem,
+    estado_atual: linha.estado_atual,
+    rotulo_interno: linha.rotulo_interno ?? null,
+    fase: linha.fase ?? null,
+    ordem: linha.ordem ?? null,
+    estado_desde: linha.estado_desde,
+    aproximado: linha.estado_data_estimada === true,
+    prazo: prazoDe(linha),
+    created_at: linha.created_at,
+    updated_at: linha.updated_at,
+  };
+}
+
+// Campos opcionais presentes no corpo, já lidos. Chave ausente fica de fora; chave com null limpa.
+function lerOpcionais(body) {
+  const lidos = {};
+  for (const [campo, ler] of Object.entries(CAMPOS_OPCIONAIS)) {
+    if (campo in body) lidos[campo] = ler(body[campo]);
+  }
+  return lidos;
+}
+
+// escopo, briefing_slots_oferecidos, briefing_documentos e briefing_formulario_respostas são jsonb
+const JSONB_CAMPOS = [
+  "escopo",
+  "briefing_slots_oferecidos",
+  "briefing_documentos",
+  "briefing_formulario_respostas",
+  "vexto_briefing_chips",
+  "vexto_briefing_pilares",
+  "vexto_briefing_mineracao",
+  "cs_toques_historico",
+];
+const valorSql = (campo, valor) => (JSONB_CAMPOS.includes(campo) && valor !== null ? JSON.stringify(valor) : valor);
+const colunaSql = (campo, n) => (JSONB_CAMPOS.includes(campo) ? `$${n}::jsonb` : `$${n}`);
+
+// Sem ocorrido_em: fluxo, agora. Com ocorrido_em: correção, com motivo obrigatório; nunca no futuro.
+function lerMovimento(body) {
+  const estado = typeof body.estado === "string" ? body.estado.trim() : "";
+  if (!estado) throw new ErroDeRota(422, "ESTADO_INVALIDO", "Informe o estado.");
+  const motivo = typeof body.motivo === "string" && body.motivo.trim() ? body.motivo.trim() : null;
+  if (body.data_estimada != null && typeof body.data_estimada !== "boolean") {
+    throw new ErroDeRota(422, "DATA_ESTIMADA_INVALIDA", "data_estimada precisa ser true ou false.");
+  }
+
+  if (body.ocorrido_em == null || body.ocorrido_em === "") {
+    if (body.data_estimada === true) {
+      throw new ErroDeRota(422, "DATA_ESTIMADA_SEM_DATA", "data_estimada só vale numa correção com ocorrido_em.");
+    }
+    return { estado, motivo, ocorridoEm: null, dataEstimada: false, origem: "fluxo" };
+  }
+
+  const ocorrido = new Date(body.ocorrido_em);
+  if (typeof body.ocorrido_em !== "string" || Number.isNaN(ocorrido.getTime())) {
+    throw new ErroDeRota(422, "OCORRIDO_EM_INVALIDO", "ocorrido_em precisa ser uma data ISO.");
+  }
+  if (ocorrido.getTime() > Date.now() + TOLERANCIA_FUTURO_MS) {
+    throw new ErroDeRota(422, "OCORRIDO_EM_FUTURO", "ocorrido_em não pode estar no futuro.");
+  }
+  if (!motivo) throw new ErroDeRota(422, "MOTIVO_OBRIGATORIO", "Correção com data passada exige motivo.");
+  return { estado, motivo, ocorridoEm: ocorrido.toISOString(), dataEstimada: body.data_estimada === true, origem: "correcao" };
+}
+
+function uidDe(req) {
+  const uid = req.authAccess?.uid;
+  if (!uid) throw new ErroDeRota(401, "UNAUTHENTICATED", "Usuário sem uid: não dá para registrar quem fez.");
+  return String(uid);
+}
+
+const CAMPOS_ESTADO = ["codigo", "ordem", "fase", "rotulo_interno", "rotulo_portal", "prazo_contagem", "prazo_horas", "terminal"];
+
+// Lista fechada de campos, mais acao_do_cliente só quando a coluna existe.
+function estadoDe(linha) {
+  const estado = {};
+  for (const campo of CAMPOS_ESTADO) estado[campo] = linha[campo] ?? null;
+  if (typeof linha.acao_do_cliente === "boolean") estado.acao_do_cliente = linha.acao_do_cliente;
+  return estado;
+}
+
+async function estadosAtivos(client) {
+  const { rows } = await client.query(`SELECT codigo FROM public.gd_estados WHERE ativo ORDER BY ordem`);
+  return rows.map((r) => r.codigo);
+}
+
+// Barreira 1: existe e está ativo. A FK sozinha não pega estado desativado.
+async function exigirEstadoValido(client, estado) {
+  const { rows } = await client.query(
+    `SELECT 1 FROM public.gd_estados WHERE codigo = $1 AND ativo`,
+    [estado]
+  );
+  if (rows.length === 0) {
+    throw new ErroDeRota(422, "ESTADO_INVALIDO", `Estado ${estado} não existe ou está inativo.`, {
+      validos: await estadosAtivos(client),
+    });
+  }
+}
+
+async function registrarEvento(client, clienteId, mov, uid, atorTipo = "humano", dados = null) {
+  // SAVEPOINT: depois do erro da FK a transação fica abortada, e a lista de estados válidos da
+  // resposta não poderia mais ser lida (a barreira 2 respondia 500; pego por mutação).
+  await client.query("SAVEPOINT gd_evento");
+  try {
+    const { rows } = await client.query(
+      `SELECT (e).id, (e).ocorrido_em, (e).origem
+         FROM (SELECT public.gd_registrar_evento($1, $2, COALESCE($3::timestamptz, now()), $4, $5, $6, $7, $8, COALESCE($9::jsonb, '{}'::jsonb)) AS e) x`,
+      [clienteId, mov.estado, mov.ocorridoEm, mov.dataEstimada, mov.origem, atorTipo, uid, mov.motivo, dados ? JSON.stringify(dados) : null]
+    );
+    await client.query("RELEASE SAVEPOINT gd_evento");
+    return rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK TO SAVEPOINT gd_evento");
+    // Barreira 2: estado sumiu entre a checagem e o INSERT.
+    if (err?.code === "23503") {
+      throw new ErroDeRota(422, "ESTADO_INVALIDO", `Estado ${mov.estado} não existe.`, {
+        validos: await estadosAtivos(client),
+      });
+    }
+    throw err;
+  }
+}
+
+async function lerCliente(client, id) {
+  const { rows } = await client.query(`${SELECT_CLIENTE} WHERE c.id = $1 AND c.dono_client_id = $2`, [id, GD_DONO]);
+  return rows[0] ? clienteDe(rows[0]) : null;
+}
+
+function exigirUuid(id) {
+  if (!UUID_RE.test(String(id || ""))) throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+}
+
+function responderErro(res, err, rota) {
+  if (err instanceof ErroDeRota) {
+    sendError(res, err.status, err.code, err.message, err.details);
+    return;
+  }
+  if (err instanceof CampoInvalido) {
+    sendError(res, 422, err.code, err.message);
+    return;
+  }
+  // Trava da migration que a leitura acima deixou passar (ex.: cnpj_a_confirmar sem cnpj).
+  if (err?.code === "23514") {
+    sendError(res, 422, "CAMPO_INVALIDO", "Valor recusado pelas regras do cliente.", { regra: err.constraint });
+    return;
+  }
+  if (err?.code === "23505") {
+    sendError(res, 409, "CLIENTE_DUPLICADO", "Já existe cliente da GD com esse nome ou CNPJ.");
+    return;
+  }
+  console.error(`[gd-clientes] ${rota}:`, err?.message || err);
+  sendError(res, 500, "INTERNAL_ERROR", "Erro ao processar clientes da GD.");
+}
+
+async function emTransacao(getPool, fn) {
+  const pool = getPool();
+  if (!pool) throw new ErroDeRota(503, "DATABASE_UNAVAILABLE", "Banco indisponível.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const resultado = await fn(client);
+    await client.query("COMMIT");
+    return resultado;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export function registerGdClientesRoutes(app, {
+  getPool = () => pgDatabasePool,
+  requireFirebaseAuth = requireFirebaseAuthPadrao,
+  requireGoclawToken = requireGoclawReadToken,
+  evolutionGroupCreator = createEvolutionGroup,
+  evolutionInviteGetter = getEvolutionGroupInviteCode,
+  evolutionMessageSender = sendTextMessageViaEvolution,
+  evolutionCommunityLinker = linkEvolutionGroupToCommunity,
+  evolutionPictureUpdater = updateEvolutionGroupPicture,
+  brandingAvatarGenerator = generateAndApplyGdBrandingAvatar,
+  slackSender = sendSlackMessage,
+  driveFolderSetup = setupClientDriveFolders,
+  driveFileUploader = uploadFileToDrive,
+  calendarSlotFinder = findAvailableBriefingSlots,
+  calendarEventCreator = createBriefingCalendarEvent,
+  reminderProcessor = processarLembretesBriefing,
+  briefingSynthesizer = executarSinteseEGeracaoBriefing,
+  internalApprovalSender = enviarDocumentosParaAprovacaoInterna,
+  clientApprovalSender = enviarDocumentosParaAprovacaoCliente,
+  approvalMessageProcessor = processarMensagemAprovacaoWhatsApp,
+  commercialWorkflowExecutor = executarFluxoApresentacaoComercial,
+  commercialBatchIngestion = processarIngestaoLogosNovas,
+  chatMiner = minerarConversasWhatsApp,
+  agentBuilder = construirEAtivarAgenteInbound,
+} = {}) {
+  const guarda = [requireFirebaseAuth, requireGdClientesAccess];
+  const pool = () => {
+    const p = getPool();
+    if (!p) throw new ErroDeRota(503, "DATABASE_UNAVAILABLE", "Banco indisponível.");
+    return p;
+  };
+
+  // Endpoint do Vigia GoClaw: leitura autenticada por token de serviço (GOCLAW_READ_TOKEN).
+  app.get("/api/gd/clientes/vigia", requireGoclawToken, async (_req, res) => {
+    try {
+      const { rows } = await pool().query(
+        `SELECT c.id, c.nome AS nome_empresa, c.estado_atual, e.fase, e.ordem, c.estado_desde AS entrou_em,
+                e.prazo_horas, e.prazo_contagem, e.rotulo_interno, e.acao_do_cliente
+           FROM public.gd_clientes c
+           LEFT JOIN public.gd_estados e ON e.codigo = c.estado_atual
+          WHERE c.dono_client_id = $1
+          ORDER BY e.ordem NULLS LAST, c.estado_desde, c.nome`,
+        [GD_DONO]
+      );
+      res.json({
+        clientes: rows.map((r) => ({
+          id: r.id,
+          nome_empresa: r.nome_empresa,
+          estado_atual: r.estado_atual || null,
+          fase: r.fase || null,
+          ordem: r.ordem != null ? Number(r.ordem) : null,
+          entrou_em: r.entrou_em ? new Date(r.entrou_em).toISOString() : null,
+          prazo_horas: r.prazo_horas != null ? Number(r.prazo_horas) : null,
+          prazo_contagem: r.prazo_contagem || null,
+          rotulo_interno: r.rotulo_interno || null,
+          acao_do_cliente: Boolean(r.acao_do_cliente),
+        })),
+      });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/vigia");
+    }
+  });
+
+  app.get("/api/gd/estados", ...guarda, async (_req, res) => {
+    try {
+      // to_jsonb(e) em vez de listar colunas: acao_do_cliente vem de uma migration posterior e, se
+      // ela não tiver rodado, a rota segue respondendo sem o campo em vez de cair em 500 (a tela
+      // trata a falta como "nenhuma etapa é ação do cliente").
+      const { rows } = await pool().query(
+        `SELECT to_jsonb(e) AS e FROM public.gd_estados e WHERE e.ativo ORDER BY e.ordem`
+      );
+      res.json({ estados: rows.map(({ e }) => estadoDe(e)) });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/estados");
+    }
+  });
+
+  app.get("/api/gd/clientes", ...guarda, async (req, res) => {
+    try {
+      const filtros = [`c.dono_client_id = $1`];
+      const params = [GD_DONO];
+      if (typeof req.query.estado === "string" && req.query.estado) {
+        params.push(req.query.estado);
+        filtros.push(`c.estado_atual = $${params.length}`);
+      }
+      if (typeof req.query.fase === "string" && req.query.fase) {
+        params.push(req.query.fase);
+        filtros.push(`e.fase = $${params.length}`);
+      }
+      params.push(LIMITE_LISTA);
+      const { rows } = await pool().query(
+        `${SELECT_CLIENTE} WHERE ${filtros.join(" AND ")}
+          ORDER BY e.ordem NULLS LAST, c.estado_desde, c.nome
+          LIMIT $${params.length}`,
+        params
+      );
+      res.json({ clientes: rows.map(clienteDe) });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes");
+    }
+  });
+
+  app.get("/api/gd/clientes/:id", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const db = pool();
+      const cliente = await lerCliente(db, req.params.id);
+      if (!cliente) throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      // Sem estado_de na tabela: o estado anterior sai da própria linha do tempo.
+      const { rows } = await db.query(
+        `SELECT ev.id, ev.estado_para AS estado,
+                LAG(ev.estado_para) OVER (ORDER BY ev.ocorrido_em, ev.seq) AS estado_anterior,
+                es.rotulo_interno, ev.ocorrido_em, ev.registrado_em, ev.data_estimada,
+                ev.origem, ev.ator_tipo, ev.ator_id, ev.motivo
+           FROM public.gd_cliente_eventos ev
+           JOIN public.gd_estados es ON es.codigo = ev.estado_para
+          WHERE ev.cliente_id = $1
+          ORDER BY ev.ocorrido_em, ev.seq`,
+        [cliente.id]
+      );
+      res.json({ cliente, eventos: rows });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/:id");
+    }
+  });
+
+  // Cliente novo do funil: nasce sem estado (o trigger exige) e recebe o primeiro evento na mesma
+  // transação. Se o evento falhar, o cliente não fica.
+  app.post("/api/gd/clientes", ...guarda, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const uid = uidDe(req);
+      const nome = lerNome(body.nome);
+      const opcionais = lerOpcionais(body);
+      const mov = lerMovimento(body);
+      const colunas = ["dono_client_id", "nome", "origem"];
+      const valores = ["$1", "$2", "'fluxo'"];
+      const params = [GD_DONO, nome];
+      for (const [campo, valor] of Object.entries(opcionais)) {
+        params.push(valorSql(campo, valor));
+        colunas.push(campo);
+        valores.push(colunaSql(campo, params.length));
+      }
+      const cliente = await emTransacao(getPool, async (client) => {
+        await exigirEstadoValido(client, mov.estado);
+        const { rows } = await client.query(
+          `INSERT INTO public.gd_clientes (${colunas.join(", ")})
+           VALUES (${valores.join(", ")}) RETURNING id`,
+          params
+        );
+        await registrarEvento(client, rows[0].id, mov, uid);
+        return lerCliente(client, rows[0].id);
+      });
+      res.status(201).json({ cliente });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes");
+    }
+  });
+
+  // Só nome e os campos de cadastro (CAMPOS_OPCIONAIS). Qualquer outra chave é recusada aqui; o
+  // trigger gd_clientes_trava_estado recusa estado_* no banco mesmo que esta lista um dia afrouxe.
+  app.patch("/api/gd/clientes/:id", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const body = req.body || {};
+      const chaves = Object.keys(body);
+      const editaveis = ["nome", ...Object.keys(CAMPOS_OPCIONAIS)];
+      const proibidas = chaves.filter((k) => !editaveis.includes(k));
+      if (proibidas.length) {
+        throw new ErroDeRota(422, "CAMPO_NAO_EDITAVEL", "Só os dados de cadastro são editáveis; estado muda por evento.", { campos: proibidas, editaveis });
+      }
+      if (chaves.length === 0) throw new ErroDeRota(422, "NADA_PARA_ALTERAR", `Informe algum de: ${editaveis.join(", ")}.`);
+
+      const sets = [];
+      const params = [];
+      if ("nome" in body) { params.push(lerNome(body.nome)); sets.push(`nome = $${params.length}`); }
+      for (const [campo, valor] of Object.entries(lerOpcionais(body))) {
+        params.push(valorSql(campo, valor));
+        sets.push(`${campo} = ${colunaSql(campo, params.length)}`);
+      }
+      params.push(req.params.id, GD_DONO);
+
+      const cliente = await emTransacao(getPool, async (client) => {
+        const { rowCount } = await client.query(
+          `UPDATE public.gd_clientes SET ${sets.join(", ")}
+            WHERE id = $${params.length - 1} AND dono_client_id = $${params.length}`,
+          params
+        );
+        if (rowCount !== 1) throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        return lerCliente(client, req.params.id);
+      });
+      res.json({ cliente });
+    } catch (err) {
+      responderErro(res, err, "PATCH /api/gd/clientes/:id");
+    }
+  });
+
+  app.post("/api/gd/clientes/:id/eventos", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const body = req.body || {};
+      const uid = uidDe(req);
+      const mov = lerMovimento(body);
+      const esperado = typeof body.estado_esperado === "string" ? body.estado_esperado : null;
+
+      const resultado = await emTransacao(getPool, async (client) => {
+        const { rows } = await client.query(
+          `SELECT estado_atual FROM public.gd_clientes
+            WHERE id = $1 AND dono_client_id = $2 FOR UPDATE`,
+          [req.params.id, GD_DONO]
+        );
+        if (rows.length === 0) throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        const atual = rows[0].estado_atual;
+
+        // Duas pessoas movendo o mesmo cliente: quem viu um estado velho recarrega.
+        if (esperado !== null && esperado !== atual) {
+          throw new ErroDeRota(409, "ESTADO_MUDOU", "O cliente mudou de estado enquanto a tela estava aberta.", { estado_atual: atual });
+        }
+        if (mov.origem === "fluxo" && mov.estado === atual) {
+          throw new ErroDeRota(409, "ESTADO_IGUAL", `O cliente já está em ${atual}.`, { estado_atual: atual });
+        }
+        await exigirEstadoValido(client, mov.estado);
+        const evento = await registrarEvento(client, req.params.id, mov, uid);
+        return { evento, cliente: await lerCliente(client, req.params.id) };
+      });
+      res.status(201).json(resultado);
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/eventos");
+    }
+  });
+
+  // ─── Portal do Cliente: emissão e consulta segura por token ───────────────
+
+  // Emissão de token de acompanhamento do portal (acesso interno restrito à GD).
+  // Gera token de alta entropia (base64url) e salva apenas o SHA-256 no banco.
+  // Revoga automaticamente qualquer token anterior que ainda estiver ativo.
+  app.post("/api/gd/clientes/:id/portal-token", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const uid = req.authAccess?.uid || req.authAccess?.email || "sistema";
+      const token = gerarPortalToken();
+      const tokenHash = hashPortalToken(token);
+
+      const criado_em = await emTransacao(getPool, async (client) => {
+        const { rows } = await client.query(
+          `SELECT id FROM public.gd_clientes WHERE id = $1 AND dono_client_id = $2 FOR UPDATE`,
+          [req.params.id, GD_DONO]
+        );
+        if (rows.length === 0) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        await client.query(
+          `UPDATE public.gd_cliente_portal_tokens
+              SET revogado_em = now(),
+                  revogado_por = $2
+            WHERE cliente_id = $1
+              AND revogado_em IS NULL`,
+          [req.params.id, uid]
+        );
+
+        const { rows: insertRows } = await client.query(
+          `INSERT INTO public.gd_cliente_portal_tokens (cliente_id, token_sha256, criado_em, criado_por)
+           VALUES ($1, $2, now(), $3)
+           RETURNING criado_em`,
+          [req.params.id, tokenHash, uid]
+        );
+        return insertRows[0].criado_em;
+      });
+
+      res.status(201).json({
+        token,
+        url: `/acompanhamento/${token}`,
+        criado_em,
+      });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/portal-token");
+    }
+  });
+
+  // Funções sanitizadoras públicas para o Portal do Cliente (Frente 7)
+  function sanitizarBriefingDocumentosPublico(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const docs = raw.documentos || {};
+    return {
+      briefing: {
+        docx_url: docs.briefing?.docxUrl || null,
+        pdf_url: docs.briefing?.pdfUrl || null,
+      },
+      identidade_visual: {
+        docx_url: docs.identidade_visual?.docxUrl || null,
+        pdf_url: docs.identidade_visual?.pdfUrl || null,
+      },
+      roteiro: {
+        docx_url: docs.roteiro?.docxUrl || null,
+        pdf_url: docs.roteiro?.pdfUrl || null,
+      },
+      planejamento: {
+        docx_url: docs.planejamento?.docxUrl || null,
+        pdf_url: docs.planejamento?.pdfUrl || null,
+      },
+      drive_pasta_url: raw.pastaUrl || null,
+    };
+  }
+
+  function extrairStatusChipsPublico(chips) {
+    if (!chips) return { total: 0, ativos: 0, prontos: false };
+    const list = Array.isArray(chips) ? chips : (chips.chips || []);
+    const ativos = list.filter((c) => c.status === "ATIVO" || c.ativo === true).length;
+    return {
+      total: list.length,
+      ativos,
+      prontos: list.length > 0 && ativos === list.length,
+    };
+  }
+
+  // Consulta pública da linha do tempo do cliente por token revogável ou slug.
+  // Não requer autenticação de usuário; validação feita via SHA-256 do token ou portal_slug.
+  // Retorna apenas dados públicos/sanitizados: sem dados sigilosos, notas, motivos, atores ou rótulos internos.
+  const handlerPortalPublico = async (req, res) => {
+    try {
+      const rawParam = (req.params.slug || req.params.token || "").trim();
+      if (!rawParam) {
+        res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
+        return;
+      }
+
+      const db = pool();
+      let clienteId = null;
+
+      // 1. Tenta resolver por token sha256
+      try {
+        const tokenHash = hashPortalToken(rawParam);
+        const { rows: tokenRows } = await db.query(
+          `SELECT id, cliente_id
+             FROM public.gd_cliente_portal_tokens
+            WHERE token_sha256 = $1
+              AND revogado_em IS NULL`,
+          [tokenHash]
+        );
+
+        if (tokenRows.length > 0) {
+          const { id: tokenId, cliente_id } = tokenRows[0];
+          clienteId = cliente_id;
+
+          // Atualiza último acesso do token
+          await db.query(
+            `UPDATE public.gd_cliente_portal_tokens
+                SET ultimo_acesso_em = now()
+              WHERE id = $1`,
+            [tokenId]
+          );
+        }
+      } catch {
+        // Formato não base64url ou inválido para hash, segue para verificação de slug
+      }
+
+      // 2. Sem token ativo: aceita o slug do portal, mas SÓ o que tem sufixo secreto (portalSlug.js).
+      //    Slug igual ao nome da empresa é adivinhável e não abre o portal; não há mais busca pelo nome.
+      //    Este GET não grava nada.
+      if (!clienteId && temSufixoSecreto(rawParam)) {
+        const { rows: slugRows } = await db.query(
+          `SELECT id
+             FROM public.gd_clientes
+            WHERE dono_client_id = $1
+              AND portal_slug = $2`,
+          [GD_DONO, rawParam.toLowerCase()]
+        );
+        if (slugRows.length === 1) clienteId = slugRows[0].id;
+      }
+
+      if (!clienteId) {
+        res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
+        return;
+      }
+
+      const [clienteRes, estadosRes, eventosRes] = await Promise.all([
+        db.query(
+          `SELECT nome, estado_atual, estado_desde, estado_data_estimada,
+                  proposal_id, drive_url, escopo,
+                  contrato_url, briefing_url, ficha_vexo_url, planejamento_url,
+                  grupo_cliente_url, onboarding_concluido_em, portal_slug,
+                  vexto_briefing_status, vexto_briefing_chips, briefing_documentos
+             FROM public.gd_clientes
+            WHERE id = $1 AND dono_client_id = $2`,
+          [clienteId, GD_DONO]
+        ),
+        db.query(
+          `SELECT codigo, ordem, fase, rotulo_portal, terminal, acao_do_cliente
+             FROM public.gd_estados
+            WHERE ativo
+            ORDER BY ordem`
+        ),
+        db.query(
+          `SELECT estado_para AS estado, ocorrido_em, data_estimada
+             FROM public.gd_cliente_eventos
+            WHERE cliente_id = $1
+            ORDER BY ocorrido_em, seq`,
+          [clienteId]
+        ),
+      ]);
+
+      if (clienteRes.rows.length === 0) {
+        res.status(404).json({ error: "Link de acompanhamento inválido ou expirado." });
+        return;
+      }
+
+      const c = clienteRes.rows[0];
+      const cliente = {
+        nome: c.nome,
+        estado_atual: c.estado_atual,
+        estado_desde: c.estado_desde,
+        estado_data_estimada: Boolean(c.estado_data_estimada),
+        proposal_id: c.proposal_id || null,
+        drive_url: c.drive_url || null,
+        escopo: c.escopo || null,
+        contrato_url: c.contrato_url || null,
+        briefing_url: c.briefing_url || null,
+        ficha_vexo_url: c.ficha_vexo_url || null,
+        planejamento_url: c.planejamento_url || null,
+        grupo_cliente_url: c.grupo_cliente_url || null,
+        onboarding_concluido_em: c.onboarding_concluido_em || null,
+        portal_slug: c.portal_slug || null,
+        vexto_briefing_status: c.vexto_briefing_status || null,
+        briefing_documentos: sanitizarBriefingDocumentosPublico(c.briefing_documentos),
+        chips_configurados: extrairStatusChipsPublico(c.vexto_briefing_chips),
+      };
+
+      const estados = estadosRes.rows.map((r) => ({
+        codigo: r.codigo,
+        ordem: Number(r.ordem),
+        fase: r.fase,
+        rotulo_portal: r.rotulo_portal,
+        terminal: Boolean(r.terminal),
+        acao_do_cliente: Boolean(r.acao_do_cliente),
+      }));
+
+      const eventos = eventosRes.rows.map((r) => ({
+        estado: r.estado,
+        ocorrido_em: r.ocorrido_em,
+        data_estimada: Boolean(r.data_estimada),
+      }));
+
+      const suporte = {
+        whatsapp: process.env.GD_SUPORTE_WHATSAPP || "5534997719779",
+        google_review_url: process.env.GD_GOOGLE_REVIEW_URL || "https://g.page/r/geracaodigital/review",
+        instagram_url: process.env.GD_INSTAGRAM_URL || "https://instagram.com/geracaodigital",
+      };
+
+      res.json({ cliente, estados, eventos, suporte });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/public/portal/:slug");
+    }
+  };
+
+  app.get("/api/gd/public/portal/:token", handlerPortalPublico);
+  app.get("/api/gd/public/portal/:slug", handlerPortalPublico);
+
+  // ─── Customer Success: Disparo manual da régua de cuidado (Frente 7) ───────
+  app.post("/api/gd/cs/processar", ...guarda, async (req, res) => {
+    try {
+      const { cliente_id, force_tipo, intervalo_dias } = req.body || {};
+      const resultado = await processarReguaCustomerSuccess({
+        pool: pool(),
+        clienteId: cliente_id || null,
+        forceTipo: force_tipo || null,
+        intervaloDias: intervalo_dias ? Number(intervalo_dias) : undefined,
+        evolutionSender: evolutionMessageSender,
+      });
+      res.json(resultado);
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/cs/processar");
+    }
+  });
+
+  // ─── Customer Success: Histórico de toques do cliente (Frente 7) ───────────
+  app.get("/api/gd/clientes/:id/cs-historico", ...guarda, async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const db = pool();
+      const { rows } = await db.query(
+        `SELECT id, nome, cs_regua_ativa, cs_ultimo_toque_em,
+                cs_avaliacao_google_enviada_em, cs_proximo_toque_em,
+                COALESCE(cs_toques_historico, '[]'::jsonb) AS cs_toques_historico
+           FROM public.gd_clientes
+          WHERE id = $1 AND dono_client_id = $2`,
+        [req.params.id, GD_DONO]
+      );
+      if (rows.length === 0) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+      res.json({ cliente: rows[0] });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/:id/cs-historico");
+    }
+  });
+
+  // ─── Onboarding Operacional: criação de grupos de WhatsApp (Braços GoClaw) ──
+  app.post(
+    "/api/gd/clientes/:id/onboarding/whatsapp-groups",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const body = req.body || {};
+        const clienteId = req.params.id;
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        if (cliente.grupo_interno_jid && cliente.grupo_cliente_jid && !body.force) {
+          res.json({
+            status: "already_created",
+            message: "Grupos de WhatsApp já haviam sido criados para este cliente.",
+            cliente,
+            grupos: {
+              interno: { jid: cliente.grupo_interno_jid, url: cliente.grupo_interno_url },
+              cliente: { jid: cliente.grupo_cliente_jid, url: cliente.grupo_cliente_url },
+            },
+          });
+          return;
+        }
+
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        // Equipe GD (Conrado, Caio, Gabriel)
+        const envEquipe = process.env.GD_ONBOARDING_EQUIPE_TELEFONES;
+        const equipeConfigurada = envEquipe
+          ? envEquipe.split(",").map((s) => s.trim()).filter(Boolean)
+          : ["5534991751267", "5534997719779", "5534991241824"];
+
+        const equipeParticipantes = Array.isArray(body.equipe_telefones)
+          ? body.equipe_telefones
+          : typeof body.equipe_telefones === "string"
+          ? body.equipe_telefones.split(",").map((s) => s.trim()).filter(Boolean)
+          : equipeConfigurada;
+
+        const clienteTelefone = body.cliente_telefone || cliente.aprovador_telefone || null;
+
+        // 1. Google Drive: Provisionar estrutura oficial de 4 pastas se ainda não tiver
+        let driveUrlFinal = cliente.drive_url || null;
+        let driveSetupResult = null;
+        if (body.drive_url) {
+          driveUrlFinal = lerDriveUrl(body.drive_url);
+        } else if (!driveUrlFinal) {
+          try {
+            driveSetupResult = await driveFolderSetup({
+              clientName: cliente.nome,
+              makePublic: false,
+              allowMockFallback: true,
+            });
+            if (driveSetupResult?.driveLink) {
+              driveUrlFinal = driveSetupResult.driveLink;
+            }
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao provisionar pasta no Google Drive para ${cliente.nome}:`, e.message);
+          }
+        }
+
+        // 2. Criar Grupo Interno GD (PASTA: {CLIENTE})
+        const subjectInterno = `PASTA: ${cliente.nome.toUpperCase()}`.slice(0, 100);
+        const resInterno = await evolutionGroupCreator({
+          instanceName,
+          subject: subjectInterno,
+          description: `Grupo interno da equipe Geração Digital para alinhamento e operação de ${cliente.nome}.`,
+          participants: equipeParticipantes,
+        });
+
+        const jidInterno = resInterno.groupJid;
+        let urlInterno = null;
+        let communityInternaResult = null;
+        if (jidInterno) {
+          try {
+            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidInterno });
+            urlInterno = invite?.inviteUrl || null;
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo interno (${jidInterno}):`, e.message);
+          }
+
+          // 2.1 Associação automática do grupo interno à Comunidade WhatsApp "GD — Operação Interna"
+          try {
+            communityInternaResult = await evolutionCommunityLinker({
+              instanceName,
+              groupJid: jidInterno,
+              communityName: "GD — Operação Interna",
+              communityJid: body.comunidade_interna_jid || process.env.GD_COMUNIDADE_INTERNA_JID || null,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao associar grupo interno à Comunidade GD — Operação Interna (${jidInterno}):`, e.message);
+          }
+        }
+
+        // 3. Criar Grupo com o Cliente (MÁQUINA DE VENDAS: {CLIENTE})
+        const subjectCliente = `MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}`.slice(0, 100);
+        const participantesClienteGrupo = [...equipeParticipantes];
+        if (clienteTelefone) {
+          participantesClienteGrupo.push(clienteTelefone);
+        }
+
+        const resCliente = await evolutionGroupCreator({
+          instanceName,
+          subject: subjectCliente,
+          description: `Canal oficial de acompanhamento e suporte da Geração Digital para ${cliente.nome}.`,
+          participants: participantesClienteGrupo,
+        });
+
+        const jidCliente = resCliente.groupJid;
+        let urlCliente = null;
+        let brandingAvatarResult = null;
+        let briefingOfferResult = null;
+        if (jidCliente) {
+          try {
+            const invite = await evolutionInviteGetter({ instanceName, groupJid: jidCliente });
+            urlCliente = invite?.inviteUrl || null;
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao obter invite code do grupo do cliente (${jidCliente}):`, e.message);
+          }
+
+          // 3.1 Mensagem de boas-vindas no grupo do cliente
+          const nomeDestinatario = cliente.aprovador_nome || cliente.nome;
+          const textoBoasVindas =
+            typeof body.mensagem_boas_vindas === "string" && body.mensagem_boas_vindas.trim()
+              ? body.mensagem_boas_vindas.trim()
+              : `Olá, ${nomeDestinatario}! Seja muito bem-vindo(a) à Geração Digital! 🚀\n\nEste é o nosso canal oficial de atendimento, alinhamento e acompanhamento com toda a nossa equipe. Qualquer dúvida ou solicitação, estamos sempre por aqui.\n\nEm breve daremos início aos próximos passos do seu onboarding!`;
+
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: jidCliente,
+              text: textoBoasVindas,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao enviar mensagem de boas-vindas no grupo ${jidCliente}:`, e.message);
+          }
+
+          // 3.2 Geração da Imagem de Perfil Padronizada (tarja preta 50% + Máquina de Vendas + Cliente),
+          // envio via Evolution API (/group/updateGroupPicture) e salvamento em 01_Identidade_e_Logos do Drive
+          try {
+            const identidadeFolderId = driveSetupResult?.subfolders?.identidade?.id || null;
+            brandingAvatarResult = await brandingAvatarGenerator({
+              clientName: cliente.nome,
+              groupJid: jidCliente,
+              instanceName,
+              identidadeFolderId,
+              logoUrl: body.logo_url || null,
+              evolutionUpdater: evolutionPictureUpdater,
+              driveUploader: driveFileUploader,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao gerar e aplicar avatar padronizado para ${cliente.nome}:`, e.message);
+          }
+
+          // 3.3 Oferta de horários de briefing no grupo do cliente (Frente 4)
+          if (jidCliente && body.oferecer_briefing !== false) {
+            try {
+              const slotsRes = await calendarSlotFinder({
+                fromDate: new Date(),
+                targetDays: [1, 2, 3],
+              });
+              if (slotsRes?.options?.length > 0) {
+                const textoOferta = formatBriefingOfferMessage({
+                  clienteNome: cliente.nome,
+                  aprovadorNome: cliente.aprovador_nome,
+                  aprovadorTelefone: clienteTelefone,
+                  slots: slotsRes.options,
+                });
+                await evolutionMessageSender({
+                  instanceName,
+                  number: jidCliente,
+                  text: textoOferta,
+                });
+                briefingOfferResult = {
+                  options: slotsRes.options,
+                  message_sent: true,
+                };
+              }
+            } catch (e) {
+              console.warn(`[GD-Onboarding] Falha ao oferecer horários de briefing para ${cliente.nome}:`, e.message);
+            }
+          }
+        }
+
+        const resultado = await emTransacao(getPool, async (client) => {
+          await client.query(
+            `UPDATE public.gd_clientes
+                SET grupo_interno_jid = $1,
+                    grupo_interno_url = $2,
+                    grupo_cliente_jid = $3,
+                    grupo_cliente_url = $4,
+                    onboarding_concluido_em = now(),
+                    drive_url = COALESCE($5, drive_url),
+                    briefing_slots_oferecidos = COALESCE($6::jsonb, briefing_slots_oferecidos)
+              WHERE id = $7 AND dono_client_id = $8`,
+            [
+              jidInterno,
+              urlInterno,
+              jidCliente,
+              urlCliente,
+              driveUrlFinal,
+              briefingOfferResult?.options ? JSON.stringify(briefingOfferResult.options) : null,
+              clienteId,
+              GD_DONO,
+            ]
+          );
+
+          // Transiciona estado para GRUPOS_CRIADOS caso o cliente esteja em estado anterior
+          let evento = null;
+          if (cliente.estado_atual !== "GRUPOS_CRIADOS") {
+            const mov = {
+              estado: "GRUPOS_CRIADOS",
+              motivo: "Pastas, grupos de WhatsApp, comunidade interna e avatar gerados via automação GoClaw.",
+              ocorridoEm: null,
+              dataEstimada: false,
+              origem: "fluxo",
+            };
+
+            const dadosEvento = {
+              grupo_interno: {
+                jid: jidInterno,
+                url: urlInterno,
+                comunidade: communityInternaResult?.community || "GD — Operação Interna",
+              },
+              grupo_cliente: {
+                jid: jidCliente,
+                url: urlCliente,
+                avatar_drive_url: brandingAvatarResult?.driveFile?.fileLink || null,
+              },
+              drive_url: driveUrlFinal,
+            };
+
+            await exigirEstadoValido(client, mov.estado);
+            evento = await registrarEvento(client, clienteId, mov, ator.id, ator.tipo, dadosEvento);
+          }
+
+          const clienteAtualizado = await lerCliente(client, clienteId);
+          return { evento, cliente: clienteAtualizado };
+        });
+
+        // 4. Notificação WhatsApp: avisar no grupo interno e para a equipe
+        const textoNotificacao =
+          `🚀 *Onboarding GD · Setup Concluído!*\n\n` +
+          `• *Cliente:* ${cliente.nome}\n` +
+          `• *Pasta Interna:* ${urlInterno || jidInterno || "Criada"} (associada à Comunidade *GD — Operação Interna*)\n` +
+          `• *Máquina de Vendas:* ${urlCliente || jidCliente || "Criada"}\n` +
+          (brandingAvatarResult?.evolutionUpdated ? `• *Foto do Perfil:* Atualizada com tarja oficial 50%\n` : "") +
+          (driveUrlFinal ? `• *Google Drive:* ${driveUrlFinal}\n` : "") +
+          `• *Estado:* GRUPOS_CRIADOS\n\n` +
+          `📌 *Atenção:* Vincular a Máquina de Vendas à Comunidade *"Máquinas de Vendas GD"* como *Oculto*.`;
+
+        // Envia para o grupo interno recém-criado
+        if (jidInterno) {
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: jidInterno,
+              text: textoNotificacao,
+            });
+          } catch (e) {
+            console.warn(`[GD-Onboarding] Falha ao enviar aviso no grupo interno:`, e.message);
+          }
+        }
+
+        // Envia para a equipe institucional (Conrado e Caio)
+        for (const num of equipeParticipantes) {
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: num,
+              text: textoNotificacao,
+            });
+          } catch (e) {
+            // Silencia falha em telefone individual
+          }
+        }
+
+        // Fallback Slack (apenas para compatibilidade em testes legados)
+        try {
+          await slackSender({
+            text: `🚀 *Onboarding GD · Grupos de WhatsApp Criados!*\n• *Cliente:* ${cliente.nome}\n• *Drive:* ${driveUrlFinal || "N/A"}`,
+            channel: "01-ops-geral",
+          });
+        } catch {
+          // Ignorado propositalmente
+        }
+
+        res.status(201).json({
+          success: true,
+          cliente: resultado.cliente,
+          evento: resultado.evento,
+          grupos: {
+            interno: {
+              jid: jidInterno,
+              url: urlInterno,
+              comunidade: communityInternaResult?.community || "GD — Operação Interna",
+            },
+            cliente: {
+              jid: jidCliente,
+              url: urlCliente,
+              avatar_drive_url: brandingAvatarResult?.driveFile?.fileLink || null,
+            },
+          },
+          drive: {
+            url: driveUrlFinal,
+            subfolders: driveSetupResult?.subfolders || null,
+          },
+          branding: brandingAvatarResult ? {
+            evolution_updated: brandingAvatarResult.evolutionUpdated,
+            drive_file: brandingAvatarResult.driveFile,
+          } : null,
+          briefing: briefingOfferResult ? {
+            slots_oferecidos: briefingOfferResult.options,
+            mensagem_enviada: briefingOfferResult.message_sent,
+          } : null,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/whatsapp-groups");
+      }
+    }
+  );
+
+  // ─── Onboarding: Vincular grupo interno à Comunidade WhatsApp ─────────────
+  app.post(
+    "/api/gd/clientes/:id/onboarding/whatsapp-community",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+        const jidInterno = req.body.grupo_interno_jid || cliente.grupo_interno_jid;
+        if (!jidInterno) {
+          throw new ErroDeRota(422, "GRUPO_INTERNO_NAO_CONFIGURADO", "Cliente ainda não possui grupo interno criado.");
+        }
+        const instanceName =
+          (typeof req.body.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const communityRes = await evolutionCommunityLinker({
+          instanceName,
+          groupJid: jidInterno,
+          communityName: "GD — Operação Interna",
+          communityJid: req.body.comunidade_interna_jid || process.env.GD_COMUNIDADE_INTERNA_JID || null,
+        });
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          grupo_interno_jid: jidInterno,
+          comunidade: communityRes.community,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/whatsapp-community");
+      }
+    }
+  );
+
+  // ─── Onboarding: Gerar avatar padronizado e aplicar na Máquina de Vendas ────
+  app.post(
+    "/api/gd/clientes/:id/onboarding/branding-avatar",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+        const jidCliente = req.body.grupo_cliente_jid || cliente.grupo_cliente_jid;
+        if (!jidCliente) {
+          throw new ErroDeRota(422, "GRUPO_CLIENTE_NAO_CONFIGURADO", "Cliente ainda não possui grupo de atendimento criado.");
+        }
+        const instanceName =
+          (typeof req.body.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const avatarRes = await brandingAvatarGenerator({
+          clientName: cliente.nome,
+          groupJid: jidCliente,
+          instanceName,
+          identidadeFolderId: req.body.identidade_folder_id || null,
+          logoUrl: req.body.logo_url || null,
+          evolutionUpdater: evolutionPictureUpdater,
+          driveUploader: driveFileUploader,
+        });
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          grupo_cliente_jid: jidCliente,
+          branding: {
+            evolution_updated: avatarRes.evolutionUpdated,
+            drive_file: avatarRes.driveFile,
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/onboarding/branding-avatar");
+      }
+    }
+  );
+
+  // ─── Briefing: Oferecer horários disponíveis no WhatsApp do Cliente ────────
+  app.post(
+    "/api/gd/clientes/:id/briefing/oferecer-horarios",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        const jidCliente = req.body?.grupo_cliente_jid || cliente.grupo_cliente_jid;
+        if (!jidCliente) {
+          throw new ErroDeRota(422, "GRUPO_CLIENTE_NAO_CONFIGURADO", "Cliente ainda não possui grupo de atendimento criado.");
+        }
+
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const slotsRes = await calendarSlotFinder({
+          fromDate: req.body?.from_date ? new Date(req.body.from_date) : new Date(),
+          targetDays: Array.isArray(req.body?.target_days) ? req.body.target_days : [1, 2, 3],
+          mockBusyRanges: req.body?.mock_busy_ranges || null,
+        });
+
+        if (!slotsRes?.options || slotsRes.options.length === 0) {
+          throw new ErroDeRota(422, "SEM_SLOTS_DISPONIVEIS", "Nenhum horário comercial disponível encontrado nas agendas para os próximos dias.");
+        }
+
+        const clienteTelefone = req.body?.cliente_telefone || cliente.aprovador_telefone || null;
+        const textoOferta = formatBriefingOfferMessage({
+          clienteNome: cliente.nome,
+          aprovadorNome: cliente.aprovador_nome,
+          aprovadorTelefone: clienteTelefone,
+          slots: slotsRes.options,
+        });
+
+        await evolutionMessageSender({
+          instanceName,
+          number: jidCliente,
+          text: textoOferta,
+        });
+
+        await db.query(
+          `UPDATE public.gd_clientes
+              SET briefing_slots_oferecidos = $1::jsonb
+            WHERE id = $2 AND dono_client_id = $3`,
+          [JSON.stringify(slotsRes.options), clienteId, GD_DONO]
+        );
+
+        const clienteAtualizado = await lerCliente(db, clienteId);
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          grupo_cliente_jid: jidCliente,
+          slots: slotsRes.options,
+          mensagem: textoOferta,
+          cliente: clienteAtualizado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/oferecer-horarios");
+      }
+    }
+  );
+
+  // ─── Briefing: Confirmar agendamento, criar Meet e disparar convites/avisos ─
+  app.post(
+    "/api/gd/clientes/:id/briefing/agendar",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const body = req.body || {};
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        let slotStart = null;
+        let slotEnd = null;
+
+        // Se informou opcao (1, 2, 3), busca dos slots oferecidos
+        if (body.opcao != null) {
+          const numOpcao = Number(body.opcao);
+          const slots = Array.isArray(cliente.briefing_slots_oferecidos)
+            ? cliente.briefing_slots_oferecidos
+            : [];
+          const slotEscolhido = slots.find((s) => Number(s.opcao) === numOpcao || Number(s.id) === numOpcao);
+          if (!slotEscolhido) {
+            throw new ErroDeRota(
+              422,
+              "OPCAO_SLOT_INVALIDA",
+              `Opção ${body.opcao} não encontrada entre os horários oferecidos ao cliente.`
+            );
+          }
+          slotStart = slotEscolhido.inicio;
+          slotEnd = slotEscolhido.fim;
+        } else if (body.slot_start && body.slot_end) {
+          slotStart = new Date(body.slot_start).toISOString();
+          slotEnd = new Date(body.slot_end).toISOString();
+        } else {
+          throw new ErroDeRota(
+            422,
+            "SLOT_OBRIGATORIO",
+            "Informe a opção (1, 2 ou 3) ou slot_start e slot_end para confirmar o agendamento."
+          );
+        }
+
+        const clientCalendarEmail =
+          (typeof body.google_calendar_email === "string" && body.google_calendar_email.trim()) ||
+          cliente.google_calendar_email ||
+          null;
+
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        // Cria o evento no Google Calendar com Google Meet e convidados
+        const eventResult = await calendarEventCreator({
+          clienteId,
+          clienteNome: cliente.nome,
+          slotStart,
+          slotEnd,
+          title: body.title || `Briefing Inicial · ${cliente.nome}`,
+          attendees: [
+            GD_CALENDAR_AGENCIA,
+            GD_CALENDAR_CAIO,
+            clientCalendarEmail,
+          ].filter(Boolean),
+          description: `Reunião de Briefing e Alinhamento Estratégico com a equipe da Geração Digital.\n\nCliente: ${cliente.nome}\nResponsável: ${cliente.aprovador_nome || cliente.nome}`,
+        });
+
+        // Calcula horários da régua de lembretes automáticos
+        const reminderTimes = calculateReminderTimes({ slotStart });
+
+        // Atualiza no banco e registra evento de transição de estado para BRIEFING_AGENDADO
+        const resultado = await emTransacao(getPool, async (client) => {
+          await client.query(
+            `UPDATE public.gd_clientes
+                SET briefing_agendado_inicio = $1,
+                    briefing_agendado_fim = $2,
+                    briefing_meet_url = $3,
+                    briefing_calendar_event_id = $4,
+                    briefing_lembrete_vespera_agendado_para = $5,
+                    briefing_lembrete_1h_agendado_para = $6,
+                    briefing_lembrete_vespera_enviado_em = NULL,
+                    briefing_lembrete_1h_enviado_em = NULL,
+                    google_calendar_email = COALESCE($7, google_calendar_email)
+              WHERE id = $8 AND dono_client_id = $9`,
+            [
+              slotStart,
+              slotEnd,
+              eventResult.meetUrl,
+              eventResult.eventId,
+              reminderTimes.vesperaReminderAt,
+              reminderTimes.umaHoraReminderAt,
+              clientCalendarEmail,
+              clienteId,
+              GD_DONO,
+            ]
+          );
+
+          const mov = {
+            estado: "BRIEFING_AGENDADO",
+            motivo: body.motivo || `Briefing agendado via Google Calendar para ${slotStart}.`,
+            ocorridoEm: null,
+            dataEstimada: false,
+            origem: "fluxo",
+          };
+
+          const dadosEvento = {
+            briefing: {
+              inicio: slotStart,
+              fim: slotEnd,
+              meet_url: eventResult.meetUrl,
+              calendar_event_id: eventResult.eventId,
+              attendees: eventResult.attendees,
+              lembrete_vespera_agendado_para: reminderTimes.vesperaReminderAt,
+              lembrete_1h_agendado_para: reminderTimes.umaHoraReminderAt,
+            },
+          };
+
+          await exigirEstadoValido(client, mov.estado);
+          const evento = await registrarEvento(client, clienteId, mov, ator.id, ator.tipo, dadosEvento);
+          const clienteAtualizado = await lerCliente(client, clienteId);
+          return { evento, cliente: clienteAtualizado };
+        });
+
+        const dataFormatada = formatarDataHoraAmigavel(slotStart);
+        const tagCliente = cliente.aprovador_telefone ? `@${cliente.aprovador_telefone}` : (cliente.aprovador_nome || cliente.nome);
+
+        // 1. Notifica no grupo do cliente (MÁQUINA DE VENDAS: {CLIENTE})
+        if (cliente.grupo_cliente_jid) {
+          const textoCliente =
+            `🎉 *Reunião de Briefing Confirmada!*\n\n` +
+            `Olá, ${tagCliente} (${cliente.aprovador_nome || cliente.nome})! A nossa Reunião de Briefing e Alinhamento Estratégico foi agendada com sucesso.\n\n` +
+            `📅 *Data/Horário:* ${dataFormatada}\n` +
+            `🔗 *Link da Sala (Google Meet):* ${eventResult.meetUrl}\n\n` +
+            (clientCalendarEmail
+              ? `✉️ O convite com link do Google Meet foi enviado para *${clientCalendarEmail}*.\n\n`
+              : "") +
+            `Nos vemos em breve! Qualquer dúvida estamos por aqui. 🚀`;
+
+          try {
+            await evolutionMessageSender({
+              instanceName,
+              number: cliente.grupo_cliente_jid,
+              text: textoCliente,
+            });
+          } catch (e) {
+            console.warn(`[GD-Briefing] Falha ao enviar confirmação no grupo do cliente (${cliente.grupo_cliente_jid}):`, e.message);
+          }
+        }
+
+        // 2. Notifica diretamente o Caio no WhatsApp
+        const caioNumero = process.env.GD_CAIO_WHATSAPP || GD_CAIO_WHATSAPP_PADRAO;
+        const textoCaio =
+          `📅 *Briefing Agendado!*\n\n` +
+          `• *Cliente:* ${cliente.nome}\n` +
+          `• *Data/Hora:* ${dataFormatada}\n` +
+          `• *Google Meet:* ${eventResult.meetUrl}\n` +
+          `• *Convidados:* mrkgeracaodigital@gmail.com, caioalmeidmrk@gmail.com, ${clientCalendarEmail || "cliente"}\n` +
+          `• *Responsável:* ${cliente.aprovador_nome || cliente.nome} (${cliente.aprovador_telefone || "N/A"})`;
+
+        try {
+          await evolutionMessageSender({
+            instanceName,
+            number: caioNumero,
+            text: textoCaio,
+          });
+        } catch (e) {
+          console.warn(`[GD-Briefing] Falha ao enviar aviso de agendamento para o Caio:`, e.message);
+        }
+
+        res.json({
+          success: true,
+          cliente: resultado.cliente,
+          evento: resultado.evento,
+          briefing: {
+            inicio: slotStart,
+            fim: slotEnd,
+            meet_url: eventResult.meetUrl,
+            calendar_event_id: eventResult.eventId,
+            attendees: eventResult.attendees,
+            lembretes: {
+              vespera_agendado_para: reminderTimes.vesperaReminderAt,
+              uma_hora_agendado_para: reminderTimes.umaHoraReminderAt,
+            },
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/agendar");
+      }
+    }
+  );
+
+  // ─── Briefing: Processar e disparar lembretes pendentes da régua ────────────
+  app.post(
+    "/api/gd/briefing/processar-lembretes",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        const db = pool();
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+        const now = req.body?.now ? new Date(req.body.now) : new Date();
+
+        const resultado = await reminderProcessor({
+          pool: db,
+          now,
+          evolutionSender: evolutionMessageSender,
+          instanceName,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/briefing/processar-lembretes");
+      }
+    }
+  );
+
+  // ─── Briefing: Síntese Multidocumento dos 4 Documentos com Gemini ─────────
+  app.post(
+    "/api/gd/clientes/:id/briefing/sintetizar",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+        const resultado = await briefingSynthesizer({
+          clienteId,
+          pool: db,
+          transcricao: req.body?.transcricao || null,
+          respostasFormulario: req.body?.respostas_formulario || null,
+          contrato: req.body?.contrato || null,
+          templateGd: req.body?.template_gd || null,
+          model: req.body?.model || "gemini-flash-latest",
+          apiKey: req.body?.api_key || null,
+          driveUploader: driveFileUploader,
+          actor: ator,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/sintetizar");
+      }
+    }
+  );
+
+  // ─── Briefing: Enviar os 4 Documentos no Grupo Interno (PASTA: {CLIENTE}) ──
+  app.post(
+    "/api/gd/clientes/:id/briefing/enviar-aprovacao-interna",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const resultado = await internalApprovalSender({
+          clienteId,
+          pool: db,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          actor: ator,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/enviar-aprovacao-interna");
+      }
+    }
+  );
+
+  // ─── Briefing: Enviar no Grupo do Cliente (MÁQUINA DE VENDAS: {CLIENTE}) ────
+  app.post(
+    "/api/gd/clientes/:id/briefing/enviar-aprovacao-cliente",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+        const instanceName =
+          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const resultado = await clientApprovalSender({
+          clienteId,
+          pool: db,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          actor: ator,
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/clientes/:id/briefing/enviar-aprovacao-cliente");
+      }
+    }
+  );
+
+  // ─── Briefing: Webhook/Processador de Aprovação no WhatsApp ─────────────────
+  app.post(
+    "/api/gd/briefing/webhook-aprovacao",
+    async (req, res) => {
+      try {
+        const db = pool();
+        const body = req.body || {};
+        const groupJid = body.group_jid || body.remoteJid || body.data?.key?.remoteJid;
+        const text =
+          body.text ||
+          body.message ||
+          body.data?.message?.conversation ||
+          body.data?.message?.extendedTextMessage?.text;
+        const senderJid = body.sender_jid || body.data?.key?.participant || groupJid;
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          body.instance ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        const resultado = await approvalMessageProcessor({
+          pool: db,
+          groupJid,
+          text,
+          senderJid,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          actor: { id: "webhook_whatsapp", tipo: "goclaw" },
+        });
+
+        res.json({
+          success: true,
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/briefing/webhook-aprovacao");
+      }
+    }
+  );
+
+  // ─── Briefing: Consulta de Documentos e Status de Aprovação ────────────────
+  app.get(
+    "/api/gd/clientes/:id/briefing/documentos",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const clienteId = req.params.id;
+        const db = pool();
+        const cliente = await lerCliente(db, clienteId);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        res.json({
+          success: true,
+          cliente_id: clienteId,
+          nome: cliente.nome,
+          estado_atual: cliente.estado_atual,
+          drive_url: cliente.drive_url,
+          briefing_documentos: cliente.briefing_documentos || null,
+          aprovacao_interna: {
+            status: cliente.briefing_aprovacao_interna_status || "NAO_INICIADO",
+            ressalvas: cliente.briefing_aprovacao_interna_ressalvas || null,
+            aprovado_em: cliente.briefing_aprovacao_interna_em || null,
+          },
+          aprovacao_cliente: {
+            status: cliente.briefing_aprovacao_cliente_status || "NAO_INICIADO",
+            aprovado_em: cliente.briefing_aprovacao_cliente_em || null,
+          },
+        });
+      } catch (err) {
+        responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos");
+      }
+    }
+  );
+
+  // ─── Comercial: Gerador Autônomo da Apresentação "Máquina de Vendas" ────────
+  app.post(
+    "/api/gd/comercial/gerar-apresentacao",
+    requireGdOrGoclawAuth(requireFirebaseAuth),
+    async (req, res) => {
+      try {
+        const body = req.body || {};
+        const instanceName =
+          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
+          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
+          process.env.GD_EVOLUTION_INSTANCE ||
+          "vexo-adm-vexo-atende";
+
+        // Modo 1: Ingestão em lote / Watcher da pasta "Logos Novas" no Google Drive
+        if (
+          body.poll ||
+          body.ler_pasta_drive ||
+          body.readDriveFolder ||
+          (!body.fileBase64 && !body.logoBase64 && !body.fileBuffer && !body.fileId)
+        ) {
+          const resultadoLote = await commercialBatchIngestion({
+            folderId: body.folderId || null,
+            apiKey: body.api_key || null,
+            model: body.model || "gemini-flash-latest",
+            caioNumero: body.caio_whatsapp || null,
+            instanceName,
+            workflowExecutor: commercialWorkflowExecutor,
+          });
+
+          return res.json({
+            success: true,
+            modo: "ingestao_logos_novas",
+            ...resultadoLote,
+          });
+        }
+
+        // Modo 2: Upload Direto / Processamento de Prospect Específico
+        let fileBuffer = null;
+        if (body.fileBuffer) {
+          fileBuffer = Buffer.isBuffer(body.fileBuffer) ? body.fileBuffer : Buffer.from(body.fileBuffer);
+        } else if (body.fileBase64 || body.logoBase64) {
+          const rawBase64 = (body.fileBase64 || body.logoBase64).replace(/^data:image\/[a-zA-Z0-9]+;base64,/, "");
+          fileBuffer = Buffer.from(rawBase64, "base64");
+        }
+
+        const resultado = await commercialWorkflowExecutor({
+          fileBuffer,
+          fileName: body.fileName || body.file_name || "",
+          fileId: body.fileId || body.file_id || null,
+          prospectName: body.prospectName || body.prospect_name || null,
+          nicho: body.nicho || body.niche || null,
+          apiKey: body.api_key || null,
+          model: body.model || "gemini-flash-latest",
+          caioNumero: body.caio_whatsapp || null,
+          instanceName,
+          evolutionSender: evolutionMessageSender,
+          driveUploader: driveFileUploader,
+        });
+
+        res.json({
+          success: true,
+          modo: "upload_direto",
+          ...resultado,
+        });
+      } catch (err) {
+        responderErro(res, err, "POST /api/gd/comercial/gerar-apresentacao");
+      }
+    }
+  );
+
+  // ─── Frente 6: Briefing Comercial Vexo, Mineração WhatsApp e 4 Pilares ─────
+
+  // Upload do histórico de conversas e mineração pelo Gemini
+  const lidarUploadChatMineracao = async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const clienteId = req.params.id;
+      const db = pool();
+      const cliente = await lerCliente(db, clienteId);
+      if (!cliente) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+
+      const body = req.body || {};
+      let input = null;
+
+      if (body.fileBuffer) {
+        input = Buffer.isBuffer(body.fileBuffer) ? body.fileBuffer : Buffer.from(body.fileBuffer);
+      } else if (body.fileBase64 || body.file) {
+        const rawBase64 = String(body.fileBase64 || body.file).replace(/^data:([a-zA-Z0-9/+-]+);base64,/, "");
+        input = Buffer.from(rawBase64, "base64");
+      } else if (typeof body.chat_text === "string" && body.chat_text.trim()) {
+        input = body.chat_text.trim();
+      } else if (typeof body.text === "string" && body.text.trim()) {
+        input = body.text.trim();
+      } else if (typeof body.chat === "string" && body.chat.trim()) {
+        input = body.chat.trim();
+      }
+
+      if (!input) {
+        throw new ErroDeRota(
+          400,
+          "CONVERSA_NAO_INFORMADA",
+          "Envie o arquivo de conversas do WhatsApp (_chat.txt ou .zip) ou o texto no corpo."
+        );
+      }
+
+      const fileName = body.fileName || body.file_name || "exportacao_whatsapp.txt";
+      const apiKey = body.api_key || null;
+      const model = body.model || "gemini-flash-latest";
+      const llmCaller = body.llmCaller || null;
+
+      const mineracao = await chatMiner({
+        input,
+        nomeArquivo: fileName,
+        cliente,
+        apiKey,
+        model,
+        llmCaller,
+      });
+
+      await db.query(
+        `UPDATE public.gd_clientes
+         SET vexto_briefing_mineracao = $1::jsonb,
+             vexto_briefing_status = CASE WHEN vexto_briefing_status = 'AGENTE_ATIVADO' THEN 'AGENTE_ATIVADO' ELSE 'MINERADO' END
+         WHERE id = $2 AND dono_client_id = $3`,
+        [JSON.stringify(mineracao), clienteId, GD_DONO]
+      );
+
+      res.json({
+        success: true,
+        cliente_id: clienteId,
+        status: "MINERADO",
+        mineracao,
+      });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/vexto-briefing/upload-chat");
+    }
+  };
+
+  app.post("/api/gd/clientes/:id/vexto-briefing/upload-chat", requireGdOrGoclawAuth(requireFirebaseAuth), lidarUploadChatMineracao);
+  app.post("/api/gd/clientes/:id/vexo-briefing/upload-chat", requireGdOrGoclawAuth(requireFirebaseAuth), lidarUploadChatMineracao);
+
+  // Salvamento dos 4 pilares e ativação do prompt do agente
+  const lidarSalvarPilaresEAtivar = async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const clienteId = req.params.id;
+      const db = pool();
+      const cliente = await lerCliente(db, clienteId);
+      if (!cliente) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+
+      const body = req.body || {};
+      const pilares = body.pilares || {};
+      const chips = body.chips || null;
+      const transbordoNumero = body.transbordo_numero || body.transbordoNumero || body.telefone_fechador || null;
+      const instanceName = body.instance_name || body.instanceName || null;
+      const instances = Array.isArray(body.instances) ? body.instances : [];
+      const model = body.model || "gemini-flash-latest";
+      const ativarAgente = body.ativar_agente !== false;
+      const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
+
+      if (ativarAgente) {
+        const resultado = await agentBuilder({
+          pool: db,
+          clienteId,
+          pilares,
+          chips,
+          transbordoNumero,
+          instanceName,
+          instances,
+          model,
+          actor: ator,
+        });
+
+        return res.json({
+          success: true,
+          ...resultado,
+        });
+      }
+
+      // Se apenas salvar sem ativar o agente na tabela followup_companies
+      await db.query(
+        `UPDATE public.gd_clientes
+         SET vexto_briefing_pilares = $1::jsonb,
+             vexto_briefing_chips = COALESCE($2::jsonb, vexto_briefing_chips),
+             vexto_briefing_transbordo_numero = COALESCE($3, vexto_briefing_transbordo_numero),
+             vexto_briefing_status = 'PILARES_SALVOS'
+         WHERE id = $4 AND dono_client_id = $5`,
+        [JSON.stringify(pilares), chips ? JSON.stringify(chips) : null, transbordoNumero, clienteId, GD_DONO]
+      );
+
+      res.json({
+        success: true,
+        cliente_id: clienteId,
+        status: "PILARES_SALVOS",
+        pilares,
+      });
+    } catch (err) {
+      responderErro(res, err, "POST /api/gd/clientes/:id/vexto-briefing/salvar-pilares");
+    }
+  };
+
+  app.post("/api/gd/clientes/:id/vexto-briefing/salvar-pilares", requireGdOrGoclawAuth(requireFirebaseAuth), lidarSalvarPilaresEAtivar);
+  app.post("/api/gd/clientes/:id/vexo-briefing/salvar-pilares", requireGdOrGoclawAuth(requireFirebaseAuth), lidarSalvarPilaresEAtivar);
+
+  // Visualização do status técnico, chips virtuais e pilares
+  const lidarConsultaBriefingVexo = async (req, res) => {
+    try {
+      exigirUuid(req.params.id);
+      const clienteId = req.params.id;
+      const db = pool();
+      const cliente = await lerCliente(db, clienteId);
+      if (!cliente) {
+        throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+      }
+
+      res.json({
+        success: true,
+        cliente_id: clienteId,
+        nome: cliente.nome,
+        estado_atual: cliente.estado_atual,
+        status: cliente.vexto_briefing_status || "PENDENTE",
+        chips_virtuais: cliente.vexto_briefing_chips || {
+          chips: [],
+          total: 0,
+          responsavel: "Gabriel (até 72h após contratação)",
+          recomendacao: "2 a 3 chips virtuais de proteção contra restrição",
+          status: "PENDENTE_COMPRA",
+        },
+        transbordo_numero: cliente.vexto_briefing_transbordo_numero || null,
+        mineracao: cliente.vexto_briefing_mineracao || null,
+        pilares: cliente.vexto_briefing_pilares || null,
+        prompt_gerado: cliente.vexto_briefing_prompt_gerado || null,
+        agente_id: cliente.vexto_briefing_agente_id || null,
+      });
+    } catch (err) {
+      responderErro(res, err, "GET /api/gd/clientes/:id/vexto-briefing");
+    }
+  };
+
+  app.get("/api/gd/clientes/:id/vexto-briefing", requireGdOrGoclawAuth(requireFirebaseAuth), lidarConsultaBriefingVexo);
+  app.get("/api/gd/clientes/:id/vexo-briefing", requireGdOrGoclawAuth(requireFirebaseAuth), lidarConsultaBriefingVexo);
+}

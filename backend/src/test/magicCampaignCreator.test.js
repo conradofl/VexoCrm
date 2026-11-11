@@ -5,6 +5,7 @@ import {
   getFallbackMagicCampaign,
 } from "../services/magicCampaignCreator.js";
 import * as chatbotEngine from "../chatbot-ai-engine.js";
+import { formatStepTextWithButtons } from "../campaign-outbound.js";
 
 describe("magicCampaignCreator", () => {
   beforeEach(() => {
@@ -115,7 +116,7 @@ describe("magicCampaignCreator", () => {
       expect(result.rationale).toContain("Curiosidade sobre valorização");
       expect(result.steps).toHaveLength(3);
       expect(result.steps[0].text).toContain("Oi {{primeiro_nome}}");
-      expect(result.steps[1].buttons[0].displayText).toBe("1 - Quero conferir");
+      expect(result.steps[1].buttons[0].displayText).toBe("Quero conferir");
       expect(result.steps[2].linkUrl).toBe("{{scheduling_link}}");
       expect(result.agentPrompt).toContain("Atenda o lead");
     });
@@ -148,5 +149,92 @@ describe("magicCampaignCreator", () => {
       expect(result.steps).toHaveLength(3);
       expect(result.steps[2].linkUrl).toBe("{{scheduling_link}}");
     });
+  });
+
+  describe("opções de resposta sem numeração própria: quem numera é a montagem da mensagem", () => {
+    const opcoesDaIa = async (rotulos) => {
+      const buttons = rotulos.map((r) => ({ type: "reply", displayText: r, replyText: r }));
+      vi.spyOn(chatbotEngine, "callLlmChatCompletion").mockResolvedValue(
+        JSON.stringify({ steps: [{ text: "a" }, { text: "b", buttons }, { text: "c" }] })
+      );
+      const result = await generateMagicCampaign({ prompt: "x" });
+      return result.steps[1].buttons;
+    };
+
+    it.each([
+      ["1 - Quero aproveitar", "2 - Agora não"],
+      ["1- Quero aproveitar", "2- Agora não"],
+      ["1-Quero aproveitar", "2-Agora não"],
+      ["1 Quero aproveitar", "2 Agora não"],
+      ["1. Quero aproveitar", "2. Agora não"],
+      ["1) Quero aproveitar", "2) Agora não"],
+      ["1 – Quero aproveitar", "2 — Agora não"],
+    ])("(a) IA devolve %j e %j: salva sem número, nos dois campos", async (um, dois) => {
+      const buttons = await opcoesDaIa([um, dois]);
+
+      expect(buttons.map((b) => b.displayText)).toEqual(["Quero aproveitar", "Agora não"]);
+      expect(buttons.map((b) => b.replyText)).toEqual(["Quero aproveitar", "Agora não"]);
+    });
+
+    it("(a) o lead recebe uma numeração só", async () => {
+      const buttons = await opcoesDaIa(["1 - Quero aproveitar", "2 - Agora não"]);
+      const texto = formatStepTextWithButtons("Oferta", buttons);
+
+      expect(texto).toContain("1. Quero aproveitar");
+      expect(texto).toContain("2. Agora não");
+      expect(texto).not.toMatch(/\d\.\s*\d/);
+    });
+
+    it("(b) IA devolve sem número: salva igual, sem comer caractere", async () => {
+      const rotulos = ["Quero aproveitar", "Agora não", "Ok", "A", "Sim - quero", "Plano 2 - anual"];
+      const buttons = await opcoesDaIa(rotulos);
+
+      expect(buttons.map((b) => b.displayText)).toEqual(rotulos);
+    });
+
+    it.each([
+      [["2 pessoas", "10 dias"]],
+      [["1 pessoa", "2 pessoas"]],
+      [["1 mês", "12 meses"]],
+      [["2-3 dias", "4-5 dias"]],
+      [["1.5 salário", "2.5 salários"]],
+      [["24h", "48h"]],
+      [["2 - 3 dias", "1 - 2 dias"]],
+      [["10", "20"]],
+      [["1 -", "2."]],
+      [["2 Pessoas", "1 Pessoa"]],
+    ])("(c) opção que começa com número de verdade não é mutilada: %j", async (rotulos) => {
+      const buttons = await opcoesDaIa(rotulos);
+
+      expect(buttons.map((b) => b.displayText)).toEqual(rotulos);
+    });
+
+    it("o limite de 30 caracteres vale depois de tirar o prefixo", async () => {
+      const rotulo = "Quero garantir a minha vaga já";
+      expect(rotulo).toHaveLength(30);
+
+      const [botao] = await opcoesDaIa([`1 - ${rotulo}`, "2 - Depois"]);
+
+      expect(botao.displayText).toBe(rotulo);
+    });
+
+    it("nenhum exemplo que a IA recebe vem numerado", async () => {
+      const chamada = vi.spyOn(chatbotEngine, "callLlmChatCompletion").mockResolvedValue("{}");
+      await generateMagicCampaign({ prompt: "x" });
+
+      const sistema = chamada.mock.calls[0][0].messages[0].content;
+      expect(sistema).toMatch(/"displayText": "Quero aproveitar"/);
+      expect(sistema).not.toMatch(/"(displayText|replyText)": "\d/);
+    });
+
+    it.each(["imobiliaria", "estetica", "academia", "veiculos", "varejo", "b2b", "geral"])(
+      "contingência do nicho %s não vem numerada",
+      (niche) => {
+        for (const botao of getFallbackMagicCampaign({ niche }).steps[1].buttons) {
+          expect(botao.displayText).not.toMatch(/^\d/);
+          expect(botao.replyText).not.toMatch(/^\d/);
+        }
+      }
+    );
   });
 });

@@ -95,12 +95,6 @@ export function detectLlmProvider(modelId) {
 }
 
 const GROQ_BASE = "https://api.groq.com/openai/v1";
-// Modelo de visao (leitura de imagem recebida no WhatsApp). Configuravel por env
-// porque a Groq troca esses modelos com frequencia: llama-3.2-11b-vision-preview,
-// que estava fixo aqui, foi descontinuado e o caminho de imagem falhava sem
-// nenhum aviso ao usuario.
-const GROQ_VISION_MODEL =
-  process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
 const GROQ_WHISPER_MODEL = "whisper-large-v3-turbo";
 
 function groqKey() {
@@ -113,12 +107,12 @@ export const LLM_CALL_TIMEOUT_MS = Number(process.env.LLM_CALL_TIMEOUT_MS || 200
 
 // Um adaptador por provedor: so o fetch e a leitura da resposta. Escada, cota e
 // diagnostico ficam no laco de callLlmChatCompletion, iguais para todos.
-async function postOpenAiCompat(url, apiKey, body) {
+async function postOpenAiCompat(url, apiKey, body, timeoutMs = LLM_CALL_TIMEOUT_MS) {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(LLM_CALL_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) return { ok: false, status: res.status, corpo: await res.text() };
   const data = await res.json();
@@ -161,15 +155,15 @@ function politicaDeReasoningGemini() {
   return String(process.env.GEMINI_REASONING_EFFORT ?? "none").trim();
 }
 
-async function chamarGemini({ apiKey, model, messages, temperature, max_tokens, response_format }) {
+async function chamarGemini({ apiKey, model, messages, temperature, max_tokens, response_format, timeoutMs }) {
   const url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
   const body = { model, messages, temperature, max_tokens };
   if (response_format) body.response_format = response_format;
 
   const politica = politicaDeReasoningGemini();
-  if (!politica || geminiSemReasoning.has(model)) return postOpenAiCompat(url, apiKey, body);
+  if (!politica || geminiSemReasoning.has(model)) return postOpenAiCompat(url, apiKey, body, timeoutMs);
 
-  const r = await postOpenAiCompat(url, apiKey, { ...body, reasoning_effort: politica });
+  const r = await postOpenAiCompat(url, apiKey, { ...body, reasoning_effort: politica }, timeoutMs);
   // Chave invalida tambem volta 400 INVALID_ARGUMENT no Gemini (medido em
   // 30/10/2026): essa vai para CREDENCIAL, nunca vira "modelo recusou o parametro".
   const recusouParametro =
@@ -179,7 +173,7 @@ async function chamarGemini({ apiKey, model, messages, temperature, max_tokens, 
     classifyLlmHttpError(r.status, r.corpo).tipo !== "CREDENCIAL";
   if (!recusouParametro) return r;
 
-  const semParametro = await postOpenAiCompat(url, apiKey, body);
+  const semParametro = await postOpenAiCompat(url, apiKey, body, timeoutMs);
   // So aprende quando a repeticao SEM o parametro da certo: isso prova que ele era
   // a causa. Se falhar de novo, o problema e outro e nada fica lembrado.
   if (semParametro.ok) {
@@ -195,10 +189,10 @@ const LLM_PROVIDERS = {
   groq: {
     nome: "Groq",
     chave: () => process.env.GROQ_API_KEY || "",
-    chamar: ({ apiKey, model, messages, temperature, max_tokens, response_format }) => {
+    chamar: ({ apiKey, model, messages, temperature, max_tokens, response_format, timeoutMs }) => {
       const body = { model, messages, temperature, max_tokens };
       if (response_format) body.response_format = response_format;
-      return postOpenAiCompat(`${GROQ_BASE}/chat/completions`, apiKey, body);
+      return postOpenAiCompat(`${GROQ_BASE}/chat/completions`, apiKey, body, timeoutMs);
     },
   },
   gemini: {
@@ -209,16 +203,16 @@ const LLM_PROVIDERS = {
   openai: {
     nome: "OpenAI",
     chave: () => process.env.OPENAI_API_KEY || "",
-    chamar: ({ apiKey, model, messages, temperature, max_tokens, response_format }) => {
+    chamar: ({ apiKey, model, messages, temperature, max_tokens, response_format, timeoutMs }) => {
       const body = { model, messages, temperature, max_tokens };
       if (response_format) body.response_format = response_format;
-      return postOpenAiCompat("https://api.openai.com/v1/chat/completions", apiKey, body);
+      return postOpenAiCompat("https://api.openai.com/v1/chat/completions", apiKey, body, timeoutMs);
     },
   },
   anthropic: {
     nome: "Anthropic",
     chave: () => process.env.ANTHROPIC_API_KEY || "",
-    chamar: async ({ apiKey, model, messages, temperature, max_tokens }) => {
+    chamar: async ({ apiKey, model, messages, temperature, max_tokens, timeoutMs = LLM_CALL_TIMEOUT_MS }) => {
       const systemMsg = messages.find((m) => m.role === "system")?.content || "";
       const anthropicMessages = messages
         .filter((m) => m.role !== "system")
@@ -231,7 +225,7 @@ const LLM_PROVIDERS = {
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({ model, system: systemMsg, messages: anthropicMessages, max_tokens, temperature }),
-        signal: AbortSignal.timeout(LLM_CALL_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) return { ok: false, status: res.status, corpo: await res.text() };
       const data = await res.json();
@@ -313,6 +307,8 @@ export async function callLlmChatCompletion({
   response_format = null,
   singleModelOnly = false,
   contexto = null,
+  // Teto de espera por chamada. A visao usa o seu (IMAGE_DESCRIPTION_TIMEOUT_MS).
+  timeoutMs = LLM_CALL_TIMEOUT_MS,
 }) {
   const chosenModel = model || defaultLlmModel();
 
@@ -352,11 +348,12 @@ export async function callLlmChatCompletion({
         temperature,
         max_tokens,
         response_format,
+        timeoutMs,
       });
     } catch (err) {
       // Timeout ou rede: o provedor nao respondeu. O proximo degrau pode estar de pe.
       const motivo = err?.name === "TimeoutError" || err?.name === "AbortError"
-        ? `timeout de ${LLM_CALL_TIMEOUT_MS}ms`
+        ? `timeout de ${timeoutMs}ms`
         : err?.message || String(err);
       lastError = new Error(`${adaptador.nome} sem resposta no modelo "${m}": ${motivo}`);
       console.warn(`[chatbot-ai-engine] PROVEDOR INDISPONIVEL: ${lastError.message}. Tentando o proximo.`);
@@ -445,6 +442,7 @@ export async function callLlmChatCompletion({
           max_tokens,
           response_format: null,
           singleModelOnly: true,
+          timeoutMs,
           contexto: { ...contexto, tentativasAnteriores: (contexto?.tentativasAnteriores || 0) + cursor },
         });
       } catch (err) {
@@ -837,13 +835,22 @@ export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
   }
 }
 
-// ─── Descrição de imagem via Groq Vision ─────────────────────────────────────
+// ─── Descrição de imagem (visão) ─────────────────────────────────────────────
 
 export const IMAGE_DESCRIPTION_TIMEOUT_MS = Number(process.env.IMAGE_DESCRIPTION_TIMEOUT_MS || 10000);
 
-export async function describeImage(base64Data, mimetype = "image/jpeg", caption = "") {
-  if (!groqKey()) return null;
+// A visao passa pela mesma escada do motor: roteamento por provedor, credencial
+// com log proprio, timeout e medicao em llm_usage. Antes ela postava direto na
+// Groq com meta-llama/llama-4-scout-17b-16e-instruct como padrao — modelo morto,
+// e GROQ_VISION_MODEL nunca foi setada (medido em 30/10/2026): a leitura de imagem
+// estava quebrada desde 22/10. Apelido do Gemini, como a conversa: nao morre por
+// rotacao de versao.
+function llmVisionModel() {
+  return String(process.env.LLM_VISION_MODEL || "").trim() || "gemini-flash-latest";
+}
 
+export async function describeImage(base64Data, mimetype = "image/jpeg", caption = "", contexto = null) {
+  const modelo = llmVisionModel();
   const startMs = Date.now();
   try {
     const dataUrl = `data:${mimetype};base64,${base64Data}`;
@@ -860,46 +867,27 @@ export async function describeImage(base64Data, mimetype = "image/jpeg", caption
       },
     ];
 
-    const res = await fetch(`${GROQ_BASE}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${groqKey()}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_VISION_MODEL,
-        messages: [{ role: "user", content: userContent }],
-        max_tokens: 200,
-      }),
-      signal: AbortSignal.timeout(IMAGE_DESCRIPTION_TIMEOUT_MS),
+    const content = await callLlmChatCompletion({
+      model: modelo,
+      messages: [{ role: "user", content: userContent }],
+      max_tokens: 200,
+      // Um modelo so: o resto da escada de conversa (Groq gpt-oss) nao le imagem.
+      singleModelOnly: true,
+      timeoutMs: IMAGE_DESCRIPTION_TIMEOUT_MS,
+      contexto: { ...contexto, origem: "visao" },
     });
 
     const durationMs = Date.now() - startMs;
-
-    if (!res.ok) {
-      const detalhe = await res.text().catch(() => "");
-      console.error(
-        `[chatbot-ai] Vision error ${res.status} (${durationMs}ms, modelo "${GROQ_VISION_MODEL}"):`,
-        detalhe.slice(0, 300)
-      );
-      return null;
-    }
-
-    const data = await res.json();
-    const content = data.choices?.[0]?.message?.content || null;
     if (content) {
       console.log(`[chatbot-ai] Image described in ${durationMs}ms:`, content.slice(0, 80));
     }
-    return content;
+    return content || null;
   } catch (err) {
-    const durationMs = Date.now() - startMs;
-    if (err.name === "TimeoutError" || err.name === "AbortError") {
-      console.warn(
-        `[chatbot-ai] Descrição de imagem atingiu timeout (${durationMs}ms > ${IMAGE_DESCRIPTION_TIMEOUT_MS}ms) — fallback para legenda/imagem`
-      );
-    } else {
-      console.error(`[chatbot-ai] describeImage error (${durationMs}ms):`, err.message);
-    }
+    // Falha na leitura nao derruba a mensagem: o caller cai para legenda/[imagem].
+    console.error(
+      `[chatbot-ai] describeImage falhou (${Date.now() - startMs}ms, modelo "${modelo}"):`,
+      err?.message || err
+    );
     return null;
   }
 }
@@ -1044,7 +1032,7 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
   if (type === "image") {
     const effectiveMime = mimetype || "image/jpeg";
     if (mediaBase64 && !isGroup && !fromMe) {
-      const description = await describeImage(mediaBase64, effectiveMime, caption);
+      const description = await describeImage(mediaBase64, effectiveMime, caption, { clientId });
       if (description) {
         return {
           type,

@@ -20,6 +20,8 @@
 
 import crypto from "node:crypto";
 
+export const GD_OFFICIAL_DRIVE_ACCOUNT = "mrkgeracaodigital@gmail.com";
+
 export const DRIVE_SUBFOLDERS = [
   { key: "identidade", name: "01_Identidade_e_Logos" },
   { key: "brutos", name: "02_Fotos_e_Videos_Brutos" },
@@ -199,6 +201,109 @@ async function setFolderPermissionsApi(folderId, accessToken, role = "reader") {
 }
 
 /**
+ * Compartilha pasta no Google Drive com um usuário específico (ex: conta oficial da agência)
+ */
+export async function shareDriveFolderWithUser(folderId, userEmail, accessToken, role = "writer") {
+  if (!folderId || !userEmail || !accessToken) return;
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}/permissions?supportsAllDrives=true`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        role,
+        type: "user",
+        emailAddress: userEmail,
+      }),
+    });
+  } catch (err) {
+    console.warn(`[google-drive] Aviso: não foi possível compartilhar pasta ${folderId} com ${userEmail}:`, err.message);
+  }
+}
+
+/**
+ * Faz upload de um arquivo para uma pasta do Google Drive via REST API v3
+ */
+export async function uploadFileToDrive({
+  fileName,
+  mimeType = "image/png",
+  fileBuffer,
+  folderId = null,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!fileName || !fileBuffer) {
+    throw new Error("fileName e fileBuffer são obrigatórios para upload no Google Drive.");
+  }
+
+  const token = accessToken || (await getGoogleDriveAccessToken());
+
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para upload.");
+    }
+    const hash = crypto.createHash("md5").update(fileName + Date.now()).digest("hex").slice(0, 16);
+    const mockFileId = `mock_file_${hash}`;
+    return {
+      success: true,
+      fileId: mockFileId,
+      fileName,
+      fileLink: `https://drive.google.com/file/d/${mockFileId}/view`,
+      isMock: true,
+    };
+  }
+
+  // Upload Multipart para a API v3 do Google Drive
+  const boundary = `-------314159265358979323846_${Date.now()}`;
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelimiter = `\r\n--${boundary}--`;
+
+  const metadata = {
+    name: fileName,
+    mimeType,
+  };
+  if (folderId) {
+    metadata.parents = [folderId];
+  }
+
+  const buffer = Buffer.isBuffer(fileBuffer) ? fileBuffer : Buffer.from(fileBuffer);
+
+  const multipartRequestBody = Buffer.concat([
+    Buffer.from(
+      `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+      `${delimiter}Content-Type: ${mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n`
+    ),
+    Buffer.from(buffer.toString("base64")),
+    Buffer.from(closeDelimiter),
+  ]);
+
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": `multipart/related; boundary=${boundary}`,
+    },
+    body: multipartRequestBody,
+  });
+
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message || `Falha HTTP ${res.status} ao fazer upload do arquivo ${fileName}`);
+  }
+
+  return {
+    success: true,
+    fileId: data.id,
+    fileName,
+    fileLink: `https://drive.google.com/file/d/${data.id}/view`,
+    isMock: false,
+    data,
+  };
+}
+
+/**
  * Configura a estrutura completa de pastas no Google Drive para um cliente.
  * 
  * @param {Object} params
@@ -275,6 +380,10 @@ export async function setupClientDriveFolders({
     await setFolderPermissionsApi(clientFolderId, accessToken, "reader");
   }
 
+  // Compartilha com a conta oficial da Geração Digital (mrkgeracaodigital@gmail.com)
+  const agencyEmail = process.env.GD_DRIVE_OFFICIAL_ACCOUNT || GD_OFFICIAL_DRIVE_ACCOUNT;
+  await shareDriveFolderWithUser(clientFolderId, agencyEmail, accessToken, "writer");
+
   // 2. Cria as 4 Subpastas Padrão
   const subfolders = {};
   for (const sub of DRIVE_SUBFOLDERS) {
@@ -295,3 +404,200 @@ export async function setupClientDriveFolders({
     isMock: false,
   };
 }
+
+/**
+ * Busca o ID de uma pasta pelo nome e pasta pai via Google Drive API v3
+ */
+async function findFolderByNameApi(folderName, parentId, accessToken) {
+  let query = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName.replace(/'/g, "\\'")}' and trashed = false`;
+  if (parentId) {
+    query += ` and '${parentId}' in parents`;
+  }
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&supportsAllDrives=true&fields=files(id,name)`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json();
+  if (data?.files && data.files.length > 0) {
+    return data.files[0].id;
+  }
+  return null;
+}
+
+/**
+ * Obtém ou cria uma pasta no Google Drive pelo nome
+ */
+export async function getOrCreateDriveFolder({
+  folderName,
+  parentFolderId = null,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  const cleanName = (folderName || "").trim();
+  if (!cleanName) throw new Error("folderName é obrigatório.");
+
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para criar/buscar pasta.");
+    }
+    const hash = crypto.createHash("md5").update(cleanName + (parentFolderId || "")).digest("hex").slice(0, 16);
+    const mockId = `mock_folder_${hash}`;
+    return {
+      id: mockId,
+      name: cleanName,
+      link: `https://drive.google.com/drive/folders/${mockId}`,
+      isMock: true,
+    };
+  }
+
+  const existingId = await findFolderByNameApi(cleanName, parentFolderId, token);
+  if (existingId) {
+    return {
+      id: existingId,
+      name: cleanName,
+      link: `https://drive.google.com/drive/folders/${existingId}`,
+      isMock: false,
+    };
+  }
+
+  const newId = await createFolderApi(cleanName, parentFolderId, token);
+  return {
+    id: newId,
+    name: cleanName,
+    link: `https://drive.google.com/drive/folders/${newId}`,
+    isMock: false,
+  };
+}
+
+/**
+ * Lista arquivos dentro de uma pasta no Google Drive
+ */
+export async function listFilesInDriveFolder({
+  folderId,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!folderId) throw new Error("folderId é obrigatório.");
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para listar arquivos.");
+    }
+    return [];
+  }
+
+  const query = `'${folderId}' in parents and trashed = false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&supportsAllDrives=true&fields=files(id,name,mimeType,size,createdTime,webViewLink)`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) {
+    throw new Error(data.error?.message || `Falha HTTP ${res.status} ao listar arquivos da pasta ${folderId}`);
+  }
+  return data.files || [];
+}
+
+/**
+ * Baixa o buffer binário de um arquivo do Google Drive
+ */
+export async function downloadFileFromDrive({
+  fileId,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!fileId) throw new Error("fileId é obrigatório.");
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para download.");
+    }
+    // 1x1 transparente PNG base64 fallback
+    return Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  }
+
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Falha HTTP ${res.status} ao baixar arquivo ${fileId}`);
+  }
+  const arrayBuf = await res.arrayBuffer();
+  return Buffer.from(arrayBuf);
+}
+
+/**
+ * Exclui um arquivo do Google Drive por ID (Limpeza de lixo eletrônico)
+ */
+export async function deleteFileFromDrive({
+  fileId,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  if (!fileId) throw new Error("fileId é obrigatório para exclusão.");
+  const token = accessToken || (await getGoogleDriveAccessToken());
+  if (!token) {
+    if (!allowMockFallback) {
+      throw new Error("Nenhuma credencial do Google Drive configurada para exclusão.");
+    }
+    return { success: true, fileId, isMock: true };
+  }
+
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 204 && res.status !== 404) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error?.message || `Falha HTTP ${res.status} ao excluir arquivo ${fileId}`);
+  }
+  return { success: true, fileId, isMock: false };
+}
+
+/**
+ * Garante a criação da estrutura comercial "Máquinas de Vendas / {Nome do Prospect}"
+ */
+export async function ensureCommercialPresentationFolders({
+  prospectName,
+  rootParentId = null,
+  accessToken = null,
+  allowMockFallback = true,
+}) {
+  const cleanProspect = (prospectName || "Prospect").trim();
+  const parentId =
+    rootParentId ||
+    process.env.GOOGLE_DRIVE_MAQUINAS_DE_VENDAS_FOLDER_ID ||
+    process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID ||
+    null;
+
+  // 1. Garante a pasta raiz "Máquinas de Vendas"
+  const rootFolder = await getOrCreateDriveFolder({
+    folderName: "Máquinas de Vendas",
+    parentFolderId: parentId,
+    accessToken,
+    allowMockFallback,
+  });
+
+  // 2. Garante a pasta do Prospect dentro de "Máquinas de Vendas"
+  const prospectFolder = await getOrCreateDriveFolder({
+    folderName: cleanProspect,
+    parentFolderId: rootFolder.id,
+    accessToken,
+    allowMockFallback,
+  });
+
+  return {
+    rootFolder,
+    prospectFolder,
+    prospectFolderId: prospectFolder.id,
+    prospectFolderLink: prospectFolder.link,
+    isMock: prospectFolder.isMock,
+  };
+}
+

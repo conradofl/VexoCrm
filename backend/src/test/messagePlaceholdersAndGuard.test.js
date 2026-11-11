@@ -31,6 +31,35 @@ describe("Substituição de Placeholders (applyMessagePlaceholders)", () => {
     expect(res).toBe("Agende aqui: https://agenda.vexo.com/demo");
   });
 
+  it("quando {{scheduling_link}} ou {{link}} não for fornecido, resolve fallback seguro (wa.me ou institucional GD) sem deixar tag crua", () => {
+    const template = "👉 Show! Clica aqui no link para garantir a sua vaga agora:\n\n{{scheduling_link}}";
+    const leadComTelefone = { nome: "Maria", telefone: "5534996895453" };
+    const resComTelefone = applyMessagePlaceholders(template, leadComTelefone, "5534996895453");
+    expect(resComTelefone).toContain("https://wa.me/5534996895453");
+    expect(resComTelefone).not.toContain("{{scheduling_link}}");
+    expect(validateOutboundMessage(resComTelefone).valid).toBe(true);
+
+    const leadSemTelefone = { nome: "Lucas" };
+    const resSemTelefone = applyMessagePlaceholders(template, leadSemTelefone);
+    expect(resSemTelefone).toContain("https://mktgeracaodigital.com.br");
+    expect(resSemTelefone).not.toContain("{{scheduling_link}}");
+    expect(validateOutboundMessage(resSemTelefone).valid).toBe(true);
+  });
+
+  it("quando lead.scheduling_link contiver a própria tag crua {{scheduling_link}}, descarta e aciona o fallback seguro", () => {
+    const template = "👉 Show! Clica aqui no link para garantir a sua vaga agora:\n\n{{scheduling_link}}";
+    const leadComTagCrua = {
+      nome: "Conrado",
+      telefone: "5534997817660",
+      scheduling_link: "{{scheduling_link}}",
+      normalized_data: { scheduling_link: "{{scheduling_link}}" },
+    };
+    const res = applyMessagePlaceholders(template, leadComTagCrua, "5534997817660");
+    expect(res).toContain("https://wa.me/5534997817660");
+    expect(res).not.toContain("{{scheduling_link}}");
+    expect(validateOutboundMessage(res).valid).toBe(true);
+  });
+
   it("substitui campos dinâmicos customizados da planilha", () => {
     const template = "Confirmando sua cidade {{cidade}} e plano {{plano}}.";
     const lead = { nome: "João", normalized_data: { cidade: "Uberlândia", plano: "Avançado" } };

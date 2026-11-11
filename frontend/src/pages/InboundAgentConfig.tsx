@@ -50,7 +50,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { cn } from "@/lib/utils";
-import { useArchiveFupCompany, useCreateFupCompany, useFupCompanies, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
+import { useArchiveFupCompany, useArchivedFupCompanies, useCreateFupCompany, useDeleteFupCompanyPermanently, useFupCompanies, useUpdateFupCompany } from "@/hooks/useFollowupAdmin";
+import { AgentHasDependentsError, describeAgentDependents, type AgentDependent } from "@/lib/agentDependents";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi } from "@/lib/api";
 import { useLeadClients, useUpdateLeadClientN8nSettings, useSdrRotationNext } from "@/hooks/useLeadClients";
@@ -153,6 +154,7 @@ export default function InboundAgentConfig() {
   const selectedClientId = crmClient?.selectedClientId || "";
 
   const { data: rawCompanies = [], isLoading: loadingCompanies } = useFupCompanies(selectedClientId);
+  const { data: archivedCompanies = [] } = useArchivedFupCompanies(selectedClientId);
   // Rascunhos locais: "+ Novo agente" empilha aqui até salvar (vira linha de
   // verdade e some daqui). Sem isto so dava pra ter UM agente ainda-nao-criado
   // por vez — não dava pra começar um segundo enquanto o tenant já tem outros.
@@ -576,7 +578,7 @@ export default function InboundAgentConfig() {
     >
       {/* Aviso de transparência: se o chatbot global da empresa estiver desligado */}
       {tenantN8nSettings && tenantN8nSettings.chatbot_enabled === false && (
-        <div className="mb-6 flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
           <div className="flex items-start gap-2.5">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <div className="space-y-1">
@@ -584,7 +586,7 @@ export default function InboundAgentConfig() {
                 Atendimento geral da empresa desligado
               </p>
               <p>
-                O <strong>Chatbot Global</strong> está desativado em Padrões da Empresa.
+                O <strong>Chatbot Global</strong> está desativado.
                 Apenas chips com agente próprio configurado e ligado aqui responderão.
                 {unassignedChips.length > 0 && (
                   <span> Chips sem agente ({unassignedChips.map((c: any) => c.name || instanceNameFromChip(c)).join(", ")}) não responderão automaticamente.</span>
@@ -592,14 +594,6 @@ export default function InboundAgentConfig() {
               </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 text-xs border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40"
-            onClick={() => navigate("/crm/padroes-da-empresa")}
-          >
-            Padrões da Empresa
-          </Button>
         </div>
       )}
 
@@ -649,11 +643,21 @@ export default function InboundAgentConfig() {
                     }}
                   />
                 )}
+                {!isPlaceholder && (
+                  <DeleteAgentPermanentlyButton
+                    agent={c}
+                    chips={chips}
+                    variant="card"
+                    onGone={() => {
+                      if (c.id === companyId) setCompanyId("all");
+                    }}
+                  />
+                )}
                 <div className="flex items-center gap-1.5">
                   {hasChip && (
                     <span className={cn("h-1.5 w-1.5 rounded-full", c.inbound_enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-700")} />
                   )}
-                  <span className="text-sm font-semibold text-foreground truncate max-w-[160px] pr-4">{c.name}</span>
+                  <span className="text-sm font-semibold text-foreground truncate max-w-[160px] pr-10">{c.name}</span>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Badge variant="outline" className={cn("text-[10px] gap-1 px-1.5 py-0", kind === "campanha" ? "text-purple-600 border-purple-500/30" : "text-cyan-600 border-cyan-500/30")}>
@@ -680,6 +684,29 @@ export default function InboundAgentConfig() {
             Novo agente
           </button>
         </div>
+        {archivedCompanies.length > 0 && (
+          <Collapsible>
+            <CollapsibleTrigger className="group flex items-center gap-1 pt-1 text-xs font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-90" />
+              Arquivados ({archivedCompanies.length})
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ul className="mt-2 max-w-xl divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-950">
+                {archivedCompanies.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between gap-3 px-3.5 py-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{a.name}</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                        Arquivado em {new Date(a.archived_at).toLocaleDateString("pt-BR")}
+                      </p>
+                    </div>
+                    <DeleteAgentPermanentlyButton agent={a} chips={chips} variant="header" alreadyArchived onGone={() => {}} />
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
       </div>
 
       {!activeCompany ? (
@@ -693,12 +720,20 @@ export default function InboundAgentConfig() {
               Agentes <span className="mx-1">›</span> <span className="text-foreground font-medium">{activeCompany.name}</span>
             </p>
             {!isPlaceholderCompany && (
-              <ArchiveAgentButton
-                agent={activeCompany}
-                chips={chips}
-                variant="header"
-                onArchived={() => setCompanyId("all")}
-              />
+              <div className="flex items-center gap-2 shrink-0">
+                <ArchiveAgentButton
+                  agent={activeCompany}
+                  chips={chips}
+                  variant="header"
+                  onArchived={() => setCompanyId("all")}
+                />
+                <DeleteAgentPermanentlyButton
+                  agent={activeCompany}
+                  chips={chips}
+                  variant="header"
+                  onGone={() => setCompanyId("all")}
+                />
+              </div>
             )}
           </div>
 
@@ -1105,13 +1140,13 @@ export default function InboundAgentConfig() {
                           <Label className="text-xs font-medium">Prompt de extração do agente (opcional)</Label>
                           <Textarea
                             rows={4}
-                            placeholder="Deixe em branco para usar o prompt padrão da empresa (Padrões da Empresa > Extrato SDR)..."
+                            placeholder="Deixe em branco para usar o prompt padrão da empresa..."
                             value={inboundExtractionPrompt}
                             onChange={(e) => setInboundExtractionPrompt(e.target.value)}
                             className="font-mono text-xs"
                           />
                           <p className="text-[11px] text-slate-500">
-                            Instruções específicas para este agente montar o card do closer. Se em branco, usa o Extrato SDR de Padrões da Empresa.
+                            Instruções específicas para este agente montar o card do closer. Se em branco, usa o Extrato SDR padrão.
                           </p>
                         </div>
                       ) : (
@@ -1466,6 +1501,150 @@ function SectionHeading({ n, title, icon }: { n: number; title: string; icon: Re
         {title}
       </h2>
     </div>
+  );
+}
+
+// Excluir definitivamente: apaga a linha do banco (DELETE
+// /companies/:id/permanent). O servidor só aceita agente que não carrega nada;
+// quando recusa, a janela fica aberta dizendo o que ele carrega e oferece
+// arquivar, que é o que dá para fazer sem perder dado.
+function DeleteAgentPermanentlyButton({
+  agent,
+  chips,
+  variant = "header",
+  alreadyArchived = false,
+  onGone,
+}: {
+  agent: any;
+  chips: any[];
+  variant?: "header" | "card";
+  // Vem da seção "Arquivados": na recusa não há o que oferecer, já está arquivado.
+  alreadyArchived?: boolean;
+  onGone: () => void;
+}) {
+  const { toast } = useToast();
+  const deleteMutation = useDeleteFupCompanyPermanently();
+  const archiveMutation = useArchiveFupCompany();
+  const [open, setOpen] = useState(false);
+  const [refusal, setRefusal] = useState<AgentDependent[] | null>(null);
+  const chipNames = instancesOfCompany(agent).map((v) => chipDisplayName(v, chips));
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setRefusal(null);
+  };
+
+  const handleDelete = () => {
+    deleteMutation.mutate(agent.id, {
+      onSuccess: () => {
+        toast({ title: "Agente excluído", description: `"${agent.name}" foi apagado definitivamente.` });
+        handleOpenChange(false);
+        onGone();
+      },
+      onError: (err: any) => {
+        if (err instanceof AgentHasDependentsError) {
+          setRefusal(err.dependents);
+          return;
+        }
+        toast({ title: "Erro ao excluir", description: err?.message, variant: "destructive" });
+      },
+    });
+  };
+
+  const handleArchiveInstead = () => {
+    archiveMutation.mutate(agent.id, {
+      onSuccess: () => {
+        toast({ title: "Agente arquivado", description: `"${agent.name}" saiu da lista. Nada foi apagado.` });
+        handleOpenChange(false);
+        onGone();
+      },
+      onError: (err: any) => toast({ title: "Erro ao arquivar", description: err?.message, variant: "destructive" }),
+    });
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={handleOpenChange}>
+      <AlertDialogTrigger asChild>
+        {variant === "card" ? (
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute top-1.5 right-7 rounded-md p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+            title="Excluir definitivamente"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        ) : (
+          <Button variant="outline" size="sm" className="text-xs gap-1.5 text-slate-500 hover:text-rose-600 shrink-0">
+            <Trash2 className="h-3.5 w-3.5" />
+            Excluir definitivamente
+          </Button>
+        )}
+      </AlertDialogTrigger>
+      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+        {refusal ? (
+          <>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Não dá para excluir "{agent.name}"</AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+                <span className="block">
+                  Este agente ainda carrega{" "}
+                  <strong className="text-foreground">{describeAgentDependents(refusal) || "dados vinculados"}</strong>.
+                  Excluir apagaria isso junto, por isso o sistema recusa.
+                </span>
+                <span className="block">
+                  {alreadyArchived
+                    ? "Ele já está arquivado: continua fora da lista de agentes e nada é apagado."
+                    : "Você pode arquivar: o agente some da lista e nada é apagado."}
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="h-8 text-xs">Fechar</AlertDialogCancel>
+              {!alreadyArchived && (
+                <AlertDialogAction
+                  onClick={(e) => { e.preventDefault(); handleArchiveInstead(); }}
+                  disabled={archiveMutation.isPending}
+                  className="h-8 text-xs"
+                >
+                  {archiveMutation.isPending ? "Arquivando..." : "Arquivar em vez disso"}
+                </AlertDialogAction>
+              )}
+            </AlertDialogFooter>
+          </>
+        ) : (
+          <>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir "{agent.name}" definitivamente?</AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
+                <span className="block">
+                  O agente <strong className="text-foreground">{agent.name}</strong> é apagado do banco.{" "}
+                  <strong className="text-foreground">Não tem volta</strong>: não dá para desarquivar nem recuperar.
+                </span>
+                {chipNames.length > 0 && (
+                  <span className="block">
+                    O chip <strong className="text-foreground">{chipNames.join(", ")}</strong> volta a ser atendido pelo chatbot padrão da empresa.
+                  </span>
+                )}
+                <span className="block">
+                  Só é possível excluir agente que não tem campanha, agendamento, jornada nem documento. Se tiver, o sistema avisa e nada é apagado.
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => { e.preventDefault(); handleDelete(); }}
+                disabled={deleteMutation.isPending}
+                className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white"
+              >
+                {deleteMutation.isPending ? "Excluindo..." : "Excluir definitivamente"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </>
+        )}
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

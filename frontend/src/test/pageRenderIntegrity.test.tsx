@@ -82,6 +82,8 @@ vi.mock("@/hooks/useFollowupAdmin", () => ({
   useCreateFupCompany: () => ({ mutateAsync: vi.fn() }),
   useUpdateFupCompany: () => ({ mutateAsync: vi.fn() }),
   useArchiveFupCompany: () => ({ mutate: vi.fn(), isPending: false }),
+  useArchivedFupCompanies: () => ({ data: [], isLoading: false }),
+  useDeleteFupCompanyPermanently: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/hooks/useReports", () => ({
@@ -162,7 +164,7 @@ describe("Integridade de Renderização de Páginas e Verificação de Símbolos
     ]);
     expect(screen.queryByText(/^Operação$/)).toBeNull();
     expect(screen.queryByText(/^Configurações$/)).toBeNull();
-    expect(screen.getByText(/Padrões da empresa/)).toBeTruthy();
+    expect(screen.queryByText(/Padrões da empresa/)).toBeNull();
   });
 
   it("TenantScopeBoundary desmonta e remonta sem erros ao trocar de tenantId", () => {

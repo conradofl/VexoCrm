@@ -49,10 +49,11 @@ import GeracaoDigitalPublicProposal from "./pages/GeracaoDigitalPublicProposal";
 import PresentationPreview from "./pages/PresentationPreview";
 import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
 import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
+import GeracaoDigitalClientes from "./pages/GeracaoDigitalClientes";
 import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPresentation";
 import GeracaoDigitalImplementationBriefing from "./pages/GeracaoDigitalImplementationBriefing";
 import ComercialVexo from "./pages/ComercialVexo";
-import ClientPortal from "./pages/ClientPortal";
+import GeracaoDigitalPortalCliente from "./pages/GeracaoDigitalPortalCliente";
 
 const queryClient = new QueryClient();
 
@@ -242,21 +243,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route
-                path="padroes-da-empresa"
-                element={
-                  <ProtectedRoute allowedRoles={["internal"]}>
-                    <ChatbotSettings />
-                  </ProtectedRoute>
-                }
-              />
+              <Route path="padroes-da-empresa" element={<Navigate to="/crm/agente" replace />} />
               <Route path="chatbot" element={<Navigate to="/crm/agente" replace />} />
               <Route path="inbound-agents" element={<Navigate to="/crm/agente" replace />} />
-              <Route path="chatbot-settings" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
-              <Route path="chatbot-config" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
+              <Route path="chatbot-settings" element={<Navigate to="/crm/agente" replace />} />
+              <Route path="chatbot-config" element={<Navigate to="/crm/agente" replace />} />
               <Route path="chatbot-docs" element={<Navigate to="/crm/agente?tab=docs" replace />} />
-              <Route path="prompt-editor" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
-              <Route path="chatbot-templates" element={<Navigate to="/crm/padroes-da-empresa" replace />} />
+              <Route path="prompt-editor" element={<Navigate to="/crm/agente" replace />} />
+              <Route path="chatbot-templates" element={<Navigate to="/crm/agente" replace />} />
 
               <Route
                 path="followup"
@@ -406,6 +400,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="clientes-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalClientes />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="implantacao-gd" element={<Navigate to="/crm/implantacao?tab=salvas" replace />} />
               <Route path="briefings-gd" element={<Navigate to="/crm/geracao-digital?tab=briefings" replace />} />
             </Route>
@@ -468,7 +470,8 @@ const App = () => (
                }
              />
              <Route path="/proposta/:id" element={<GeracaoDigitalPublicProposal />} />
-             <Route path="/portal/:slug" element={<ClientPortal />} />
+             <Route path="/acompanhamento/:token" element={<GeracaoDigitalPortalCliente />} />
+             <Route path="/portal/:slug" element={<GeracaoDigitalPortalCliente />} />
              {/* Preview temporário da Apresentação Comercial (teste de layout/copy). */}
              <Route path="/apresentacao-preview" element={<PresentationPreview />} />
              <Route path="*" element={<NotFound />} />

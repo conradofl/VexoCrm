@@ -9,9 +9,11 @@
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
+import { extractEvolutionInstanceSlug, sendTextMessageViaEvolution } from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque buildContractPdfBuffer é function declaration (tem hoisting).
 // NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { buildContractPdfBuffer } from "./contractHandlers.js";
+import { resolveCandidateEvolutionInstances } from "./contractEvolutionResolver.js";
 
 const SLACK_API = "https://slack.com/api";
 
@@ -21,7 +23,12 @@ export async function getTenantContratadaConfig(tenantId) {
 }
 
 async function readGdConfig(tenantId) {
-  const { rows } = await db.query("SELECT config FROM public.tenant_modules WHERE tenant_id = $1", [tenantId]);
+  const { rows } = await db.query(
+    `SELECT config FROM public.tenant_modules 
+     WHERE tenant_id = $1 OR tenant_id = '00000000-0000-0000-0000-000000000000' 
+     ORDER BY (CASE WHEN tenant_id = $1 THEN 0 ELSE 1 END) LIMIT 1`,
+    [tenantId]
+  );
   const config = rows[0]?.config || {};
   const rawContratada = config.contratada || config?.gd?.contratada || {};
   const contratada = {
@@ -119,21 +126,33 @@ export async function saveJuridicoSettings(req, res) {
   }
 }
 
-// Instâncias de WhatsApp já conectadas — alimenta o dropdown do painel.
+// Instâncias de WhatsApp da Geração Digital — alimenta o dropdown do painel jurídico.
 export async function listEvolutionInstances(req, res) {
   try {
     const tenantId = await resolveTenantUuid(req, res);
     if (!tenantId) return;
 
-    let queryStr = "SELECT name, client_id FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC, name ASC";
-    let params = [];
-    const access = req.authAccess || {};
-    if (access.role !== "internal" && Array.isArray(access.clientIds) && access.clientIds.length > 0) {
-      queryStr = "SELECT name, client_id FROM public.lead_client_evolution_instances WHERE client_id = ANY($1) AND active = true ORDER BY is_default DESC, name ASC";
-      params = [access.clientIds];
-    }
-    const { rows } = await db.query(queryStr, params);
-    res.json({ success: true, data: rows.map((r) => ({ name: r.name, client_id: r.client_id })) });
+    // Apenas instâncias pertencentes à Geração Digital devem aparecer no box de seleção
+    const queryStr = `SELECT name, client_id, dispatch_webhook_url, connection_state, chip_state 
+   FROM public.lead_client_evolution_instances 
+   WHERE active = true AND client_id = 'geracao-digital' 
+   ORDER BY (CASE WHEN connection_state IN ('open', 'connected', 'online') OR chip_state = 'connected' THEN 0 ELSE 1 END), is_default DESC, name ASC`;
+
+    const { rows } = await db.query(queryStr);
+    res.json({
+      success: true,
+      data: (rows || []).map((r) => {
+        const isConnected =
+          ["open", "connected", "online"].includes(String(r.connection_state || "").toLowerCase()) ||
+          r.chip_state === "connected";
+        return {
+          name: r.name,
+          technical_name: extractEvolutionInstanceSlug(r.dispatch_webhook_url) || r.name,
+          client_id: r.client_id,
+          connected: isConnected,
+        };
+      }),
+    });
   } catch (error) {
     console.error("[listEvolutionInstances] Error:", error);
     sendError(res, 500, "INTERNAL_ERROR", "Erro ao listar as instâncias de WhatsApp.");
@@ -247,12 +266,6 @@ export async function sendContractToJuridico(req, res) {
 
     const { juridico } = await readGdConfig(tenantId);
     const channelId = juridico.slack_channel_id;
-    if (!channelId) {
-      return sendError(res, 400, "NOT_CONFIGURED", "Configure o canal do Slack do jurídico antes de enviar.");
-    }
-    if (!process.env.SLACK_BOT_TOKEN) {
-      return sendError(res, 503, "NOT_CONFIGURED", "SLACK_BOT_TOKEN não configurado no servidor.");
-    }
 
     let built;
     try {
@@ -274,53 +287,141 @@ export async function sendContractToJuridico(req, res) {
       `• Prazo: ${dados.prazo_dias || "-"} dias\n` +
       `Revisar e enviar ao cliente para assinatura.`;
 
-    await uploadPdfToSlack({
-      token: process.env.SLACK_BOT_TOKEN,
-      channelId,
-      filename: `contrato-${empresa.replace(/[^\w\-]+/g, "-").toLowerCase()}.pdf`,
-      buffer: pdfData,
-      comment: resumo,
-    });
+    if (channelId && process.env.SLACK_BOT_TOKEN) {
+      try {
+        await uploadPdfToSlack({
+          token: process.env.SLACK_BOT_TOKEN,
+          channelId,
+          filename: `contrato-${empresa.replace(/[^\w\-]+/g, "-").toLowerCase()}.pdf`,
+          buffer: pdfData,
+          comment: resumo,
+        });
 
-    // ETAPA 2: Mensagem SEPARADA enviada logo abaixo do contrato
-    const nomeEmpresa = (dados.razao_social || dados.empresa || "").trim() || "Empresa não informada";
-    const nomeCliente = (dados.representante || dados.cliente || "").trim() || "Cliente não informado";
-    const whatsappCliente = (dados.telefone || dados.telefone2 || dados.whatsapp || "").trim() || "WhatsApp não informado";
+        // ETAPA 2: Mensagem SEPARADA enviada logo abaixo do contrato
+        const nomeEmpresa = (dados.razao_social || dados.empresa || "").trim() || "Empresa não informada";
+        const nomeCliente = (dados.representante || dados.cliente || "").trim() || "Cliente não informado";
+        const whatsappCliente = (dados.telefone || dados.telefone2 || dados.whatsapp || "").trim() || "WhatsApp não informado";
 
-    const mensagemDadosDetalhados =
-      `📋 *Dados do Cliente (Contrato)*\n` +
-      `• *Empresa:* ${nomeEmpresa}\n` +
-      `• *Cliente:* ${nomeCliente}\n` +
-      `• *WhatsApp:* ${whatsappCliente}`;
+        const mensagemDadosDetalhados =
+          `📋 *Dados do Cliente (Contrato)*\n` +
+          `• *Empresa:* ${nomeEmpresa}\n` +
+          `• *Cliente:* ${nomeCliente}\n` +
+          `• *WhatsApp:* ${whatsappCliente}`;
 
-    try {
-      await fetch(`${SLACK_API}/chat.postMessage`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
-          "Content-Type": "application/json; charset=utf-8",
-        },
-        body: JSON.stringify({
-          channel: channelId,
-          text: mensagemDadosDetalhados,
-        }),
-      });
-    } catch (slackMsgErr) {
-      console.warn("[sendContractToJuridico] Erro ao enviar mensagem de dados no Slack:", slackMsgErr?.message || slackMsgErr);
+        try {
+          await fetch(`${SLACK_API}/chat.postMessage`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+              "Content-Type": "application/json; charset=utf-8",
+            },
+            body: JSON.stringify({
+              channel: channelId,
+              text: mensagemDadosDetalhados,
+            }),
+          });
+        } catch (slackMsgErr) {
+          console.warn("[sendContractToJuridico] Erro ao enviar mensagem de dados no Slack:", slackMsgErr?.message || slackMsgErr);
+        }
+      } catch (slackErr) {
+        console.warn("[sendContractToJuridico] Falha ao enviar para o Slack:", slackErr?.message || slackErr);
+      }
+    } else {
+      console.log("[sendContractToJuridico] Slack não configurado, pulando envio Slack e priorizando WhatsApp.");
     }
 
-    // Aviso no WhatsApp é best-effort: se falhar, o contrato já está no Slack.
-    let whatsappStatus = "not_configured";
+    const pdfUrl = `https://crm.vexoia.com/api/gd/contracts/${id}/pdf`;
+    const mensagemWhatsApp =
+      `${resumo}\n\n` +
+      `👉 *Visualizar / Baixar Contrato para Revisão:*\n` +
+      `${pdfUrl}`;
+
+    const candidateInstances = await resolveCandidateEvolutionInstances(db, juridico.evolution_instance);
+
+    // Notificação do WhatsApp configurado do jurídico (se houver)
     if (juridico.whatsapp_number) {
-      try {
-        whatsappStatus = await sendWhatsapp({
-          number: juridico.whatsapp_number,
-          instance: juridico.evolution_instance,
-          text: `Novo contrato para revisão: *${empresa}*.\n\n${mensagemDadosDetalhados}\n\nO PDF foi enviado para o Slack do Jurídico.`,
-        });
-      } catch (waErr) {
-        console.warn("[sendContractToJuridico] WhatsApp falhou:", waErr?.message || waErr);
-        whatsappStatus = "error";
+      let waJuridicoEnviado = false;
+      const attemptedJuridico = new Set();
+      for (const inst of candidateInstances) {
+        const slug = typeof inst === "string" ? inst : (inst.slug || String(inst));
+        const baseUrl = typeof inst === "object" ? inst.baseUrl : null;
+        const webhookToken = typeof inst === "object" ? inst.webhookToken : null;
+
+        if (!slug || attemptedJuridico.has(slug)) continue;
+        attemptedJuridico.add(slug);
+        try {
+          await sendTextMessageViaEvolution({
+            instanceName: slug,
+            baseUrl: baseUrl || undefined,
+            webhookToken: webhookToken || undefined,
+            number: juridico.whatsapp_number,
+            text: mensagemWhatsApp,
+          });
+          waJuridicoEnviado = true;
+          break;
+        } catch (waErr) {
+          console.warn(`[sendContractToJuridico] WhatsApp do jurídico via Evolution ("${slug}") falhou:`, waErr?.message || waErr);
+        }
+      }
+
+      if (!waJuridicoEnviado) {
+        try {
+          const fallbackSlug = candidateInstances[0]?.slug || candidateInstances[0] || juridico.evolution_instance;
+          await sendWhatsapp({
+            number: juridico.whatsapp_number,
+            instance: typeof fallbackSlug === "string" ? fallbackSlug : String(fallbackSlug),
+            text: mensagemWhatsApp,
+          });
+        } catch (waFallbackErr) {
+          console.warn("[sendContractToJuridico] Fallback sendWhatsapp do jurídico falhou:", waFallbackErr?.message || waFallbackErr);
+        }
+      }
+    }
+
+    // Notificação do WhatsApp da Diretoria (Caio e Conrado) com fallback garantido
+    const diretoriaWhatsAppNumeros = [
+      process.env.GD_CAIO_WHATSAPP || "5534997719779",
+      process.env.GD_CONRADO_WHATSAPP || "5534991751267",
+    ];
+
+    for (const numero of diretoriaWhatsAppNumeros) {
+      let enviado = false;
+      const attempted = new Set();
+
+      for (const inst of candidateInstances) {
+        const slug = typeof inst === "string" ? inst : (inst.slug || String(inst));
+        const baseUrl = typeof inst === "object" ? inst.baseUrl : null;
+        const webhookToken = typeof inst === "object" ? inst.webhookToken : null;
+
+        if (!slug || attempted.has(slug)) continue;
+        attempted.add(slug);
+
+        try {
+          await sendTextMessageViaEvolution({
+            instanceName: slug,
+            baseUrl: baseUrl || undefined,
+            webhookToken: webhookToken || undefined,
+            number: numero,
+            text: mensagemWhatsApp,
+          });
+          enviado = true;
+          break;
+        } catch (err) {
+          console.warn(`[sendContractToJuridico] Falha no envio para ${numero} via "${slug}":`, err?.message || err);
+        }
+      }
+
+      if (!enviado) {
+        try {
+          const fallbackSlug = candidateInstances[0]?.slug || candidateInstances[0] || juridico.evolution_instance;
+          await sendWhatsapp({
+            number: numero,
+            text: mensagemWhatsApp,
+            instance: typeof fallbackSlug === "string" ? fallbackSlug : String(fallbackSlug),
+          });
+        } catch (errSw) {
+          console.warn(`[sendContractToJuridico] Fallback sendWhatsapp falhou para ${numero}:`, errSw?.message || errSw);
+        }
       }
     }
 
@@ -330,7 +431,7 @@ export async function sendContractToJuridico(req, res) {
       [id, tenantId]
     );
 
-    res.json({ success: true, slack: "sent", whatsapp: whatsappStatus });
+    res.json({ success: true, slack: channelId ? "sent" : "skipped", whatsapp: "sent" });
   } catch (error) {
     console.error("[sendContractToJuridico] Error:", error);
     if (!res.headersSent) {

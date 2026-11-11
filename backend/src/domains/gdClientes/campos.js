@@ -1,0 +1,300 @@
+import { gerarPortalSlug, temSufixoSecreto } from "./portalSlug.js";
+// Leitura dos campos de gd_clientes, igual para a rota e para o script de importação: o mesmo dado
+// não pode entrar por um caminho e ser recusado pelo outro. As travas da migration 20261103120000
+// recusam o mesmo no banco; aqui o erro sai com código e mensagem, antes do INSERT.
+export const GD_DONO = "geracao-digital";
+export const ESCOPOS = ["google", "social", "linkedin", "meta", "consultoria", "eventos", "vexo"];
+
+export class CampoInvalido extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+const vazio = (v) => v == null || (typeof v === "string" && !v.trim());
+
+function texto(bruto, code, rotulo, max) {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido(code, `${rotulo} precisa ser texto.`);
+  const t = bruto.trim();
+  if (t.length > max) throw new CampoInvalido(code, `${rotulo} passa de ${max} caracteres.`);
+  return t;
+}
+
+// Chave de deduplicação por nome dentro do dono: minúsculas, sem acento, espaços colapsados.
+export function chaveDoNome(nome) {
+  return String(nome).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function lerNome(bruto) {
+  const nome = typeof bruto === "string" ? bruto.trim() : "";
+  if (!nome || nome.length > 200) throw new CampoInvalido("NOME_INVALIDO", "Nome obrigatório, até 200 caracteres.");
+  return nome;
+}
+
+// CNPJ guardado só com dígitos: "12.345.678/0001-90" e "12345678000190" seriam dois clientes
+// para o índice único se entrassem como vieram.
+export function lerCnpj(bruto) {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido("CNPJ_INVALIDO", "CNPJ precisa ser texto com 14 dígitos.");
+  const digitos = bruto.replace(/\D/g, "");
+  if (digitos.length !== 14) throw new CampoInvalido("CNPJ_INVALIDO", "CNPJ precisa ter 14 dígitos.");
+  return digitos;
+}
+
+// Validação matemática oficial dos dois dígitos verificadores de CNPJ brasileiro.
+// Recusa strings que não tenham 14 dígitos, sequências com todos os dígitos iguais e DVs inválidos.
+export function validarCnpjMatematico(cnpj) {
+  if (!cnpj || (typeof cnpj !== "string" && typeof cnpj !== "number")) return false;
+  const digitos = String(cnpj).replace(/\D/g, "");
+  if (digitos.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(digitos)) return false;
+
+  const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let soma1 = 0;
+  for (let i = 0; i < 12; i++) {
+    soma1 += parseInt(digitos[i], 10) * pesos1[i];
+  }
+  const resto1 = soma1 % 11;
+  const dv1 = resto1 < 2 ? 0 : 11 - resto1;
+  if (parseInt(digitos[12], 10) !== dv1) return false;
+
+  const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  let soma2 = 0;
+  for (let i = 0; i < 13; i++) {
+    soma2 += parseInt(digitos[i], 10) * pesos2[i];
+  }
+  const resto2 = soma2 % 11;
+  const dv2 = resto2 < 2 ? 0 : 11 - resto2;
+  if (parseInt(digitos[13], 10) !== dv2) return false;
+
+  return true;
+}
+
+// Sempre com o DDI 55, só dígitos. Com 10 ou 11 dígitos o 55 entra na frente; com 12 ou 13 o
+// número já precisa começar com 55. DDD começando com 0 é recusado (o "5500" fabricado).
+export function lerTelefone(bruto) {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido("TELEFONE_INVALIDO", "Telefone precisa ser texto.");
+  let d = bruto.replace(/\D/g, "");
+  if (d.length === 10 || d.length === 11) d = `55${d}`;
+  if (!/^55[1-9][0-9]{9,10}$/.test(d)) {
+    throw new CampoInvalido("TELEFONE_INVALIDO", "Telefone precisa ser brasileiro: DDD válido e 8 ou 9 dígitos, com ou sem 55.");
+  }
+  return d;
+}
+
+export function lerDriveUrl(bruto) {
+  const url = texto(bruto, "DRIVE_URL_INVALIDA", "Link do Drive", 500);
+  if (url === null) return null;
+  if (!/^https:\/\//.test(url)) throw new CampoInvalido("DRIVE_URL_INVALIDA", "Link do Drive precisa começar com https://.");
+  if (url.includes("/u/0/")) {
+    throw new CampoInvalido("DRIVE_URL_INVALIDA", "Link do Drive com /u/0/ abre a conta de quem copiou; tire o /u/0/ do link.");
+  }
+  return url;
+}
+
+export function lerUrlOpcional(bruto, code, rotulo) {
+  const url = texto(bruto, code, rotulo, 500);
+  if (url === null) return null;
+  if (!/^https:\/\//.test(url)) {
+    throw new CampoInvalido(code, `${rotulo} precisa começar com https://.`);
+  }
+  return url;
+}
+
+export const lerContratoUrl = (bruto) => lerUrlOpcional(bruto, "CONTRATO_URL_INVALIDA", "Link do contrato");
+export const lerBriefingUrl = (bruto) => lerUrlOpcional(bruto, "BRIEFING_URL_INVALIDA", "Link do briefing");
+export const lerFichaVexoUrl = (bruto) => lerUrlOpcional(bruto, "FICHA_VEXO_URL_INVALIDA", "Link da ficha Vexo");
+export const lerPlanejamentoUrl = (bruto) => lerUrlOpcional(bruto, "PLANEJAMENTO_URL_INVALIDA", "Link do planejamento");
+export const lerGrupoInternoUrl = (bruto) => lerUrlOpcional(bruto, "GRUPO_INTERNO_URL_INVALIDA", "Link do grupo interno");
+export const lerGrupoClienteUrl = (bruto) => lerUrlOpcional(bruto, "GRUPO_CLIENTE_URL_INVALIDA", "Link do grupo do cliente");
+export const lerGrupoInternoJid = (bruto) => texto(bruto, "GRUPO_INTERNO_JID_INVALIDO", "JID do grupo interno", 100);
+export const lerGrupoClienteJid = (bruto) => texto(bruto, "GRUPO_CLIENTE_JID_INVALIDO", "JID do grupo do cliente", 100);
+
+export function lerDataOpcional(bruto, code, rotulo) {
+  if (vazio(bruto)) return null;
+  const d = new Date(bruto);
+  if (Number.isNaN(d.getTime())) throw new CampoInvalido(code, `${rotulo} precisa ser uma data ISO válida.`);
+  return d.toISOString();
+}
+
+export const lerOnboardingConcluidoEm = (bruto) => lerDataOpcional(bruto, "ONBOARDING_CONCLUIDO_EM_INVALIDO", "Data de conclusão do onboarding");
+
+// Lista de códigos, sem repetição. Lista vazia é "sem escopo informado".
+export function lerEscopo(bruto) {
+  if (bruto == null) return null;
+  if (!Array.isArray(bruto)) throw new CampoInvalido("ESCOPO_INVALIDO", `Escopo precisa ser lista de: ${ESCOPOS.join(", ")}.`);
+  const fora = bruto.filter((c) => !ESCOPOS.includes(c));
+  if (fora.length) throw new CampoInvalido("ESCOPO_INVALIDO", `Escopo fora da lista: ${fora.join(", ")}. Válidos: ${ESCOPOS.join(", ")}.`);
+  const unicos = [...new Set(bruto)];
+  return unicos.length ? unicos : null;
+}
+
+export const lerEscopoOriginal = (bruto) => texto(bruto, "ESCOPO_ORIGINAL_INVALIDO", "Escopo original", 1000);
+export const lerAprovadorNome = (bruto) => texto(bruto, "APROVADOR_NOME_INVALIDO", "Nome do aprovador", 200);
+
+export function lerEmail(bruto, code = "EMAIL_INVALIDO", rotulo = "E-mail") {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido(code, `${rotulo} precisa ser texto.`);
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const t = bruto.trim();
+  if (!emailRegex.test(t)) {
+    throw new CampoInvalido(code, `${rotulo} precisa ser um endereço de e-mail válido.`);
+  }
+  if (t.length > 255) {
+    throw new CampoInvalido(code, `${rotulo} passa de 255 caracteres.`);
+  }
+  return t;
+}
+
+export const lerGoogleCalendarEmail = (bruto) =>
+  lerEmail(bruto, "GOOGLE_CALENDAR_EMAIL_INVALIDO", "E-mail da Agenda Google");
+
+export const lerBriefingMeetUrl = (bruto) => lerUrlOpcional(bruto, "BRIEFING_MEET_URL_INVALIDA", "Link do Google Meet");
+export const lerBriefingCalendarEventId = (bruto) => texto(bruto, "BRIEFING_CALENDAR_EVENT_ID_INVALIDO", "ID do evento da Google Agenda", 255);
+export const lerBriefingAgendadoInicio = (bruto) => lerDataOpcional(bruto, "BRIEFING_AGENDADO_INICIO_INVALIDO", "Data/hora de início do briefing");
+export const lerBriefingAgendadoFim = (bruto) => lerDataOpcional(bruto, "BRIEFING_AGENDADO_FIM_INVALIDO", "Data/hora de término do briefing");
+export function lerBriefingSlotsOferecidos(bruto) {
+  if (bruto == null) return null;
+  if (typeof bruto === "object") return bruto;
+  try {
+    return JSON.parse(bruto);
+  } catch {
+    throw new CampoInvalido("BRIEFING_SLOTS_INVALIDOS", "Slots de briefing precisam ser JSON válido.");
+  }
+}
+
+export function lerJsonOpcional(bruto, code, rotulo) {
+  if (bruto == null) return null;
+  if (typeof bruto === "object") return bruto;
+  try {
+    return JSON.parse(bruto);
+  } catch {
+    throw new CampoInvalido(code, `${rotulo} precisa ser JSON válido.`);
+  }
+}
+
+export const lerBriefingDocumentos = (b) => lerJsonOpcional(b, "BRIEFING_DOCUMENTOS_INVALIDOS", "Documentos de briefing");
+export const lerBriefingFormularioRespostas = (b) => lerJsonOpcional(b, "BRIEFING_FORMULARIO_INVALIDO", "Respostas do formulário de briefing");
+export const lerBriefingTranscricao = (b) => texto(b, "BRIEFING_TRANSCRICAO_INVALIDA", "Transcrição do briefing", 200000);
+export const lerBriefingAprovacaoInternaStatus = (b) => texto(b, "BRIEFING_APROVACAO_INTERNA_STATUS_INVALIDO", "Status da aprovação interna", 50);
+export const lerBriefingAprovacaoInternaRessalvas = (b) => texto(b, "BRIEFING_RESSALVAS_INVALIDAS", "Ressalvas da aprovação interna", 5000);
+export const lerBriefingAprovacaoInternaEm = (b) => lerDataOpcional(b, "BRIEFING_APROVACAO_INTERNA_EM_INVALIDO", "Data da aprovação interna");
+export const lerBriefingAprovacaoClienteStatus = (b) => texto(b, "BRIEFING_APROVACAO_CLIENTE_STATUS_INVALIDO", "Status da aprovação do cliente", 50);
+export const lerBriefingAprovacaoClienteEm = (b) => lerDataOpcional(b, "BRIEFING_APROVACAO_CLIENTE_EM_INVALIDO", "Data da aprovação do cliente");
+
+// ─── Frente 6: Briefing Comercial Vexo, Mineração WhatsApp e Setup de Chips ─────
+export function lerVextoBriefingChips(b) {
+  if (b == null) return null;
+  return lerJsonOpcional(b, "VEXTO_BRIEFING_CHIPS_INVALIDO", "Chips Virtuais Vexo");
+}
+
+export function lerVextoBriefingTransbordoNumero(b) {
+  if (vazio(b)) return null;
+  return lerTelefone(b);
+}
+
+export function lerVextoBriefingPilares(b) {
+  if (b == null) return null;
+  return lerJsonOpcional(b, "VEXTO_BRIEFING_PILARES_INVALIDO", "Pilares do Briefing Vexo");
+}
+
+export function lerVextoBriefingMineracao(b) {
+  if (b == null) return null;
+  return lerJsonOpcional(b, "VEXTO_BRIEFING_MINERACAO_INVALIDA", "Mineração de WhatsApp Vexo");
+}
+
+export const lerVextoBriefingPromptGerado = (b) => texto(b, "VEXTO_BRIEFING_PROMPT_INVALIDO", "Prompt do agente Vexo", 100000);
+export const lerVextoBriefingStatus = (b) => texto(b, "VEXTO_BRIEFING_STATUS_INVALIDO", "Status do Briefing Vexo", 50);
+export const lerVextoBriefingAgenteId = (b) => texto(b, "VEXTO_BRIEFING_AGENTE_ID_INVALIDO", "ID do Agente Vexo", 100);
+
+export function lerPortalSlug(bruto) {
+  if (vazio(bruto)) return null;
+  if (typeof bruto !== "string") throw new CampoInvalido("PORTAL_SLUG_INVALIDO", "Slug do portal precisa ser texto.");
+  const s = bruto.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+  if (!s || s.length > 100) throw new CampoInvalido("PORTAL_SLUG_INVALIDO", "Slug do portal inválido, até 100 caracteres.");
+  // O portal abre sem login: slug sem sufixo secreto seria adivinhável pelo nome da empresa (ver portalSlug.js).
+  return temSufixoSecreto(s) ? s : gerarPortalSlug(s);
+}
+
+export function lerCsReguaAtiva(bruto) {
+  if (bruto == null) return true;
+  if (typeof bruto !== "boolean") throw new CampoInvalido("CS_REGUA_ATIVA_INVALIDA", "cs_regua_ativa precisa ser boolean.");
+  return bruto;
+}
+
+export const lerCsUltimoToqueEm = (b) => lerDataOpcional(b, "CS_DATA_INVALIDA", "Data do último toque de CS");
+export const lerCsAvaliacaoGoogleEnviadaEm = (b) => lerDataOpcional(b, "CS_DATA_INVALIDA", "Data da avaliação Google");
+export const lerCsProximoToqueEm = (b) => lerDataOpcional(b, "CS_DATA_INVALIDA", "Data do próximo toque de CS");
+
+export function lerCsToquesHistorico(bruto) {
+  if (bruto == null) return [];
+  if (typeof bruto === "string") {
+    try {
+      bruto = JSON.parse(bruto);
+    } catch {
+      throw new CampoInvalido("CS_HISTORICO_INVALIDO", "cs_toques_historico precisa ser JSON válido.");
+    }
+  }
+  if (!Array.isArray(bruto)) throw new CampoInvalido("CS_HISTORICO_INVALIDO", "cs_toques_historico precisa ser lista.");
+  return bruto;
+}
+
+export function lerCnpjAConfirmar(bruto) {
+  if (bruto == null) return false;
+  if (typeof bruto !== "boolean") throw new CampoInvalido("CNPJ_A_CONFIRMAR_INVALIDO", "cnpj_a_confirmar precisa ser true ou false.");
+  return bruto;
+}
+
+// Campos opcionais do cliente, na ordem das colunas. nome fica fora: é obrigatório e tem regra própria.
+export const CAMPOS_OPCIONAIS = {
+  cnpj: lerCnpj,
+  aprovador_nome: lerAprovadorNome,
+  aprovador_telefone: lerTelefone,
+  google_calendar_email: lerGoogleCalendarEmail,
+  drive_url: lerDriveUrl,
+  contrato_url: lerContratoUrl,
+  briefing_url: lerBriefingUrl,
+  ficha_vexo_url: lerFichaVexoUrl,
+  planejamento_url: lerPlanejamentoUrl,
+  grupo_interno_jid: lerGrupoInternoJid,
+  grupo_interno_url: lerGrupoInternoUrl,
+  grupo_cliente_jid: lerGrupoClienteJid,
+  grupo_cliente_url: lerGrupoClienteUrl,
+  onboarding_concluido_em: lerOnboardingConcluidoEm,
+  escopo: lerEscopo,
+  escopo_original: lerEscopoOriginal,
+  cnpj_a_confirmar: lerCnpjAConfirmar,
+  briefing_slots_oferecidos: lerBriefingSlotsOferecidos,
+  briefing_agendado_inicio: lerBriefingAgendadoInicio,
+  briefing_agendado_fim: lerBriefingAgendadoFim,
+  briefing_meet_url: lerBriefingMeetUrl,
+  briefing_calendar_event_id: lerBriefingCalendarEventId,
+  briefing_lembrete_vespera_agendado_para: (b) => lerDataOpcional(b, "LEMBRETE_VESPERA_INVALIDO", "Data do lembrete de véspera"),
+  briefing_lembrete_vespera_enviado_em: (b) => lerDataOpcional(b, "LEMBRETE_VESPERA_INVALIDO", "Data de envio do lembrete de véspera"),
+  briefing_lembrete_1h_agendado_para: (b) => lerDataOpcional(b, "LEMBRETE_1H_INVALIDO", "Data do lembrete de 1 hora"),
+  briefing_lembrete_1h_enviado_em: (b) => lerDataOpcional(b, "LEMBRETE_1H_INVALIDO", "Data de envio do lembrete de 1 hora"),
+  briefing_documentos: lerBriefingDocumentos,
+  briefing_aprovacao_interna_status: lerBriefingAprovacaoInternaStatus,
+  briefing_aprovacao_interna_ressalvas: lerBriefingAprovacaoInternaRessalvas,
+  briefing_aprovacao_interna_em: lerBriefingAprovacaoInternaEm,
+  briefing_aprovacao_cliente_status: lerBriefingAprovacaoClienteStatus,
+  briefing_aprovacao_cliente_em: lerBriefingAprovacaoClienteEm,
+  briefing_transcricao: lerBriefingTranscricao,
+  briefing_formulario_respostas: lerBriefingFormularioRespostas,
+  vexto_briefing_chips: lerVextoBriefingChips,
+  vexto_briefing_transbordo_numero: lerVextoBriefingTransbordoNumero,
+  vexto_briefing_pilares: lerVextoBriefingPilares,
+  vexto_briefing_mineracao: lerVextoBriefingMineracao,
+  vexto_briefing_prompt_gerado: lerVextoBriefingPromptGerado,
+  vexto_briefing_status: lerVextoBriefingStatus,
+  vexto_briefing_agente_id: lerVextoBriefingAgenteId,
+  portal_slug: lerPortalSlug,
+  cs_regua_ativa: lerCsReguaAtiva,
+  cs_ultimo_toque_em: lerCsUltimoToqueEm,
+  cs_toques_historico: lerCsToquesHistorico,
+  cs_avaliacao_google_enviada_em: lerCsAvaliacaoGoogleEnviadaEm,
+  cs_proximo_toque_em: lerCsProximoToqueEm,
+};

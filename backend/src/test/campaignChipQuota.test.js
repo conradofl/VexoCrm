@@ -465,6 +465,7 @@ describe("[TESTE OBRIGATÓRIO] a previsão de término do lote usa o contador co
 
     const grouped = [{
       campaign_id: "camp-1", campaign_name: "Campanha", lote_count: 1, sent_total: 0, failed_total: 0, leads_total: 20, leads_pending: 20,
+      leads_will_run: 20, // lote scheduled: tudo o que falta vai rodar sozinho
       leads_pause_target: 0, leads_resume_target: 0, leads_cancel_target: 0, statuses: ["scheduled"], evolution_instance_id: CHIP,
       next_scheduled_at: null, last_updated_at: HOJE.toISOString(),
     }];

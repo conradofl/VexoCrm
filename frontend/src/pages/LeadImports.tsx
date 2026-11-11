@@ -18,7 +18,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchApi } from "@/lib/api";
+import { fetchApi, readApiErrorMessage } from "@/lib/api";
 import { fetchCampaignAudience, fetchLeadIds, type LeadRequest } from "@/lib/leads/leadListApi";
 import { MassDeleteDialog } from "@/components/leads/MassDeleteDialog";
 import { canMassDeleteLeads } from "@/lib/leadMassDelete";
@@ -105,6 +105,7 @@ import {
   type StepActionButton,
 } from "@/lib/leadImports/spreadsheet";
 import { isScheduledDateInPast } from "@/lib/campaignScheduleValidation";
+import { buildDispatchRequestBody, resolveDispatchChipIds, withResolvedDispatchChips } from "@/lib/campaignDispatchRequest";
 
 import { LeadSourceStep, type PhoneAuditStats } from "./LeadImports/LeadSourceStep";
 import { classifyPhoneAudit } from "@/lib/leadImports/phoneAudit";
@@ -837,13 +838,11 @@ export default function LeadImports({
           ? WARM_CHIP_DAILY_QUOTA
           : COLD_CHIP_DAILY_QUOTA;
 
-    const selected = dispatchOptions.evolutionInstanceId
-      ? evolutionInstanceOptions.find((inst) => inst.id === dispatchOptions.evolutionInstanceId)
-      : null;
+    const selectedId = resolveDispatchChipIds(dispatchOptions, evolutionInstanceOptions)[0];
+    const selected = evolutionInstanceOptions.find((inst) => inst.id === selectedId);
     if (selected) return limitOf(selected);
-    if (evolutionInstanceOptions.length === 0) return COLD_CHIP_DAILY_QUOTA;
-    return Math.max(...evolutionInstanceOptions.map(limitOf));
-  }, [evolutionInstanceOptions, dispatchOptions.evolutionInstanceId]);
+    return COLD_CHIP_DAILY_QUOTA;
+  }, [evolutionInstanceOptions, dispatchOptions.dispatchChipIds, dispatchOptions.evolutionInstanceId]);
 
   const suggestedVariantCount = useMemo(
     () =>
@@ -877,6 +876,10 @@ export default function LeadImports({
   // Initialize/refresh settings
   useEffect(() => {
     if (editingCampaignId) {
+      return;
+    }
+    // Chips de outra empresa nao podem virar padrao na chave da empresa ativa.
+    if (selectedLeadClient?.id !== activeClientId) {
       return;
     }
     const defaultInstanceId =
@@ -1724,10 +1727,7 @@ export default function LeadImports({
           image: campaignSequence.find(s => s.type === "image")?.image,
           sequence: campaignSequence,
           dispatchOptions: {
-            ...dispatchOptions,
-            dispatchChipIds: Array.isArray(dispatchOptions.dispatchChipIds)
-              ? dispatchOptions.dispatchChipIds.filter((id) => evolutionInstanceOptions.some((inst) => inst.id === id))
-              : (dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : []),
+            ...withResolvedDispatchChips(dispatchOptions, evolutionInstanceOptions),
             handoffChipIds: (Array.isArray(dispatchOptions.handoffChipIds) ? dispatchOptions.handoffChipIds : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []))
               .filter((id) => evolutionInstanceOptions.some((inst) => inst.id === id)),
             handoffChipId: (Array.isArray(dispatchOptions.handoffChipIds) ? dispatchOptions.handoffChipIds : (dispatchOptions.handoffChipId ? [dispatchOptions.handoffChipId] : []))
@@ -1861,28 +1861,23 @@ export default function LeadImports({
           if ((deliberateDispatch || newTriggerType === "manual") && i === 0) batchTriggerType = "manual";
           if (!deliberateDispatch && newTriggerType === "draft") batchTriggerType = "draft";
 
-          const dispatchChipList = Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0
-            ? dispatchOptions.dispatchChipIds
-            : (dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : []);
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: `${campaignName.trim()} — Lote ${i + 1}/${numBatches}`,
-              steps: campaignSequence,
-              triggerType: batchTriggerType,
-              status: batchTriggerType === "draft" ? "draft" : undefined,
-              scheduledAt: (batchTriggerType === "scheduled") ? batchScheduledIso : null,
-              evolutionInstanceId: dispatchOptions.evolutionInstanceId,
-              dispatch_options: {
-                ...dispatchOptions,
-                dispatchChipIds: dispatchChipList,
-              },
-              limitPerRun: size,
-              offset: offset,
-            }),
+            body: JSON.stringify(
+              buildDispatchRequestBody({
+                name: `${campaignName.trim()} — Lote ${i + 1}/${numBatches}`,
+                steps: campaignSequence,
+                triggerType: batchTriggerType,
+                scheduledAt: batchTriggerType === "scheduled" ? batchScheduledIso : null,
+                dispatchOptions,
+                chips: evolutionInstanceOptions,
+                limitPerRun: size,
+                offset,
+              })
+            ),
           });
-          if (!dispatchRes.ok) throw new Error(`Erro ao registrar lote ${i + 1} de disparo.`);
+          if (!dispatchRes.ok) throw new Error(await readApiErrorMessage(dispatchRes, `Erro ao registrar lote ${i + 1} de disparo`));
           const dispatchData = await dispatchRes.json();
           const dispatchId = dispatchData.dispatch.id;
 
@@ -1914,28 +1909,23 @@ export default function LeadImports({
         }
       } else {
         const effectiveTriggerType = deliberateDispatch ? "manual" : newTriggerType;
-        const dispatchChipList = Array.isArray(dispatchOptions.dispatchChipIds) && dispatchOptions.dispatchChipIds.length > 0
-          ? dispatchOptions.dispatchChipIds
-          : (dispatchOptions.evolutionInstanceId ? [dispatchOptions.evolutionInstanceId] : []);
         const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: `${campaignName.trim()} — Lote Principal`,
-            // SPEC 17: sem limite digitado, o lote cobre o público inteiro (não manda limitPerRun).
-            ...(parseDispatchCap(dispatchCapText) ? { limitPerRun: parseDispatchCap(dispatchCapText) } : {}),
-            steps: campaignSequence,
-            triggerType: effectiveTriggerType,
-            status: effectiveTriggerType === "draft" ? "draft" : undefined,
-            scheduledAt: effectiveTriggerType === "scheduled" ? scheduledIso : null,
-            evolutionInstanceId: dispatchOptions.evolutionInstanceId,
-            dispatch_options: {
-              ...dispatchOptions,
-              dispatchChipIds: dispatchChipList,
-            },
-          }),
+          body: JSON.stringify(
+            buildDispatchRequestBody({
+              name: `${campaignName.trim()} — Lote Principal`,
+              // SPEC 17: sem limite digitado, o lote cobre o público inteiro (não manda limitPerRun).
+              limitPerRun: parseDispatchCap(dispatchCapText),
+              steps: campaignSequence,
+              triggerType: effectiveTriggerType,
+              scheduledAt: effectiveTriggerType === "scheduled" ? scheduledIso : null,
+              dispatchOptions,
+              chips: evolutionInstanceOptions,
+            })
+          ),
         });
-        if (!dispatchRes.ok) throw new Error("Erro ao registrar lote de disparo.");
+        if (!dispatchRes.ok) throw new Error(await readApiErrorMessage(dispatchRes, "Erro ao registrar lote de disparo"));
         const dispatchData = await dispatchRes.json();
         const dispatchId = dispatchData.dispatch.id;
 
@@ -2016,7 +2006,7 @@ export default function LeadImports({
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ status: "paused" }),
       });
-      if (!res.ok) throw new Error("Erro ao pausar lote.");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao pausar lote"));
       toast({ title: "Lote pausado" });
       refetchDispatches();
     } catch (err) {
@@ -2073,7 +2063,7 @@ export default function LeadImports({
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Erro ao excluir lote.");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao excluir lote"));
       toast({ title: "Lote removido" });
       refetchDispatches();
     } catch (err) {
@@ -2087,7 +2077,7 @@ export default function LeadImports({
       const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${disp.id}/failed?format=csv`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Falha ao gerar CSV.");
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Falha ao gerar CSV"));
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -2098,7 +2088,7 @@ export default function LeadImports({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast({ title: "Erro de download", description: "Não foi possível obter o CSV de falhas.", variant: "destructive" });
+      toast({ title: "Erro de download", description: err instanceof Error ? err.message : "Não foi possível obter o CSV de falhas.", variant: "destructive" });
     }
   };
 

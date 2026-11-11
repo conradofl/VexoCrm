@@ -24,6 +24,7 @@ import {
   Upload,
   FileCheck,
   ChevronDown,
+  MessageSquare,
 } from "lucide-react";
 import { getStableColor } from "@/lib/stableColor";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<{ id: string; proposalId?: string | null; dados: any } | null>(null);
   const [creatingStandaloneKey, setCreatingStandaloneKey] = useState<string | null>(null);
+  const [notificandoId, setNotificandoId] = useState<string | null>(null);
 
   // Busca e troca de aba voltam para a primeira página.
   useEffect(() => { setPage(1); }, [busca, showArquivados]);
@@ -263,15 +265,53 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     const empresa = contract.dados?.razao_social || "este contrato";
     if (!window.confirm(`Enviar o contrato de "${empresa}" para o jurídico revisar?`)) return;
     enviarJuridico.mutate(contract.id, {
-      onSuccess: (r: any) => {
-        const wa =
-          r?.whatsapp === "sent" ? " WhatsApp avisado." :
-          r?.whatsapp === "not_configured" ? " (WhatsApp não configurado)" :
-          r?.whatsapp === "error" ? " (falha no aviso por WhatsApp)" : "";
-        toast({ title: "Enviado ao jurídico", description: `PDF publicado no Slack.${wa}` });
+      onSuccess: () => {
+        toast({
+          title: "Enviado com sucesso!",
+          description: "Contrato enviado para o WhatsApp da diretoria (Caio e Conrado).",
+        });
       },
       onError: (err: any) => toast({ title: "Erro ao enviar", description: err.message, variant: "destructive" }),
     });
+  };
+
+  // Notifica a diretoria (Caio e Conrado) no WhatsApp sobre o contrato comercial.
+  const handleNotificarDiretoria = async (contract: any) => {
+    try {
+      setNotificandoId(contract.id);
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/gd/contracts/${contract.id}/notificar-diretoria?client_id=${clientId || ""}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.success === false) {
+        const errorMsg = typeof data?.error === "string" ? data.error : (data?.error?.message || "Falha ao enviar notificação para a diretoria.");
+        toast({
+          title: "Erro no WhatsApp",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Diretoria notificada!",
+        description: data?.instance ? `Notificado via ${data.instance}` : "Caio e Conrado foram notificados no WhatsApp.",
+      });
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Erro no WhatsApp",
+        description: err.message,
+        variant: "destructive",
+      });
+    } finally {
+      setNotificandoId(null);
+    }
   };
 
   // Cada botão do contrato, separado, para a MESMA ação aparecer onde fizer sentido: no cartão aberto (todos),
@@ -330,6 +370,20 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     </>
   );
 
+  const botaoNotificarDiretoria = (contract: any, compact = false) => (
+    <>
+      <Button
+        size="sm"
+        className={cn("bg-emerald-600 hover:bg-emerald-500 text-white font-medium", compact ? "" : "w-full")}
+        onClick={() => handleNotificarDiretoria(contract)}
+        disabled={notificandoId === contract.id}
+      >
+        <MessageSquare className="h-4 w-4 mr-2" />
+        {notificandoId === contract.id ? "Notificando..." : "Notificar no WhatsApp"}
+      </Button>
+    </>
+  );
+
   const botaoEditar = (contract: any, compact = false) => (
     <>
       <Button
@@ -378,6 +432,7 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     <>
       {botoesAssinado(contract, compact)}
       {botaoJuridico(contract, compact)}
+      {botaoNotificarDiretoria(contract, compact)}
       {botaoEditar(contract, compact)}
       {botaoPdf(contract, compact)}
       {botaoArquivar(contract, compact)}
@@ -392,10 +447,11 @@ export function ContractsList({ isVexoCommercial = false }: { isVexoCommercial?:
     </>
   );
 
-  /** O resto (assinado, editar, arquivar): ao expandir a linha. */
+  /** O resto (assinado, notificar diretoria, editar, arquivar): ao expandir a linha. */
   const acoesSecundarias = (contract: any, compact = false) => (
     <>
       {botoesAssinado(contract, compact)}
+      {botaoNotificarDiretoria(contract, compact)}
       {botaoEditar(contract, compact)}
       {botaoArquivar(contract, compact)}
     </>

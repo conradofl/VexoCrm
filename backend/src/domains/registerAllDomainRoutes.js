@@ -4,6 +4,7 @@ import { registerFollowupQueueRoutes } from "../followup/queueRoutes.js";
 import { registerGeracaoDigitalRoutes } from "./geracaoDigitalRoutes.js";
 import { registerContractRoutes } from "./geracaoDigitalContracts/contractRoutes.js";
 import { registerContractWebhookRoutes } from "./geracaoDigitalContracts/webhookRoutes.js";
+import { registerGdClientesRoutes } from "./gdClientes/routes.js";
 import { registerRagRoutes } from "../rag/routes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { registerEventosRoutes } from "./eventos/routes.js";
@@ -62,6 +63,7 @@ export function registerAllDomainRoutes(app) {
   registerGeracaoDigitalRoutes(app, pgDatabasePool, requireFirebaseAuth, requireInternalPageAccess);
   registerContractRoutes(app);
   registerContractWebhookRoutes(app);
+  registerGdClientesRoutes(app);
 
   // ─── Base de Conhecimento RAG (upload/indexação, fila própria) ────────────
   registerRagRoutes(app);

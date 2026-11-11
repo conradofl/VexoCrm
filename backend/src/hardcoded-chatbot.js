@@ -3,12 +3,17 @@
  * Fluxo de conversa fixo em código (estável), dados variáveis salvos incrementalmente em tempo real
  */
 
-import { createClient as createRedisClient } from "redis";
+// Redis client lazy loaded if needed
+let createRedisClient = null;
 
 let redisClient = null;
 
-function initializeRedisClientNow() {
+async function initializeRedisClientNow() {
   if (redisClient) return redisClient;
+  if (!createRedisClient) {
+    const redisModule = await import("redis");
+    createRedisClient = redisModule.createClient;
+  }
 
   const host = process.env.REDIS_HOST || "localhost";
   const port = parseInt(process.env.REDIS_PORT || "6379");

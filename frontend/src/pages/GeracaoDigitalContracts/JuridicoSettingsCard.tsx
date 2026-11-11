@@ -69,6 +69,12 @@ export function JuridicoSettingsCard() {
     });
   };
 
+  const gdConnectedInstances = (instances || []).filter(
+    (i: any) =>
+      (String(i.client_id || "").toLowerCase() === "geracao-digital" || !i.client_id) &&
+      i.connected !== false
+  );
+
   const hasContratada = Boolean(form.contratada.razao_social || form.contratada.cnpj);
 
   return (
@@ -214,16 +220,60 @@ export function JuridicoSettingsCard() {
               <div className="space-y-1">
                 <Label className="text-xs">Instância que envia</Label>
                 <select
-                  value={form.evolution_instance}
-                  onChange={(e) => setForm((f) => ({ ...f, evolution_instance: e.target.value }))}
+                  value={
+                    gdConnectedInstances.find(
+                      (i: any) =>
+                        (i.technical_name && i.technical_name === form.evolution_instance) ||
+                        (i.name && i.name === form.evolution_instance)
+                    )?.technical_name ||
+                    gdConnectedInstances.find(
+                      (i: any) =>
+                        (i.technical_name && i.technical_name === form.evolution_instance) ||
+                        (i.name && i.name === form.evolution_instance)
+                    )?.name ||
+                    form.evolution_instance
+                  }
+                  onChange={(e) => {
+                    const newVal = e.target.value;
+                    const updatedForm = { ...form, evolution_instance: newVal };
+                    setForm(updatedForm);
+                    save.mutate(updatedForm, {
+                      onSuccess: () =>
+                        toast({
+                          title: "Instância de envio atualizada",
+                          description: newVal
+                            ? `Chip "${newVal}" configurado para envio com sucesso.`
+                            : "Definido para o padrão do sistema.",
+                        }),
+                      onError: (err: any) =>
+                        toast({
+                          title: "Erro ao salvar instância",
+                          description: err.message,
+                          variant: "destructive",
+                        }),
+                    });
+                  }}
                   className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-white/10 rounded-md px-3 h-9 text-sm text-slate-800 dark:text-slate-100"
                 >
-                  <option value="">— padrão do sistema —</option>
-                  {(instances || []).map((i) => (
-                    <option key={i.name} value={i.name}>
-                      {i.name} {i.client_id ? `(${i.client_id})` : ""}
-                    </option>
-                  ))}
+                  <option value="">— padrão do sistema (conectado) —</option>
+                  {gdConnectedInstances.map((i: any) => {
+                    const val = i.technical_name || i.name;
+                    return (
+                      <option key={val} value={val}>
+                        {i.name} (conectado)
+                      </option>
+                    );
+                  })}
+                  {form.evolution_instance &&
+                    !gdConnectedInstances.some(
+                      (i: any) =>
+                        (i.technical_name && i.technical_name === form.evolution_instance) ||
+                        (i.name && i.name === form.evolution_instance)
+                    ) && (
+                      <option value={form.evolution_instance} disabled>
+                        {form.evolution_instance} (desconectado ou indisponível)
+                      </option>
+                    )}
                 </select>
                 <span className="text-[10px] text-slate-500">Instância WhatsApp conectada.</span>
               </div>

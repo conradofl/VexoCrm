@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export const ClientPortal: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
-  const activeSlug = slug || "vox2you";
+  const activeSlug = slug || "";
   const { toast } = useToast();
 
   const { data: portalData, isLoading } = useClientPortal(activeSlug);
@@ -25,6 +25,14 @@ export const ClientPortal: React.FC = () => {
 
   const [selectedStage, setSelectedStage] = useState<FunnelStageId | "todos">("todos");
   const [selectedItem, setSelectedItem] = useState<DeliverableItem | null>(null);
+
+  if (!isLoading && !portalData) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-white">
+        <p className="text-base font-semibold">Este painel ainda não foi configurado.</p>
+      </div>
+    );
+  }
 
   if (isLoading || !portalData) {
     return (

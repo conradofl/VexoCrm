@@ -34,7 +34,7 @@ export function assembleContractFromBlocks({
   const assembledClauses = activeClauses.map((c, idx) => {
     const ordinal = toExtenseOrdinal(idx + 1);
     const cleanTitle = (c.titulo || "")
-      .replace(/^Cláusula\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*/i, "")
+      .replace(/^(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:|]\s*/i, "")
       .trim();
     const header = `Cláusula ${ordinal} – ${cleanTitle}`;
     const body = (c.conteudo || "").trim();
@@ -66,8 +66,8 @@ export function parseTemplateContentToClauses(conteudo) {
   }
 
   // Regex para identificar cabeçalhos de cláusula
-  // Suporta: "Cláusula Primeira - Das Partes", "Cláusula Sétima – Do Foro", "CLAUSULA 2ª: Do Objeto"
-  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:]\s*([^\n]+)/gi;
+  // Suporta: "Cláusula Primeira - Das Partes", "Cláusula Sétima – Do Foro", "CLAUSULA 2ª: Do Objeto", "CLÁUSULA PRIMEIRA | DAS PARTES"
+  const clauseRegex = /(?:^|\n)(?:Cláusula|CLAUSULA)\s+([A-Za-zÀ-ÖØ-öø-ÿ0-9ºª\s]+?)\s*[–\-:|]\s*([^\n]+)/gi;
 
   const matches = [...conteudo.matchAll(clauseRegex)];
 
@@ -205,7 +205,97 @@ export function isSystemOrStandardField(key) {
  * Formata um valor numérico em moeda brasileira (BRL).
  */
 export function formatBrl(val) {
-  return Number(val || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }).replace(/\s/g, " ");
+  if (val == null || val === "") return "";
+  if (typeof val === "string" && val.includes("R$")) return val;
+  const num = typeof val === "number" ? val : parseFloat(String(val).replace(/[^\d.,-]/g, "").replace(",", "."));
+  if (isNaN(num)) return String(val);
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(num).replace(/\u00a0/g, " ");
+}
+
+export const formatCurrencyBRL = formatBrl;
+
+/**
+ * Aplica máscara de CNPJ (14 dígitos) ou CPF (11 dígitos).
+ */
+export function formatCnpj(val) {
+  if (!val) return "";
+  const digits = String(val).replace(/\D/g, "");
+  if (digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
+  if (digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  }
+  return String(val);
+}
+
+/**
+ * Aplica máscara de CPF (11 dígitos).
+ */
+export function formatCpf(val) {
+  if (!val) return "";
+  const digits = String(val).replace(/\D/g, "");
+  if (digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  }
+  return String(val);
+}
+
+/**
+ * Aplica máscara brasileira de telefone celular (11 dígitos) ou fixo (10 dígitos).
+ * Se contiver o DDI 55 (12 ou 13 dígitos), remove o 55 antes de formatar.
+ */
+export function formatTelefone(val) {
+  if (!val) return "";
+  let digits = String(val).replace(/\D/g, "");
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 11) {
+    return digits.replace(/^(\d{2})(\d{5})(\d{4})$/, "($1) $2-$3");
+  }
+  if (digits.length === 10) {
+    return digits.replace(/^(\d{2})(\d{4})(\d{4})$/, "($1) $2-$3");
+  }
+  return String(val);
+}
+
+/**
+ * Normaliza e aplica máscaras em todos os campos do objeto dados do contrato.
+ */
+export function prepareContractDados(dados = {}) {
+  const d = { ...dados };
+  if (d.cnpj) d.cnpj = formatCnpj(d.cnpj);
+  if (d.contratada_cnpj) d.contratada_cnpj = formatCnpj(d.contratada_cnpj);
+  if (d.responsavel_cpf) d.responsavel_cpf = formatCpf(d.responsavel_cpf);
+  if (d.cpf) d.cpf = formatCpf(d.cpf);
+
+  if (d.telefone) d.telefone = formatTelefone(d.telefone);
+  if (d.telefone2) d.telefone2 = formatTelefone(d.telefone2);
+  if (d.contratada_telefone) d.contratada_telefone = formatTelefone(d.contratada_telefone);
+
+  if (d.valor_total != null && d.valor_total !== "") {
+    d.valor_total = formatBrl(d.valor_total);
+  }
+  if (d.valor_parcela != null && d.valor_parcela !== "") {
+    d.valor_parcela = formatBrl(d.valor_parcela);
+  }
+  if (d.condicao_permuta != null && d.condicao_permuta !== "" && !isNaN(Number(String(d.condicao_permuta).replace(/[^\d.,-]/g, "").replace(",", ".")))) {
+    d.condicao_permuta = formatBrl(d.condicao_permuta);
+  }
+
+  if (d.endereco && typeof d.endereco === "object") {
+    const e = d.endereco;
+    const parts = [];
+    if (e.logradouro) parts.push(e.logradouro + (e.numero ? `, ${e.numero}` : ""));
+    if (e.bairro) parts.push(e.bairro);
+    if (e.cidade && e.uf) parts.push(`${e.cidade} – ${e.uf}`);
+    else if (e.cidade) parts.push(e.cidade);
+    if (e.cep) parts.push(`CEP ${e.cep}`);
+    d.endereco = parts.join(", ");
+  }
+
+  return d;
 }
 
 /**

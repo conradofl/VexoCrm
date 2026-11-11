@@ -19,7 +19,16 @@ import {
   createContractTemplate,
   updateContractTemplate,
   deleteContractTemplate,
+  generateContractPdf,
+  buildContractPdfBuffer,
+  renderContractPdf,
 } from "../domains/geracaoDigitalContracts/contractHandlers.js";
+import {
+  formatCnpj,
+  formatTelefone,
+  formatBrl,
+  prepareContractDados,
+} from "../domains/geracaoDigitalContracts/contractMerge.js";
 
 const TENANT_A = "a1b2c3d4-e5f6-4a7b-8c9d-0123456789ab";
 const TENANT_B = "b2c3d4e5-f6a7-4b8c-9d0e-123456789abc";
@@ -188,6 +197,44 @@ E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias
       expect(formatFieldLabel("area_m2")).toBe("Area M2");
       expect(formatFieldLabel("cro_responsavel")).toBe("Cro Responsavel");
     });
+
+    it("formatCnpj aplica máscara oficial de CNPJ 00.000.000/0000-00", () => {
+      expect(formatCnpj("65569191000152")).toBe("65.569.191/0001-52");
+      expect(formatCnpj("29447330000101")).toBe("29.447.330/0001-01");
+      expect(formatCnpj("65.569.191/0001-52")).toBe("65.569.191/0001-52");
+    });
+
+    it("formatTelefone aplica máscara brasileira (00) 00000-0000 e remove DDI 55", () => {
+      expect(formatTelefone("5534997719779")).toBe("(34) 99771-9779");
+      expect(formatTelefone("5534999259499")).toBe("(34) 99925-9499");
+      expect(formatTelefone("3432321234")).toBe("(34) 3232-1234");
+    });
+
+    it("formatBrl formata valores monetários no padrão brasileiro BRL", () => {
+      expect(formatBrl(2500)).toBe("R$ 2.500,00");
+      expect(formatBrl("16800.00")).toBe("R$ 16.800,00");
+      expect(formatBrl("R$ 2.500,00")).toBe("R$ 2.500,00");
+    });
+
+    it("prepareContractDados normaliza e aplica máscaras em todos os campos", () => {
+      const prepared = prepareContractDados({
+        cnpj: "65569191000152",
+        telefone: "5534997719779",
+        valor_total: 2500,
+        condicao_permuta: 13440,
+        endereco: {
+          logradouro: "Av. Nicomedes Alves dos Santos",
+          numero: "3600",
+          cidade: "Uberlândia",
+          uf: "MG",
+        },
+      });
+      expect(prepared.cnpj).toBe("65.569.191/0001-52");
+      expect(prepared.telefone).toBe("(34) 99771-9779");
+      expect(prepared.valor_total).toBe("R$ 2.500,00");
+      expect(prepared.condicao_permuta).toBe("R$ 13.440,00");
+      expect(prepared.endereco).toBe("Av. Nicomedes Alves dos Santos, 3600, Uberlândia – MG");
+    });
   });
 
   describe("4. CRUD de Templates no Backend com Multi-Tenant Isolation", () => {
@@ -275,6 +322,154 @@ E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias
             return { rows: [{ id: item.id }] };
           }
 
+          // 6. Contratos e dados para generateContractPdf / buildContractPdfBuffer
+          if (text.includes("FROM gd_contracts")) {
+            return {
+              rows: [
+                {
+                  id: "ct-100",
+                  tenant_id: TENANT_A,
+                  dados: {
+                    razao_social: "CONTAINER SOLUTION",
+                    cnpj: "29447330000101",
+                    representante_nome: "Lucas Gonçalves Fernandes",
+                    endereco: "Av. Nicomedes Alves dos Santos, 3600, Uberlândia – MG",
+                    telefone: "5534999259499",
+                    email: "lucasfernandes9827@gmail.com",
+                    valor_total: 16800,
+                    cronograma_pagamento: "R$ 3.360,00",
+                    condicao_permuta: "R$ 13.440,00",
+                    prazo_meses: "12",
+                  },
+                },
+              ],
+            };
+          }
+          if (text.includes("FROM tenant_modules")) {
+            return {
+              rows: [
+                {
+                  config: {
+                    contratada: {
+                      razao_social: "AGÊNCIA GERAÇÃO DIGITAL LTDA",
+                      cnpj: "66722723000102",
+                      representante: "Caio Vinícius Almeida de Oliveira",
+                      endereco: "Av. Paraná, 65, Tibery, Uberlândia – MG, CEP 38405-022",
+                      telefone: "34997719779",
+                      email: "comercial@mktgeracaodigital.com.br",
+                      comarca: "Uberlândia – MG",
+                      assinatura: "Caio Vinícius Almeida de Oliveira",
+                    },
+                  },
+                },
+              ],
+            };
+          }
+          if (text.includes("FROM gd_contract_templates") && (text.includes("00000000-0000-0000-0000-000000000000") || text.includes("ORDER BY"))) {
+            return {
+              rows: [
+                {
+                  id: "tpl-modular-pdf",
+                  tenant_id: "00000000-0000-0000-0000-000000000000",
+                  nome: "Contrato Oficial de Parceria - Marketing Digital & Automação",
+                  conteudo: `CONTRATO DE PRESTAÇÃO DE SERVIÇOS
+MARKETING DIGITAL & AUTOMAÇÃO
+
+CLÁUSULA PRIMEIRA | DAS PARTES
+
+CONTRATADA
+{{contratada_razao_social}}
+CNPJ: {{contratada_cnpj}}
+Representante: {{contratada_representante}}
+Endereço: {{contratada_endereco}}
+Telefone: {{contratada_telefone}}
+E-mail: {{contratada_email}}
+
+CONTRATANTE
+{{razao_social}}
+CNPJ: {{cnpj}}
+Responsável: {{representante_nome}}
+Endereço: {{endereco}}
+Telefone: {{telefone}}
+E-mail: {{email}}
+
+Por este instrumento particular, as partes acima qualificadas, doravante designadas simplesmente CONTRATADA e CONTRATANTE, celebram o presente Contrato de Prestação de Serviços, que será regido pelas cláusulas e condições a seguir expostas.
+
+CLÁUSULA SEGUNDA | DOS OBJETOS
+
+Constitui objeto do presente contrato a prestação de serviços de marketing, automação de sistemas, inteligência artificial, consultoria comercial e marketing.
+
+CLÁUSULA TERCEIRA | DAS OBRIGAÇÕES DAS PARTES
+
+Compete à CONTRATANTE:
+1. Responder ao Briefing (documento com dados e especificações do material requerido pela cliente, assim como dúvidas surgidas pela equipe na confecção dos mesmos);
+2. Dar a devida cadência e atendimento ao cliente final;
+3. Repassar informações para campanhas;
+4. Comparecer aos dias de gravações previamente autorizados e combinados com a equipe;
+5. Fazer pagamento na data agendada.
+
+Compete à CONTRATADA:
+1. Efetuar treinamento para utilização do sistema Vexo;
+2. Prestar consultoria para validar o projeto de marketing e afins;
+3. Criar as campanhas de disparo para WhatsApp;
+4. Acompanhar resultados mensais do cliente;
+5. Organizar o banco de dados de acordo com o repasse do cliente;
+6. Estruturar conjuntamente a área comercial da CONTRATANTE.
+
+CLÁUSULA QUARTA | DO PREÇO E CONDIÇÕES
+
+O valor do contrato corresponde à soma total das mensalidades pelo período acordado:
+
+Compromisso do Período:
+{{valor_total}}
+
+COMPOSIÇÃO DO PERÍODO
+
+Em reais (conforme condições de pagamento):
+{{cronograma_pagamento}}
+
+Em permuta:
+{{condicao_permuta}}
+
+CLÁUSULA QUINTA | DO PRAZO
+
+O presente instrumento é firmado pelo prazo de {{prazo_meses}} meses, contados a partir da data de sua assinatura.
+
+CLÁUSULA SEXTA | DO FORO
+
+As partes, em comum acordo, elegem o foro da Comarca de {{contratada_comarca}} para dirimir quaisquer questões ou dúvidas oriundas do presente contrato.
+
+E, por estarem assim justas e contratadas, firmam o presente contrato em 02 (duas) vias, para um só efeito.
+
+{{contratada_comarca}}, {{data_extenso}}.
+
+____________________________________________________
+CONTRATADA
+{{contratada_razao_social}}
+{{contratada_representante}}
+
+____________________________________________________
+CONTRATANTE
+{{razao_social}}
+{{representante_nome}}
+
+Testemunha 1
+Nome: _____________________________________________
+CPF: ______________________________________________
+
+Testemunha 2
+Nome: _____________________________________________
+CPF: ______________________________________________`,
+                  clausulas: [],
+                  ativo: true,
+                },
+              ],
+            };
+          }
+          if (text.startsWith("UPDATE gd_contracts")) {
+            return { rows: [] };
+          }
+
           return { rows: [] };
         }),
       };
@@ -283,9 +478,17 @@ E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias
     });
 
     function makeMockRes() {
+      const headers = {};
       const res = {
         statusCode: 200,
         body: null,
+        // sendError aplica CORS antes de responder e lê/grava cabeçalho: o dublê precisa ter os dois.
+        getHeader(k) {
+          return headers[String(k).toLowerCase()];
+        },
+        setHeader(k, v) {
+          headers[String(k).toLowerCase()] = v;
+        },
         status(code) {
           this.statusCode = code;
           return this;
@@ -377,6 +580,151 @@ E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias
       await deleteContractTemplate(reqLegitimo, resLegitimo);
       expect(resLegitimo.statusCode).toBe(200);
       expect(tplA.ativo).toBe(false);
+    });
+
+    it("generateContractPdf: devolve 200 com buffer de PDF válido sem ReferenceError de parseTemplateContentToClauses", async () => {
+      const headers = {};
+      const res = {
+        statusCode: 200,
+        sentData: null,
+        headersSent: false,
+        getHeader(k) {
+          return headers[String(k).toLowerCase()];
+        },
+        setHeader(k, v) {
+          headers[k.toLowerCase()] = v;
+        },
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+        send(data) {
+          this.sentData = data;
+          this.headersSent = true;
+          return this;
+        },
+        json(data) {
+          this.sentData = data;
+          this.headersSent = true;
+          return this;
+        },
+      };
+
+      const req = {
+        // Com Authorization a rota resolve o tenant pelo login; sem ele cai no acesso por link (outro caminho).
+        headers: { authorization: "Bearer teste" },
+        params: { id: "ct-100" },
+        query: { client_id: TENANT_A },
+        authAccess: { role: "internal", isAdmin: true, clientId: TENANT_A, clientIds: [TENANT_A] },
+      };
+
+      await generateContractPdf(req, res);
+      expect(res.statusCode).toBe(200);
+      expect(headers["content-type"]).toBe("application/pdf");
+      expect(headers["content-disposition"]).toBe('inline; filename="contrato-ct-100.pdf"');
+      expect(Buffer.isBuffer(res.sentData)).toBe(true);
+      expect(res.sentData.slice(0, 4).toString()).toBe("%PDF");
+      expect(res.sentData.length).toBeGreaterThan(100);
+      expect(res.sentData.pageCount).toBe(2);
+    });
+
+    it("buildContractPdfBuffer: gera buffer de PDF com exatamente 2 páginas (pdfData.pageCount === 2) e dados formatados", async () => {
+      const { pdfData, dados } = await buildContractPdfBuffer(TENANT_A, "ct-100");
+      expect(Buffer.isBuffer(pdfData)).toBe(true);
+      expect(pdfData.slice(0, 4).toString()).toBe("%PDF");
+      expect(pdfData.pageCount).toBe(2);
+      expect(dados.cnpj).toBe("29.447.330/0001-01");
+      expect(dados.telefone).toBe("(34) 99925-9499");
+      expect(dados.valor_total).toBe("R$ 16.800,00");
+    });
+
+    it("renderContractPdf: formata máscaras de CNPJ/telefone, moeda BRL e garante rigorosamente 2 páginas", async () => {
+      const rawTemplate = `CONTRATO DE PRESTAÇÃO DE SERVIÇOS
+MARKETING DIGITAL & AUTOMAÇÃO
+
+CLÁUSULA PRIMEIRA | DAS PARTES
+CONTRATADA
+AGÊNCIA GERAÇÃO DIGITAL LTDA
+CNPJ: 66722723000102
+Representante: Caio Vinícius Almeida de Oliveira
+Endereço: Av. Paraná, 65, Tibery, Uberlândia – MG, CEP 38405-022
+Telefone: 34997719779
+E-mail: comercial@mktgeracaodigital.com.br
+
+CONTRATANTE
+{{razao_social}}
+CNPJ: {{cnpj}}
+Responsável: {{representante_nome}}
+Endereço: {{endereco}}
+Telefone: {{telefone}}
+E-mail: {{email}}
+
+Por este instrumento particular, as partes acima qualificadas celebram o presente contrato.
+
+CLÁUSULA SEGUNDA | DOS OBJETOS
+Prestação de serviços de marketing digital e automação.
+
+CLÁUSULA TERCEIRA | DAS OBRIGAÇÕES DAS PARTES
+Compete à CONTRATANTE:
+1. Responder ao Briefing;
+2. Fazer pagamento na data agendada.
+Compete à CONTRATADA:
+1. Efetuar treinamento para utilização do sistema Vexo;
+2. Prestar consultoria para validar o projeto.
+
+CLÁUSULA QUARTA | DO PREÇO E CONDIÇÕES
+O valor do contrato corresponde à soma total das mensalidades:
+Compromisso do Período:
+{{valor_total}}
+COMPOSIÇÃO DO PERÍODO
+Em reais (dividido em até 12x no cartão de crédito):
+{{cronograma_pagamento}}
+Em permuta:
+{{condicao_permuta}}
+
+CLÁUSULA QUINTA | DO PRAZO
+Prazo de {{prazo_meses}} meses.
+
+CLÁUSULA SEXTA | DO FORO
+Foro de Uberlândia – MG.
+
+E, por estarem assim justas e contratadas, firmam o presente contrato em 02 vias.
+
+Uberlândia – MG, 16 de outubro de 2026.
+
+____________________________________________________
+CONTRATADA
+AGÊNCIA GERAÇÃO DIGITAL LTDA
+Caio Vinícius Almeida de Oliveira
+
+____________________________________________________
+CONTRATANTE
+{{razao_social}}
+{{representante_nome}}
+
+Testemunha 1
+Nome: _____________________________________________
+CPF: ______________________________________________
+
+Testemunha 2
+Nome: _____________________________________________
+CPF: ______________________________________________`;
+
+      const pdfData = await renderContractPdf(rawTemplate, {
+        razao_social: "Padaria Modelo LTDA",
+        cnpj: "65569191000152",
+        telefone: "5534999259499",
+        representante_nome: "Maria Silva",
+        endereco: "Rua Goiás, 50, Uberlândia – MG",
+        email: "maria@padaria.com",
+        valor_total: 2500,
+        cronograma_pagamento: 2500,
+        condicao_permuta: "Não aplicável",
+        prazo_meses: "12",
+      });
+
+      expect(Buffer.isBuffer(pdfData)).toBe(true);
+      expect(pdfData.pageCount).toBe(2);
     });
   });
 });

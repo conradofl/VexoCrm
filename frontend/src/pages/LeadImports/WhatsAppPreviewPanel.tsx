@@ -2,6 +2,7 @@ import { AlertTriangle, ExternalLink, ImagePlus, Link2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CampaignSequenceStep } from "@/hooks/useCampanhas";
 import type { StepActionButton } from "@/lib/leadImports/spreadsheet";
+import { renderPreviewNames } from "@/lib/leadImports/messageVariables";
 
 type SequenceStep = CampaignSequenceStep & { buttons?: StepActionButton[] };
 
@@ -85,16 +86,14 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
                   <div className="space-y-2">
                     {group.steps.map((step, sIdx) => {
                       const sampleText = step.text || "(Escreva a mensagem no formulário...)";
-                      const resolvedText = sampleText
-                        .replace(/\{\{\s*nome\s*\}\}/gi, "Maria Silva")
+                      const resolvedText = renderPreviewNames(sampleText)
                         .replace(/\{\{\s*telefone\s*\}\}/gi, "5511999999999")
                         .replace(/\{\{\s*scheduling_link\s*\}\}/gi, multiAgendaEnabled ? "https://calendly.com/consultor" : "(Link da Agenda)");
 
                       const isLink = step.type === "link";
                       const rawLink = step.linkUrl || "";
                       const defaultSchedLink = multiAgendaEnabled ? "https://calendly.com/consultor" : "https://suaempresa.com.br/apresentacao";
-                      let resolvedLink = rawLink
-                        .replace(/\{\{\s*nome\s*\}\}/gi, "Maria Silva")
+                      let resolvedLink = renderPreviewNames(rawLink)
                         .replace(/\{\{\s*telefone\s*\}\}/gi, "5511999999999")
                         .replace(/https?:\/\/\s*\{\{\s*scheduling_link\s*\}\}/gi, defaultSchedLink)
                         .replace(/\{\{\s*scheduling_link\s*\}\}/gi, defaultSchedLink);

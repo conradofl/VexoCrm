@@ -2,18 +2,17 @@ import React from "react";
 import {
   ExternalLink,
   FolderOpen,
-  Hash,
   Eye,
   CheckCircle2,
   Clock,
   AlertCircle,
   PauseCircle,
   Sparkles,
-  Megaphone,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { textoDoPrazo, type GdPrazo } from "@/lib/gdClientes";
 
 export interface PortfolioClient {
   id: string;
@@ -25,15 +24,25 @@ export interface PortfolioClient {
   contactWhatsapp: string;
   contactEmail?: string;
   products: string[];
-  stage: "onboarding" | "identidade_visual" | "producao_ativa" | "aguardando_aprovacao" | "pausado";
+  stage: "onboarding" | "identidade_visual" | "producao_ativa" | "aguardando_aprovacao" | "pausado" | string;
+  rotulo_interno?: string | null;
+  fase?: string | null;
+  prazo?: GdPrazo | null;
   weeklyPostsDelivered: number;
   weeklyPostsTarget: number;
   trafficStatus: "ativo" | "setup" | "pausado";
   monthlyBudget: string;
   trelloActiveCards: number;
   trelloOverdueCards: number;
-  driveFolderUrl?: string;
+  driveFolderUrl?: string | null;
   slackChannel?: string;
+}
+
+function isValidDriveUrl(url?: string | null): boolean {
+  if (!url || typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === "null" || trimmed === "undefined") return false;
+  return trimmed.startsWith("http://") || trimmed.startsWith("https://");
 }
 
 interface PortfolioTableProps {
@@ -125,7 +134,7 @@ export function PortfolioTable({ clients, onSelectClient }: PortfolioTableProps)
               <th className="py-3.5 px-4">Fase da Esteira</th>
               <th className="py-3.5 px-4">Posts da Semana</th>
               <th className="py-3.5 px-4">Tráfego & Mídia</th>
-              <th className="py-3.5 px-4">Demandas Trello</th>
+              <th className="py-3.5 px-4">Etapa Atual & Prazo</th>
               <th className="py-3.5 px-4 text-right">Ações Rápidas</th>
             </tr>
           </thead>
@@ -219,17 +228,37 @@ export function PortfolioTable({ clients, onSelectClient }: PortfolioTableProps)
                     {getTrafficBadge(client.trafficStatus, client.monthlyBudget)}
                   </td>
 
-                  {/* Demandas Trello */}
+                  {/* Etapa Atual & Prazo */}
                   <td className="py-4 px-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 text-[11px] font-mono">
-                        {client.trelloActiveCards} ativas
-                      </Badge>
-                      {client.trelloOverdueCards > 0 && (
-                        <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[11px] font-bold">
-                          {client.trelloOverdueCards} atrasadas
-                        </Badge>
-                      )}
+                    <div className="space-y-1 max-w-[200px]">
+                      <p
+                        className="font-semibold text-slate-800 dark:text-slate-200 truncate text-[11px]"
+                        title={client.rotulo_interno || client.stage}
+                      >
+                        {client.rotulo_interno || client.stage}
+                      </p>
+                      {(() => {
+                        const prazoInfo = textoDoPrazo(client.prazo || null);
+                        if (prazoInfo.atrasado) {
+                          return (
+                            <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[10px] font-bold">
+                              Atrasado ({prazoInfo.texto})
+                            </Badge>
+                          );
+                        }
+                        if (client.prazo && prazoInfo.texto !== "—" && prazoInfo.texto !== "sem prazo") {
+                          return (
+                            <Badge className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 text-[10px]">
+                              {prazoInfo.texto}
+                            </Badge>
+                          );
+                        }
+                        return (
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                            {prazoInfo.texto === "—" ? "Sem prazo" : prazoInfo.texto}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </td>
 
@@ -247,27 +276,15 @@ export function PortfolioTable({ clients, onSelectClient }: PortfolioTableProps)
                         <Eye className="w-4 h-4" />
                       </Button>
 
-                      {client.driveFolderUrl && (
+                      {isValidDriveUrl(client.driveFolderUrl) && (
                         <a
-                          href={client.driveFolderUrl}
+                          href={client.driveFolderUrl!}
                           target="_blank"
                           rel="noreferrer"
                           className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
                           title="Abrir Pasta no Google Drive"
                         >
                           <FolderOpen className="w-4 h-4" />
-                        </a>
-                      )}
-
-                      {client.slackChannel && (
-                        <a
-                          href={`https://geracaodigital.slack.com/messages/${client.slackChannel}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
-                          title={`Canal Slack #${client.slackChannel}`}
-                        >
-                          <Hash className="w-4 h-4" />
                         </a>
                       )}
 

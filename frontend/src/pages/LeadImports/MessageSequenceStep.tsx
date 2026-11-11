@@ -77,6 +77,9 @@ function getStepChromaticStyle(order: number, type: "text" | "image" | "link") {
   };
 }
 
+const VARIAVEIS_DO_LINK = ["{{nome}}", "{{primeiro_nome}}", "{{telefone}}"];
+const VARIAVEIS_DA_MENSAGEM = [...VARIAVEIS_DO_LINK, "{{scheduling_link}}"];
+
 interface MessageSequenceStepProps {
   sequenceImageInputRef: RefObject<HTMLInputElement>;
   onSequenceImageChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -120,17 +123,22 @@ export function MessageSequenceStep({
   onRemoveStepButton,
   onUpdateStepButton,
 }: MessageSequenceStepProps) {
-  // Insere o emoji na POSICAO DO CURSOR, nao no fim: escrever no meio do texto e o
-  // uso normal, e concatenar quebraria a frase. Sem cursor (campo nunca focado),
-  // cai para o fim. So texto entra, entao {{nome}} e a contagem de caracteres do
-  // proprio campo seguem valendo.
+  // Insere emoji e variavel na POSICAO DO CURSOR, nao no fim: escrever no meio do texto
+  // e o uso normal, e concatenar quebraria a frase. Campo que nunca recebeu foco cai para
+  // o fim: o selectionStart dele existe, mas nao foi o usuario quem escolheu. So texto
+  // entra, entao {{nome}} e a contagem de caracteres do proprio campo seguem valendo.
   const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+  const camposFocados = useRef(new Set<string>());
+
+  function selecaoDoCampo(stepId: string, base: string) {
+    const campo = textareaRefs.current[stepId];
+    if (!campo || !camposFocados.current.has(stepId)) return { inicio: base.length, fim: base.length };
+    return { inicio: campo.selectionStart, fim: campo.selectionEnd };
+  }
 
   function inserirNoCursor(stepId: string, textoAtual: string, trecho: string) {
-    const campo = textareaRefs.current[stepId];
     const base = textoAtual || "";
-    const inicio = campo?.selectionStart ?? base.length;
-    const fim = campo?.selectionEnd ?? base.length;
+    const { inicio, fim } = selecaoDoCampo(stepId, base);
     const novoTexto = base.slice(0, inicio) + trecho + base.slice(fim);
     updateCampaignStep(stepId, { text: novoTexto });
     // Reposiciona o cursor depois do que foi inserido, para continuar digitando.
@@ -141,6 +149,15 @@ export function MessageSequenceStep({
       alvo.focus();
       alvo.setSelectionRange(posicao, posicao);
     });
+  }
+
+  // A variavel nao gruda na palavra vizinha: separa com espaco so onde faltar.
+  function inserirVariavel(stepId: string, textoAtual: string, variavel: string) {
+    const base = textoAtual || "";
+    const { inicio, fim } = selecaoDoCampo(stepId, base);
+    const antes = inicio > 0 && !/[\s(]/.test(base[inicio - 1]) ? " " : "";
+    const depois = /[\p{L}\p{N}]/u.test(base[fim] ?? "") ? " " : "";
+    inserirNoCursor(stepId, base, `${antes}${variavel}${depois}`);
   }
 
   const repeticoesPorDia = variantCount > 0 ? Math.ceil(dailyQuota / variantCount) : dailyQuota;
@@ -256,12 +273,14 @@ export function MessageSequenceStep({
                       className="min-h-[72px] text-xs font-sans bg-white dark:bg-slate-900"
                       value={step.text}
                       onChange={(e) => updateCampaignStep(step.id, { text: e.target.value })}
+                      onFocus={() => camposFocados.current.add(step.id)}
                     />
                     <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                       <EmojiPicker onSelect={(emoji) => inserirNoCursor(step.id, step.text, emoji)} />
                       <span>Variáveis:</span>
-                      <button type="button" onClick={() => updateCampaignStep(step.id, { text: (step.text || "") + " {{nome}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{nome}}"}</button>
-                      <button type="button" onClick={() => updateCampaignStep(step.id, { text: (step.text || "") + " {{telefone}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{telefone}}"}</button>
+                      {VARIAVEIS_DO_LINK.map((variavel) => (
+                        <button key={variavel} type="button" onClick={() => inserirVariavel(step.id, step.text, variavel)} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{variavel}</button>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -274,15 +293,16 @@ export function MessageSequenceStep({
                     className="min-h-[96px] text-xs font-sans"
                     value={step.text}
                     onChange={(e) => updateCampaignStep(step.id, { text: e.target.value })}
+                    onFocus={() => camposFocados.current.add(step.id)}
                   />
 
                   {/* Variables helper */}
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                     <EmojiPicker onSelect={(emoji) => inserirNoCursor(step.id, step.text, emoji)} />
                     <span>Variáveis:</span>
-                    <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{nome}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{nome}}"}</button>
-                    <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{telefone}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{telefone}}"}</button>
-                    <button type="button" onClick={() => updateCampaignStep(step.id, { text: step.text + " {{scheduling_link}}" })} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{"{{scheduling_link}}"}</button>
+                    {VARIAVEIS_DA_MENSAGEM.map((variavel) => (
+                      <button key={variavel} type="button" onClick={() => inserirVariavel(step.id, step.text, variavel)} className="rounded-full bg-slate-100 hover:bg-slate-200 px-2 py-0.5 dark:bg-slate-800 dark:hover:bg-slate-700">{variavel}</button>
+                    ))}
                   </div>
                 </div>
               )}

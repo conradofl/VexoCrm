@@ -41,13 +41,8 @@ import { registerFollowupReply } from "../../services/followupReplyHook.js";
 import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
 import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceService.js";
 
-const SQL_NUMBER_CHANGE_MATCH = (col) => `(
-  ${col} ~* 'estamos\\s+desativando\\s+esse\\s+n[úu]mero|chama\\s+meu\\s+vendedor|nos\\s+chame\\s+no\\s+(contato|n[úu]mero|link)|novo\\s+n[úu]mero|troca\\s+de\\s+n[úu]mero'
-)`;
-
-const SQL_AUTOMATION_MATCH = (col) => `(
-  ${col} ~* 'digite\\s+(apenas\\s+)?(o\\s+)?(n[úu]mero|\\d)|(escolha|selecione|escreva)\\s+(uma\\s+)?(das\\s+)?opç[õo]|escolha\\s+(um\\s+)?(dos\\s+)?n[úu]meros?|opç[ãa]o\\s+(desejada|inv[áa]lida)|\\bmenu\\b|atendimento\\s+autom[áa]tico|protocolo\\s+de\\s+atendimento|resposta\\s+autom[áa]tica|\\[mensagem\\s+autom[áa]tica\\]|((esse\\s+|o\\s+)?(atendimento|chamado|contato)\\s+(est[áa]\\s+)?(sendo\\s+)?transferid[oa]\\s+para|(vou\\s+te\\s+transferir|transferindo|transferid[oa])\\s+para\\s+(um\\s+|o\\s+|a\\s+|noss[oa]\\s+)?(atendente|consultor[a]?|especialista|setor|departamento|escrit[óo]rio|equipe|humano|suporte|operador[a]?))|n[ãa]o\\s+(consegui\\s+identificar|entendi)\\s+(a\\s+)?(sua\\s+)?resposta|agradece(mos)?\\s+(o\\s+)?seu\\s+contato|agradecemos\\s+a\\s+prefer[êe]ncia|bem[- ]vindo\\(a\\)|hor[áa]rios?\\s+de\\s+atendimento|nosso\\s+(showroom|card[áa]pio|cat[áa]logo|site)|finalizarei\\s+nossa\\s+intera[çc][ãa]o|vou\\s+encerrar\\s+esse\\s+atendimento|atendimento\\s+foi\\s+finalizado|responder\\s+a\\s+nossa\\s+pesquisa'
-)`;
+import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH } from "../../services/inboxSqlMatchers.js";
+import { fetchWorkStateCounts, fetchWorkStatePage, isWorkStateTab, resolveRobotChips } from "../../services/inboxWorkState.js";
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
@@ -68,7 +63,7 @@ import {
   trackInvalidResponse,
 } from "../../hardcoded-chatbot-persistence.js";
 import { parseStoredHistorico } from "../../leads-outlier-schema.js";
-import { resolveInboundAgentConfig, buildSpinInstruction, fireInboundCompletionWebhook } from "../../services/inboundAgent.js";
+import { resolveInboundAgentConfig, buildSpinInstruction, fireInboundCompletionWebhook, isPersonalInstance } from "../../services/inboundAgent.js";
 import {
   shouldIgnoreInboundEvent,
   resolveInboundEventName,
@@ -644,18 +639,49 @@ export function registerChatbotRoutes(app, deps) {
 
       // Pausa manual vencida não aparece como pausada em lugar nenhum da tela: mesma
       // fonte do prazo e mesma expressão do portão (agentMuteGuard), inclusive no erro.
-      const pauseExpiryDays = resolveAgentPauseExpiryDays(
-        await getLeadClientN8nSettings(clientId).catch(() => null)
-      );
+      const inboxTenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
+      const pauseExpiryDays = resolveAgentPauseExpiryDays(inboxTenantSettings);
       const pauseExpiredSql = agentPauseExpiredSql(pauseExpiryDays, "cs");
+
+      // Em quais chips o robô responde, pela mesma regra do portão do webhook. Falha de
+      // leitura = nenhum chip: na dúvida a conversa fica com a pessoa, nunca "com o robô".
+      let robotInfo = { robotChips: [], byChip: {} };
+      try {
+        const [agentsRes, chipRows] = await Promise.all([
+          pgDatabasePool.query(
+            `SELECT name, evolution_instance, evolution_instances, inbound_enabled, agent_kind, archived_at
+               FROM public.followup_companies
+              WHERE tenant_id = $1 AND archived_at IS NULL`,
+            [clientId]
+          ),
+          getLeadClientEvolutionInstances(clientId),
+        ]);
+        robotInfo = resolveRobotChips({
+          settings: inboxTenantSettings,
+          agents: agentsRes?.rows || [],
+          instances: chipRows || [],
+        });
+      } catch (robotErr) {
+        console.warn("[whatsapp/chats] não foi possível resolver os chips do robô:", robotErr?.message || robotErr);
+      }
+      const workStateOptions = {
+        clientId,
+        now: new Date(),
+        robotChips: robotInfo.robotChips,
+        chipAliases: instanceAliases,
+        pauseExpiredSql,
+      };
+      const runInboxQuery = (sql, params) => pgDatabasePool.query(sql, params);
 
       const queryParams = [clientId];
 
+      // Escopo de chip: só mensagens daquele chip. Mensagem sem chip gravado não entra em
+      // chip nenhum (antes entrava em todos, e o filtro mostrava conversa que não era dele).
       let instanceFilter = "";
       if (instanceAliases && instanceAliases.length > 0) {
         queryParams.push(instanceAliases);
         const idx = queryParams.length;
-        instanceFilter = `AND (instance_name = ANY(\$${idx}) OR instance_name IS NULL)`;
+        instanceFilter = `AND instance_name = ANY(\$${idx})`;
       }
 
       let tabCondition = "";
@@ -726,6 +752,9 @@ export function registerChatbotRoutes(app, deps) {
         }
       }
 
+      // Abas novas (estados de trabalho). Com busca digitada a rota continua buscando em tudo.
+      const useWorkState = !search && isWorkStateTab(rawTab);
+
       let total = 0;
       let items = [];
       let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0, myUnopened: 0 };
@@ -734,7 +763,7 @@ export function registerChatbotRoutes(app, deps) {
       try {
         // 1. Apura contadores gerais para as abas
         const opIdentifiersForCount = operatorIdentifiers.length > 0 ? operatorIdentifiers : ["__NONE__"];
-        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND (instance_name = ANY($2) OR instance_name IS NULL)" : "";
+        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND instance_name = ANY($2)" : "";
         const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
         countsParams.push(opIdentifiersForCount);
         const opParamIdx = countsParams.length;
@@ -811,6 +840,11 @@ export function registerChatbotRoutes(app, deps) {
           };
         }
 
+        // 1b. Estados de trabalho (Esperam você / Com o lead / Robô cuida / Esfriaram).
+        // O contador e a lista de cada estado saem da MESMA consulta (inboxWorkState.js).
+        lastQueryInfo = { step: "workStateCounts (estados de trabalho)", sql: null, params: [clientId] };
+        counts.work = await fetchWorkStateCounts(runInboxQuery, workStateOptions);
+
         // 2. Count total para a listagem atual
         const countQueryText = `
           WITH pre_canonical AS (
@@ -847,9 +881,11 @@ export function registerChatbotRoutes(app, deps) {
           ${searchFilter}
         `;
 
-        lastQueryInfo = { step: "countQuery (total da aba atual)", sql: countQueryText, params: queryParams };
-        const countRes = await pgDatabasePool.query(countQueryText, queryParams);
-        total = countRes.rows[0]?.total || 0;
+        if (!useWorkState) {
+          lastQueryInfo = { step: "countQuery (total da aba atual)", sql: countQueryText, params: queryParams };
+          const countRes = await pgDatabasePool.query(countQueryText, queryParams);
+          total = countRes.rows[0]?.total || 0;
+        }
 
         // 3. Query paginada de itens
         const queryParamsWithPaging = [...queryParams, limit, offset];
@@ -935,9 +971,7 @@ export function registerChatbotRoutes(app, deps) {
           LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
         `;
 
-        lastQueryInfo = { step: "queryText (itens paginados)", sql: queryText, params: queryParamsWithPaging };
-        const result = await pgDatabasePool.query(queryText, queryParamsWithPaging);
-        items = result.rows.map((row) => {
+        const mapChatRow = (row) => {
           const timestampVal = row.effective_timestamp ? Math.floor(new Date(row.effective_timestamp).getTime() / 1000) : null;
           const hasLead = Boolean(row.lead_name || row.lead_origin || row.source_campaign_id);
           const classified = classifyConversation(row.message_text, { hasLeadInCrm: hasLead, hasHumanReply: false });
@@ -977,8 +1011,23 @@ export function registerChatbotRoutes(app, deps) {
             },
             leadOrigin: row.lead_origin || null,
             sourceCampaignId: row.source_campaign_id || null,
+            workState: row.work_state || null,
+            waitingSince: row.last_in_at ? new Date(row.last_in_at).toISOString() : null,
+            leadNeverSpoke: row.lead_never_spoke === true,
           };
-        });
+        };
+
+        if (useWorkState) {
+          // Total = o contador do próprio estado, vindo da mesma consulta da lista.
+          total = counts.work?.[rawTab] || 0;
+          lastQueryInfo = { step: "workStatePage (itens do estado de trabalho)", sql: null, params: [clientId, rawTab, limit, offset] };
+          const rows = await fetchWorkStatePage(runInboxQuery, { ...workStateOptions, state: rawTab, limit, offset, leadsTable });
+          items = rows.map(mapChatRow);
+        } else {
+          lastQueryInfo = { step: "queryText (itens paginados)", sql: queryText, params: queryParamsWithPaging };
+          const result = await pgDatabasePool.query(queryText, queryParamsWithPaging);
+          items = result.rows.map(mapChatRow);
+        }
       } catch (pgErr) {
         const safeParams = (lastQueryInfo.params || []).map((param) => {
           if (typeof param === "string" && search && param.toLowerCase().includes(search.toLowerCase())) {
@@ -1014,6 +1063,7 @@ export function registerChatbotRoutes(app, deps) {
         items,
         total: total || items.length,
         counts,
+        chipAgents: robotInfo.byChip,
         nextOffset: offset + items.length,
         hasMore: offset + items.length < (total || items.length),
       });
@@ -3127,12 +3177,32 @@ export function registerChatbotRoutes(app, deps) {
 
     try {
       campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
-      const activeWaitCampaign = campaignReplyContext.processingWaitForReplyMatches[0] || null;
+
+      const allCandidates = [
+        ...(campaignReplyContext.processingWaitForReplyMatches || []),
+        ...(campaignReplyContext.waitForReplyMatches || []),
+        ...(campaignReplyContext.matches || []),
+        ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
+      ];
+
+      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar (não pausada)
+      let activeWaitCampaign = allCandidates.find((c) => {
+        if (!c || c.status === "pausada") return false;
+        const progress = c.leadImportItem?.progress || {};
+        const hasProgress = progress && Object.keys(progress).length > 0;
+        if (!hasProgress) return false;
+        const nextStepIndex = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
+        if (nextStepIndex === null) return false;
+        const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
+        const steps = stepPlan.enabledSteps || [];
+        return nextStepIndex < steps.length;
+      }) || (campaignReplyContext.processingWaitForReplyMatches?.[0]?.status !== "pausada" ? campaignReplyContext.processingWaitForReplyMatches?.[0] : null) || null;
+
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
 
       // Por que este lead caiu (ou nao) no fluxo de resposta.
-      const candidato = campaignReplyContext.waitForReplyMatches[0] || campaignReplyContext.matches[0] || null;
+      const candidato = activeWaitCampaign || campaignReplyContext.waitForReplyMatches?.[0] || campaignReplyContext.matches?.[0] || null;
       const progressoConsultado = candidato?.leadImportItem?.progress ?? null;
       console.log("[campaign-routing] contexto", {
         clientId,
@@ -3182,42 +3252,89 @@ export function registerChatbotRoutes(app, deps) {
             return;
           }
         }
-      } else if (activeCampaignForLead) {
-        const escolha = resolveCampaignAgent(activeCampaignForLead);
-        if (escolha.agente === AGENTE_NENHUM || escolha.bloqueado) {
-          console.log("[campaign-routing] campanha configurada como Sem IA (apenas passos) — IA bloqueada:", {
-            clientId,
-            phone: maskPhoneForLog(phone),
+      }
+
+      // Se NÃO for disparo de próximo passo de campanha (activeWaitCampaignToDispatch é null):
+      if (!activeWaitCampaignToDispatch) {
+        if (activeCampaignForLead) {
+          const escolha = resolveCampaignAgent(activeCampaignForLead);
+          if (escolha.agente === AGENTE_NENHUM || escolha.bloqueado) {
+            console.log("[campaign-routing] campanha configurada como Sem IA (apenas passos) — IA bloqueada:", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              campaignId: activeCampaignForLead.id,
+              campaignName: activeCampaignForLead.name,
+              porque: escolha.porque,
+            });
+            responder({ status: "skipped_disparo_only", motivo: "campanha_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
+            return;
+          }
+          if (escolha.agente === "atendimento") {
+            const chipInboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
+            const chipHasExplicitAgent = Boolean(chipInboundConfig && chipInboundConfig.enabled && chipInboundConfig.agentKind !== "campanha");
+            if (!chipHasExplicitAgent) {
+              console.log("[campaign-routing] campanha sem roteiro próprio e chip sem agente inbound próprio — skipped_disparo_only:", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+                instanceName,
+                campaignId: activeCampaignForLead.id,
+              });
+              responder({ status: "skipped_disparo_only", motivo: "lead_campanha_sem_agente_inbound" }, { clientId, phone: maskPhoneForLog(phone) });
+              return;
+            }
+          }
+          campaignPromptIdOverride = escolha.campaignPromptId;
+          chatbotPromptTypeOverride = escolha.agente === AGENTE_CAMPANHA && escolha.campaignPromptId ? "campanha" : "padrao";
+          if (escolha.configuracaoIncompleta) {
+            console.warn("[campaign-routing] campanha marcada como agente SEM roteiro — caindo no atendimento padrão", {
+              clientId, campaignId: activeCampaignForLead.id,
+            });
+          }
+          console.log("[campaign-routing] agente escolhido", {
+            clientId, phone: maskPhoneForLog(phone),
+            agente: escolha.agente,
+            porque: escolha.porque,
             campaignId: activeCampaignForLead.id,
             campaignName: activeCampaignForLead.name,
-            porque: escolha.porque,
+            campaignPromptId: escolha.campaignPromptId,
+            mode: activeCampaignForLead.mode || null,
+            endsAt: activeCampaignForLead.endsAt,
           });
-          responder({ status: "skipped_disparo_only", motivo: "campanha_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
-          return;
-        }
-        campaignPromptIdOverride = escolha.campaignPromptId;
-        chatbotPromptTypeOverride = escolha.agente === AGENTE_CAMPANHA && escolha.campaignPromptId ? "campanha" : "padrao";
-        if (escolha.configuracaoIncompleta) {
-          console.warn("[campaign-routing] campanha marcada como agente SEM roteiro — caindo no atendimento padrão", {
-            clientId, campaignId: activeCampaignForLead.id,
+        } else {
+          // Bloqueio rigoroso: se o chip for pessoal ou se for lead de campanha sem IA explicitamente habilitada no chip,
+          // NUNCA atribuir agente: "atendimento". O fluxo deve retornar com skipped_disparo_only e encerrar.
+          const isPersonal = isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName) || isPersonalInstance(matchedChip?.name);
+          if (isPersonal) {
+            console.log("[campaign-routing] chip pessoal sem IA — skipped_disparo_only:", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              instanceName,
+            });
+            responder({ status: "skipped_disparo_only", motivo: "chip_pessoal_sem_ia" }, { clientId, phone: maskPhoneForLog(phone) });
+            return;
+          }
+
+          if (temCampanhaParaEsteTelefone) {
+            const chipInboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
+            const chipHasExplicitAgent = Boolean(chipInboundConfig && chipInboundConfig.enabled && chipInboundConfig.agentKind !== "campanha");
+            if (!chipHasExplicitAgent) {
+              console.log("[campaign-routing] lead de campanha sem campanha ativa casada e chip sem agente inbound próprio — skipped_disparo_only:", {
+                clientId,
+                phone: maskPhoneForLog(phone),
+                instanceName,
+                campanhasCasadas: campaignReplyContext?.matches?.length ?? 0,
+              });
+              responder({ status: "skipped_disparo_only", motivo: "lead_campanha_sem_agente_inbound" }, { clientId, phone: maskPhoneForLog(phone) });
+              return;
+            }
+          }
+
+          console.log("[campaign-routing] agente escolhido", {
+            clientId, phone: maskPhoneForLog(phone),
+            agente: "atendimento",
+            porque: "nenhuma campanha ativa para este telefone",
           });
         }
-        console.log("[campaign-routing] agente escolhido", {
-          clientId, phone: maskPhoneForLog(phone),
-          agente: escolha.agente,
-          porque: escolha.porque,
-          campaignId: activeCampaignForLead.id,
-          campaignName: activeCampaignForLead.name,
-          campaignPromptId: escolha.campaignPromptId,
-          mode: activeCampaignForLead.mode || null,
-          endsAt: activeCampaignForLead.endsAt,
-        });
-      } else {
-        console.log("[campaign-routing] agente escolhido", {
-          clientId, phone: maskPhoneForLog(phone),
-          agente: "atendimento",
-          porque: "nenhuma campanha ativa para este telefone",
-        });
       }
     } catch (err) {
       console.warn("[chatbot-webhook] campaign routing check failed, continuing normal flow:", err.message);
@@ -3306,6 +3423,13 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // ── CAMINHO 2: CHATBOT / AGENTE IA (INBOUND OU AGENTE DE CAMPANHA) ──
+    // Trava rígida 1: Chip pessoal NUNCA responde com IA de atendimento
+    const chipAtual = String(instanceName || rawInstanceName || matchedChip?.name || "").trim();
+    if (isPersonalInstance(chipAtual) || isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName) || isPersonalInstance(matchedChip?.name)) {
+      descartar("chip_pessoal_sem_ia", { clientId, instanceName, rawInstanceName });
+      return;
+    }
+
     // SÓ AQUI CONSULTA SE O AGENTE DE IA ESTÁ HABILITADO.
     let tenantSettingsReadFailed = false;
     const tenantSettings = await getLeadClientN8nSettings(clientId).catch((err) => {
@@ -3347,6 +3471,12 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
     } else {
+      // Se este lead veio de campanha mas o chip não tem agente próprio inbound, descarta para não herdar IA geral
+      if (temCampanhaParaEsteTelefone) {
+        descartar("inbound_disabled", { clientId, instanceName, motivo: "lead_campanha_sem_agente_inbound" });
+        return;
+      }
+
       // Chip SEM agente próprio: depende do chatbot global do tenant
       if (tenantSettings && tenantSettings.chatbot_enabled === false) {
         // Frente B: Antes de descartar, verifica se o telefone tem run de campanha aguardando resposta
@@ -3413,7 +3543,6 @@ export function registerChatbotRoutes(app, deps) {
       const chipsDoChatbot = Array.isArray(tenantSettings?.chatbot_instances)
         ? tenantSettings.chatbot_instances.map((v) => String(v ?? "").trim()).filter(Boolean)
         : [];
-      const chipAtual = String(instanceName || "").trim();
       if (chipsDoChatbot.length > 0) {
         const allTenantInstances = (await getLeadClientEvolutionInstances(clientId).catch(() => [])) || [];
         const aliasesDoChip = (await resolveInstanceNameAliases(clientId, chipAtual).catch(() => null)) || [];
@@ -3431,27 +3560,13 @@ export function registerChatbotRoutes(app, deps) {
 
         const vinculado = Array.from(nomesDoChipAtual).some((nome) => nomesMarcadosExpandidos.has(nome));
         if (!chipAtual || !vinculado) {
-          const hasAnyValidConfiguredChip = allTenantInstances.some((inst) => {
-            const urlName = inst.dispatch_webhook_url?.split("/").filter(Boolean).pop();
-            return chipsDoChatbot.some((m) => m === inst.id || m === inst.name || (urlName && m === urlName));
+          descartar("chip_nao_vinculado", {
+            clientId,
+            chipAtual: chipAtual || null,
+            aliasesDoChipAtual: Array.from(nomesDoChipAtual),
+            chipsMarcados: chipsDoChatbot,
           });
-
-          if (!hasAnyValidConfiguredChip && allTenantInstances.length > 0) {
-            console.warn("[chatbot-webhook] chips_marcados_orfaos: nenhum chip ativo do tenant casa com a lista marcada. Atendendo pelo chip ativo para evitar descarte de lead:", {
-              clientId,
-              chipAtual,
-              chipsMarcados: chipsDoChatbot,
-              instanciasAtivas: allTenantInstances.map((i) => i.name || i.id),
-            });
-          } else {
-            descartar("chip_nao_vinculado", {
-              clientId,
-              chipAtual: chipAtual || null,
-              aliasesDoChipAtual: Array.from(nomesDoChipAtual),
-              chipsMarcados: chipsDoChatbot,
-            });
-            return;
-          }
+          return;
         }
       }
     }

@@ -1,56 +1,66 @@
 import React from "react";
-import { Users, Clock, AlertTriangle, CheckCircle2, TrendingUp } from "lucide-react";
+import { Users, Clock, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 interface PortfolioStatsCardsProps {
   totalClients: number;
-  activeDemands: number;
-  overdueDemands: number;
-  slaPercent: number;
+  activeClients?: number;
+  setupClients?: number;
+  attentionClients?: number;
+  // Aliases retrocompatíveis
+  activeDemands?: number;
+  overdueDemands?: number;
+  slaPercent?: number;
 }
 
 export function PortfolioStatsCards({
   totalClients,
+  activeClients,
+  setupClients,
+  attentionClients,
   activeDemands,
   overdueDemands,
-  slaPercent,
 }: PortfolioStatsCardsProps) {
+  const regimeCount = activeClients ?? activeDemands ?? 0;
+  const setupCount = setupClients ?? 0;
+  const attentionCount = attentionClients ?? overdueDemands ?? 0;
+
   const cards = [
     {
-      label: "Clientes Ativos",
+      label: "Total de Clientes",
       value: totalClients,
-      caption: "Carteira com contratos em esteira",
+      caption: "Contas sob gestão da Geração Digital",
       icon: Users,
       iconColor: "text-purple-600 dark:text-purple-400",
       iconBg: "bg-purple-100 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/40",
     },
     {
-      label: "Demandas em Andamento",
-      value: activeDemands,
-      caption: "Tarefas ativas no Trello e produção",
+      label: "Clientes Ativos (Regime)",
+      value: regimeCount,
+      caption: "Fase de regime contínuo ativo",
+      icon: CheckCircle2,
+      iconColor: "text-emerald-600 dark:text-emerald-400",
+      iconBg: "bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/40",
+    },
+    {
+      label: "Em Implantação / Setup",
+      value: setupCount,
+      caption: "Fases de entrada e estratégia",
       icon: Clock,
       iconColor: "text-blue-600 dark:text-blue-400",
       iconBg: "bg-blue-100 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/40",
     },
     {
-      label: "Demandas Atrasadas",
-      value: overdueDemands,
-      caption: overdueDemands > 0 ? "Exigem intervenção imediata do Maestro" : "Nenhum gargalo travado hoje",
+      label: "Prazos / Atenção",
+      value: attentionCount,
+      caption: attentionCount > 0 ? "Exigem atenção operacional imediata" : "Nenhum prazo atrasado na carteira",
       icon: AlertTriangle,
-      iconColor: overdueDemands > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400",
-      iconBg: overdueDemands > 0
+      iconColor: attentionCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400",
+      iconBg: attentionCount > 0
         ? "bg-rose-100 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/40"
         : "bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/40",
-      isWarning: overdueDemands > 0,
-    },
-    {
-      label: "SLA da Semana",
-      value: `${slaPercent}%`,
-      caption: "Taxa de entregas no prazo acordado",
-      icon: CheckCircle2,
-      iconColor: "text-emerald-600 dark:text-emerald-400",
-      iconBg: "bg-emerald-100 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/40",
+      isWarning: attentionCount > 0,
     },
   ];
 
