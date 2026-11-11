@@ -53,6 +53,7 @@ import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 import { temSufixoSecreto } from "./portalSlug.js";
 import { resolveCandidateEvolutionInstances } from "../geracaoDigitalContracts/contractEvolutionResolver.js";
+import { obterTelefonesEquipeGd } from "./gdColaboradoresMemoria.js";
 
 export { GD_DONO, gerarPortalToken, hashPortalToken };
 const PERMISSAO_GD = "geracao_digital.proposals";
@@ -939,11 +940,11 @@ export function registerGdClientesRoutes(app, {
         const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
         const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
 
-        // Equipe GD (Conrado, Caio, Gabriel)
+        // Equipe GD (8 colaboradores oficiais)
         const envEquipe = process.env.GD_ONBOARDING_EQUIPE_TELEFONES;
         const equipeConfigurada = envEquipe
           ? envEquipe.split(",").map((s) => s.trim()).filter(Boolean)
-          : ["5534991751267", "5534997719779", "5534991241824"];
+          : obterTelefonesEquipeGd();
 
         const equipeParticipantes = Array.isArray(body.equipe_telefones)
           ? body.equipe_telefones
