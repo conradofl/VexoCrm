@@ -120,6 +120,46 @@ export function useDocumentVisibility(): boolean {
   return isVisible;
 }
 
+// Teto de espera da lista de conversas no navegador. Sem isso um pedido que nunca volta deixa a
+// coluna em "Carregando conversas..." para sempre. Fica acima do teto do servidor (8 s).
+export const CHATS_REQUEST_TIMEOUT_MS = 15000;
+
+export class ChatsRequestTimeoutError extends Error {
+  constructor() {
+    super("A lista de conversas demorou demais para responder.");
+    this.name = "ChatsRequestTimeoutError";
+  }
+}
+
+/**
+ * fetch com dois motivos de cancelamento: o sinal de quem chamou (a tela pediu outra coisa ou
+ * saiu) e o teto de tempo. Só o teto vira erro visível; cancelamento de quem chamou é silencioso.
+ */
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  { signal, timeoutMs = CHATS_REQUEST_TIMEOUT_MS }: { signal?: AbortSignal; timeoutMs?: number } = {}
+): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onCallerAbort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", onCallerAbort, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (timedOut) throw new ChatsRequestTimeoutError();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onCallerAbort);
+  }
+}
+
 export function useWhatsAppChats(
   clientId: string | null,
   instanceName: string | null,
@@ -138,7 +178,7 @@ export function useWhatsAppChats(
     }
   }, [enabled, tab, search]);
 
-  const fetchChatsPage = async (offset: number): Promise<WhatsAppChatsPage> => {
+  const fetchChatsPage = async (offset: number, signal?: AbortSignal): Promise<WhatsAppChatsPage> => {
     const token = await getIdToken();
     if (!token) {
       throw new Error("Usuario nao autenticado.");
@@ -162,19 +202,27 @@ export function useWhatsAppChats(
       params.append("search", search.trim());
     }
 
-    const res = await fetch(`${API_BASE_URL}/api/whatsapp/chats?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    // O sinal vem do React Query: trocar de aba, de chip ou de empresa, ou sair da tela, CANCELA
+    // o pedido anterior em vez de deixá-lo rodando atrás do novo.
+    const res = await fetchWithTimeout(
+      `${API_BASE_URL}/api/whatsapp/chats?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      { signal }
+    );
 
     return parseApiResponse<WhatsAppChatsPage>(res);
   };
 
+  // Estourou o teto: não insiste (cada tentativa são mais 15 s de "Carregando"). O próximo
+  // ciclo de 12 s tenta de novo sozinho. Outras falhas: uma nova tentativa.
+  const retryChats = (failureCount: number, err: unknown) =>
+    !(err instanceof ChatsRequestTimeoutError) && failureCount < 1;
+
   const recentChatsQuery = useQuery({
     queryKey: ["whatsapp-chats", clientId, instanceName, tab, search, "recent"],
     enabled: enabled && !!clientId,
-    queryFn: async () => fetchChatsPage(0),
+    queryFn: async ({ signal }) => fetchChatsPage(0, signal),
+    retry: retryChats,
     refetchInterval: isVisible && enabled && !!clientId && !search.trim() ? 12000 : false,
     refetchIntervalInBackground: false,
     staleTime: 5000,
@@ -184,7 +232,8 @@ export function useWhatsAppChats(
     queryKey: ["whatsapp-chats", clientId, instanceName, tab, search, "older"],
     enabled: enabled && olderPagesEnabled && !!clientId,
     initialPageParam: 40,
-    queryFn: async ({ pageParam }) => fetchChatsPage(pageParam),
+    queryFn: async ({ pageParam, signal }) => fetchChatsPage(pageParam, signal),
+    retry: retryChats,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextOffset : undefined),
     staleTime: 30000,
   });
