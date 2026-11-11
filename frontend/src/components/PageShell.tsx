@@ -26,6 +26,8 @@ interface PageShellProps {
   compactHero?: boolean;
   contentClassName?: string;
   showGlobalClientSelector?: boolean;
+  /** Tela de trabalho que ocupa a altura toda: sem a faixa de título e subtítulo. */
+  hideHero?: boolean;
 }
 
 export function PageShell({
@@ -38,6 +40,7 @@ export function PageShell({
   compactHero = false,
   contentClassName,
   showGlobalClientSelector = true,
+  hideHero = false,
 }: PageShellProps) {
   const isNested = useContext(PageShellContext);
 
@@ -244,6 +247,9 @@ export function PageShell({
       </header>
 
       <div className={cn("flex-1 overflow-y-auto px-4 py-3 lg:px-6 lg:py-4 print:h-auto print:overflow-visible print:p-0", spacing, contentClassName)}>
+        {hideHero ? (
+          headerRight ? <div className="mb-2 flex flex-wrap items-center justify-end gap-2">{headerRight}</div> : null
+        ) : (
         <div
           className={
             compactHero
@@ -266,6 +272,7 @@ export function PageShell({
             </div>
           )}
         </div>
+        )}
         {children}
       </div>
     </div>
