@@ -445,8 +445,9 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
     const sql = buildMessageEffectivenessSql(true);
     // a assinatura de SQL_CANONICAL_PHONE é a checagem de tamanho (10/11/12
     // dígitos) que só ela faz — regexp_replace sozinho nunca produz isso
-    expect(sql).toContain("length(regexp_replace(COALESCE(l.telefone, l.phone)");
-    expect(sql).toContain("length(regexp_replace(runs.phone");
+    // Desde ae8a8f47 a canonicalização tira o sufixo de JID antes de contar dígitos.
+    expect(sql).toContain("length(regexp_replace(regexp_replace(COALESCE(l.telefone, l.phone)");
+    expect(sql).toContain("length(regexp_replace(regexp_replace(runs.phone");
   });
 
   it("[TESTE OBRIGATÓRIO] telefone: usa COALESCE(l.telefone, l.phone) — lead com só uma das duas colunas preenchida não fica de fora", () => {

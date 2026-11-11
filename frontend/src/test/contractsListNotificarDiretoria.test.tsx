@@ -118,7 +118,8 @@ describe("ContractsList — Botão Notificar no WhatsApp", () => {
       expect(toastMock).toHaveBeenCalledWith(
         expect.objectContaining({
           title: "Diretoria notificada!",
-          description: "Caio e Conrado foram notificados no WhatsApp.",
+          // A resposta traz o chip usado; a tela diz por qual chip saiu.
+          description: "Notificado via vexo-adm",
         })
       );
     });
@@ -145,7 +146,7 @@ describe("ContractsList — Botão Notificar no WhatsApp", () => {
     await waitFor(() => {
       expect(toastMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: "Erro ao notificar diretoria",
+          title: "Erro no WhatsApp",
           description: "Falha na Evolution API",
           variant: "destructive",
         })

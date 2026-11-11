@@ -1,3 +1,4 @@
+import { gerarPortalSlug, temSufixoSecreto } from "./portalSlug.js";
 // Leitura dos campos de gd_clientes, igual para a rota e para o script de importação: o mesmo dado
 // não pode entrar por um caminho e ser recusado pelo outro. As travas da migration 20261103120000
 // recusam o mesmo no banco; aqui o erro sai com código e mensagem, antes do INSERT.
@@ -214,7 +215,8 @@ export function lerPortalSlug(bruto) {
   if (typeof bruto !== "string") throw new CampoInvalido("PORTAL_SLUG_INVALIDO", "Slug do portal precisa ser texto.");
   const s = bruto.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
   if (!s || s.length > 100) throw new CampoInvalido("PORTAL_SLUG_INVALIDO", "Slug do portal inválido, até 100 caracteres.");
-  return s;
+  // O portal abre sem login: slug sem sufixo secreto seria adivinhável pelo nome da empresa (ver portalSlug.js).
+  return temSufixoSecreto(s) ? s : gerarPortalSlug(s);
 }
 
 export function lerCsReguaAtiva(bruto) {

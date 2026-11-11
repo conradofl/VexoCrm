@@ -452,33 +452,59 @@ describe("leitura", () => {
     }
   });
 
-  describe("Portal Público — resolução por slug e normalização do nome", () => {
-    it("resolve cliente por portal_slug explícito", async () => {
+  describe("Portal Público — só abre por slug com sufixo secreto", () => {
+    it("o slug gravado pelo CRM ganha sufixo secreto e é esse slug que abre o portal", async () => {
       const c = await novoCliente("Cliente Com Slug", "ATIVO");
-      await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { portal_slug: "meu-slug-personalizado" } });
+      const patch = await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { portal_slug: "meu-slug-personalizado" } });
+      expect(patch.status).toBe(200);
 
-      const res = await fetch(`${base}/api/gd/public/portal/meu-slug-personalizado`);
+      const { rows } = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
+      const slug = rows[0].portal_slug;
+      expect(slug).toMatch(/^meu-slug-personalizado-[a-z2-9]{12}$/);
+
+      const res = await fetch(`${base}/api/gd/public/portal/${slug}`);
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.cliente.nome).toBe("Cliente Com Slug");
-      expect(data.cliente.portal_slug).toBe("meu-slug-personalizado");
+      expect(data.cliente.portal_slug).toBe(slug);
     });
 
-    it("resolve cliente pelo slug normalizado de c.nome e auto-preenche portal_slug caso estivesse nulo", async () => {
+    it("[OBRIGATÓRIO] o slug sem sufixo não abre o portal, nem quando é exatamente o que foi digitado no CRM", async () => {
+      const c = await novoCliente("Cliente Slug Puro", "ATIVO");
+      await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { portal_slug: "cliente-slug-puro" } });
+
+      const res = await fetch(`${base}/api/gd/public/portal/cliente-slug-puro`);
+      expect(res.status).toBe(404);
+    });
+
+    it("[OBRIGATÓRIO] slug antigo sem sufixo, já gravado no banco, não abre o portal", async () => {
+      const c = await novoCliente("Cliente Slug Antigo", "ATIVO");
+      await db.query("UPDATE gd_clientes SET portal_slug = 'cliente-slug-antigo' WHERE id = $1", [c.id]);
+
+      const res = await fetch(`${base}/api/gd/public/portal/cliente-slug-antigo`);
+      expect(res.status).toBe(404);
+    });
+
+    it("[OBRIGATÓRIO] o nome da empresa não abre o portal e a consulta pública não grava nada", async () => {
       const c = await novoCliente("Padaria Pão de Mel", "ATIVO");
-      // Verifica que no banco portal_slug está nulo inicialmente
-      const checkAntes = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
-      expect(checkAntes.rows[0].portal_slug).toBeNull();
+      const antes = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
+      expect(antes.rows[0].portal_slug).toBeNull();
 
-      // Acessa pelo slug normalizado (ex: padaria-pao-de-mel)
-      const res = await fetch(`${base}/api/gd/public/portal/padaria-pao-de-mel`);
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.cliente.nome).toBe("Padaria Pão de Mel");
+      for (const tentativa of ["padaria-pao-de-mel", "Padaria%20P%C3%A3o%20de%20Mel", "padaria-pão-de-mel"]) {
+        const res = await fetch(`${base}/api/gd/public/portal/${tentativa}`);
+        expect(res.status, tentativa).toBe(404);
+      }
 
-      // Verifica que auto-preencheu portal_slug no banco
-      const checkDepois = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
-      expect(checkDepois.rows[0].portal_slug).toBe("padaria-pao-de-mel");
+      const depois = await db.query("SELECT portal_slug FROM gd_clientes WHERE id = $1", [c.id]);
+      expect(depois.rows[0].portal_slug).toBeNull();
+    });
+
+    it("um sufixo com formato certo mas que não é o do cliente não abre o portal", async () => {
+      const c = await novoCliente("Cliente Sufixo Errado", "ATIVO");
+      await chamar("PATCH", `/api/gd/clientes/${c.id}`, { body: { portal_slug: "cliente-sufixo-errado" } });
+
+      const res = await fetch(`${base}/api/gd/public/portal/cliente-sufixo-errado-abcdefghjkmn`);
+      expect(res.status).toBe(404);
     });
   });
 });

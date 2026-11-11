@@ -15,6 +15,7 @@
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { pgDatabasePool } from "./database.js";
 import { GD_DONO } from "../domains/gdClientes/campos.js";
+import { garantirPortalSlugSecreto, temSufixoSecreto } from "../domains/gdClientes/portalSlug.js";
 
 export const DEFAULT_CS_INTERVAL_DAYS = 14;
 export const GOOGLE_REVIEW_DAYS_THRESHOLD = 15;
@@ -75,7 +76,9 @@ export function montarMensagemAcompanhamentoPeriodico({
 }) {
   const nomeEmpresa = cliente?.nome || "sua empresa";
   const urlDrive = driveUrl || cliente?.drive_url || "Link disponível no portal do cliente";
-  const urlPortal = portalUrl || (cliente?.portal_slug ? `${GD_PORTAL_BASE_URL}/${cliente.portal_slug}` : "Acesse seu link de acompanhamento");
+  const urlPortal =
+    portalUrl ||
+    (temSufixoSecreto(cliente?.portal_slug) ? `${GD_PORTAL_BASE_URL}/${cliente.portal_slug}` : "Acesse seu link de acompanhamento");
 
   return (
     `👋 *Acompanhamento de Customer Success | Geração Digital*\n\n` +
@@ -214,9 +217,17 @@ export async function processarReguaCustomerSuccess({
         linkedinUrl,
       });
     } else {
-      const portalUrl = c.portal_slug ? `${portalBaseUrl}/${c.portal_slug}` : `${portalBaseUrl}`;
+      // O link vai para o grupo do cliente e abre sem login: só sai slug com sufixo secreto. Se o cliente ainda
+      // tem slug antigo (igual ao nome), ele é trocado aqui. Sem slug seguro, a mensagem sai sem link.
+      let slugSeguro = null;
+      try {
+        slugSeguro = await garantirPortalSlugSecreto(db, { clienteId: c.id, donoClientId: GD_DONO });
+      } catch (err) {
+        console.warn("[gd-cs] não foi possível garantir o slug secreto do portal:", err?.message || err);
+      }
+      const portalUrl = slugSeguro ? `${portalBaseUrl}/${slugSeguro}` : null;
       mensagemTexto = montarMensagemAcompanhamentoPeriodico({
-        cliente: c,
+        cliente: { ...c, portal_slug: slugSeguro },
         portalUrl,
         driveUrl: c.drive_url,
       });
