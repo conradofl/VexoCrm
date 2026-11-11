@@ -58,6 +58,7 @@ function baseRow(overrides = {}) {
     campaign_name: "Campanha",
     message: "Oi",
     sent_count: 30,
+    reached_count: 30,
     replied_count: 0,
     sent_without_timestamp: 0,
     casou_so_no_canonico: 0,
@@ -140,8 +141,8 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
     // de maior taxa vem primeiro aqui, simulando exatamente esse contrato.
     const deps = makeDeps({
       rows: [
-        baseRow({ campaign_id: "c-alta", campaign_name: "Campanha alta taxa", message: "Olá {{nome}}, temos uma condição especial hoje.", sent_count: 30, replied_count: 15, sent_without_timestamp: 0, quente: 9, morno: 4, frio: 1, sem_classificacao: 1, lead_nao_encontrado: 0 }),
-        baseRow({ campaign_id: "c-baixa", campaign_name: "Campanha baixa taxa", message: "Oi {{nome}}, tudo bem?", sent_count: 40, replied_count: 4, sent_without_timestamp: 6, quente: 0, morno: 1, frio: 3, sem_classificacao: 0, lead_nao_encontrado: 0 }),
+        baseRow({ campaign_id: "c-alta", campaign_name: "Campanha alta taxa", message: "Olá {{nome}}, temos uma condição especial hoje.", sent_count: 30, reached_count: 30, replied_count: 15, sent_without_timestamp: 0, quente: 9, morno: 4, frio: 1, sem_classificacao: 1, lead_nao_encontrado: 0 }),
+        baseRow({ campaign_id: "c-baixa", campaign_name: "Campanha baixa taxa", message: "Oi {{nome}}, tudo bem?", sent_count: 40, reached_count: 20, replied_count: 4, sent_without_timestamp: 6, quente: 0, morno: 1, frio: 3, sem_classificacao: 0, lead_nao_encontrado: 0 }),
       ],
     });
     const handler = getRouteHandler(deps, "/api/campaigns/reports/message-effectiveness");
@@ -159,7 +160,10 @@ describe("GET /api/campaigns/reports/message-effectiveness", () => {
     expect(res.body.campaigns[0].sentWithoutTimestamp).toBe(0);
     expect(res.body.campaigns[0].repliedByTemperature).toEqual({ quente: 9, morno: 4, frio: 1, semClassificacao: 1, leadNaoEncontrado: 0 });
     expect(res.body.campaigns[1].campaignId).toBe("c-baixa");
-    expect(res.body.campaigns[1].replyRate).toBe(10);
+    // 40 envios para 20 pessoas, 4 responderam: a taxa é por PESSOA (4 ÷ 20), não por envio (4 ÷ 40).
+    expect(res.body.campaigns[1].sentCount).toBe(40);
+    expect(res.body.campaigns[1].reachedCount).toBe(20);
+    expect(res.body.campaigns[1].replyRate).toBe(20);
     expect(res.body.campaigns[1].sentWithoutTimestamp).toBe(6);
     expect(res.body.campaigns[1].repliedByTemperature).toEqual({ quente: 0, morno: 1, frio: 3, semClassificacao: 0, leadNaoEncontrado: 0 });
 
@@ -558,7 +562,7 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
     expect(sql).toContain("COUNT(*) FILTER (WHERE runs.sent_at_missing)::int AS sent_without_timestamp");
     // não é o mesmo FILTER de replied_count — são duas contagens
     // independentes sobre o mesmo `runs`, uma nunca implica a outra
-    expect(sql).toContain("COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count");
+    expect(sql).toContain("COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied)::int AS replied_count");
     expect(sql.indexOf("AS sent_without_timestamp")).not.toBe(sql.indexOf("AS replied_count"));
   });
 
@@ -632,13 +636,13 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
     expect(sql).not.toMatch(/is_group\s*=\s*false/);
     // o agregado final usa a MESMA semântica (IS NOT TRUE) pra decidir quem
     // entra em respostasDeGrupo — nunca "= false" também aqui
-    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE runs\.replied AND runs\.replied_without_group IS NOT TRUE\)::int/);
+    expect(sql).toMatch(/COUNT\(DISTINCT runs\.person\) FILTER \(WHERE runs\.replied\) - COUNT\(DISTINCT runs\.person\) FILTER \(WHERE runs\.replied_without_group\)\)::int AS respostas_de_grupo/);
   });
 
   it("[TESTE OBRIGATÓRIO] casouSoNoCanonico: EXISTS só com igualdade crua, comparada contra a EXISTS de replied", () => {
     const sql = buildMessageEffectivenessSql(true, true);
     expect(sql).toContain("AS replied_raw_only");
-    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE runs\.replied AND NOT runs\.replied_raw_only\)::int AS casou_so_no_canonico/);
+    expect(sql).toMatch(/COUNT\(DISTINCT runs\.person\) FILTER \(WHERE runs\.replied\)\s+- COUNT\(DISTINCT runs\.person\) FILTER \(WHERE runs\.replied_raw_only\)\)::int AS casou_so_no_canonico/);
     // a variante "raw_only" não pode ter o OR canônico — senão não mede nada.
     // Checa a ausência da ASSINATURA do canônico (length(regexp_replace(lm.phone...),
     // não " OR " cru — o bloco tem outro OR legítimo (direction/engagement_signal).
@@ -652,7 +656,7 @@ describe("buildMessageEffectivenessSql — estrutural (defesa contra regressão 
   it("[TESTE OBRIGATÓRIO] sem is_group (coluna ausente), respostasDeGrupo é NULL na query — não 0", () => {
     const sqlComIsGroup = buildMessageEffectivenessSql(true, true);
     const sqlSemIsGroup = buildMessageEffectivenessSql(true, false);
-    expect(sqlComIsGroup).toMatch(/COUNT\(\*\) FILTER \(WHERE runs\.replied AND runs\.replied_without_group IS NOT TRUE\)::int AS respostas_de_grupo/);
+    expect(sqlComIsGroup).toMatch(/COUNT\(DISTINCT runs\.person\) FILTER \(WHERE runs\.replied\) - COUNT\(DISTINCT runs\.person\) FILTER \(WHERE runs\.replied_without_group\)\)::int AS respostas_de_grupo/);
     expect(sqlSemIsGroup).toContain("NULL::int AS respostas_de_grupo");
     expect(stripSqlComments(sqlSemIsGroup)).not.toContain("is_group");
   });

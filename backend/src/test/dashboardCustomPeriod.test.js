@@ -199,7 +199,7 @@ const MARKERS = [
   ["closings", "current_closings"],
   ["classification", "TRIM(l.stage)"],
   ["firstReplyOnly", "stopped_after_first"],
-  ["profiles", "WITH cohort AS"],
+  ["profiles", "replied_people"],
   ["baseHealth", "no_reply_over_days"],
   ["firstHuman", "median_minutes"],
 ];
