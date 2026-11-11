@@ -8,11 +8,14 @@ import {
   AlertCircle,
   PauseCircle,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import { textoDoPrazo, type GdPrazo } from "@/lib/gdClientes";
+import { useEmitirGdPortalToken } from "@/hooks/useGdClientes";
 
 export interface PortfolioClient {
   id: string;
@@ -51,6 +54,22 @@ interface PortfolioTableProps {
 }
 
 export function PortfolioTable({ clients, onSelectClient }: PortfolioTableProps) {
+  const emitir = useEmitirGdPortalToken();
+  const [abastecendoId, setAbastecendoId] = React.useState<string | null>(null);
+
+  const abrirPortal = async (e: React.MouseEvent, clienteId: string) => {
+    e.stopPropagation();
+    setAbastecendoId(clienteId);
+    try {
+      const data = await emitir.mutateAsync(clienteId);
+      window.open(`/acompanhamento/${data.token}`, "_blank");
+    } catch (err) {
+      toast({ title: "Erro ao abrir portal", description: String(err), variant: "destructive" });
+    } finally {
+      setAbastecendoId(null);
+    }
+  };
+
   const getStageBadge = (stage: PortfolioClient["stage"]) => {
     switch (stage) {
       case "onboarding":
@@ -288,16 +307,22 @@ export function PortfolioTable({ clients, onSelectClient }: PortfolioTableProps)
                         </a>
                       )}
 
-                      <a
-                        href={`/portal/${client.slug}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="h-8 px-2.5 rounded-lg flex items-center gap-1 text-[11px] font-bold text-purple-650 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/40 border border-purple-200 dark:border-purple-800/40 transition-all"
+                      <button
+                        type="button"
+                        onClick={(e) => abrirPortal(e, client.id)}
+                        disabled={abastecendoId === client.id}
+                        className="h-8 px-2.5 rounded-lg flex items-center gap-1 text-[11px] font-bold text-purple-650 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/40 border border-purple-200 dark:border-purple-800/40 transition-all cursor-pointer disabled:opacity-50"
                         title="Abrir Portal do Cliente"
                       >
-                        <span>Portal</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
+                        {abastecendoId === client.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <>
+                            <span>Portal</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </>
+                        )}
+                      </button>
                     </div>
                   </td>
                 </tr>

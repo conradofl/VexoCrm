@@ -7,11 +7,13 @@ import {
   Mail,
   UserCheck,
   Loader2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
-import { useCriarGruposWhatsapp } from "@/hooks/useGdClientes";
+import { useCriarGruposWhatsapp, useEmitirGdPortalToken } from "@/hooks/useGdClientes";
 import type { PortfolioClient } from "./PortfolioTable";
 
 interface ClientDrawerProps {
@@ -29,7 +31,11 @@ function isValidDriveUrl(url?: string | null): boolean {
 
 export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
   const criarGrupos = useCriarGruposWhatsapp();
+  const emitirPortal = useEmitirGdPortalToken();
   const [criandoGrupos, setCriandoGrupos] = React.useState(false);
+  const [abrindoPortal, setAbrindoPortal] = React.useState(false);
+  const [copiandoPortal, setCopiandoPortal] = React.useState(false);
+  const [copiado, setCopiado] = React.useState(false);
 
   if (!client) return null;
 
@@ -39,7 +45,6 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
     try {
       const res = await criarGrupos.mutateAsync({
         clienteId: client.id,
-        instanceName: "vexo-adm-vexo-atende",
         force: false,
       });
       if (res.status === "already_created") {
@@ -61,6 +66,47 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
       });
     } finally {
       setCriandoGrupos(false);
+    }
+  };
+
+  const handleAbrirPortal = async () => {
+    if (!client?.id) return;
+    setAbrindoPortal(true);
+    try {
+      const data = await emitirPortal.mutateAsync(client.id);
+      window.open(`/acompanhamento/${data.token}`, "_blank");
+    } catch (err) {
+      toast({
+        title: "Erro ao abrir portal",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setAbrindoPortal(false);
+    }
+  };
+
+  const handleCopiarLink = async () => {
+    if (!client?.id) return;
+    setCopiandoPortal(true);
+    try {
+      const data = await emitirPortal.mutateAsync(client.id);
+      const url = `${window.location.origin}/acompanhamento/${data.token}`;
+      await navigator.clipboard.writeText(url);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+      toast({
+        title: "Link do portal copiado!",
+        description: url,
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao copiar link do portal",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setCopiandoPortal(false);
     }
   };
 
@@ -205,15 +251,38 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
             </a>
           )}
 
-          <a
-            href={`/portal/${client.slug}`}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-2 p-2.5 rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 font-bold"
-          >
-            <ExternalLink className="w-4 h-4 text-purple-600" />
-            <span>Abrir Portal do Cliente</span>
-          </a>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAbrirPortal}
+              disabled={abrindoPortal || copiandoPortal}
+              className="flex-1 flex items-center justify-center gap-2 p-2.5 rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 font-bold hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {abrindoPortal ? (
+                <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
+              ) : (
+                <ExternalLink className="w-4 h-4 text-purple-600" />
+              )}
+              <span>Abrir Portal do Cliente</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopiarLink}
+              disabled={abrindoPortal || copiandoPortal}
+              className="flex items-center justify-center gap-1.5 p-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+              title="Copiar Link do Portal"
+            >
+              {copiandoPortal ? (
+                <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+              ) : copiado ? (
+                <Check className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Copy className="w-4 h-4 text-slate-500" />
+              )}
+              <span>{copiado ? "Copiado!" : "Copiar Link"}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

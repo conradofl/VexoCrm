@@ -52,6 +52,7 @@ import { processarReguaCustomerSuccess } from "../../services/gdCustomerSuccessS
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 import { temSufixoSecreto } from "./portalSlug.js";
+import { resolveCandidateEvolutionInstances } from "../geracaoDigitalContracts/contractEvolutionResolver.js";
 
 export { GD_DONO, gerarPortalToken, hashPortalToken };
 const PERMISSAO_GD = "geracao_digital.proposals";
@@ -935,11 +936,8 @@ export function registerGdClientesRoutes(app, {
           return;
         }
 
-        const instanceName =
-          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
-          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-          process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+        const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
+        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
 
         // Equipe GD (Conrado, Caio, Gabriel)
         const envEquipe = process.env.GD_ONBOARDING_EQUIPE_TELEFONES;
