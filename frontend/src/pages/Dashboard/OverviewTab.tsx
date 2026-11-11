@@ -88,6 +88,11 @@ function ActionCardView({ card }: { card: ActionCard }) {
         </div>
         <p className="text-[12.5px] text-muted-foreground">{card.detail}</p>
         <p className="text-[12.5px] text-muted-foreground">{card.optOutNote}</p>
+        {card.countedNote && (
+          <p className="text-[11.5px] text-muted-foreground/80" data-testid="card-never-approached-counted">
+            {card.countedNote}
+          </p>
+        )}
       </div>
     );
   }
@@ -127,11 +132,11 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
 
   const overview = data.overview;
   const actionCards = useMemo(() => {
-    const cards: ActionCard[] = [buildWaitingCard(overview?.waiting), buildNeverApproachedCard(overview?.base)];
+    const cards: ActionCard[] = [buildWaitingCard(overview?.waiting), buildNeverApproachedCard(overview?.base, data.lastUpdatedAt)];
     const chip = buildChipAlertCard(overview?.chips, overview?.chipsQuotaIsToday ?? false);
     if (chip) cards.push(chip);
     return cards;
-  }, [overview]);
+  }, [overview, data.lastUpdatedAt]);
   const funnel = useMemo(() => buildFunnel(data), [data]);
   const selection = useMemo(() => buildFunnelSelection(data, funnel, selected), [data, funnel, selected]);
   const messages = useMemo(() => buildMessageRows(data.rankings.messages), [data.rankings.messages]);

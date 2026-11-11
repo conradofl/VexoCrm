@@ -6,7 +6,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { OverviewTab } from "@/pages/Dashboard/OverviewTab";
 import type { DashboardOverview, DashboardPayload } from "@/hooks/useDashboard";
-import { buildChipAlertCard, buildFunnel } from "@/lib/dashboard/overview";
+import { buildChipAlertCard, buildCountedNote, buildFunnel } from "@/lib/dashboard/overview";
 
 const OVERVIEW: DashboardOverview = {
   waiting: { status: "pending_source" },
@@ -110,6 +110,26 @@ describe("Pede ação agora", () => {
     const card = screen.getByTestId("card-never-approached");
     expect(within(card).getByText("Opt-out não é registrado nesta empresa.")).toBeInTheDocument();
     expect(within(card).queryByText(/pediram para sair|pediu para sair/)).not.toBeInTheDocument();
+  });
+
+  it("nunca abordados é número guardado: o cartão diz a hora em que foi contado", () => {
+    const at = "2026-11-11T12:00:00.000Z";
+    const time = new Date(at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    show(payload());
+    expect(screen.getByTestId("card-never-approached-counted")).toHaveTextContent(new RegExp(`às ${time}\\.$`));
+
+    // Mesmo dia: só a hora. Outro dia: a data vai junto. Sem hora ou hora inválida: nenhuma frase, nunca uma hora inventada.
+    const sameDay = new Date(at);
+    expect(buildCountedNote(at, sameDay)).toBe(`Contado às ${time}.`);
+    const nextDay = new Date(sameDay.getTime() + 36 * 3600 * 1000);
+    expect(buildCountedNote(at, nextDay)).toMatch(/^Contado em \d{2}\/\d{2} às \d{2}:\d{2}\.$/);
+    expect(buildCountedNote(null)).toBeNull();
+    expect(buildCountedNote("não é data")).toBeNull();
+  });
+
+  it("sem hora de cálculo no payload, o cartão não mostra frase de hora", () => {
+    show(payload({}, { lastUpdatedAt: null }));
+    expect(screen.queryByTestId("card-never-approached-counted")).not.toBeInTheDocument();
   });
 
   it("base indisponível mostra travessão e o motivo, nunca zero", () => {

@@ -27,7 +27,7 @@ export type ActionCard =
   | { kind: "waiting"; state: "pending" }
   | { kind: "waiting"; state: "ready"; value: number; detail: string; attention: boolean; href: string; cta: string }
   | { kind: "neverApproached"; state: "unavailable" }
-  | { kind: "neverApproached"; state: "ready"; value: number; detail: string; optOutNote: string }
+  | { kind: "neverApproached"; state: "ready"; value: number; detail: string; optOutNote: string; countedNote: string | null }
   | { kind: "chip"; state: "ready"; value: number; limit: number; chipName: string; detail: string; href: string; cta: string };
 
 export function buildWaitingCard(waiting: OverviewWaiting | null | undefined): ActionCard {
@@ -53,7 +53,25 @@ export function buildWaitingCard(waiting: OverviewWaiting | null | undefined): A
   };
 }
 
-export function buildNeverApproachedCard(base: OverviewBase | null | undefined): ActionCard {
+/**
+ * Hora em que o número foi contado. A contagem da base leva segundos em empresa grande, então o cartão mostra
+ * o número guardado e diz de quando ele é. Em outro dia, a frase leva a data junto.
+ */
+export function buildCountedNote(lastUpdatedAt: string | null | undefined, now: Date = new Date()): string | null {
+  if (!lastUpdatedAt) return null;
+  const at = new Date(lastUpdatedAt);
+  if (Number.isNaN(at.getTime())) return null;
+  const time = at.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (at.toDateString() === now.toDateString()) return `Contado às ${time}.`;
+  const day = at.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return `Contado em ${day} às ${time}.`;
+}
+
+export function buildNeverApproachedCard(
+  base: OverviewBase | null | undefined,
+  lastUpdatedAt?: string | null,
+  now: Date = new Date(),
+): ActionCard {
   if (!base) return { kind: "neverApproached", state: "unavailable" };
   const na = base.neverApproached;
   const share = na.shareOfBasePct === null ? "" : ` ${String(na.shareOfBasePct).replace(".", ",")}% da base.`;
@@ -64,7 +82,14 @@ export function buildNeverApproachedCard(base: OverviewBase | null | undefined):
     : na.optOutDiscounted > 0
     ? `Já sem ${n(na.optOutDiscounted)} que ${plural(na.optOutDiscounted, "pediu", "pediram")} para sair.`
     : "Nenhum deles pediu para sair.";
-  return { kind: "neverApproached", state: "ready", value: na.reachable, detail, optOutNote };
+  return {
+    kind: "neverApproached",
+    state: "ready",
+    value: na.reachable,
+    detail,
+    optOutNote,
+    countedNote: buildCountedNote(lastUpdatedAt, now),
+  };
 }
 
 /** O chip mais perto da cota, se algum passou de 80%. Sem chip acima do limite, o cartão não existe. */
