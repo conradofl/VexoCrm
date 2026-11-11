@@ -137,7 +137,6 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
   const messages = useMemo(() => buildMessageRows(data.rankings.messages), [data.rankings.messages]);
   const chips = useMemo(() => buildChipUsage(overview?.chips), [overview?.chips]);
   const slices = useMemo(() => buildBaseSlices(overview?.base), [overview?.base]);
-  const anyChipPresumed = chips?.some((c) => c.presumed) ?? false;
 
   return (
     <div className="flex flex-col gap-5">
@@ -295,10 +294,7 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
               {chips.map((c) => (
                 <div key={c.name}>
                   <div className="mb-1 flex justify-between gap-2.5 text-[13px]">
-                    <span className="truncate font-semibold text-foreground">
-                      {c.name}
-                      {c.presumed && <span className="font-normal text-muted-foreground"> *</span>}
-                    </span>
+                    <span className="truncate font-semibold text-foreground">{c.name}</span>
                     <span className={`flex-none font-bold tabular-nums ${c.attention ? "text-orange-700 dark:text-orange-300" : "text-foreground"}`}>
                       {c.text}
                     </span>
@@ -308,10 +304,7 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
                   </div>
                 </div>
               ))}
-              <p className="text-[11.5px] text-muted-foreground">
-                Laranja = acima de 80% da cota.
-                {anyChipPresumed && " * Chip sem estado gravado: a cota mostrada é a padrão de chip frio."}
-              </p>
+              <p className="text-[11.5px] text-muted-foreground">Laranja = acima de 80% da cota.</p>
             </div>
           )}
         </div>

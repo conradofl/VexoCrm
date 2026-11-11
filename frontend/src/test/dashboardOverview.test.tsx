@@ -23,8 +23,8 @@ const OVERVIEW: DashboardOverview = {
     meetings: { hasRecords: true, current: 41, previous: 47 },
   },
   chips: [
-    { instanceId: "c1", name: "Comercial", sentToday: 46, quotaLimit: 50, quotaPercentage: 92, quotaPresumed: false },
-    { instanceId: "c2", name: "Pessoal", sentToday: 12, quotaLimit: 50, quotaPercentage: 24, quotaPresumed: true },
+    { instanceId: "c1", name: "Comercial", sentToday: 46, quotaLimit: 50, quotaPercentage: 92 },
+    { instanceId: "c2", name: "Pessoal", sentToday: 12, quotaLimit: 50, quotaPercentage: 24 },
   ],
   chipsQuotaIsToday: true,
   firstHumanResponse: null,
@@ -198,12 +198,12 @@ describe("Frases sem fonte não aparecem", () => {
 });
 
 describe("Leituras de apoio", () => {
-  it("cota por chip: laranja só acima de 80%, e cota presumida vem marcada", () => {
+  it("cota por chip: o rótulo diz o que o contador enxerga", () => {
     show(payload());
     expect(screen.getByText("46 de 50")).toBeInTheDocument();
     expect(screen.getByText("12 de 50")).toBeInTheDocument();
     expect(screen.getByText(/Envios de campanha e follow-up de hoje/)).toBeInTheDocument();
-    expect(screen.getByText(/Chip sem estado gravado/)).toBeInTheDocument();
+    expect(screen.getByText("Laranja = acima de 80% da cota.")).toBeInTheDocument();
   });
 
   it("base: cinco situações, cada uma com o seu número", () => {

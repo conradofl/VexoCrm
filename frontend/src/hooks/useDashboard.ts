@@ -193,7 +193,6 @@ export interface OverviewChip {
   sentToday: number;
   quotaLimit: number;
   quotaPercentage: number;
-  quotaPresumed: boolean;
 }
 
 export interface OverviewFirstHumanResponse {

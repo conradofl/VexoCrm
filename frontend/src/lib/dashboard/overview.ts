@@ -275,7 +275,6 @@ export interface ChipUsageRow {
   text: string;
   widthPct: number;
   attention: boolean;
-  presumed: boolean;
 }
 
 export function buildChipUsage(chips: OverviewChip[] | null | undefined): ChipUsageRow[] | null {
@@ -287,7 +286,6 @@ export function buildChipUsage(chips: OverviewChip[] | null | undefined): ChipUs
       text: c.quotaLimit > 0 ? `${n(c.sentToday)} de ${n(c.quotaLimit)}` : n(c.sentToday),
       widthPct: c.quotaLimit > 0 ? Math.min(100, Math.max(0, c.quotaPercentage)) : 0,
       attention: c.quotaLimit > 0 && c.quotaPercentage >= CHIP_ALERT_PCT,
-      presumed: c.quotaPresumed,
     }));
 }
 
