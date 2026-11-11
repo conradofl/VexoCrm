@@ -657,8 +657,6 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
           name: chip.instance_name || String(chip.instance_id),
           chipState: chip.chip_state || "cold",
           active: chip.active !== false,
-          // Sem estado gravado e sem limite próprio, o sistema trata o chip como frio: a cota é presumida.
-          quotaPresumed: !chip.chip_state && (chip.daily_limit_override === null || chip.daily_limit_override === undefined),
           sent: instStats ? instStats.sent_count : 0,
           reached: instStats ? instStats.reached_count : 0,
           replies: instStats ? instStats.replied_count : 0,
@@ -1051,7 +1049,6 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
               sentToday: chip.sentToday,
               quotaLimit: chip.quotaLimit,
               quotaPercentage: chip.quotaPercentage,
-              quotaPresumed: chip.quotaPresumed === true,
             }))
         : null,
       // A cota é do DIA: só faz sentido quando o período inclui hoje.
