@@ -52,6 +52,10 @@ import {
   X,
   Video,
   PhoneCall,
+  ArrowLeft,
+  Pause,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { EmojiPicker } from "@/pages/LeadImports/EmojiPicker";
@@ -134,6 +138,16 @@ import { sanitizePhone } from "@/lib/phone";
 import { formatHeaderCount, parseDossierSummary } from "@/lib/messageFormatting";
 import { isLeadStalled, computeLeadDaysIdle } from "@/lib/leads/stalledLeads";
 import { useLeadReactivationSettings } from "@/hooks/useLeadReactivation";
+import {
+  ConversationListItem,
+  InboxFooterFilters,
+  InboxOrderRow,
+  InboxSearchRow,
+  InboxStateTabs,
+  type ChipOption,
+  type FooterFilter,
+  type InboxTab,
+} from "@/components/inbox/InboxColumn";
 
 function formatScheduleDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "";
@@ -326,6 +340,16 @@ function OriginBadge({
   return null;
 }
 
+const DOSSIER_PINNED_KEY = "vexo_inbox_dossie_fixado";
+const WIDE_SCREEN_QUERY = "(min-width: 1280px)";
+
+const EMPTY_TAB_TEXT: Partial<Record<InboxTab, string>> = {
+  esperam: "Ninguém esperando você nos últimos 7 dias.",
+  com_lead: "Nenhuma conversa aguardando o lead.",
+  robo: "Nenhuma conversa com o robô respondendo.",
+  esfriaram: "Nenhuma conversa esfriou sem resposta.",
+};
+
 interface WhatsAppInboxProps {
   title?: string;
   subtitle?: string;
@@ -349,13 +373,55 @@ export default function WhatsAppInbox({
   const [selectedInstanceNames, setSelectedInstanceNames] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [compositionMode, setCompositionMode] = useState<"whatsapp" | "internal_note">("whatsapp");
-  const [inboxTab, setInboxTab] = useState<"fila" | "aguardando" | "minhas" | "hoje" | "automacao" | "arquivadas" | "pausadas" | "grupos" | "todas">("fila");
+  const [inboxTab, setInboxTab] = useState<InboxTab>("esperam");
+  // Relógio da lista: o tempo de espera anda sozinho, sem depender de nova busca.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
   const [hasNewUnseenMessage, setHasNewUnseenMessage] = useState(false);
-  const [showDossier, setShowDossier] = useState(true);
+  // A gaveta do dossiê abre fechada. Quem atende o dia inteiro pode fixar: a escolha fica
+  // salva neste navegador.
+  const [showDossier, setShowDossier] = useState(false);
+  const [dossierPinned, setDossierPinned] = useState(() => {
+    try {
+      return window.localStorage.getItem(DOSSIER_PINNED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleDossierPinned = () => {
+    setDossierPinned((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(DOSSIER_PINNED_KEY, next ? "1" : "0");
+      } catch {
+        /* sem armazenamento: vale só nesta visita */
+      }
+      if (next) setShowDossier(true);
+      return next;
+    });
+  };
+  const [isWideScreen, setIsWideScreen] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(WIDE_SCREEN_QUERY).matches : true
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(WIDE_SCREEN_QUERY);
+    const onChange = () => setIsWideScreen(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  // No celular a tela mostra a fila OU a conversa.
+  const [mobileView, setMobileView] = useState<"list" | "chat">("list");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [isApplyFollowupModalOpen, setIsApplyFollowupModalOpen] = useState(false);
   const [isCreateReminderModalOpen, setIsCreateReminderModalOpen] = useState(false);
@@ -492,13 +558,13 @@ export default function WhatsAppInbox({
   const [bulkConfirmCount, setBulkConfirmCount] = useState(0);
   const [bulkConfirmPhones, setBulkConfirmPhones] = useState<string[]>([]);
   const [bulkLeadConfirmOpen, setBulkLeadConfirmOpen] = useState(false);
-  const [showOlderAwaiting, setShowOlderAwaiting] = useState(false);
   const [undoArchiveState, setUndoArchiveState] = useState<{ count: number; phones: string[] } | null>(null);
   const undoTimeoutRef = useRef<any>(null);
 
   // Limpa seleção sempre que mudar de aba ou de termo de busca (garante isolamento estrito)
   useEffect(() => {
     setSelectedChatIds(new Set());
+    setSelectMode(false);
   }, [inboxTab, debouncedSearch]);
 
   const toggleSelectChat = (chatId: string) => {
@@ -782,6 +848,54 @@ export default function WhatsAppInbox({
     return chats;
   }, [chats, inboxTab, itemsByPhone]);
   const totalChatsCount = chatsQuery.total ?? chats.length;
+
+  const chipOptions = useMemo<ChipOption[]>(
+    () =>
+      evolutionInstances.map((inst) => ({
+        value: inst.dispatch_webhook_url
+          ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop() ?? inst.name
+          : inst.name,
+        name: inst.name,
+        // Sem estado informado, não afirmar que está desconectado.
+        connected: !inst.connection_state || inst.connection_state === "open",
+      })),
+    [evolutionInstances]
+  );
+
+  // As listas que saíram das abas. Nenhuma deixou de existir: estas ficam no botão de filtros...
+  const otherLists: FooterFilter[] = [
+    {
+      key: "esfriaram",
+      label: "Esfriaram",
+      title: "O lead falou por último há mais de 7 dias e ninguém respondeu. Mais parado primeiro.",
+      count: chatsQuery.counts?.work?.esfriaram,
+    },
+    { key: "minhas", label: "Minhas", title: "Conversas atribuídas a você", count: chatsQuery.counts?.myUnopened },
+    {
+      key: "hoje",
+      label: "Hoje",
+      title: "Pendências para hoje ou atrasadas (mensagens agendadas e lembretes pessoais)",
+      count: hojeBadgeCount,
+    },
+    {
+      key: "pausadas",
+      label: "Pausadas",
+      title: "Conversas com o robô pausado. Na lista elas levam a etiqueta 'você atende'.",
+      count: chatsQuery.counts?.paused,
+    },
+    { key: "todas", label: "Todas", title: "Todas as conversas (incluindo grupos e arquivadas)" },
+  ];
+  // ...e estas no rodapé da coluna.
+  const footerFilters: FooterFilter[] = [
+    { key: "grupos", label: "Grupos", title: "Grupos de WhatsApp", count: chatsQuery.counts?.groups },
+    {
+      key: "automacao",
+      label: "Automações",
+      title: "Robôs e autoatendimentos detectados do outro lado",
+      count: chatsQuery.counts?.automations,
+    },
+    { key: "arquivadas", label: "Arquivadas", title: "Conversas arquivadas manualmente" },
+  ];
 
   const handleReabrirAtendimento = async () => {
     if (!selectedChat || !clientId) return;
@@ -1070,6 +1184,16 @@ export default function WhatsAppInbox({
     setShowScrollBottomBtn(false);
     setHasNewUnseenMessage(false);
   };
+
+  // No celular a conversa fica escondida enquanto a fila está na tela: ao abrir, vai para o fim.
+  useEffect(() => {
+    if (mobileView !== "chat") return;
+    const frame = requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [mobileView, selectedChatId]);
 
   const handleMessagesScroll = () => {
     const container = messagesContainerRef.current;
@@ -1365,8 +1489,664 @@ export default function WhatsAppInbox({
     }
   };
 
+  // ── Tela nova: o que o cabeçalho, o campo de resposta e a gaveta precisam saber ──
+  const isSelectedChatAttended = Boolean(
+    selectedChat?.attendedAt &&
+      (!selectedChat?.timestamp || new Date(selectedChat.attendedAt).getTime() >= selectedChat.timestamp * 1000)
+  );
+  const isSelectedChatAwaiting = Boolean(
+    selectedChat &&
+      !selectedChat.isGroup &&
+      selectedChat.state !== "automacao" &&
+      selectedChat.state !== "arquivada" &&
+      !selectedChat.archived &&
+      selectedChat.lastMessage &&
+      !selectedChat.lastMessage.fromMe &&
+      !isSelectedChatAttended
+  );
+  const isSelectedChatArchived = Boolean(selectedChat && (selectedChat.state === "arquivada" || selectedChat.archived));
+
+  const chipAliasesOf = (inst: { id?: string | null; name?: string | null; dispatch_webhook_url?: string | null }): string[] =>
+    [inst.id, inst.name, String(inst.dispatch_webhook_url || "").split("/").filter(Boolean).pop()].filter(Boolean).map(String);
+  // O envio manual sai sempre pelo chip padrão ativo da empresa (mesma escolha do servidor,
+  // em POST /api/whatsapp/messages), não pelo chip em que o lead escreveu.
+  const sendChip = evolutionInstances.find((inst) => inst.active && inst.is_default) || evolutionInstances.find((inst) => inst.active) || null;
+  const leadChipAlias = selectedChat?.leadChip || null;
+  const leadChipInstance = leadChipAlias ? evolutionInstances.find((inst) => chipAliasesOf(inst).includes(leadChipAlias)) : null;
+  const leadChipName = leadChipInstance?.name || leadChipAlias;
+  const leadChipAgent = leadChipAlias ? chatsQuery.chipAgents?.[leadChipAlias] ?? null : null;
+  const robotAnswersOnLeadChip = Boolean(leadChipAgent && leadChipAgent.kind !== "nenhum");
+  const sendsFromOtherChip = Boolean(leadChipAlias && sendChip && !chipAliasesOf(sendChip).includes(leadChipAlias));
+
+  const headerName = matchedLead?.nome || selectedChat?.name || "Selecione uma conversa";
+  const currentStageLabel = getStageLabel(FUNNEL_STAGES[currentStageIndex].key);
+  const assignedOperator = matchedLead?.assigned_to ? operatorOptions.find((op) => op.uid === matchedLead.assigned_to) : null;
+  const responsibleLabel = matchedLead?.assigned_to
+    ? assignedOperator?.displayName || assignedOperator?.email || matchedLead.assigned_to
+    : "Compartilhado";
+  const selectedOrigin = selectedChat?.leadOrigin ?? null;
+  const selectedCampaignName = selectedChat?.sourceCampaignId ? campaignNames.get(selectedChat.sourceCampaignId) : undefined;
+  const needsHumanAttention = Boolean(matchedLead?.dados?.precisa_atencao_humana || (matchedLead as any)?.precisa_atencao_humana);
+
+  const handleAssignLead = async (targetUid: string | null) => {
+    if (!matchedLead) return;
+    try {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/leads/${matchedLead.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ assigned_to: targetUid }),
+      });
+      if (!res.ok) {
+        const err = await readApiErrorMessage(res, "Falha ao reatribuir lead.");
+        throw new Error(err);
+      }
+      toast.success("Responsável atualizado!");
+      refetchLeads();
+    } catch (err: any) {
+      toast.error("Erro ao reatribuir", { description: err.message });
+    }
+  };
+
+  const isNoteMode = compositionMode === "internal_note";
+  const isSending = sendMessage.isPending || sendMediaMessage.isPending;
+  const showBulkBar = selectMode || selectedChatIds.size > 0;
+  const waitOrderedTab = inboxTab === "esperam" || inboxTab === "esfriaram";
+  const activeListName = [...otherLists, ...footerFilters].find((f) => f.key === inboxTab)?.label;
+  const orderLabel = debouncedSearch
+    ? `Resultado da busca · ${formatHeaderCount(filteredChats.length, totalChatsCount)}`
+    : waitOrderedTab
+    ? `${activeListName ? `${activeListName} · ` : ""}Mais parado primeiro`
+    : activeListName
+    ? `${activeListName} · ${formatHeaderCount(filteredChats.length, totalChatsCount)}`
+    : "Mais recente primeiro";
+  const chipScopeLabel = selectedInstanceNames[0]
+    ? chipOptions.find((opt) => opt.value === selectedInstanceNames[0])?.name || selectedInstanceNames[0]
+    : "Todos os chips";
+
+  // Fechar a gaveta também desafixa: senão o X não fecharia nada em tela larga.
+  const closeDossier = () => {
+    setShowDossier(false);
+    if (dossierPinned) toggleDossierPinned();
+  };
+  const dossierVisible = (showDossier || (dossierPinned && isWideScreen)) && Boolean(selectedChat);
+  const dossierAsColumn = dossierPinned && isWideScreen;
+
+  // Conteúdo do dossiê: o mesmo na gaveta e na coluna fixada.
+  const dossierPanel = (
+    <div
+      className="flex h-full min-h-0 flex-col bg-card"
+      data-testid="dossier-panel"
+      role="complementary"
+      aria-label="Dossiê do lead"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !dossierAsColumn) closeDossier();
+      }}
+    >
+      <div className="flex items-center gap-2 border-b border-border/60 px-3.5 py-[11px]">
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-bold text-foreground">Dossiê do lead</span>
+        <button
+          type="button"
+          onClick={toggleDossierPinned}
+          aria-pressed={dossierPinned}
+          aria-label={dossierPinned ? "Desafixar dossiê" : "Manter o dossiê fixo ao lado da conversa"}
+          title={dossierPinned ? "Desafixar: o dossiê volta a abrir só quando você pedir" : "Fixar: o dossiê fica sempre aberto ao lado da conversa"}
+          data-testid="dossier-pin"
+          className={cn(
+            "h-[26px] w-[26px] cursor-pointer place-items-center rounded-[7px] border", isWideScreen ? "grid" : "hidden",
+            dossierPinned
+              ? "border-indigo-300 bg-indigo-50 text-indigo-600 dark:border-indigo-500/50 dark:bg-indigo-500/15 dark:text-indigo-300"
+              : "border-border bg-muted/40 text-foreground/70 hover:bg-muted"
+          )}
+        >
+          {dossierPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={closeDossier}
+          aria-label="Fechar gaveta"
+          title="Fechar"
+          data-testid="dossier-close"
+          className="grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[7px] border border-border bg-muted/40 text-foreground/70 hover:bg-muted"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3.5 py-[13px]">
+        {/* Identidade */}
+        <div className="flex items-center gap-2.5">
+          <ChatAvatar label={headerName} picture={contactProfilePic || selectedChat?.profilePic} size="sm" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12.5px] font-semibold text-foreground">{matchedLead?.nome || selectedChat?.name || "Lead sem nome"}</div>
+            <div className="truncate text-[10.5px] text-muted-foreground">{relationshipContextLine}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Phone className="h-3 w-3" />
+          <span className="font-mono">{displayPhone}</span>
+          {rawPhone && (
+            <button
+              type="button"
+              onClick={() => handleCopyPhone(rawPhone)}
+              className="cursor-pointer p-1 text-muted-foreground transition-colors hover:text-foreground"
+              title="Copiar número"
+              aria-label="Copiar número"
+            >
+              {copiedPhone ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            </button>
+          )}
+          {matchedLead?.qualificacao && (
+            <Badge
+              variant="outline"
+              className={cn(
+                "ml-auto text-[10px] font-bold uppercase",
+                matchedLead.qualificacao === "QUENTE"
+                  ? "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
+                  : matchedLead.qualificacao === "MORNO"
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+              )}
+            >
+              {matchedLead.qualificacao === "QUENTE" ? "Quente" : matchedLead.qualificacao === "MORNO" ? "Morno" : "Frio"}
+            </Badge>
+          )}
+        </div>
+
+                {Boolean(matchedLead?.dados?.precisa_atencao_humana || (matchedLead as any)?.precisa_atencao_humana) && (
+                  <div className="w-full p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-left flex items-start gap-2">
+                    <ShieldAlert className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                        Atenção Humana Necessária (IA Pausada)
+                      </p>
+                      <p className="text-[10px] text-rose-600/90 dark:text-rose-300/90 leading-tight mt-0.5">
+                        {String(
+                          matchedLead?.dados?.motivo_atencao_humana ||
+                            (matchedLead as any)?.motivo_atencao_humana ||
+                            "Mensagens idênticas repetidas detectadas (loop com bot/menu automático)"
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {!matchedLead && !selectedChat?.isGroup && (
+                  <div className="w-full p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-left">
+                    <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-200 font-semibold text-xs">
+                      <UserPlus className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Lead não cadastrado</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                      Este contato do WhatsApp ainda não está na sua base de leads do CRM.
+                    </p>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="w-full mt-2.5 h-7 text-xs font-semibold gap-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-xs cursor-pointer"
+                      onClick={handleCreateLeadFromCurrentChat}
+                      disabled={createLeadMutation.isPending}
+                    >
+                      <UserPlus className="h-3.5 w-3.5" />
+                      <span>{createLeadMutation.isPending ? "Cadastrando..." : "Cadastrar como Lead no CRM"}</span>
+                    </Button>
+                  </div>
+                )}
+
+        {/* Leitura do robô */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                    <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                    Leitura do robô
+                  </span>
+                  <button
+                    type="button"
+                    disabled={isSummarizing || !selectedChatId}
+                    onClick={handleSummarizeWithAI}
+                    className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSummarizing ? (
+                      <>
+                        <LoaderCircle className="h-3 w-3 animate-spin" />
+                        Analisando...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-3 w-3" />
+                        Atualizar
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 dark:bg-purple-950/40 p-4 space-y-3 text-xs shadow-xs">
+                  {dossierSummary.isPersonal ? (
+                    <div className="space-y-1 text-[11px] text-muted-foreground">
+                      <div className="font-semibold flex items-center gap-1.5 text-foreground/80">
+                        <span>🚫</span>
+                        <span>Conversa pessoal</span>
+                      </div>
+                      <p className="italic text-muted-foreground/90 whitespace-pre-line leading-relaxed">
+                        {dossierSummary.personalText || "Nenhuma intenção comercial detectada."}
+                      </p>
+                    </div>
+                  ) : currentChatSummary || matchedLead ? (
+                    <div className="space-y-2 text-[11px]">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>🎯</span> Objetivo:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.objetivo || "—"}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>📋</span> Situação:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.situacao || "—"}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>🤝</span> Combinado:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.combinado || "—"}</span>
+                      </div>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
+                          <span>⏭</span> Próximo passo:
+                        </span>
+                        <span className="text-foreground text-right font-medium">{dossierSummary.proximoPasso || "—"}</span>
+                      </div>
+
+                      {/* Rodapé com pendências de descoberta */}
+                      {dossierSummary.missing.length > 0 && (
+                        <div className="pt-2 mt-2 border-t border-purple-500/20 text-[10px] text-muted-foreground/80 italic">
+                          Falta descobrir: {dossierSummary.missing.join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-2 space-y-2">
+                      <p className="text-muted-foreground text-[11px]">
+                        Nenhum resumo gerado ainda.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isSummarizing || !selectedChatId}
+                        onClick={handleSummarizeWithAI}
+                        className="h-7 text-[11px] rounded-lg border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 cursor-pointer"
+                      >
+                        <Sparkles className="mr-1.5 h-3 w-3 text-purple-500" />
+                        {isSummarizing ? "Gerando resumo..." : "Gerar Resumo com IA"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {activeSuggestion && matchedLead && (
+                <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-2.5 space-y-2 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-1.5">
+                      <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-purple-900 dark:text-purple-200">
+                          Sugestão da IA
+                        </p>
+                        <p className="text-[11px] text-purple-800/90 dark:text-purple-300 leading-snug">
+                          {activeSuggestion.reason}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDismissStageSuggestion}
+                      className="text-purple-500 hover:text-purple-700 dark:hover:text-purple-300 p-0.5 cursor-pointer"
+                      title="Dispensar sugestão"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <Button
+                      size="sm"
+                      onClick={() => handleApplyStageSuggestion(activeSuggestion)}
+                      className="h-6 text-[11px] px-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded cursor-pointer"
+                    >
+                      Avançar para {getStageLabel(activeSuggestion.suggestedStage)}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleDismissStageSuggestion}
+                      className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      Dispensar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+        {/* Registrar: os cinco registros com o mesmo peso */}
+        <div>
+          <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[.05em] text-muted-foreground">Registrar</div>
+          <div className="grid grid-cols-2 gap-[5px]">
+            <button
+              type="button"
+              onClick={() => setIsRegisterCallModalOpen(true)}
+              title="Registrar ligação telefônica (atendeu, ocupado etc.)"
+              className="min-h-9 cursor-pointer rounded-[7px] border border-border bg-card px-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+            >
+              Ligação
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMeetingToEdit(null);
+                setIsScheduleMeetingModalOpen(true);
+              }}
+              title="Agendar call no Google Meet e enviar convite no WhatsApp"
+              className="min-h-9 cursor-pointer rounded-[7px] border border-border bg-card px-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+            >
+              Reunião
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCreateReminderModalOpen(true)}
+              title="Criar lembrete pessoal interno (não envia nada ao cliente)"
+              className="min-h-9 cursor-pointer rounded-[7px] border border-border bg-card px-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+            >
+              Lembrete
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsApplyFollowupModalOpen(true)}
+              className="min-h-9 cursor-pointer rounded-[7px] border border-border bg-card px-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+            >
+              Cadência
+            </button>
+            {activeSchedule ? (
+              <button
+                type="button"
+                onClick={() => setIsEditScheduleModalOpen(true)}
+                title="Mensagem agendada ativa para este lead. Clique para editar ou cancelar."
+                className="col-span-2 flex min-h-9 cursor-pointer items-center justify-center gap-1.5 rounded-[7px] border border-indigo-300 bg-indigo-50 px-2 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-200"
+              >
+                <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  Mensagem agendada
+                  {activeSchedule.totalActiveCount && activeSchedule.totalActiveCount > 1 ? ` (+${activeSchedule.totalActiveCount - 1})` : ""} ·{" "}
+                  {formatScheduleDate(activeSchedule.nextScheduledFor)}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsReminderModalOpen(true)}
+                title="Agendar mensagem que dispara para o cliente na data e hora marcadas"
+                className="col-span-2 min-h-9 cursor-pointer rounded-[7px] border border-border bg-card px-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+              >
+                Agendar mensagem
+              </button>
+            )}
+          </div>
+        </div>
+
+        {podeGerarProposta && (
+          <button
+            type="button"
+            onClick={() => {
+              const rawP = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
+              const prospectName = matchedLead?.nome || selectedChat?.name || "";
+              const params = new URLSearchParams();
+              if (rawP) params.set("phone", rawP);
+              if (prospectName) params.set("nome", prospectName);
+              navigate(`/crm/propostas-gd?${params.toString()}`);
+            }}
+            className="w-full cursor-pointer rounded-[9px] bg-indigo-500 px-2.5 py-2.5 text-xs font-bold text-white hover:bg-indigo-600"
+          >
+            Gerar proposta comercial
+          </button>
+        )}
+
+        <div className="flex flex-col gap-2">
+                  {activeMeeting && (
+                    <MeetingPostCallCheckinCard
+                      meeting={activeMeeting}
+                      clientId={clientId}
+                      onReschedule={() => {
+                        setActiveMeetingToEdit(activeMeeting);
+                        setIsScheduleMeetingModalOpen(true);
+                      }}
+                      onStageChange={(newStage) => handleUpdateFunnelStage(newStage)}
+                    />
+                  )}
+
+                  {regularPendingReminder && (
+                    <div
+                      className={cn(
+                        "rounded-xl border p-2.5 text-xs flex items-start justify-between gap-2 shadow-2xs",
+                        regularPendingReminder.isOverdue
+                          ? "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-200"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200"
+                      )}
+                    >
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div
+                          className={cn(
+                            "flex items-center gap-1.5 font-bold",
+                            regularPendingReminder.isOverdue
+                              ? "text-rose-800 dark:text-rose-300"
+                              : "text-amber-800 dark:text-amber-300"
+                          )}
+                        >
+                          <Bell
+                            className={cn(
+                              "h-3.5 w-3.5 shrink-0",
+                              regularPendingReminder.isOverdue
+                                ? "text-rose-600 dark:text-rose-400"
+                                : "text-amber-600 dark:text-amber-400"
+                            )}
+                          />
+                          {regularPendingReminder.isOverdue && (
+                            <span className="rounded bg-rose-600 px-1 py-0.5 text-[9px] font-extrabold uppercase text-white tracking-wider shrink-0">
+                              Venceu
+                            </span>
+                          )}
+                          <span className="truncate">{regularPendingReminder.title}</span>
+                        </div>
+                        {regularPendingReminder.notes && (
+                          <p
+                            className={cn(
+                              "text-[11px] line-clamp-2",
+                              regularPendingReminder.isOverdue
+                                ? "text-rose-700/80 dark:text-rose-300/80"
+                                : "text-amber-700/80 dark:text-amber-300/80"
+                            )}
+                          >
+                            {regularPendingReminder.notes}
+                          </p>
+                        )}
+                        <div
+                          className={cn(
+                            "flex items-center gap-2 text-[10px] pt-0.5 font-mono",
+                            regularPendingReminder.isOverdue
+                              ? "text-rose-600 dark:text-rose-400"
+                              : "text-amber-600 dark:text-amber-400"
+                          )}
+                        >
+                          <span>📅 {formatScheduleDate(regularPendingReminder.remindAt)}</span>
+                          {regularPendingReminder.assignedToName && (
+                            <span>· 👤 {regularPendingReminder.assignedToName}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              await completeLeadReminder.mutateAsync(regularPendingReminder.id);
+                              toast.success("Lembrete concluído!");
+                            } catch (err: any) {
+                              toast.error(err?.message || "Erro ao concluir lembrete.");
+                            }
+                          }}
+                          disabled={completeLeadReminder.isPending}
+                          className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white border-none shrink-0 cursor-pointer gap-1 shadow-2xs"
+                          title="Concluir lembrete em 1 clique"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Concluir
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
+                              title="Opções do lembrete"
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-32">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setEditingReminder(regularPendingReminder);
+                                setIsCreateReminderModalOpen(true);
+                              }}
+                              className="cursor-pointer text-xs flex items-center gap-2"
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span>Editar</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={async () => {
+                                if (window.confirm("Deseja realmente excluir este lembrete?")) {
+                                  try {
+                                    await deleteLeadReminder.mutateAsync(regularPendingReminder.id);
+                                    toast.success("Lembrete excluído!");
+                                  } catch (err: any) {
+                                    toast.error(err?.message || "Erro ao excluir lembrete.");
+                                  }
+                                }
+                              }}
+                              className="cursor-pointer text-xs flex items-center gap-2 text-rose-600 focus:text-rose-600"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Excluir</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  )}
+        </div>
+
+        {matchedLead && (
+          <div className="flex items-center gap-2.5 rounded-[9px] border border-border/60 bg-muted/30 px-[11px] py-[9px]">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11.5px] font-semibold text-foreground">Bloquear disparos em massa</div>
+              <div className="text-[10px] text-muted-foreground">opt-out deste lead</div>
+            </div>
+            <Switch
+              aria-label="Bloquear disparos em massa para este lead"
+              checked={Boolean((matchedLead as any)?.opt_out || (matchedLead?.dados as any)?.opt_out || (matchedLead as any)?.metadata?.opt_out === "true")}
+              onCheckedChange={(checked) => handleToggleOptOut(matchedLead.id, checked)}
+            />
+          </div>
+        )}
+
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              const p = new URLSearchParams();
+              if (matchedLead?.id) p.set("leadId", matchedLead.id);
+              if (rawPhone) p.set("phone", rawPhone);
+              navigate(`/crm/banco-de-dados?${p.toString()}`);
+            }}
+            className="cursor-pointer py-1 text-[11px] font-semibold text-indigo-600 hover:underline dark:text-indigo-300"
+          >
+            Histórico completo
+          </button>
+                  <div className="pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowCompletedReminders((prev) => !prev)}
+                      className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1"
+                    >
+                      {showCompletedReminders ? (
+                        <ChevronDown className="h-3 w-3" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3" />
+                      )}
+                      <span>Lembretes concluídos</span>
+                    </button>
+
+                    {showCompletedReminders && (
+                      <div className="mt-1 space-y-1.5 pl-1">
+                        {completedRemindersQuery.isLoading ? (
+                          <div className="text-[10px] text-muted-foreground p-1">Carregando concluídos...</div>
+                        ) : completedReminders.length === 0 ? (
+                          <div className="text-[10px] text-muted-foreground italic p-1">
+                            Nenhum lembrete concluído para este contato.
+                          </div>
+                        ) : (
+                          completedReminders.map((r) => (
+                            <div
+                              key={r.id}
+                              className="rounded-lg border border-border/40 bg-muted/20 p-2 text-xs flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0 flex-1 space-y-0.5 opacity-80">
+                                <div className="flex items-center gap-1.5 font-medium line-through text-muted-foreground text-[11px]">
+                                  <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                                  <span className="truncate">{r.title}</span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground font-mono">
+                                  Concluído {r.completedAt ? formatScheduleDate(r.completedAt) : ""}
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={async () => {
+                                  try {
+                                    await updateLeadReminder.mutateAsync({
+                                      id: r.id,
+                                      status: "pending",
+                                    });
+                                    toast.success("Lembrete reaberto com sucesso!");
+                                  } catch (err: any) {
+                                    toast.error(err?.message || "Erro ao reabrir lembrete.");
+                                  }
+                                }}
+                                disabled={updateLeadReminder.isPending}
+                                className="h-6 px-2 text-[10px] font-semibold text-muted-foreground hover:text-foreground rounded cursor-pointer gap-1"
+                                title="Desfazer conclusão e mover de volta para pendente"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Desfazer
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <PageShell title={title} subtitle={subtitle} headerRight={headerRight} compactHero spacing="space-y-4">
+    <PageShell title={title} subtitle={subtitle} headerRight={headerRight} hideHero spacing="space-y-4">
       {tenantsLoading ? (
         <div className="flex flex-col items-center justify-center gap-4 py-20 text-sm text-muted-foreground">
           <LoaderCircle className="h-7 w-7 animate-spin text-emerald-500" />
@@ -1379,359 +2159,108 @@ export default function WhatsAppInbox({
           description="Conecte pelo menos um chip de WhatsApp ativo em 'Chips WhatsApp' para visualizar e enviar mensagens."
         />
       ) : (
-        /* ── LAYOUT PRINCIPAL: LISTA FIXA (300px), CHAT RESPONSIVO (flex-1), DOSSIÊ COLAPSÁVEL (320px) ── */
-        <div className="flex h-[calc(100vh-220px)] min-h-[650px] gap-3">
-          {/* ══════════════════════════════════════════════════════════════════════════
-              COLUNA 1: Lista de Conversas, Filtros & Busca (Largura Fixa 300px)
-          ══════════════════════════════════════════════════════════════════════════ */}
-          <div className="w-[300px] shrink-0 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/60 shadow-xs">
-            {/* Header com Abas de Navegação */}
-            <div className="flex flex-col gap-2.5 border-b border-border/60 p-3 bg-muted/20">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-                  Conversas
-                </span>
-                <span
-                  className="text-[11px] font-semibold text-muted-foreground font-mono"
-                  title={`Total no banco: ${totalChatsCount} | Carregadas na tela: ${filteredChats.length}`}
-                >
-                  {formatHeaderCount(filteredChats.length, totalChatsCount)}
-                </span>
-              </div>
+        /* ── PAINEL DE PLANTÃO: fila à esquerda, conversa no resto, dossiê em gaveta ── */
+        <div
+          data-testid="inbox-layout"
+          className="flex h-[calc(100dvh-100px)] min-h-[480px] overflow-hidden rounded-2xl border border-border/80 bg-card shadow-xs"
+        >
+          {/* ═══════════ COLUNA 1 — A FILA ═══════════ */}
+          <aside
+            data-testid="inbox-column"
+            className={cn(
+              "min-h-0 w-full flex-col border-border/80 md:w-[340px] md:shrink-0 md:border-r xl:w-[380px]",
+              mobileView === "chat" ? "hidden md:flex" : "flex"
+            )}
+          >
+            <InboxSearchRow
+              search={searchQuery}
+              onSearchChange={setSearchQuery}
+              filtersOpen={filtersOpen}
+              onFiltersOpenChange={setFiltersOpen}
+              chipValue={selectedInstanceNames[0] || null}
+              chipOptions={chipOptions}
+              chipAgents={chatsQuery.chipAgents}
+              onChipChange={(val) => setSelectedInstanceNames(val ? [val] : [])}
+              otherLists={otherLists}
+              activeTab={inboxTab}
+              onTabChange={setInboxTab}
+              selectMode={selectMode}
+              onToggleSelectMode={() => {
+                setSelectMode((v) => !v);
+                setSelectedChatIds(new Set());
+              }}
+            />
 
-              {/* Abas de Navegação do Inbox */}
-              <div className="flex flex-col gap-1 rounded-xl bg-background p-1 border border-border/70 text-[11px]">
-                {/* Linha 1: Fila | Espera | Minhas | Hoje | Todas */}
-                <div className="grid grid-cols-5 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("fila")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center",
-                      inboxTab === "fila"
-                        ? "bg-primary text-primary-foreground shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    title="Fila de trabalho limpa (sem grupos e sem automações)"
-                  >
-                    Fila
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("aguardando")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
-                      inboxTab === "aguardando"
-                        ? "bg-amber-600 text-white shadow-xs"
-                        : "text-amber-700 dark:text-amber-400 hover:text-foreground"
-                    )}
-                    title="Leads que responderam e estão aguardando nossa resposta"
-                  >
-                    <span>Espera</span>
-                    {(chatsQuery.counts?.awaiting ?? 0) > 0 && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "aguardando"
-                            ? "bg-white text-amber-800"
-                            : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                        )}
-                      >
-                        {chatsQuery.counts?.awaiting}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("minhas")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
-                      inboxTab === "minhas"
-                        ? "bg-primary text-primary-foreground shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    title="Conversas atribuídas a você"
-                  >
-                    <span>Minhas</span>
-                    {Boolean(chatsQuery.counts?.myUnopened && chatsQuery.counts.myUnopened > 0) && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "minhas"
-                            ? "bg-white text-primary"
-                            : "bg-primary/20 text-primary dark:text-primary-foreground"
-                        )}
-                        title={`${chatsQuery.counts?.myUnopened} novos leads atribuídos não abertos`}
-                      >
-                        {chatsQuery.counts?.myUnopened}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("hoje")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-0.5",
-                      inboxTab === "hoje"
-                        ? "bg-primary text-primary-foreground shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    title="Pendências para hoje ou atrasadas (mensagens agendadas e lembretes pessoais)"
-                  >
-                    <span>Hoje</span>
-                    {hojeBadgeCount > 0 && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "hoje"
-                            ? "bg-white text-primary"
-                            : "bg-primary/20 text-primary dark:text-primary-foreground"
-                        )}
-                        title={`${hojeBadgeCount} pendências para hoje ou atrasadas`}
-                      >
-                        {hojeBadgeCount}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("todas")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center",
-                      inboxTab === "todas"
-                        ? "bg-primary text-primary-foreground shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    title="Todas as conversas (incluindo grupos e arquivadas)"
-                  >
-                    Todas
-                  </button>
-                </div>
-
-                {/* Linha 2: Automações | Arquivadas | Pausadas | Grupos */}
-                <div className="grid grid-cols-4 gap-1 border-t border-border/40 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("automacao")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
-                      inboxTab === "automacao"
-                        ? "bg-purple-600 text-white shadow-xs"
-                        : "text-purple-700 dark:text-purple-400 hover:text-foreground"
-                    )}
-                    title="Robôs e autoatendimentos detectados"
-                  >
-                    <span>Automações</span>
-                    {(chatsQuery.counts?.automations ?? 0) > 0 && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "automacao"
-                            ? "bg-white text-purple-800"
-                            : "bg-purple-500/20 text-purple-700 dark:text-purple-300"
-                        )}
-                      >
-                        {chatsQuery.counts?.automations}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("arquivadas")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
-                      inboxTab === "arquivadas"
-                        ? "bg-slate-700 text-white shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    title="Conversas arquivadas manualmente"
-                  >
-                    <span>Arquivadas</span>
-                    {(chatsQuery.counts?.archived ?? 0) > 0 && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "arquivadas"
-                            ? "bg-white text-slate-800"
-                            : "bg-slate-500/20 text-slate-700 dark:text-slate-300"
-                        )}
-                      >
-                        {chatsQuery.counts?.archived}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("pausadas")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
-                      inboxTab === "pausadas"
-                        ? "bg-amber-600 text-white shadow-xs"
-                        : "text-amber-700 dark:text-amber-400 hover:text-foreground"
-                    )}
-                    title="Conversas com o agente pausado. A pausa só sai pelo Reativar agente."
-                  >
-                    <span>Pausadas</span>
-                    {(chatsQuery.counts?.paused ?? 0) > 0 && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "pausadas"
-                            ? "bg-white text-amber-800"
-                            : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                        )}
-                      >
-                        {chatsQuery.counts?.paused}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInboxTab("grupos")}
-                    className={cn(
-                      "rounded-lg py-1 font-semibold transition-all text-center flex items-center justify-center gap-1 text-[10px]",
-                      inboxTab === "grupos"
-                        ? "bg-blue-600 text-white shadow-xs"
-                        : "text-blue-700 dark:text-blue-400 hover:text-foreground"
-                    )}
-                    title="Grupos de WhatsApp"
-                  >
-                    <span>Grupos</span>
-                    {(chatsQuery.counts?.groups ?? 0) > 0 && (
-                      <span
-                        className={cn(
-                          "rounded-full px-1 text-[9px] font-bold leading-tight",
-                          inboxTab === "grupos"
-                            ? "bg-white text-blue-800"
-                            : "bg-blue-500/20 text-blue-700 dark:text-blue-300"
-                        )}
-                      >
-                        {chatsQuery.counts?.groups}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* Barra de Busca em Tempo Real */}
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por nome ou número..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-8.5 pl-8 text-xs rounded-xl bg-background border-border/80"
-                />
-              </div>
-
-              {/* Seletor Dropdown de Chips */}
-              <div className="flex items-center gap-2 pt-1 pb-1">
-                <Smartphone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <Select
-                  value={selectedInstanceNames[0] || "all"}
-                  onValueChange={(val) => setSelectedInstanceNames(val === "all" ? [] : [val])}
-                >
-                  <SelectTrigger className="h-7 text-xs rounded-lg border-border/80 bg-background w-full">
-                    <SelectValue placeholder="Todos os chips conectados" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">📱 Todos os chips conectados</SelectItem>
-                    {evolutionInstances.map((inst) => {
-                      const urlName = inst.dispatch_webhook_url
-                        ? inst.dispatch_webhook_url.split("/").filter(Boolean).pop() ?? inst.name
-                        : inst.name;
-                      return (
-                        <SelectItem key={urlName} value={urlName}>
-                          🟢 {inst.name}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="px-4 pt-3">
+              <InboxStateTabs active={inboxTab} counts={chatsQuery.counts?.work} onChange={setInboxTab} />
             </div>
 
-            {/* Barra de Seleção em Massa ou Cabeçalho de Itens */}
-            {selectedChatIds.size > 0 ? (
-              <div className="sticky top-0 z-20 flex flex-col gap-1.5 p-2 bg-primary/10 dark:bg-primary/20 border-b border-primary/30 shadow-xs">
-                <div className="flex items-center justify-between gap-1 text-xs">
-                  <div className="flex items-center gap-1.5 font-semibold text-primary">
+            <InboxOrderRow label={orderLabel} chipLabel={chipScopeLabel} onChipClick={() => setFiltersOpen(true)} />
+
+            {showBulkBar && (
+              <div className="flex flex-col gap-1.5 border-y border-indigo-200 bg-indigo-50 px-3 py-2 dark:border-indigo-500/30 dark:bg-indigo-500/10" data-testid="inbox-bulk-bar">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
+                  <div className="flex items-center gap-1.5 font-semibold text-indigo-700 dark:text-indigo-200">
                     <CheckSquare className="h-3.5 w-3.5" />
-                    <span>{selectedChatIds.size} selecionada{selectedChatIds.size > 1 ? "s" : ""}</span>
+                    <span>
+                      {selectedChatIds.size} selecionada{selectedChatIds.size === 1 ? "" : "s"}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1 flex-wrap">
+                  <div className="flex flex-wrap items-center gap-1">
                     <Button
                       variant="default"
                       size="sm"
-                      className="h-6.5 px-2 text-[11px] font-semibold gap-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-xs cursor-pointer"
+                      className="h-7 cursor-pointer gap-1 rounded-lg bg-amber-600 px-2 text-[11px] font-semibold text-white shadow-xs hover:bg-amber-700"
                       onClick={handleRequestBulkCreateLeads}
-                      disabled={bulkCreateLeadsMutation.isPending}
+                      disabled={bulkCreateLeadsMutation.isPending || selectedChatIds.size === 0}
                       title="Cadastrar contatos selecionados como leads no CRM"
                     >
                       <UserPlus className="h-3 w-3" />
-                      Cadastrar Leads ({selectedChatIds.size})
+                      Cadastrar leads
                     </Button>
                     <Button
                       variant="default"
                       size="sm"
-                      className="h-6.5 px-2 text-[11px] font-semibold gap-1 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-white rounded-lg shadow-xs cursor-pointer"
+                      className="h-7 cursor-pointer gap-1 rounded-lg bg-slate-900 px-2 text-[11px] font-semibold text-white shadow-xs hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
                       onClick={() => handleRequestBulkArchive(Array.from(selectedChatIds))}
+                      disabled={selectedChatIds.size === 0}
                       title="Arquivar conversas selecionadas"
                     >
                       <Archive className="h-3 w-3" />
-                      Arquivar ({selectedChatIds.size})
+                      Arquivar
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6.5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
-                      onClick={() => setSelectedChatIds(new Set())}
-                      title="Limpar seleção"
+                      className="h-7 cursor-pointer px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setSelectedChatIds(new Set());
+                        setSelectMode(false);
+                      }}
+                      title="Sair da seleção"
                     >
-                      Limpar
+                      Sair
                     </Button>
                   </div>
                 </div>
-
-                {/* Opção para selecionar todas as conversas visíveis */}
                 {filteredChats.length > selectedChatIds.size && (
                   <button
                     type="button"
                     onClick={handleSelectAllVisible}
-                    className="text-left text-[10px] text-primary hover:underline font-medium cursor-pointer"
+                    className="cursor-pointer text-left text-[11px] font-medium text-indigo-700 hover:underline dark:text-indigo-200"
                   >
                     Selecionar todas as {filteredChats.length} conversas desta lista
                   </button>
                 )}
               </div>
-            ) : filteredChats.length > 0 ? (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/40 text-[10px] text-muted-foreground">
-                <span>{filteredChats.length} conversa{filteredChats.length > 1 ? "s" : ""}</span>
-                <button
-                  type="button"
-                  onClick={handleSelectAllVisible}
-                  className="text-primary hover:underline font-medium flex items-center gap-1 cursor-pointer"
-                  title="Selecionar todas as conversas visíveis"
-                >
-                  <Square className="h-3 w-3" />
-                  Selecionar todas
-                </button>
-              </div>
-            ) : null}
+            )}
 
-            {/* Lista Scrollável de Chats */}
-            <div
-              ref={chatsContainerRef}
-              onScroll={handleChatsScroll}
-              className="flex-1 overflow-y-auto divide-y divide-border/40"
-            >
+            {/* Lista */}
+            <div ref={chatsContainerRef} onScroll={handleChatsScroll} className="min-h-0 flex-1 overflow-y-auto" data-testid="inbox-list">
               {chatsQuery.isLoading ? (
-                <div className="p-6 text-center text-xs text-muted-foreground">
-                  Carregando conversas...
-                </div>
+                <div className="p-6 text-center text-xs text-muted-foreground">Carregando conversas...</div>
               ) : chatsQuery.error && filteredChats.length === 0 ? (
-                <div role="alert" data-testid="chats-error" className="p-6 text-center text-xs text-destructive space-y-2">
+                <div role="alert" data-testid="chats-error" className="space-y-2 p-6 text-center text-xs text-destructive">
                   <p className="font-medium">Não foi possível carregar as conversas.</p>
                   <p className="text-muted-foreground">
                     {chatsQuery.error instanceof Error ? chatsQuery.error.message : "Erro desconhecido."}
@@ -1739,17 +2268,17 @@ export default function WhatsAppInbox({
                   <button
                     type="button"
                     onClick={() => chatsQuery.refetch()}
-                    className="underline underline-offset-2 text-foreground hover:text-primary"
+                    className="text-foreground underline underline-offset-2 hover:text-primary"
                   >
                     Tentar de novo
                   </button>
                 </div>
               ) : filteredChats.length === 0 ? (
-                <div className="p-6 text-center text-xs text-muted-foreground">
-                  Nenhuma conversa encontrada.
+                <div className="p-6 text-center text-xs text-muted-foreground" data-testid="inbox-empty">
+                  {(!debouncedSearch && EMPTY_TAB_TEXT[inboxTab]) || "Nenhuma conversa encontrada."}
                 </div>
-              ) : (() => {
-                const renderChatCard = (chat: WhatsAppChat) => {
+              ) : (
+                filteredChats.map((chat) => {
                   const isSelected = selectedChatId === chat.id;
                   const rawId = String(chat.id || "");
                   const isJid = rawId.includes("@");
@@ -1763,539 +2292,200 @@ export default function WhatsAppInbox({
                   const cardSummary = cPhone ? itemsByPhone[cPhone] : null;
                   const cardHasActiveSchedule = Boolean(cardSummary?.activeSchedule);
                   const cardPendingReminders = cardSummary?.activeReminders || [];
-                  const cardHasPendingReminder = cardPendingReminders.length > 0;
-                  const precisaAtencao = Boolean(
-                    lead?.dados?.precisa_atencao_humana || (lead as any)?.precisa_atencao_humana
-                  );
+                  const precisaAtencao = Boolean(lead?.dados?.precisa_atencao_humana || (lead as any)?.precisa_atencao_humana);
                   const motivoAtencao = String(
-                    lead?.dados?.motivo_atencao_humana ||
-                      (lead as any)?.motivo_atencao_humana ||
-                      "Atenção humana solicitada"
+                    lead?.dados?.motivo_atencao_humana || (lead as any)?.motivo_atencao_humana || "Atenção humana solicitada"
                   );
                   const isAttended = Boolean(
-                    chat.attendedAt &&
-                    (!chat.timestamp || new Date(chat.attendedAt).getTime() >= chat.timestamp * 1000)
+                    chat.attendedAt && (!chat.timestamp || new Date(chat.attendedAt).getTime() >= chat.timestamp * 1000)
                   );
                   const isAwaitingReply = Boolean(
                     !chat.isGroup &&
-                    !rawId.includes("@g.us") &&
-                    chat.state !== "automacao" &&
-                    chat.state !== "arquivada" &&
-                    !chat.archived &&
-                    chat.lastMessage &&
-                    !chat.lastMessage.fromMe &&
-                    !precisaAtencao &&
-                    !isAttended
+                      !rawId.includes("@g.us") &&
+                      chat.state !== "automacao" &&
+                      chat.state !== "arquivada" &&
+                      !chat.archived &&
+                      chat.lastMessage &&
+                      !chat.lastMessage.fromMe &&
+                      !precisaAtencao &&
+                      !isAttended
                   );
+                  const reminder = cardPendingReminders[0];
+                  const lastSender = chat.lastMessage?.senderType;
+                  const lastFromRobot = Boolean(chat.lastMessage?.fromMe && (lastSender === "bot" || lastSender === "campaign"));
+                  const previewBody = getPreview(chat);
+                  const preview = chat.leadNeverSpoke
+                    ? `Sem resposta · ${previewBody}`
+                    : !chat.lastMessage?.fromMe
+                    ? previewBody
+                    : lastFromRobot
+                    ? `Robô: ${previewBody}`
+                    : `Você: ${previewBody}`;
 
                   return (
-                    <button
+                    <ConversationListItem
                       key={chat.id}
-                      type="button"
-                      onClick={() => setSelectedChatId(chat.id)}
-                      className={cn(
-                        "flex w-full items-start gap-2.5 p-2.5 text-left transition-all hover:bg-muted/50 cursor-pointer",
-                        isSelected && "bg-emerald-500/10 border-l-4 border-l-emerald-500 pl-2",
-                        precisaAtencao && !isSelected && "bg-rose-500/5 border-l-2 border-l-rose-500 pl-2"
-                      )}
+                      id={chat.id}
+                      label={chat.name || phoneLabel}
+                      preview={preview}
+                      selected={isSelected}
+                      selectMode={showBulkBar}
+                      checked={selectedChatIds.has(chat.id)}
+                      onSelect={() => {
+                        setSelectedChatId(chat.id);
+                        setMobileView("chat");
+                      }}
+                      onToggleCheck={() => toggleSelectChat(chat.id)}
+                      waitingSince={chat.waitingSince}
+                      showWait={waitOrderedTab}
+                      fallbackTime={formatChatDate(chat.timestamp)}
+                      now={nowTick}
+                      flags={{
+                        unreadCount: chat.unreadCount,
+                        attentionReason: precisaAtencao ? motivoAtencao : null,
+                        isNumberChange: chat.isNumberChange,
+                        isAgentMuted: Boolean(chat.agentMutedAt),
+                        agentMutedReason: chat.agentMutedReason,
+                        isAutomation: chat.state === "automacao",
+                        automationReason: chat.stateReason,
+                        isArchived: chat.state === "arquivada" || chat.archived,
+                        isGroup: chat.isGroup,
+                        isTransferred: Boolean(chat.lastMessage?.meta?.is_handoff_bridge),
+                        transferredTo: chat.lastMessage?.meta?.transferred_to_chip || null,
+                        isAttended:
+                          isAttended &&
+                          !isAwaitingReply &&
+                          chat.state !== "automacao" &&
+                          chat.state !== "arquivada" &&
+                          !chat.archived &&
+                          !chat.isGroup,
+                        attendedBy: chat.attendedBy,
+                        noLead: !chat.isGroup && !rawId.includes("@g.us") && !lead,
+                        scheduleText: cardHasActiveSchedule ? formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor) : null,
+                        reminder: reminder
+                          ? { title: reminder.title, overdue: Boolean(reminder.isOverdue), when: formatScheduleDate(reminder.remindAt) }
+                          : null,
+                        stalledDays: lead && isLeadStalled(lead, reactivationStalledDays) ? computeLeadDaysIdle(lead) : null,
+                        fromCampaign: chat.leadOrigin === "campaign",
+                        campaignName: chat.sourceCampaignId ? campaignNames.get(chat.sourceCampaignId) ?? null : null,
+                        leadNeverSpoke: chat.leadNeverSpoke,
+                        lastFromRobot,
+                      }}
                     >
-                      {/* Checkbox de Seleção Individual */}
-                      <div
-                        className="flex items-center self-center shrink-0 pr-0.5"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                        }}
-                      >
-                        <Checkbox
-                          checked={selectedChatIds.has(chat.id)}
-                          onCheckedChange={() => toggleSelectChat(chat.id)}
-                          className="h-4 w-4 rounded-sm border-border/80 data-[state=checked]:bg-primary"
-                          aria-label={`Selecionar ${chat.name || phoneLabel}`}
-                        />
-                      </div>
-
-                      <ChatAvatar label={chat.name || phoneLabel} picture={chat.profilePic} size="md" />
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                          <p
-                            className={cn(
-                              "truncate text-xs font-bold",
-                              isSelected
-                                ? "text-emerald-700 dark:text-emerald-300"
-                                : precisaAtencao
-                                ? "text-rose-700 dark:text-rose-300"
-                                : "text-foreground"
-                            )}
-                          >
-                            {chat.name || phoneLabel}
-                          </p>
-                          <span className="shrink-0 text-[10px] text-muted-foreground">
-                            {formatChatDate(chat.timestamp)}
-                          </span>
+                      {inboxTab === "hoje" && cardSummary?.todayDue?.hasScheduledToday && (
+                        <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] text-indigo-800 dark:text-indigo-300">
+                          <Clock3 className="h-3 w-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                          <span className="font-bold">Vai ser enviado ao cliente:</span>
+                          <span className="truncate">mensagem agendada para {formatScheduleDate(cardSummary.todayDue.scheduledAt)}</span>
                         </div>
-
-                        <p className="truncate text-[11px] text-muted-foreground leading-snug">
-                          {getPreview(chat)}
-                        </p>
-
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                          {chat.unreadCount > 0 && (
-                            <span className="rounded-full bg-emerald-500 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
-                              {chat.unreadCount}
-                            </span>
-                          )}
-                          {chat.isNumberChange && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
-                              title="Contato informou novo número / mudança de telefone"
-                            >
-                              <Phone className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                              <span>Novo Número</span>
-                            </span>
-                          )}
-                          {chat.agentMutedAt && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 border border-slate-500/30 px-1.5 py-0.5 text-[9px] font-semibold text-slate-700 dark:text-slate-300"
-                              title={chat.agentMutedReason ? `Agente pausado: ${chat.agentMutedReason}` : "Agente pausado · conversa pessoal"}
-                            >
-                              <BotOff className="h-2.5 w-2.5 text-slate-600 dark:text-slate-400 shrink-0" />
-                              <span>Agente pausado · {chat.agentMutedReason || "conversa pessoal"}</span>
-                            </span>
-                          )}
-                          {chat.state === "automacao" && !chat.isNumberChange && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 text-[9px] font-bold text-purple-700 dark:text-purple-300"
-                              title={chat.stateReason || "Robô / Autoatendimento detectado"}
-                            >
-                              <Bot className="h-2.5 w-2.5 text-purple-600 dark:text-purple-400 shrink-0" />
-                              <span>Automação</span>
-                            </span>
-                          )}
-                          {(chat.state === "arquivada" || chat.archived) && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-slate-500/15 border border-slate-500/30 px-1.5 py-0.5 text-[9px] font-bold text-slate-700 dark:text-slate-300"
-                            >
-                              <Archive className="h-2.5 w-2.5 shrink-0" />
-                              <span>Arquivada</span>
-                            </span>
-                          )}
-                          {chat.isGroup && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.5 text-[9px] font-bold text-blue-700 dark:text-blue-300"
-                            >
-                              <Users className="h-2.5 w-2.5 shrink-0" />
-                              <span>Grupo</span>
-                            </span>
-                          )}
-                          {precisaAtencao && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.5 text-[9px] font-bold text-rose-700 dark:text-rose-300"
-                              title={`Atenção humana necessária: ${motivoAtencao}`}
-                            >
-                              <ShieldAlert className="h-2.5 w-2.5 text-rose-600 dark:text-rose-400 shrink-0" />
-                              <span>Atenção Humana</span>
-                            </span>
-                          )}
-                          {Boolean(chat.lastMessage?.meta?.is_handoff_bridge) && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
-                              title={
-                                chat.lastMessage?.meta?.transferred_to_chip
-                                  ? `Conversa transferida para ${chat.lastMessage.meta.transferred_to_chip}`
-                                  : "Conversa transferida para outro chip"
-                              }
-                            >
-                              <span>🤝</span>
-                              <span>Transferido para {chat.lastMessage?.meta?.transferred_to_chip || "outro chip"}</span>
-                            </span>
-                          )}
-                          {isAwaitingReply && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300">
-                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                              Aguardando resposta
-                            </span>
-                          )}
-                          {isAttended && !isAwaitingReply && chat.state !== "automacao" && chat.state !== "arquivada" && !chat.archived && !chat.isGroup && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-300"
-                              title={chat.attendedBy ? `Atendido por ${chat.attendedBy}` : "Atendimento registrado"}
-                            >
-                              <CheckCheck className="h-2.5 w-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                              <span>Atendido</span>
-                            </span>
-                          )}
-                          {!chat.isGroup && !rawId.includes("@g.us") && !lead && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700 dark:text-amber-300"
-                              title="Contato ainda não cadastrado na base de Leads do CRM"
-                            >
-                              <UserPlus className="h-2.5 w-2.5 shrink-0" />
-                              <span>Sem Lead</span>
-                            </span>
-                          )}
-                          {cardHasActiveSchedule && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:text-indigo-300"
-                              title={`Vai ser enviado ao cliente: mensagem agendada para ${formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)}`}
-                            >
-                              <Clock3 className="h-2.5 w-2.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                              <span>📤 Envio {formatScheduleDate(cardSummary?.activeSchedule?.nextScheduledFor)}</span>
-                            </span>
-                          )}
-                          {cardHasPendingReminder && (
-                            <span
-                              className={cn(
-                                "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
-                                cardPendingReminders[0].isOverdue
-                                  ? "bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-300"
-                                  : "bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-300"
-                              )}
-                              title={
-                                cardPendingReminders[0].isOverdue
-                                  ? `VENCEU: lembrete pessoal "${cardPendingReminders[0].title}" venceu em ${formatScheduleDate(cardPendingReminders[0].remindAt)}`
-                                  : `Só para você: lembrete pessoal "${cardPendingReminders[0].title}" para ${formatScheduleDate(cardPendingReminders[0].remindAt)}`
-                              }
-                            >
-                              <Bell className={cn("h-2.5 w-2.5 shrink-0", cardPendingReminders[0].isOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
-                              <span>{cardPendingReminders[0].isOverdue ? `⏰ Venceu · ${cardPendingReminders[0].title}` : `📌 ${cardPendingReminders[0].title}`}</span>
-                            </span>
-                          )}
-                          {lead && isLeadStalled(lead, reactivationStalledDays) && (
-                            <span
-                              data-testid={`lead-stalled-badge-${chat.id}`}
-                              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300"
-                              title={`Lead parado há ${computeLeadDaysIdle(lead)} dias sem resposta`}
-                            >
-                              <span>⚠️ Parado há {computeLeadDaysIdle(lead)}d</span>
-                            </span>
-                          )}
-                          <OriginBadge
-                            origin={chat.leadOrigin ?? null}
-                            campaignId={chat.sourceCampaignId ?? null}
-                            campaignNames={campaignNames}
-                          />
-                        </div>
-                        {inboxTab === "hoje" && cardSummary?.todayDue?.hasScheduledToday && (
-                          <div className="mt-1 flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[10px] text-indigo-800 dark:text-indigo-300">
-                            <Clock3 className="h-3 w-3 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                            <span className="font-bold">Vai ser enviado ao cliente:</span>
-                            <span className="truncate">mensagem agendada para {formatScheduleDate(cardSummary.todayDue.scheduledAt)}</span>
-                          </div>
-                        )}
-                        {inboxTab === "hoje" && cardSummary?.todayDue?.hasReminderToday && (
-                          <div className={cn(
+                      )}
+                      {inboxTab === "hoje" && cardSummary?.todayDue?.hasReminderToday && (
+                        <div
+                          className={cn(
                             "mt-1 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px]",
                             cardSummary.todayDue.isReminderOverdue
                               ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300"
                               : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-                          )}>
-                            <Bell className={cn("h-3 w-3 shrink-0", cardSummary.todayDue.isReminderOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400")} />
-                            <span className="font-bold">{cardSummary.todayDue.isReminderOverdue ? "Venceu:" : "Só para você:"}</span>
-                            <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                };
-
-                if (inboxTab === "aguardando") {
-                  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-                  const recentAwaitingChats = filteredChats.filter(
-                    (c) => Boolean(c.timestamp && c.timestamp * 1000 >= sevenDaysAgoMs)
-                  );
-                  const olderAwaitingChats = filteredChats.filter(
-                    (c) => !c.timestamp || c.timestamp * 1000 < sevenDaysAgoMs
-                  );
-
-                  return (
-                    <div className="flex flex-col divide-y divide-border/30">
-                      {/* Seção 1: Últimos 7 dias */}
-                      <div className="px-3 py-1.5 bg-muted/40 text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
-                        <span>Últimos 7 dias ({recentAwaitingChats.length})</span>
-                      </div>
-                      <div className="divide-y divide-border/40">
-                        {recentAwaitingChats.length === 0 ? (
-                          <div className="p-4 text-center text-xs text-muted-foreground">
-                            Nenhuma conversa recente nos últimos 7 dias.
-                          </div>
-                        ) : (
-                          recentAwaitingChats.map(renderChatCard)
-                        )}
-                      </div>
-
-                      {/* Seção 2: Mais antigas (Recolhidas por padrão) */}
-                      {olderAwaitingChats.length > 0 && (
-                        <div className="border-t border-border/60">
-                          <button
-                            type="button"
-                            onClick={() => setShowOlderAwaiting((v) => !v)}
-                            className="w-full px-3 py-2 bg-muted/20 hover:bg-muted/40 text-[11px] font-semibold text-muted-foreground flex items-center justify-between transition-colors cursor-pointer"
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <Clock3 className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                              <span>Mais antigas ({olderAwaitingChats.length})</span>
-                            </div>
-                            <span className="text-[10px] text-primary flex items-center gap-0.5">
-                              {showOlderAwaiting ? "Recolher" : "Expandir"}
-                              {showOlderAwaiting ? (
-                                <ChevronUp className="h-3.5 w-3.5" />
-                              ) : (
-                                <ChevronDown className="h-3.5 w-3.5" />
-                              )}
-                            </span>
-                          </button>
-                          {showOlderAwaiting && (
-                            <div className="divide-y divide-border/40 bg-muted/5">
-                              {olderAwaitingChats.map(renderChatCard)}
-                            </div>
                           )}
+                        >
+                          <Bell
+                            className={cn(
+                              "h-3 w-3 shrink-0",
+                              cardSummary.todayDue.isReminderOverdue ? "text-rose-600 dark:text-rose-400" : "text-amber-600 dark:text-amber-400"
+                            )}
+                          />
+                          <span className="font-bold">{cardSummary.todayDue.isReminderOverdue ? "Venceu:" : "Só para você:"}</span>
+                          <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
                         </div>
                       )}
-                    </div>
+                    </ConversationListItem>
                   );
-                }
-
-                return filteredChats.map(renderChatCard);
-              })()}
+                })
+              )}
             </div>
-          </div>
 
-          {/* ══════════════════════════════════════════════════════════════════════════
-              COLUNA 2: Chat Central & Linha do Tempo (Ocupa Todo o Espaço Restante)
-          ══════════════════════════════════════════════════════════════════════════ */}
-          <div className="flex-1 min-w-0 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border/80 bg-card/60 shadow-xs">
-            {/* Header da Conversa Ativa */}
-            {(() => {
-              const isSelectedChatAttended = Boolean(
-                selectedChat?.attendedAt &&
-                (!selectedChat?.timestamp || new Date(selectedChat.attendedAt).getTime() >= selectedChat.timestamp * 1000)
-              );
-              const isSelectedChatAwaiting = Boolean(
-                selectedChat &&
-                !selectedChat.isGroup &&
-                selectedChat.state !== "automacao" &&
-                selectedChat.state !== "arquivada" &&
-                !selectedChat.archived &&
-                selectedChat.lastMessage &&
-                !selectedChat.lastMessage.fromMe &&
-                !isSelectedChatAttended
-              );
+            {/* Rodapé: Grupos, Automações e Arquivadas. As outras listas estão no botão de filtros. */}
+            <InboxFooterFilters active={inboxTab} filters={footerFilters} onChange={setInboxTab} />
+          </aside>
 
-              return (
-                <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5 border-b border-border/60 p-3 bg-muted/20 min-h-[58px]">
-                  {/* Faixa 1: Identidade do Contato */}
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    {selectedChat && (
-                      <ChatAvatar
-                        label={matchedLead?.nome || selectedChat.name || displayPhone}
-                        picture={contactProfilePic || selectedChat.profilePic}
-                        size="sm"
-                      />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p
-                          className="truncate text-sm font-bold text-foreground max-w-[200px] sm:max-w-[260px]"
-                          title={selectedChat?.name || "Selecione uma conversa"}
-                        >
-                          {selectedChat?.name || "Selecione uma conversa"}
-                        </p>
-                        {selectedChat && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 gap-1 shrink-0"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            Online
-                          </Badge>
-                        )}
-                        {isSelectedChatAttended && !isSelectedChatAwaiting && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 gap-1 shrink-0"
-                            title={selectedChat?.attendedBy ? `Atendido por ${selectedChat.attendedBy}` : "Atendimento registrado"}
-                          >
-                            <CheckCheck className="h-2.5 w-2.5 text-emerald-600" />
-                            Atendido
-                          </Badge>
-                        )}
-                        {isSelectedChatAwaiting && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 gap-1 shrink-0"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-                            Aguardando resposta
-                          </Badge>
-                        )}
-                        {selectedChat && !matchedLead && !selectedChat.isGroup && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 gap-1 shrink-0"
-                            title="Contato não cadastrado como Lead no CRM"
-                          >
-                            <UserPlus className="h-2.5 w-2.5 text-amber-600" />
-                            Sem Lead
-                          </Badge>
-                        )}
-                        {selectedChat?.isNumberChange && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 gap-1 shrink-0"
-                            title="Contato informou novo número"
-                          >
-                            <Phone className="h-2.5 w-2.5 text-indigo-600" />
-                            Novo Número
-                          </Badge>
-                        )}
-                        {selectedChat?.state === "automacao" && !selectedChat?.isNumberChange && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300 gap-1 max-w-[180px] sm:max-w-[220px] truncate shrink-0 cursor-help"
-                            title={selectedChat.stateReason || "Robô / Autoatendimento detectado"}
-                          >
-                            <Bot className="h-2.5 w-2.5 text-purple-600 shrink-0" />
-                            <span className="truncate">Automação: {selectedChat.stateReason || "URA / Robô"}</span>
-                          </Badge>
-                        )}
-                        {(selectedChat?.state === "arquivada" || selectedChat?.archived) && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300 gap-1 shrink-0"
-                          >
-                            <Archive className="h-2.5 w-2.5" />
-                            Arquivada
-                          </Badge>
-                        )}
-                        {selectedChat?.isGroup && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300 gap-1 shrink-0"
-                          >
-                            <Users className="h-2.5 w-2.5" />
-                            Grupo
-                          </Badge>
-                        )}
-                        {selectedChat?.agentMutedAt && (
-                          <Badge
-                            variant="outline"
-                            className="h-4 px-1.5 text-[9px] font-bold border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300 gap-1 shrink-0 cursor-help"
-                            title={selectedChat.agentMutedReason ? `Agente pausado: ${selectedChat.agentMutedReason}` : "Agente pausado · conversa pessoal"}
-                          >
-                            <BotOff className="h-2.5 w-2.5 text-slate-600 dark:text-slate-400 shrink-0" />
-                            <span className="truncate">Agente pausado · {selectedChat.agentMutedReason || "conversa pessoal"}</span>
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground truncate">{displayPhone}</p>
-                    </div>
+          {/* ═══════════ COLUNA 2 — A CONVERSA ═══════════ */}
+          <section
+            data-testid="inbox-conversation"
+            className={cn("relative min-h-0 min-w-0 flex-1 flex-col", mobileView === "chat" ? "flex" : "hidden md:flex")}
+          >
+            {/* Cabeçalho: uma linha de identidade */}
+            <header className="flex flex-wrap items-center gap-3 border-b border-border/60 px-3 py-3 sm:px-5" data-testid="chat-header">
+              <button
+                type="button"
+                onClick={() => setMobileView("list")}
+                aria-label="Voltar para a lista de conversas"
+                data-testid="chat-back"
+                className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-[9px] border border-border bg-card text-foreground/70 md:hidden"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              {selectedChat && <ChatAvatar label={headerName} picture={contactProfilePic || selectedChat.profilePic} size="sm" />}
+              <div className="min-w-0 flex-1 basis-[140px]">
+                <div className="truncate text-[15px] font-semibold text-foreground" title={headerName} data-testid="chat-header-name">
+                  {headerName}
+                </div>
+                {selectedChat && (
+                  <div className="mt-px truncate text-xs text-muted-foreground" data-testid="chat-header-sub">
+                    {selectedChat.isGroup ? "Grupo de WhatsApp" : displayPhone}
+                    {leadChipName ? ` · chip ${leadChipName}` : ""}
                   </div>
+                )}
+              </div>
 
-                  {/* Faixa 2: Ações (Máximo 2 visíveis + Menu "⋯") */}
-                  {selectedChat && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Botão Primário Contextual */}
-                      {selectedChat.agentMutedAt ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 gap-1 text-xs rounded-xl border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 cursor-pointer shadow-xs"
-                          onClick={handleUnmuteAgent}
-                          disabled={unmuteChat.isPending}
-                          title="Reativar agente de IA nesta conversa"
-                        >
-                          <Bot className="h-3.5 w-3.5 text-emerald-600" />
-                          <span>{unmuteChat.isPending ? "Reativando..." : "Reativar agente"}</span>
-                        </Button>
-                      ) : !matchedLead && !selectedChat.isGroup ? (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          className="h-8 gap-1 text-xs rounded-xl bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-xs"
-                          onClick={handleCreateLeadFromCurrentChat}
-                          disabled={createLeadMutation.isPending}
-                          title="Cadastrar este contato como lead no CRM"
-                        >
-                          <UserPlus className="h-3.5 w-3.5" />
-                          <span>{createLeadMutation.isPending ? "Cadastrando..." : "Cadastrar Lead"}</span>
-                        </Button>
-                      ) : selectedChat.state === "automacao" && !selectedChat.isNumberChange ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 gap-1 text-xs text-purple-600 hover:text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-900/50 rounded-xl"
-                          onClick={handleMarkNotAutomation}
-                          title="Reclassificar esta conversa como atendimento humano normal e mover para a Fila"
-                        >
-                          <Bot className="h-3.5 w-3.5" />
-                          <span>Não é automação</span>
-                        </Button>
-                      ) : isSelectedChatAwaiting ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 gap-1 text-xs rounded-xl border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20"
-                          onClick={handleMarkAsAttended}
-                          title="Marcar atendimento concluído e remover da Espera sem arquivar"
-                        >
-                          <CheckCheck className="h-3.5 w-3.5 text-emerald-600" />
-                          <span>Marcar Atendido</span>
-                        </Button>
-                      ) : selectedChat.archived || selectedChat.state === "arquivada" ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 gap-1 text-xs rounded-xl border-border/80 text-muted-foreground hover:text-foreground"
-                          onClick={handleToggleArchive}
-                          title="Desarquivar conversa e mover para a Fila"
-                        >
-                          <ArchiveRestore className="h-3.5 w-3.5" />
-                          <span>Desarquivar</span>
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 gap-1 text-xs rounded-xl border-border/80 text-muted-foreground hover:text-foreground"
-                          onClick={handleToggleArchive}
-                          title="Arquivar conversa"
-                        >
-                          <Archive className="h-3.5 w-3.5" />
-                          <span>Arquivar</span>
-                        </Button>
-                      )}
+              {selectedChat && selectedChat.agentMutedAt ? (
+                <div
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-100 py-[5px] pl-2 pr-2.5 dark:border-amber-500/40 dark:bg-amber-500/15"
+                  title={selectedChat.agentMutedReason ? `Robô pausado: ${selectedChat.agentMutedReason}` : "Robô pausado nesta conversa"}
+                  data-testid="robot-pill"
+                >
+                  <Pause className="h-[13px] w-[13px] text-amber-800 dark:text-amber-200" aria-hidden="true" />
+                  <span className="text-xs font-semibold text-amber-900 dark:text-amber-100">Robô pausado</span>
+                  <button
+                    type="button"
+                    onClick={handleUnmuteAgent}
+                    disabled={unmuteChat.isPending}
+                    className="cursor-pointer pl-1 text-xs font-bold text-indigo-600 underline disabled:opacity-60 dark:text-indigo-300"
+                  >
+                    {unmuteChat.isPending ? "reativando..." : "reativar"}
+                  </button>
+                </div>
+              ) : selectedChat && robotAnswersOnLeadChip && !selectedChat.isGroup ? (
+                <div
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 py-[5px] pl-2 pr-2.5 dark:border-indigo-500/40 dark:bg-indigo-500/15"
+                  title={leadChipAgent?.agentName ? `Quem responde sozinho neste chip: ${leadChipAgent.agentName}` : "O robô da empresa responde sozinho neste chip"}
+                  data-testid="robot-pill"
+                >
+                  <Bot className="h-[13px] w-[13px] text-indigo-600 dark:text-indigo-300" aria-hidden="true" />
+                  <span className="text-xs font-semibold text-indigo-800 dark:text-indigo-100">Robô cuida</span>
+                  <button
+                    type="button"
+                    onClick={handleMuteAgent}
+                    disabled={muteChat.isPending}
+                    className="cursor-pointer pl-1 text-xs font-bold text-indigo-600 underline disabled:opacity-60 dark:text-indigo-300"
+                  >
+                    {muteChat.isPending ? "pausando..." : "pausar"}
+                  </button>
+                </div>
+              ) : null}
 
-                      {/* Botão Secundário: Dossiê do Lead */}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className={cn(
-                          "h-8 gap-1.5 text-xs rounded-xl border-border/80 transition-colors",
-                          showDossier
-                            ? "bg-muted/80 text-foreground font-semibold border-primary/40 shadow-xs"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                        onClick={() => setShowDossier((v) => !v)}
-                        title={showDossier ? "Ocultar painel lateral do Dossiê do Lead" : "Exibir painel lateral do Dossiê do Lead"}
-                      >
-                        <User className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Dossiê do Lead</span>
-                      </Button>
-
-                      {/* Menu "⋯" para Outras Ações */}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 rounded-xl text-muted-foreground hover:text-foreground cursor-pointer"
-                            title="Mais opções da conversa"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
+              {selectedChat && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Mais ações desta conversa"
+                      title="Mais ações desta conversa"
+                      data-testid="chat-menu"
+                      className="grid h-[34px] w-[34px] shrink-0 cursor-pointer place-items-center rounded-[9px] border border-border bg-card text-foreground/70 hover:bg-muted"
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </button>
+                  </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-56 text-xs">
                           {/* Cadastrar como Lead se ainda não existir */}
                           {!matchedLead && !selectedChat.isGroup && (
@@ -2310,7 +2500,7 @@ export default function WhatsAppInbox({
                           )}
 
                           {/* Marcar como Atendido (se não estiver já como botão primário) */}
-                          {selectedChat.state !== "arquivada" && !selectedChat.archived && !isSelectedChatAwaiting && (
+                          {selectedChat.state !== "arquivada" && !selectedChat.archived && (
                             <DropdownMenuItem
                               onClick={handleMarkAsAttended}
                               className="gap-2 cursor-pointer text-emerald-700 dark:text-emerald-300 font-semibold"
@@ -2344,6 +2534,16 @@ export default function WhatsAppInbox({
                             </DropdownMenuItem>
                           )}
 
+                          {selectedChat.state !== "automacao" && (
+                            <DropdownMenuItem onClick={handleToggleArchive} className="gap-2 cursor-pointer">
+                              {isSelectedChatArchived ? (
+                                <ArchiveRestore className="h-3.5 w-3.5 text-muted-foreground" />
+                              ) : (
+                                <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+                              )}
+                              <span>{isSelectedChatArchived ? "Desarquivar conversa" : "Arquivar conversa"}</span>
+                            </DropdownMenuItem>
+                          )}
                           {selectedChat.state === "automacao" && (
                             <DropdownMenuItem onClick={handleToggleArchive} className="gap-2 cursor-pointer">
                               <Archive className="h-3.5 w-3.5 text-muted-foreground" />
@@ -2390,12 +2590,187 @@ export default function WhatsAppInbox({
                             <span>Limpar conversa</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </header>
+
+            {/* Faixa de contexto: por que esse lead está aqui */}
+            {selectedChat && (
+              <div
+                className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border/60 bg-muted/30 px-3 py-[9px] sm:px-5"
+                data-testid="chat-context"
+              >
+                {!selectedChat.isGroup && (
+                  <>
+                    <span className="text-[11.5px] text-muted-foreground">Veio de</span>
+                    {selectedOrigin === "campaign" ? (
+                      <span className="max-w-[220px] truncate rounded-[7px] border border-indigo-200 bg-indigo-50 px-[9px] py-[3px] text-xs font-semibold text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200">
+                        {selectedCampaignName ? `Campanha: ${selectedCampaignName}` : "Campanha"}
+                      </span>
+                    ) : selectedOrigin === "inbound" ? (
+                      <span className="rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80">
+                        Entrada direta
+                      </span>
+                    ) : (
+                      <span className="text-xs italic text-muted-foreground" title="A origem deste contato não está gravada">
+                        sem registro
+                      </span>
+                    )}
+                    <span className="text-border" aria-hidden="true">
+                      ·
+                    </span>
+                  </>
+                )}
+
+                {selectedChat.isGroup ? (
+                  <span className="inline-flex items-center gap-1 rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80">
+                    <Users className="h-3 w-3" /> Grupo
+                  </span>
+                ) : matchedLead ? (
+                  <>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          title="Estágio no funil. Clique para mudar."
+                          data-testid="chat-stage"
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80 hover:bg-muted"
+                        >
+                          {currentStageLabel}
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-48 text-xs">
+                        {FUNNEL_STAGES.map((s, idx) => (
+                          <DropdownMenuItem
+                            key={s.value}
+                            onClick={() => handleUpdateFunnelStage(s.value)}
+                            className={cn("cursor-pointer gap-2", idx === currentStageIndex && "font-bold")}
+                          >
+                            {idx === currentStageIndex ? <Check className="h-3.5 w-3.5" /> : <span className="w-3.5" />}
+                            {getStageLabel(s.key)}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <span className="text-border" aria-hidden="true">
+                      ·
+                    </span>
+                    {canManageUsers ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            title="Responsável pelo lead. Clique para mudar."
+                            data-testid="chat-responsible"
+                            className="inline-flex max-w-[200px] cursor-pointer items-center gap-1 rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80 hover:bg-muted"
+                          >
+                            <span className="truncate">{responsibleLabel}</span>
+                            <ChevronDown className="h-3 w-3 shrink-0" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-y-auto text-xs">
+                          <DropdownMenuItem onClick={() => handleAssignLead(null)} className="cursor-pointer gap-2">
+                            {!matchedLead.assigned_to ? <Check className="h-3.5 w-3.5" /> : <span className="w-3.5" />}
+                            Compartilhado
+                          </DropdownMenuItem>
+                          {operatorOptions.map((op) => (
+                            <DropdownMenuItem key={op.uid} onClick={() => handleAssignLead(op.uid)} className="cursor-pointer gap-2">
+                              {matchedLead.assigned_to === op.uid ? <Check className="h-3.5 w-3.5" /> : <span className="w-3.5" />}
+                              <span className="truncate">{op.displayName || op.email}</span>
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
                       </DropdownMenu>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+                    ) : (
+                      <span
+                        className="max-w-[200px] truncate rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80"
+                        title="Responsável pelo lead"
+                      >
+                        {responsibleLabel}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCreateLeadFromCurrentChat}
+                    disabled={createLeadMutation.isPending}
+                    title="Este contato ainda não está na base de leads. Clique para cadastrar."
+                    data-testid="chat-create-lead"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-amber-300 bg-amber-100 px-[9px] py-[3px] text-xs font-semibold text-amber-900 hover:bg-amber-200 disabled:opacity-60 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100"
+                  >
+                    <UserPlus className="h-3 w-3" />
+                    {createLeadMutation.isPending ? "Cadastrando..." : "Sem lead · cadastrar"}
+                  </button>
+                )}
+
+                {needsHumanAttention && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-[7px] border border-red-300 bg-red-50 px-[9px] py-[3px] text-xs font-semibold text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200"
+                    title={String(matchedLead?.dados?.motivo_atencao_humana || (matchedLead as any)?.motivo_atencao_humana || "Atenção humana solicitada")}
+                  >
+                    <ShieldAlert className="h-3 w-3" /> Pede atenção
+                  </span>
+                )}
+                {selectedChat.isNumberChange && (
+                  <span className="inline-flex items-center gap-1 rounded-[7px] border border-indigo-200 bg-indigo-50 px-[9px] py-[3px] text-xs font-semibold text-indigo-700 dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200" title="Contato informou novo número">
+                    <Phone className="h-3 w-3" /> Novo número
+                  </span>
+                )}
+                {selectedChat.state === "automacao" && !selectedChat.isNumberChange && (
+                  <button
+                    type="button"
+                    onClick={handleMarkNotAutomation}
+                    title={`${selectedChat.stateReason || "Robô ou autoatendimento detectado do outro lado"}. Clique se for uma pessoa: a conversa volta para a fila.`}
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-purple-300 bg-purple-50 px-[9px] py-[3px] text-xs font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-500/40 dark:bg-purple-500/10 dark:text-purple-200"
+                  >
+                    <Bot className="h-3 w-3" /> Automação · não é
+                  </button>
+                )}
+                {isSelectedChatArchived && (
+                  <button
+                    type="button"
+                    onClick={handleToggleArchive}
+                    title="Conversa arquivada. Clique para desarquivar."
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80 hover:bg-muted"
+                  >
+                    <ArchiveRestore className="h-3 w-3" /> Arquivada · desarquivar
+                  </button>
+                )}
+                {isSelectedChatAwaiting && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAsAttended}
+                    title="Marcar atendimento concluído: a conversa sai de 'Esperam você' sem arquivar"
+                    data-testid="chat-mark-attended"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-green-300 bg-green-50 px-[9px] py-[3px] text-xs font-semibold text-green-800 hover:bg-green-100 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200"
+                  >
+                    <CheckCheck className="h-3 w-3" /> Marcar atendido
+                  </button>
+                )}
+                {isSelectedChatAttended && !isSelectedChatAwaiting && (
+                  <span
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 dark:text-green-300"
+                    title={selectedChat.attendedBy ? `Atendido por ${selectedChat.attendedBy}` : "Atendimento registrado"}
+                  >
+                    <CheckCheck className="h-3 w-3" /> Atendido
+                  </span>
+                )}
+
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  onClick={() => setShowDossier((v) => !v)}
+                  aria-expanded={dossierVisible}
+                  data-testid="dossier-open"
+                  className="inline-flex min-h-7 cursor-pointer items-center gap-1 text-xs font-bold text-indigo-600 hover:underline dark:text-indigo-300"
+                >
+                  Dossiê do lead
+                  <ChevronRight className={cn("h-[13px] w-[13px] transition-transform", dossierVisible && "rotate-180")} />
+                </button>
+              </div>
+            )}
 
             {/* Linha do Tempo das Mensagens */}
             <div className="relative flex-1 min-h-0 flex flex-col">
@@ -2608,13 +2983,14 @@ export default function WhatsAppInbox({
 
               {/* Botão flutuante para rolar ao final / novas mensagens */}
               {showScrollBottomBtn && (
-                <div className="absolute bottom-3 right-4 z-20">
+                <div className="absolute bottom-2 right-4 z-10">
                   <Button
                     size="sm"
                     variant={hasNewUnseenMessage ? "default" : "secondary"}
                     onClick={() => scrollToBottom("smooth")}
                     className={cn(
-                      "h-8 gap-1.5 rounded-full px-3 text-xs font-semibold shadow-md transition-all",
+                      "h-8 gap-1.5 rounded-full text-xs font-semibold shadow-md transition-all",
+                      hasNewUnseenMessage ? "px-3" : "w-8 px-0",
                       hasNewUnseenMessage
                         ? "bg-emerald-600 hover:bg-emerald-700 text-white animate-bounce"
                         : "bg-background/95 hover:bg-background text-foreground border border-border/80 backdrop-blur-md"
@@ -2628,8 +3004,8 @@ export default function WhatsAppInbox({
                       </>
                     ) : (
                       <>
-                        <span>Mais recentes</span>
-                        <ChevronDown className="h-3.5 w-3.5" />
+                        <span className="sr-only">Ir para as mensagens mais recentes</span>
+                        <ChevronDown className="h-4 w-4" />
                       </>
                     )}
                   </Button>
@@ -2637,113 +3013,138 @@ export default function WhatsAppInbox({
               )}
             </div>
 
-            {/* Caixa de Composição & Alternância de Modo */}
-            <div className="border-t border-border/70 p-3 bg-card space-y-2.5">
-              <div className="flex items-center justify-between">
-                {/* Abas: Responder WhatsApp vs Nota Interna */}
-                <div className="flex items-center gap-1 rounded-xl bg-muted/60 p-1 border border-border/60 text-xs">
+            {/* Rodapé: um campo só, com o modo dentro dele */}
+            <div className="border-t border-border/60 bg-card px-3 pb-4 pt-3 sm:px-5" data-testid="composer">
+              <div
+                data-mode={isNoteMode ? "note" : "whatsapp"}
+                data-testid="composer-box"
+                className={cn(
+                  "overflow-hidden rounded-[14px] border shadow-xs transition-colors",
+                  isNoteMode
+                    ? "border-amber-300 bg-amber-50 dark:border-amber-500/50 dark:bg-amber-500/10"
+                    : "border-indigo-200 bg-card dark:border-indigo-500/40"
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-1 px-2 pt-[7px]">
                   <button
                     type="button"
                     onClick={() => setCompositionMode("whatsapp")}
+                    aria-pressed={!isNoteMode}
+                    data-testid="composer-mode-whatsapp"
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold transition-all",
-                      compositionMode === "whatsapp"
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
+                      "flex min-h-7 cursor-pointer items-center gap-1.5 rounded-lg border px-[11px] text-xs transition-colors",
+                      !isNoteMode
+                        ? "border-green-700 bg-green-600 font-bold text-white"
+                        : "border-transparent font-semibold text-amber-900 hover:bg-amber-100 dark:text-amber-100 dark:hover:bg-amber-500/20"
                     )}
                   >
-                    <Send className="h-3 w-3" />
-                    Responder (WhatsApp)
+                    <MessageCircle className="h-[13px] w-[13px]" aria-hidden="true" />
+                    WhatsApp
                   </button>
                   <button
                     type="button"
                     onClick={() => setCompositionMode("internal_note")}
+                    aria-pressed={isNoteMode}
+                    data-testid="composer-mode-note"
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold transition-all",
-                      compositionMode === "internal_note"
-                        ? "bg-amber-600 text-white shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
+                      "flex min-h-7 cursor-pointer items-center gap-1.5 rounded-lg border px-[11px] text-xs transition-colors",
+                      isNoteMode
+                        ? "border-amber-800 bg-amber-700 font-bold text-white"
+                        : "border-transparent font-semibold text-muted-foreground hover:bg-muted"
                     )}
                   >
-                    <Lock className="h-3 w-3" />
-                    Nota Interna Privada 📝
+                    <Lock className="h-[13px] w-[13px]" aria-hidden="true" />
+                    Nota interna
                   </button>
+                  <span className="flex-1" />
+                  {isNoteMode ? (
+                    <span className="pr-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200" data-testid="composer-hint">
+                      o cliente NÃO vê
+                    </span>
+                  ) : sendChip ? (
+                    <span
+                      className="pr-1 text-[11px] text-muted-foreground"
+                      data-testid="composer-hint"
+                      title={
+                        sendsFromOtherChip
+                          ? `O lead escreveu no chip ${leadChipName}, mas a resposta por aqui sai pelo chip padrão da empresa (${sendChip.name}).`
+                          : "A resposta por aqui sai pelo chip padrão da empresa."
+                      }
+                    >
+                      sai do chip <strong className="text-foreground/80">{sendChip.name}</strong>
+                      {sendsFromOtherChip && <span className="font-semibold text-amber-700 dark:text-amber-300"> · lead escreveu no {leadChipName}</span>}
+                    </span>
+                  ) : null}
                 </div>
 
-                <div className="flex items-center gap-1">
-                  {compositionMode === "whatsapp" && (
-                    <>
-                      <EmojiPicker
-                        onSelect={handleInsertEmoji}
-                        disabled={!selectedChat}
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-colors"
-                        iconClassName="h-4 w-4"
-                      />
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setAttachmentModalOpen(true)}
-                        disabled={!selectedChat || sendMessage.isPending || sendMediaMessage.isPending}
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-colors"
-                        title="Anexar mídia ou documento"
-                      >
-                        <Paperclip className="h-4 w-4" />
-                      </Button>
-
-                      <VoiceRecorderButton
-                        onSendAudio={async (params) => {
-                          await sendMediaMessage.mutateAsync(params);
-                        }}
-                        disabled={!selectedChat || sendMessage.isPending || sendMediaMessage.isPending}
-                      />
-                    </>
-                  )}
-
-                  <span className="text-[10px] text-muted-foreground hidden sm:inline ml-1">
-                    Pressione <kbd className="rounded bg-muted px-1 py-0.5 font-mono">Enter</kbd> para enviar
-                  </span>
-                </div>
-              </div>
-
-              <div className="relative">
-                <Textarea
+                <label htmlFor="inbox-composer-text" className="sr-only">
+                  {isNoteMode ? "Nota interna para a equipe" : "Mensagem para o cliente"}
+                </label>
+                <textarea
+                  id="inbox-composer-text"
                   ref={chatTextareaRef}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleKeyDown}
+                  rows={2}
+                  disabled={!selectedChat} // NÃO desabilita no isPending para nunca perder o foco!
                   placeholder={
-                    compositionMode === "whatsapp"
-                      ? "Digite uma mensagem para o cliente no WhatsApp..."
-                      : "Escreva uma nota interna visível apenas para a sua equipe..."
+                    isNoteMode ? "Anotação só para a equipe…  Enter salva" : "Escreva para o cliente…  Enter envia, Shift+Enter quebra linha"
                   }
-                  rows={3}
-                  disabled={!selectedChat} // NÃO desabilita mais no isPending para nunca perder o foco!
                   className={cn(
-                    "text-xs rounded-xl pr-20 resize-none font-sans",
-                    compositionMode === "internal_note" &&
-                      "border-amber-400/50 bg-amber-500/[0.04] focus-visible:ring-amber-500"
+                    "block w-full resize-none border-0 bg-transparent px-3.5 pb-1 pt-2.5 font-sans text-sm leading-normal outline-none disabled:cursor-not-allowed disabled:opacity-60",
+                    isNoteMode
+                      ? "text-amber-950 placeholder:text-amber-800/80 dark:text-amber-50 dark:placeholder:text-amber-200/70"
+                      : "text-foreground placeholder:text-muted-foreground"
                   )}
                 />
-                <Button
-                  size="sm"
-                  onClick={handleSendMessage}
-                  disabled={!selectedChat || !draft.trim() || sendMessage.isPending || sendMediaMessage.isPending}
-                  className={cn(
-                    "absolute right-2 bottom-2 h-7 px-3 text-xs font-semibold rounded-lg gap-1.5 shadow-xs",
-                    compositionMode === "whatsapp"
-                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                      : "bg-amber-600 hover:bg-amber-700 text-white"
+
+                <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+                  {!isNoteMode && (
+                    <>
+                      <EmojiPicker
+                        onSelect={handleInsertEmoji}
+                        disabled={!selectedChat}
+                        className="h-8 w-8 rounded-lg p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        iconClassName="h-[17px] w-[17px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAttachmentModalOpen(true)}
+                        disabled={!selectedChat || isSending}
+                        aria-label="Anexar arquivo"
+                        title="Anexar mídia ou documento"
+                        className="grid h-8 w-8 cursor-pointer place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Paperclip className="h-[17px] w-[17px]" />
+                      </button>
+                      <VoiceRecorderButton
+                        onSendAudio={async (params) => {
+                          await sendMediaMessage.mutateAsync(params);
+                        }}
+                        disabled={!selectedChat || isSending}
+                      />
+                    </>
                   )}
-                >
-                  {sendMessage.isPending || sendMediaMessage.isPending ? (
-                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Send className="h-3.5 w-3.5" />
-                  )}
-                  {compositionMode === "whatsapp" ? "Enviar" : "Salvar"}
-                </Button>
+                  <span className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={handleSendMessage}
+                    disabled={!selectedChat || !draft.trim() || isSending}
+                    data-testid="composer-send"
+                    className={cn(
+                      "flex min-h-9 cursor-pointer items-center gap-[7px] rounded-[10px] px-[18px] text-[13.5px] font-bold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                      isNoteMode ? "bg-amber-700 hover:bg-amber-800" : "bg-green-600 hover:bg-green-700"
+                    )}
+                  >
+                    {isNoteMode ? "Salvar nota" : "Enviar"}
+                    {isSending ? (
+                      <LoaderCircle className="h-[15px] w-[15px] animate-spin" />
+                    ) : !isNoteMode ? (
+                      <Send className="h-[15px] w-[15px]" />
+                    ) : null}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2755,707 +3156,37 @@ export default function WhatsAppInbox({
               }}
               disabled={!selectedChat || sendMediaMessage.isPending}
             />
-          </div>
 
-          {/* ══════════════════════════════════════════════════════════════════════════
-              COLUNA 3: Dossiê Lateral do Lead & Copiloto (Largura Fixa 360-380px, Colapsável)
-          ══════════════════════════════════════════════════════════════════════════ */}
-          {showDossier && (
-            <div className="w-[360px] xl:w-[380px] shrink-0 flex min-h-0 flex-col overflow-y-auto rounded-2xl border border-border/80 bg-card/60 p-4 sm:p-5 shadow-xs space-y-5 animate-in fade-in slide-in-from-right-2 duration-150">
-              {/* Header do Dossiê com botão de fechar */}
-              <div className="flex items-center justify-between pb-1 border-b border-border/40">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                  <User className="h-3.5 w-3.5 text-emerald-500" />
-                  Dossiê do Lead
-                </span>
+            {/* Gaveta do dossiê: por cima da conversa, fechada por padrão */}
+            {dossierVisible && !dossierAsColumn && (
+              <>
                 <button
                   type="button"
-                  onClick={() => setShowDossier(false)}
-                  className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted/60 cursor-pointer"
-                  title="Recolher painel do lead"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Card do Contato */}
-              <div className="flex flex-col items-center text-center p-3 rounded-2xl bg-muted/20 border border-border/60">
-                <ChatAvatar
-                  label={matchedLead?.nome || selectedChat?.name || displayPhone}
-                  picture={contactProfilePic || selectedChat?.profilePic}
-                  size="lg"
+                  aria-label="Fechar o dossiê"
+                  tabIndex={-1}
+                  onClick={closeDossier}
+                  data-testid="dossier-backdrop"
+                  className="absolute inset-0 z-20 cursor-default bg-slate-900/10"
                 />
-                <h3 className="mt-2 text-sm font-extrabold text-foreground truncate w-full">
-                  {matchedLead?.nome || selectedChat?.name || "Lead sem nome"}
-                </h3>
-                <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
-                  <Phone className="h-3 w-3" />
-                  <span>{displayPhone}</span>
-                  {rawPhone && (
-                    <button
-                      type="button"
-                      onClick={() => handleCopyPhone(rawPhone)}
-                      className="p-1 hover:text-foreground text-muted-foreground transition-colors cursor-pointer"
-                      title="Copiar número"
-                    >
-                      {copiedPhone ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-                    </button>
-                  )}
+                <div
+                  data-testid="dossier-drawer"
+                  className="absolute inset-y-0 right-0 z-30 w-full max-w-[340px] border-l border-indigo-200 shadow-2xl animate-in slide-in-from-right-4 duration-150 dark:border-indigo-500/40"
+                >
+                  {dossierPanel}
                 </div>
+              </>
+            )}
+          </section>
 
-                {/* Linha de Relacionamento (Contexto Direto) */}
-                <p className="mt-1 text-[11px] text-muted-foreground/80 font-medium">
-                  {relationshipContextLine}
-                </p>
-
-                {/* Origem e Qualificação */}
-                <div className="mt-2.5 flex flex-wrap items-center justify-center gap-1.5">
-                  <OriginBadge
-                    origin={(selectedChat as any)?.leadOrigin ?? (matchedLead ? "inbound" : null)}
-                    campaignId={(selectedChat as any)?.sourceCampaignId ?? null}
-                    campaignNames={campaignNames}
-                  />
-                  {matchedLead?.qualificacao && (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[10px] font-bold uppercase",
-                        matchedLead.qualificacao === "QUENTE"
-                          ? "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
-                          : matchedLead.qualificacao === "MORNO"
-                          ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                          : "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-                      )}
-                    >
-                      {matchedLead.qualificacao === "QUENTE" ? "🔥 Quente" : matchedLead.qualificacao === "MORNO" ? "☀️ Morno" : "❄️ Frio"}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Operador Responsável do Lead */}
-                {matchedLead && (
-                  <div className="w-full mt-2 pt-2 border-t border-border/40 flex items-center justify-between gap-2 text-left">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                      <UserCheck className="h-3 w-3 text-sky-500" />
-                      Responsável:
-                    </span>
-                    {canManageUsers ? (
-                      <select
-                        value={matchedLead.assigned_to || "none"}
-                        onChange={async (e) => {
-                          const val = e.target.value;
-                          const targetUid = val === "none" ? null : val;
-                          try {
-                            const token = await getIdToken();
-                            const res = await fetchApi(`/api/leads/${matchedLead.id}`, {
-                              method: "PATCH",
-                              headers: {
-                                Authorization: `Bearer ${token}`,
-                                "Content-Type": "application/json",
-                              },
-                              body: JSON.stringify({ assigned_to: targetUid }),
-                            });
-                            if (!res.ok) {
-                              const err = await readApiErrorMessage(res, "Falha ao reatribuir lead.");
-                              throw new Error(err);
-                            }
-                            toast.success("Responsável atualizado!");
-                            refetchLeads();
-                          } catch (err: any) {
-                            toast.error("Erro ao reatribuir", { description: err.message });
-                          }
-                        }}
-                        className="h-6 text-[11px] px-1.5 py-0 rounded-md border border-input bg-background text-foreground"
-                      >
-                        <option value="none">Compartilhado</option>
-                        {operatorOptions.map((op) => (
-                          <option key={op.uid} value={op.uid}>
-                            {op.displayName || op.email}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <Badge variant="outline" className="text-[10px] py-0.5 px-2 font-normal border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300">
-                        {matchedLead.assigned_to
-                          ? operatorOptions.find((op) => op.uid === matchedLead.assigned_to)?.displayName ||
-                            operatorOptions.find((op) => op.uid === matchedLead.assigned_to)?.email ||
-                            matchedLead.assigned_to
-                          : "Compartilhado"}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-
-                {matchedLead && (
-                  <div className="flex items-center justify-between p-2 rounded-xl bg-muted/40 border border-border/50 text-xs w-full mt-2">
-                    <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
-                      <Ban className="h-3.5 w-3.5 text-rose-500" />
-                      Bloquear Disparos em Massa (Opt-out)
-                    </span>
-                    <Switch
-                      checked={Boolean((matchedLead as any)?.opt_out || (matchedLead?.dados as any)?.opt_out || (matchedLead as any)?.metadata?.opt_out === "true")}
-                      onCheckedChange={(checked) => handleToggleOptOut(matchedLead.id, checked)}
-                    />
-                  </div>
-                )}
-
-                {Boolean(matchedLead?.dados?.precisa_atencao_humana || (matchedLead as any)?.precisa_atencao_humana) && (
-                  <div className="w-full mt-2.5 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-left flex items-start gap-2">
-                    <ShieldAlert className="h-4 w-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300">
-                        Atenção Humana Necessária (IA Pausada)
-                      </p>
-                      <p className="text-[10px] text-rose-600/90 dark:text-rose-300/90 leading-tight mt-0.5">
-                        {String(
-                          matchedLead?.dados?.motivo_atencao_humana ||
-                            (matchedLead as any)?.motivo_atencao_humana ||
-                            "Mensagens idênticas repetidas detectadas (loop com bot/menu automático)"
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Aviso e Ação de Cadastro de Lead se Contato não existe no CRM */}
-                {!matchedLead && !selectedChat?.isGroup && (
-                  <div className="w-full mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-left">
-                    <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-200 font-semibold text-xs">
-                      <UserPlus className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                      <span>Lead não cadastrado</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-                      Este contato do WhatsApp ainda não está na sua base de leads do CRM.
-                    </p>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="w-full mt-2.5 h-7 text-xs font-semibold gap-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow-xs cursor-pointer"
-                      onClick={handleCreateLeadFromCurrentChat}
-                      disabled={createLeadMutation.isPending}
-                    >
-                      <UserPlus className="h-3.5 w-3.5" />
-                      <span>{createLeadMutation.isPending ? "Cadastrando..." : "Cadastrar como Lead no CRM"}</span>
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* 1. Resumo Coletado pela IA — NO TOPO LOGO APÓS A IDENTIFICAÇÃO */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                    <Sparkles className="h-3.5 w-3.5 text-purple-500" />
-                    Resumo da IA
-                  </span>
-                  <button
-                    type="button"
-                    disabled={isSummarizing || !selectedChatId}
-                    onClick={handleSummarizeWithAI}
-                    className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 disabled:opacity-50 cursor-pointer"
-                  >
-                    {isSummarizing ? (
-                      <>
-                        <LoaderCircle className="h-3 w-3 animate-spin" />
-                        Analisando...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-3 w-3" />
-                        Atualizar
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 dark:bg-purple-950/40 p-4 space-y-3 text-xs shadow-xs">
-                  {dossierSummary.isPersonal ? (
-                    <div className="space-y-1 text-[11px] text-muted-foreground">
-                      <div className="font-semibold flex items-center gap-1.5 text-foreground/80">
-                        <span>🚫</span>
-                        <span>Conversa pessoal</span>
-                      </div>
-                      <p className="italic text-muted-foreground/90 whitespace-pre-line leading-relaxed">
-                        {dossierSummary.personalText || "Nenhuma intenção comercial detectada."}
-                      </p>
-                    </div>
-                  ) : currentChatSummary || matchedLead ? (
-                    <div className="space-y-2 text-[11px]">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
-                          <span>🎯</span> Objetivo:
-                        </span>
-                        <span className="text-foreground text-right font-medium">{dossierSummary.objetivo || "—"}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
-                          <span>📋</span> Situação:
-                        </span>
-                        <span className="text-foreground text-right font-medium">{dossierSummary.situacao || "—"}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
-                          <span>🤝</span> Combinado:
-                        </span>
-                        <span className="text-foreground text-right font-medium">{dossierSummary.combinado || "—"}</span>
-                      </div>
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-muted-foreground shrink-0 flex items-center gap-1.5">
-                          <span>⏭</span> Próximo passo:
-                        </span>
-                        <span className="text-foreground text-right font-medium">{dossierSummary.proximoPasso || "—"}</span>
-                      </div>
-
-                      {/* Rodapé com pendências de descoberta */}
-                      {dossierSummary.missing.length > 0 && (
-                        <div className="pt-2 mt-2 border-t border-purple-500/20 text-[10px] text-muted-foreground/80 italic">
-                          Falta descobrir: {dossierSummary.missing.join(", ")}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-2 space-y-2">
-                      <p className="text-muted-foreground text-[11px]">
-                        Nenhum resumo gerado ainda.
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={isSummarizing || !selectedChatId}
-                        onClick={handleSummarizeWithAI}
-                        className="h-7 text-[11px] rounded-lg border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300 hover:bg-purple-500/20 cursor-pointer"
-                      >
-                        <Sparkles className="mr-1.5 h-3 w-3 text-purple-500" />
-                        {isSummarizing ? "Gerando resumo..." : "Gerar Resumo com IA"}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Sugestão Assistida por IA no Inbox (Bloco 4B) */}
-              {activeSuggestion && matchedLead && (
-                <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-2.5 space-y-2 text-xs">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-1.5">
-                      <Sparkles className="h-4 w-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-purple-900 dark:text-purple-200">
-                          Sugestão da IA
-                        </p>
-                        <p className="text-[11px] text-purple-800/90 dark:text-purple-300 leading-snug">
-                          {activeSuggestion.reason}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleDismissStageSuggestion}
-                      className="text-purple-500 hover:text-purple-700 dark:hover:text-purple-300 p-0.5 cursor-pointer"
-                      title="Dispensar sugestão"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 pt-0.5">
-                    <Button
-                      size="sm"
-                      onClick={() => handleApplyStageSuggestion(activeSuggestion)}
-                      className="h-6 text-[11px] px-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded cursor-pointer"
-                    >
-                      Avançar para {getStageLabel(activeSuggestion.suggestedStage)}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={handleDismissStageSuggestion}
-                      className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    >
-                      Dispensar
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* 2. Trilha Horizontal do Funil Comercial (Estágios reais: Novo, Atendimento, Qualificado, Fechado) */}
-              <div className="space-y-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <Target className="h-3.5 w-3.5 text-indigo-500" />
-                  Estágio no Funil
-                </span>
-                <div className="grid grid-cols-4 gap-1.5 w-full">
-                  {FUNNEL_STAGES.map((s, idx) => {
-                    const isPast = idx < currentStageIndex;
-                    const isCurrent = idx === currentStageIndex;
-                    const isFuture = idx > currentStageIndex;
-                    const label = getStageLabel(s.key);
-
-                    return (
-                      <button
-                        key={s.value}
-                        type="button"
-                        onClick={() => handleUpdateFunnelStage(s.value)}
-                        disabled={!matchedLead}
-                        title={
-                          !matchedLead
-                            ? "Cadastre o lead para alterar o estágio"
-                            : `Mudar estágio para ${label}`
-                        }
-                        className={cn(
-                          "relative flex items-center justify-center py-2 px-1 rounded-lg text-center transition-all cursor-pointer border text-xs w-full min-w-0",
-                          isPast && "bg-emerald-600 border-emerald-600 text-white font-semibold shadow-xs",
-                          isCurrent && "border-2 border-emerald-500 bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 font-bold shadow-xs",
-                          isFuture && "border-border/60 bg-muted/40 text-muted-foreground/80 hover:border-border hover:text-foreground font-medium",
-                          !matchedLead && "opacity-50 cursor-not-allowed"
-                        )}
-                      >
-                        <div className="flex items-center gap-1 justify-center truncate px-0.5">
-                          {isPast && <Check className="h-3 w-3 shrink-0 stroke-[2.5]" />}
-                          <span className="truncate text-[11px] leading-tight font-medium">{label}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 3. Ações Rápidas do Consultor (Hierarquia Clara) */}
-              <div className="space-y-2 pt-1">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <Zap className="h-3.5 w-3.5 text-amber-500" />
-                  Ações Rápidas
-                </span>
-                <div className="flex flex-col gap-2">
-                  {/* Botão Primário Destacado: Gerar Proposta Comercial (visível apenas para geracao-digital ou módulo habilitado) */}
-                  {podeGerarProposta && (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => {
-                        const rawP = selectedChat?.id ? String(selectedChat.id).replace(/\D/g, "") : "";
-                        const prospectName = matchedLead?.nome || selectedChat?.name || "";
-                        const params = new URLSearchParams();
-                        if (rawP) params.set("phone", rawP);
-                        if (prospectName) params.set("nome", prospectName);
-                        navigate(`/crm/propostas-gd?${params.toString()}`);
-                      }}
-                      className="w-full justify-center h-9 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs cursor-pointer"
-                    >
-                      <FileText className="mr-2 h-4 w-4" />
-                      Gerar Proposta Comercial
-                    </Button>
-                  )}
-
-                  {/* Card de Check-in Pós-Reunião Google Meet */}
-                  {activeMeeting && (
-                    <MeetingPostCallCheckinCard
-                      meeting={activeMeeting}
-                      clientId={clientId}
-                      onReschedule={() => {
-                        setActiveMeetingToEdit(activeMeeting);
-                        setIsScheduleMeetingModalOpen(true);
-                      }}
-                      onStageChange={(newStage) => handleUpdateFunnelStage(newStage)}
-                    />
-                  )}
-
-                  {/* Card de Lembrete Pessoal Pendente no Dossiê */}
-                  {regularPendingReminder && (
-                    <div
-                      className={cn(
-                        "rounded-xl border p-2.5 text-xs flex items-start justify-between gap-2 shadow-2xs",
-                        regularPendingReminder.isOverdue
-                          ? "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-200"
-                          : "border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200"
-                      )}
-                    >
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <div
-                          className={cn(
-                            "flex items-center gap-1.5 font-bold",
-                            regularPendingReminder.isOverdue
-                              ? "text-rose-800 dark:text-rose-300"
-                              : "text-amber-800 dark:text-amber-300"
-                          )}
-                        >
-                          <Bell
-                            className={cn(
-                              "h-3.5 w-3.5 shrink-0",
-                              regularPendingReminder.isOverdue
-                                ? "text-rose-600 dark:text-rose-400"
-                                : "text-amber-600 dark:text-amber-400"
-                            )}
-                          />
-                          {regularPendingReminder.isOverdue && (
-                            <span className="rounded bg-rose-600 px-1 py-0.5 text-[9px] font-extrabold uppercase text-white tracking-wider shrink-0">
-                              Venceu
-                            </span>
-                          )}
-                          <span className="truncate">{regularPendingReminder.title}</span>
-                        </div>
-                        {regularPendingReminder.notes && (
-                          <p
-                            className={cn(
-                              "text-[11px] line-clamp-2",
-                              regularPendingReminder.isOverdue
-                                ? "text-rose-700/80 dark:text-rose-300/80"
-                                : "text-amber-700/80 dark:text-amber-300/80"
-                            )}
-                          >
-                            {regularPendingReminder.notes}
-                          </p>
-                        )}
-                        <div
-                          className={cn(
-                            "flex items-center gap-2 text-[10px] pt-0.5 font-mono",
-                            regularPendingReminder.isOverdue
-                              ? "text-rose-600 dark:text-rose-400"
-                              : "text-amber-600 dark:text-amber-400"
-                          )}
-                        >
-                          <span>📅 {formatScheduleDate(regularPendingReminder.remindAt)}</span>
-                          {regularPendingReminder.assignedToName && (
-                            <span>· 👤 {regularPendingReminder.assignedToName}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            try {
-                              await completeLeadReminder.mutateAsync(regularPendingReminder.id);
-                              toast.success("Lembrete concluído!");
-                            } catch (err: any) {
-                              toast.error(err?.message || "Erro ao concluir lembrete.");
-                            }
-                          }}
-                          disabled={completeLeadReminder.isPending}
-                          className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white border-none shrink-0 cursor-pointer gap-1 shadow-2xs"
-                          title="Concluir lembrete em 1 clique"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                          Concluir
-                        </Button>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
-                              title="Opções do lembrete"
-                            >
-                              <MoreVertical className="h-3.5 w-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-32">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setEditingReminder(regularPendingReminder);
-                                setIsCreateReminderModalOpen(true);
-                              }}
-                              className="cursor-pointer text-xs flex items-center gap-2"
-                            >
-                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span>Editar</span>
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={async () => {
-                                if (window.confirm("Deseja realmente excluir este lembrete?")) {
-                                  try {
-                                    await deleteLeadReminder.mutateAsync(regularPendingReminder.id);
-                                    toast.success("Lembrete excluído!");
-                                  } catch (err: any) {
-                                    toast.error(err?.message || "Erro ao excluir lembrete.");
-                                  }
-                                }
-                              }}
-                              className="cursor-pointer text-xs flex items-center gap-2 text-rose-600 focus:text-rose-600"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              <span>Excluir</span>
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Seção de Lembretes Concluídos com Desfazer */}
-                  <div className="pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setShowCompletedReminders((prev) => !prev)}
-                      className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1"
-                    >
-                      {showCompletedReminders ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                      <span>Lembretes concluídos</span>
-                    </button>
-
-                    {showCompletedReminders && (
-                      <div className="mt-1 space-y-1.5 pl-1">
-                        {completedRemindersQuery.isLoading ? (
-                          <div className="text-[10px] text-muted-foreground p-1">Carregando concluídos...</div>
-                        ) : completedReminders.length === 0 ? (
-                          <div className="text-[10px] text-muted-foreground italic p-1">
-                            Nenhum lembrete concluído para este contato.
-                          </div>
-                        ) : (
-                          completedReminders.map((r) => (
-                            <div
-                              key={r.id}
-                              className="rounded-lg border border-border/40 bg-muted/20 p-2 text-xs flex items-center justify-between gap-2"
-                            >
-                              <div className="min-w-0 flex-1 space-y-0.5 opacity-80">
-                                <div className="flex items-center gap-1.5 font-medium line-through text-muted-foreground text-[11px]">
-                                  <Check className="h-3 w-3 text-emerald-500 shrink-0" />
-                                  <span className="truncate">{r.title}</span>
-                                </div>
-                                <div className="text-[10px] text-muted-foreground font-mono">
-                                  Concluído {r.completedAt ? formatScheduleDate(r.completedAt) : ""}
-                                </div>
-                              </div>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={async () => {
-                                  try {
-                                    await updateLeadReminder.mutateAsync({
-                                      id: r.id,
-                                      status: "pending",
-                                    });
-                                    toast.success("Lembrete reaberto com sucesso!");
-                                  } catch (err: any) {
-                                    toast.error(err?.message || "Erro ao reabrir lembrete.");
-                                  }
-                                }}
-                                disabled={updateLeadReminder.isPending}
-                                className="h-6 px-2 text-[10px] font-semibold text-muted-foreground hover:text-foreground rounded cursor-pointer gap-1"
-                                title="Desfazer conclusão e mover de volta para pendente"
-                              >
-                                <RotateCcw className="h-3 w-3" />
-                                Desfazer
-                              </Button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Bloco C: Atividades Comerciais Diretas (Google Meet & Ligação Telefônica) */}
-                  <div className="grid grid-cols-2 gap-2 pt-0.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setActiveMeetingToEdit(null);
-                        setIsScheduleMeetingModalOpen(true);
-                      }}
-                      className="w-full justify-center h-8 text-[11px] font-bold rounded-xl border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-500/20 cursor-pointer shadow-2xs"
-                      title="Agendar call no Google Meet e enviar convite no WhatsApp"
-                    >
-                      <Video className="mr-1.5 h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                      📅 Agendar Call (Meet)
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setIsRegisterCallModalOpen(true)}
-                      className="w-full justify-center h-8 text-[11px] font-bold rounded-xl border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-200 hover:bg-blue-500/20 cursor-pointer shadow-2xs"
-                      title="Registrar ligação telefônica (Atendeu, Ocupado, etc.)"
-                    >
-                      <PhoneCall className="mr-1.5 h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                      📞 Registrar Ligação
-                    </Button>
-                  </div>
-
-                  {/* Ações de Agendamento com Estado e Lembrete Pessoal */}
-                  {activeSchedule ? (
-                    <div className="space-y-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsEditScheduleModalOpen(true)}
-                        className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-indigo-500/40 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/20 cursor-pointer truncate"
-                        title="Mensagem agendada ativa para este lead. Clique para editar ou cancelar."
-                      >
-                        <Clock3 className="mr-1.5 h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                        <span className="truncate">
-                          ⏰ Mensagem agendada{activeSchedule.totalActiveCount && activeSchedule.totalActiveCount > 1 ? ` (+${activeSchedule.totalActiveCount - 1})` : ""} · {formatScheduleDate(activeSchedule.nextScheduledFor)}
-                        </span>
-                      </Button>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setIsCreateReminderModalOpen(true)}
-                          className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 cursor-pointer"
-                          title="Criar lembrete pessoal interno (não envia WhatsApp para o cliente)"
-                        >
-                          <Bell className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
-                          Criar lembrete
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setIsApplyFollowupModalOpen(true)}
-                          className="w-full justify-center h-8 text-xs font-semibold rounded-xl border-purple-500/30 bg-purple-500/5 text-purple-700 dark:text-purple-300 hover:bg-purple-500/15 cursor-pointer"
-                        >
-                          <RefreshCw className="mr-1.5 h-3.5 w-3.5 text-purple-500" />
-                          Cadência
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsReminderModalOpen(true)}
-                        className="w-full justify-center h-8 text-[11px] font-semibold rounded-xl border-indigo-500/30 bg-indigo-500/5 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/15 cursor-pointer px-1"
-                        title="Agendar mensagem que dispara para o cliente na data e hora marcadas"
-                      >
-                        <CalendarClock className="mr-1 h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                        <span className="truncate">Agendar msg</span>
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsCreateReminderModalOpen(true)}
-                        className="w-full justify-center h-8 text-[11px] font-semibold rounded-xl border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 cursor-pointer px-1"
-                        title="Criar lembrete pessoal interno (não envia nada ao cliente)"
-                      >
-                        <Bell className="mr-1 h-3.5 w-3.5 text-amber-500 shrink-0" />
-                        <span className="truncate">Lembrete</span>
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsApplyFollowupModalOpen(true)}
-                        className="w-full justify-center h-8 text-[11px] font-semibold rounded-xl border-purple-500/30 bg-purple-500/5 text-purple-700 dark:text-purple-300 hover:bg-purple-500/15 cursor-pointer px-1"
-                      >
-                        <RefreshCw className="mr-1 h-3.5 w-3.5 text-purple-500 shrink-0" />
-                        <span className="truncate">Cadência</span>
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+          {/* Dossiê fixado: terceira coluna, só em tela larga e só porque a pessoa pediu */}
+          {dossierVisible && dossierAsColumn && (
+            <aside data-testid="dossier-pinned" className="min-h-0 w-[320px] shrink-0 border-l border-border/80">
+              {dossierPanel}
+            </aside>
           )}
         </div>
       )}
+
 
       <SingleFollowupReminderModal
         open={isReminderModalOpen}
