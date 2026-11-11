@@ -56,6 +56,11 @@ const MIGRATION_FRENTE6 = readFileSync(
   resolve("supabase/migrations/20261108160000_gd_clientes_vexto_briefing_and_chips.sql"),
   "utf8"
 );
+// A rota de clientes lê portal_slug e as colunas da régua de sucesso: sem esta migration todo endpoint dá 500.
+const MIGRATION_CS_PORTAL = readFileSync(
+  resolve("supabase/migrations/20261108180000_gd_clientes_customer_success_and_portal_slug.sql"),
+  "utf8"
+);
 
 const PERFIS = {
   equipeGd: {
@@ -323,6 +328,7 @@ E temos desconto especial à vista!
       await db.exec(MIGRATION_BRIEFING);
       await db.exec(MIGRATION_FRENTE5);
       await db.exec(MIGRATION_FRENTE6);
+      await db.exec(MIGRATION_CS_PORTAL);
 
       // Insere cliente de teste
       const resIns = await db.query(

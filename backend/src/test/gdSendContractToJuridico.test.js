@@ -227,15 +227,17 @@ describe("sendContractToJuridico e resolveCampaignImportSelectionStrict", () => 
       expect(result).toBe("import-sheet-456");
     });
 
-    it("retorna __crm__ quando tem audienceCriteria do Banco e import_id ausente", () => {
+    // Campanha do Banco sem origem NÃO tem origem: o resolvedor estrito devolve null e quem chamou recusa com
+    // CAMPAIGN_WITHOUT_SOURCE. Devolver "__crm__" só fazia a trava passar, e o lote lia todas as planilhas
+    // (ver campaignWithoutSourceGuard.test.js e o comentário em dispatch.js).
+    it("retorna null quando tem audienceCriteria do Banco e import_id ausente", () => {
       const campaign = {
         import_id: null,
         analytics_meta: {
           audienceCriteria: { tag: "quente" },
         },
       };
-      const result = resolveCampaignImportSelectionStrict(campaign);
-      expect(result).toBe("__crm__");
+      expect(resolveCampaignImportSelectionStrict(campaign)).toBeNull();
     });
 
     it("retorna __all__ para campanha sem audienceCriteria e sem planilha", () => {
