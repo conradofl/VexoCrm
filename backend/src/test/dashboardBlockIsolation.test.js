@@ -41,6 +41,11 @@ const BLOCK_QUERIES = [
   ["analysis.topProfiles", "replied_people"],
   ["analysis.baseHealth", "no_reply_over_days"],
   ["analysis.firstHumanResponse", "median_minutes"],
+  // Visão geral (Fase 1 do redesenho)
+  ["overview.base", "slice_never_approached"],
+  ["overview.meetings", "meetings_people_current"],
+  ["overview.funnelMeetings", "funnel_meetings_current"],
+  ["overview.firstHumanResponse", "coverage_conversations"],
 ];
 
 const HEALTHY = {
@@ -70,6 +75,24 @@ const HEALTHY = {
     ],
   },
   alerts: { rows: [{ count: 0 }] },
+  "overview.base": {
+    rows: [
+      {
+        base_total: 100, slice_invalid_phone: 5, slice_in_conversation: 20, slice_no_reply: 30, slice_never_approached: 40,
+        slice_closed_no_approach: 5, never_approached_phones: 38, reachable_phones: 36, optout_discounted_phones: 2, optout_recorded: 3,
+      },
+    ],
+  },
+  "overview.meetings": { rows: [{ has_records: true, meetings_people_current: 6, meetings_people_previous: 4 }] },
+  "overview.funnelMeetings": { rows: [{ funnel_meetings_current: 3, funnel_meetings_previous: 2 }] },
+  "overview.firstHumanResponse": {
+    rows: [
+      {
+        coverage_conversations: 20, coverage_answered: 12, coverage_waiting: 6, coverage_waiting_bot_only: 1, coverage_indeterminate: 2,
+        coverage_answered_unknown_first: 1, coverage_waiting_over_threshold: 4, coverage_median_min: 5, coverage_p90_min: 90,
+      },
+    ],
+  },
   "summary.closings": { rows: [{ current_closings: 3, previous_closings: 1 }] },
   "analysis.leadClassification": {
     rows: [
@@ -159,13 +182,13 @@ describe("Dashboard — cada bloco falhando individualmente mantém os outros", 
   // [bloco que cai, caminho no payload que fica null, extras que mudam por dependência]
   const CASES = [
     { block: "summary.sent", path: "summary.sent", alsoMarks: ["alerts"], alsoChanges: ["summary.replied.rate", "summary.replied.previousRate", "alerts"] },
-    { block: "summary.replied", path: "summary.replied", alsoMarks: [], alsoChanges: [] },
+    { block: "summary.replied", path: "summary.replied", alsoMarks: [], alsoChanges: ["overview.funnel.received", "overview.funnel.replied"] },
     { block: "summary.meetings", path: "summary.meetings", alsoMarks: [], alsoChanges: [] },
     { block: "summary.proposals", path: "summary.proposals", alsoMarks: [], alsoChanges: [] },
     { block: "summary.contracts", path: "summary.contracts", alsoMarks: [], alsoChanges: [] },
     { block: "rankings.messages", path: "rankings.messages", alsoMarks: ["alerts"], alsoChanges: ["alerts"] },
-    { block: "rankings.chips", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent"] },
-    { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent"], marks: "rankings.chips" },
+    { block: "rankings.chips", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent", "overview.chips"] },
+    { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent", "overview.chips"], marks: "rankings.chips" },
     { block: "rankings.regions", path: "rankings.regions", alsoMarks: [], alsoChanges: [] },
     { block: "rankings.failureReasons", path: "rankings.failureReasons", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.failureTotals"] },
     { block: "alerts", path: null, alsoMarks: [], alsoChanges: [] },
@@ -175,6 +198,11 @@ describe("Dashboard — cada bloco falhando individualmente mantém os outros", 
     { block: "analysis.topProfiles", path: "analysis.topProfiles", alsoMarks: [], alsoChanges: [] },
     { block: "analysis.baseHealth", path: "analysis.baseHealth", alsoMarks: [], alsoChanges: [] },
     { block: "analysis.firstHumanResponse", path: "analysis.firstHumanResponse", alsoMarks: [], alsoChanges: [] },
+    // Visão geral: cada consulta nova cai sozinha. Sem a contagem de reuniões, a etapa do funil também sai null.
+    { block: "overview.base", path: "overview.base", alsoMarks: [], alsoChanges: [] },
+    { block: "overview.meetings", path: "overview.meetings", alsoMarks: [], alsoChanges: ["overview.funnel.meetings"] },
+    { block: "overview.funnelMeetings", path: "overview.funnel.meetings", alsoMarks: [], alsoChanges: [] },
+    { block: "overview.firstHumanResponse", path: "overview.firstHumanResponse", alsoMarks: [], alsoChanges: [] },
   ];
 
   for (const c of CASES) {

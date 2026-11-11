@@ -36,6 +36,14 @@ import {
   parseCustomPeriodKey,
 } from "./dashboardPeriod.js";
 
+import {
+  measureBaseSlices,
+  measureMeetings,
+  measureFunnelMeetings,
+  measureFirstHumanResponseCoverage,
+  measureWaiting,
+} from "./dashboardOverview.js";
+
 const LM_TIMESTAMP_SQL = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
 // "Respondeu" (definição única, 31/10/2026): PESSOAS — COUNT(DISTINCT telefone canônico do envio) dos envios
 // respondidos em até 14 dias. Todo bloco do Dashboard que diz "responderam" conta assim; a taxa é
@@ -97,6 +105,7 @@ export function buildChipQuotaSql() {
       i.id AS instance_id,
       i.name AS instance_name,
       i.chip_state,
+      i.active,
       i.daily_limit_override,
       COALESCE(
         (
@@ -647,6 +656,9 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
           instanceId: chip.instance_id,
           name: chip.instance_name || String(chip.instance_id),
           chipState: chip.chip_state || "cold",
+          active: chip.active !== false,
+          // Sem estado gravado e sem limite próprio, o sistema trata o chip como frio: a cota é presumida.
+          quotaPresumed: !chip.chip_state && (chip.daily_limit_override === null || chip.daily_limit_override === undefined),
           sent: instStats ? instStats.sent_count : 0,
           reached: instStats ? instStats.reached_count : 0,
           replies: instStats ? instStats.replied_count : 0,
@@ -832,6 +844,15 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const baseHealthBlock = await runBlock("analysis.baseHealth", () => measureBaseHealth(pool, analysisCtx));
   const firstHumanResponseBlock = await runBlock("analysis.firstHumanResponse", () => measureFirstHumanResponse(pool, analysisCtx));
 
+  // ── Visão geral (Fase 1 do redesenho): consultas novas, cada uma isolada ─
+  const overviewBaseBlock = await runBlock("overview.base", () => measureBaseSlices(pool, analysisCtx));
+  const overviewMeetingsBlock = await runBlock("overview.meetings", () => measureMeetings(pool, analysisCtx));
+  const overviewFunnelMeetingsBlock = await runBlock("overview.funnelMeetings", () => measureFunnelMeetings(pool, analysisCtx));
+  const overviewResponseTimeBlock = await runBlock("overview.firstHumanResponse", () => measureFirstHumanResponseCoverage(pool, analysisCtx));
+  const overviewWaitingBlock = await runBlock("overview.waiting", () =>
+    measureWaiting(pool, analysisCtx, options.loadWaitingSource ? { loadSource: options.loadWaitingSource } : undefined)
+  );
+
   // ── Bloco 3: O que fazer agora (No máximo 3 frases com ação) ────────────
   // Cada aviso só é avaliado quando os números de que depende existem. Número indisponível
   // não dispara nem "apaga" aviso por engano: o aviso fica não avaliado e o bloco `alerts`
@@ -1000,6 +1021,43 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       firstHumanResponse: firstHumanResponseBlock.value,
     },
     alerts: selectedAlerts,
+    // Visão geral: bloco que falhou sai `null` (e o nome vai em unavailableBlocks). Nunca zero.
+    overview: {
+      // "pending_source" enquanto a consulta da tela Conversas não estiver no main (ver dashboardOverview.js).
+      waiting: overviewWaitingBlock.value,
+      base: overviewBaseBlock.value,
+      // Reuniões no período (pessoas), lidas de followup_schedules. hasRecords=false → "sem registro".
+      meetings: overviewMeetingsBlock.value,
+      funnel: {
+        received: repliedBlock.ok ? { current: reachedCurrent, previous: reachedPrevious } : null,
+        replied: repliedBlock.ok ? { current: repliedCurrent, previous: repliedPrevious } : null,
+        // Coorte: quem respondeu a campanha e marcou reunião depois. Sem registro de reunião na empresa → null.
+        meetings:
+          overviewFunnelMeetingsBlock.ok && overviewMeetingsBlock.ok
+            ? {
+                hasRecords: overviewMeetingsBlock.value.hasRecords,
+                current: overviewMeetingsBlock.value.hasRecords ? overviewFunnelMeetingsBlock.value.current : null,
+                previous: overviewMeetingsBlock.value.hasRecords ? overviewFunnelMeetingsBlock.value.previous : null,
+              }
+            : null,
+      },
+      // Todos os chips (o ranking acima corta em 3). Uso de hoje é só campanha e follow-up: é o que o contador enxerga.
+      chips: chipList
+        ? chipList
+            .filter((chip) => chip.active !== false)
+            .map((chip) => ({
+              instanceId: chip.instanceId,
+              name: chip.name,
+              sentToday: chip.sentToday,
+              quotaLimit: chip.quotaLimit,
+              quotaPercentage: chip.quotaPercentage,
+              quotaPresumed: chip.quotaPresumed === true,
+            }))
+        : null,
+      // A cota é do DIA: só faz sentido quando o período inclui hoje.
+      chipsQuotaIsToday: periodIncludesToday,
+      firstHumanResponse: overviewResponseTimeBlock.value,
+    },
   };
 }
 
