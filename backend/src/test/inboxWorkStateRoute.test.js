@@ -1,0 +1,242 @@
+// Coluna de Conversas pela ROTA REAL (GET /api/whatsapp/chats), com o SQL rodando em
+// Postgres em memória (PGlite). Dublê só no que sai do processo: autenticação, a leitura
+// de chips/configuração do tenant e o cliente Supabase (que esta rota não usa).
+//
+// Prova duas coisas:
+//   1. as abas novas (esperam, com_lead, robo, esfriaram) chegam à tela com contador
+//      igual à quantidade de itens;
+//   2. nenhum filtro antigo sumiu: Grupos, Automações, Arquivadas, Pausadas, Todas e o
+//      escopo de chip continuam alcançáveis e cada um continua filtrando.
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { PGlite } from "@electric-sql/pglite";
+import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
+
+const TENANT = "geracao-digital";
+const ago = ({ minutes = 0, hours = 0, days = 0 }) =>
+  new Date(Date.now() - (minutes + hours * 60 + days * 24 * 60) * 60_000).toISOString();
+
+const P = {
+  espera: "5534990000001",
+  esperaNoChipB: "5534990000002",
+  esfriou: "5534990000003",
+  comLead: "5534990000004",
+  robo: "5534990000005",
+  pausada: "5534990000006",
+  arquivada: "5534990000007",
+  automacao: "5534990000008",
+  semChip: "5534990000009",
+  grupo: "120363000000000000@g.us",
+};
+
+let db;
+let listChats;
+
+async function msg(phone, direction, when, { chip = "chip-a", text = "mensagem", isGroup = false } = {}) {
+  await db.query(
+    `INSERT INTO public.lead_messages (client_id, phone, direction, sender_type, message_text, message_timestamp, instance_name, is_group)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [TENANT, phone, direction, direction === "inbound" ? "lead" : "device", text, when, chip, isGroup]
+  );
+}
+
+beforeAll(async () => {
+  db = new PGlite();
+  await db.exec(`
+    CREATE TABLE public.lead_messages (
+      id BIGSERIAL PRIMARY KEY,
+      client_id TEXT, lead_id TEXT, campaign_id TEXT, phone TEXT, sender_type TEXT, direction TEXT,
+      engagement_signal TEXT, message_text TEXT, delivered_at TIMESTAMPTZ, message_timestamp TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT now(), meta JSONB, instance_name TEXT, wa_message_id TEXT UNIQUE,
+      media_path TEXT, media_url TEXT, content_type TEXT, dispatch_id TEXT, contact_name TEXT,
+      is_group BOOLEAN DEFAULT false
+    );
+    CREATE TABLE public.leads (
+      id TEXT, client_id TEXT, telefone TEXT, nome TEXT, lead_origin TEXT, source_campaign_id TEXT,
+      assigned_to TEXT, assigned_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE TABLE public.whatsapp_chat_states (
+      client_id TEXT NOT NULL, phone TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'ativa', reason TEXT,
+      source TEXT NOT NULL DEFAULT 'auto', changed_by TEXT, attended_at TIMESTAMPTZ, attended_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      agent_muted_at TIMESTAMPTZ, agent_muted_reason TEXT, agent_muted_source TEXT, agent_mute_last_human_at TIMESTAMPTZ,
+      PRIMARY KEY (client_id, phone)
+    );
+    CREATE TABLE public.whatsapp_lid_map (lid TEXT, profile_pic TEXT, contact_name TEXT);
+    CREATE TABLE public.whatsapp_user_chat_states (client_id TEXT, phone TEXT, user_id TEXT, last_opened_at TIMESTAMPTZ);
+    CREATE TABLE public.followup_companies (
+      id TEXT, tenant_id TEXT, name TEXT, evolution_instance TEXT, evolution_instances JSONB,
+      inbound_enabled BOOLEAN, agent_kind TEXT, archived_at TIMESTAMPTZ
+    );
+  `);
+
+  await msg(P.espera, "outbound", ago({ hours: 30 }));
+  await msg(P.espera, "inbound", ago({ hours: 26 }));
+  await msg(P.esperaNoChipB, "inbound", ago({ hours: 2 }), { chip: "chip-b" });
+  await msg(P.esfriou, "inbound", ago({ days: 20 }));
+  await msg(P.comLead, "inbound", ago({ hours: 5 }));
+  await msg(P.comLead, "outbound", ago({ hours: 4 }));
+  await msg(P.robo, "inbound", ago({ minutes: 3 }), { chip: "chip-robo" });
+  await msg(P.pausada, "inbound", ago({ minutes: 50 }), { chip: "chip-robo" });
+  await msg(P.arquivada, "inbound", ago({ hours: 1 }));
+  await msg(P.automacao, "inbound", ago({ hours: 1 }), { text: "Digite 1 para falar com o financeiro" });
+  await msg(P.semChip, "outbound", ago({ hours: 3 }), { chip: null });
+  await msg(P.grupo, "inbound", ago({ hours: 1 }), { isGroup: true });
+
+  await db.query(
+    `INSERT INTO public.whatsapp_chat_states (client_id, phone, state, agent_muted_at, agent_muted_source) VALUES
+       ($1, $2, 'ativa', now() - interval '10 minutes', 'manual'),
+       ($1, $3, 'arquivada', NULL, NULL)`,
+    [TENANT, P.pausada, P.arquivada]
+  );
+
+  const pool = {
+    query: async (sql, params) => {
+      try {
+        return await db.query(sql, params);
+      } catch (err) {
+        if (err?.code === "42P01") return { rows: [], rowCount: 0 };
+        throw err;
+      }
+    },
+  };
+
+  const routes = {};
+  const register = (method) => vi.fn((path, ...handlers) => {
+    routes[`${method} ${path}`] = handlers[handlers.length - 1];
+  });
+  const app = { post: register("POST"), get: register("GET"), delete: register("DELETE"), put: register("PUT"), patch: register("PATCH") };
+  const chip = (id, name) => ({ id, name, active: true, dispatch_webhook_url: `https://evolution.invalid/message/sendText/${id}` });
+
+  registerChatbotRoutes(app, {
+    ensureDb: () => true,
+    getLeadClientEvolutionInstances: async () => [chip("chip-a", "Chip A"), chip("chip-b", "Chip B"), chip("chip-robo", "Chip Robô")],
+    // Robô da empresa ligado só no chip-robo.
+    getLeadClientN8nSettings: async () => ({ chatbot_enabled: true, chatbot_instances: ["chip-robo"], agent_pause_expiry_days: 0 }),
+    internalErrorPayloadDetails: () => ({}),
+    isMissingSchemaError: () => false,
+    leadsTableName: () => "leads",
+    maskPhoneForLog: (p) => p,
+    MAX_LEADS_OUTLIER_BATCH: 100,
+    continueCampaignLeadFromReply: vi.fn(),
+    findCampaignReplyMatches: async () => ({ matches: [], waitForReplyMatches: [], processingWaitForReplyMatches: [], activePeriodCampaign: null }),
+    normalizeString: (s) => (s ? String(s).trim() : ""),
+    normalizeTenantKey: (k) => k,
+    pgDatabasePool: pool,
+    requireAppViewAccess: () => (_req, _res, next) => next(),
+    requireFirebaseAuth: (_req, _res, next) => next(),
+    resolveAuthorizedClientId: (_req, _res, cid) => cid || TENANT,
+    resolveDispatchWebhookSettings: async () => ({}),
+    resolveInboundDispatchSettings: async () => ({}),
+    sanitizePhone: (p) => String(p || "").replace(/\D/g, ""),
+    sendError: vi.fn((res, status, code) => res.json({ success: false, status, code })),
+    supabase: { from: () => ({}) },
+    validateLeadsOutlierRecord: () => true,
+    validateN8nInboundBearer: () => true,
+  });
+
+  listChats = async (query = {}) => {
+    let payload = null;
+    const res = { json: vi.fn((data) => { payload = data; }), status: vi.fn(() => res) };
+    await routes["GET /api/whatsapp/chats"]({ query: { clientId: TENANT, limit: "200", ...query } }, res);
+    return payload;
+  };
+});
+
+afterAll(async () => {
+  await db?.close();
+});
+
+const ids = (payload) => payload.items.map((c) => c.id).sort();
+
+describe("GET /api/whatsapp/chats — abas de estado de trabalho", () => {
+  it("cada aba nova devolve as conversas do seu estado", async () => {
+    expect(ids(await listChats({ tab: "esperam" }))).toEqual([P.espera, P.esperaNoChipB, P.pausada].sort());
+    expect(ids(await listChats({ tab: "com_lead" }))).toEqual([P.comLead, P.semChip].sort());
+    expect(ids(await listChats({ tab: "robo" }))).toEqual([P.robo]);
+    expect(ids(await listChats({ tab: "esfriaram" }))).toEqual([P.esfriou]);
+  });
+
+  it("o contador de cada aba bate com o total e com a quantidade de itens da aba", async () => {
+    for (const tab of ["esperam", "com_lead", "robo", "esfriaram"]) {
+      const payload = await listChats({ tab });
+      expect(payload.items.length, `itens da aba ${tab}`).toBe(payload.counts.work[tab]);
+      expect(payload.total, `total da aba ${tab}`).toBe(payload.counts.work[tab]);
+      expect(payload.hasMore).toBe(false);
+    }
+  });
+
+  it("'Esperam você' vem com mais parado primeiro e com o início da espera em cada item", async () => {
+    const payload = await listChats({ tab: "esperam" });
+    expect(payload.items.map((c) => c.id)).toEqual([P.espera, P.esperaNoChipB, P.pausada]);
+    for (const item of payload.items) {
+      expect(item.workState).toBe("esperam");
+      expect(Math.floor(Date.parse(item.waitingSince) / 1000)).toBe(item.timestamp);
+    }
+  });
+
+  it("diz quem responde em cada chip, pela regra do portão", async () => {
+    const payload = await listChats({ tab: "esperam" });
+    expect(payload.chipAgents["chip-robo"]).toMatchObject({ kind: "empresa" });
+    expect(payload.chipAgents["chip-a"]).toMatchObject({ kind: "nenhum", reason: "chip_fora_do_robo_da_empresa" });
+  });
+});
+
+describe("GET /api/whatsapp/chats — nenhum filtro antigo sumiu", () => {
+  it("Grupos continua trazendo só grupos", async () => {
+    const payload = await listChats({ tab: "grupos" });
+    expect(ids(payload)).toEqual([P.grupo]);
+    expect(payload.counts.groups).toBe(1);
+  });
+
+  it("Automações continua trazendo só conversa de robô de terceiro", async () => {
+    const payload = await listChats({ tab: "automacoes" });
+    expect(ids(payload)).toEqual([P.automacao]);
+    expect(payload.counts.automations).toBe(1);
+  });
+
+  it("Arquivadas continua trazendo só as arquivadas", async () => {
+    const payload = await listChats({ tab: "arquivadas" });
+    expect(ids(payload)).toEqual([P.arquivada]);
+    expect(payload.counts.archived).toBe(1);
+  });
+
+  it("Pausadas continua trazendo só conversa com agente pausado", async () => {
+    const payload = await listChats({ tab: "pausadas" });
+    expect(ids(payload)).toEqual([P.pausada]);
+    expect(payload.counts.paused).toBe(1);
+  });
+
+  it("Todas continua trazendo tudo, e nenhuma aba de estado mostra grupo, arquivada ou automação", async () => {
+    expect((await listChats({ tab: "todas" })).items).toHaveLength(Object.keys(P).length);
+    const deTrabalho = (
+      await Promise.all(["esperam", "com_lead", "robo", "esfriaram"].map((tab) => listChats({ tab })))
+    ).flatMap((p) => p.items.map((c) => c.id));
+    expect(deTrabalho).not.toContain(P.grupo);
+    expect(deTrabalho).not.toContain(P.arquivada);
+    expect(deTrabalho).not.toContain(P.automacao);
+  });
+});
+
+describe("GET /api/whatsapp/chats — escopo de chip", () => {
+  it("um chip mostra menos conversas que todos, nas abas novas e nas antigas", async () => {
+    expect((await listChats({ tab: "esperam" })).items).toHaveLength(3);
+    expect(ids(await listChats({ tab: "esperam", instanceName: "chip-b" }))).toEqual([P.esperaNoChipB]);
+
+    expect((await listChats({ tab: "todas" })).items.length).toBeGreaterThan(1);
+    expect(ids(await listChats({ tab: "todas", instanceName: "chip-b" }))).toEqual([P.esperaNoChipB]);
+  });
+
+  it("conversa sem chip gravado aparece em 'todos' e não aparece dentro de chip nenhum", async () => {
+    expect(ids(await listChats({ tab: "com_lead" }))).toContain(P.semChip);
+    for (const instanceName of ["chip-a", "chip-b", "chip-robo"]) {
+      expect(ids(await listChats({ tab: "com_lead", instanceName })), instanceName).not.toContain(P.semChip);
+      expect(ids(await listChats({ tab: "todas", instanceName })), instanceName).not.toContain(P.semChip);
+    }
+  });
+
+  it("o contador acompanha o escopo de chip", async () => {
+    const payload = await listChats({ tab: "esperam", instanceName: "chip-robo" });
+    expect(payload.counts.work).toEqual({ esperam: 1, com_lead: 0, robo: 1, esfriaram: 0 });
+    expect(payload.items.map((c) => c.id)).toEqual([P.pausada]);
+  });
+});
