@@ -6,8 +6,12 @@ import {
   Phone,
   Mail,
   UserCheck,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/use-toast";
+import { useCriarGruposWhatsapp } from "@/hooks/useGdClientes";
 import type { PortfolioClient } from "./PortfolioTable";
 
 interface ClientDrawerProps {
@@ -24,7 +28,41 @@ function isValidDriveUrl(url?: string | null): boolean {
 }
 
 export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
+  const criarGrupos = useCriarGruposWhatsapp();
+  const [criandoGrupos, setCriandoGrupos] = React.useState(false);
+
   if (!client) return null;
+
+  const handleCriarGrupos = async () => {
+    if (!client?.id) return;
+    setCriandoGrupos(true);
+    try {
+      const res = await criarGrupos.mutateAsync({
+        clienteId: client.id,
+        instanceName: "vexo-adm-vexo-atende",
+        force: false,
+      });
+      if (res.status === "already_created") {
+        toast({
+          title: "Grupos e Pastas já existem",
+          description: "Os grupos de WhatsApp e pastas no Google Drive já haviam sido criados anteriormente.",
+        });
+      } else {
+        toast({
+          title: "🚀 Sucesso!",
+          description: "Grupos de WhatsApp e pastas no Google Drive provisionados com sucesso.",
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Erro ao criar grupos e pastas",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setCriandoGrupos(false);
+    }
+  };
 
   return (
     <div className="fixed inset-y-0 right-0 w-full max-w-md bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-2xl z-50 flex flex-col animate-slide-in-right">
@@ -122,6 +160,30 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
             </p>
             <p className="text-[10px] text-slate-500 mt-0.5">Status: {client.trafficStatus}</p>
           </div>
+        </div>
+
+        {/* Ações Operacionais */}
+        <div className="space-y-2.5 pt-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            Ações Operacionais
+          </p>
+          <Button
+            type="button"
+            onClick={handleCriarGrupos}
+            disabled={criandoGrupos}
+            className="w-full justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold py-2.5 rounded-xl shadow-xs cursor-pointer transition-all disabled:opacity-50"
+          >
+            {criandoGrupos ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span>Criando Grupos & Pastas...</span>
+              </>
+            ) : (
+              <>
+                <span>🚀 Criar Grupos & Pastas Drive</span>
+              </>
+            )}
+          </Button>
         </div>
 
         {/* Links Operacionais */}

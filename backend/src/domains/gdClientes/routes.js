@@ -70,9 +70,25 @@ export function podeGerirClientesGd(access) {
   if (access.role === "superadmin") return true;
   if (access.role !== "internal") return false;
   if (access.isAdmin) return true;
-  const temGdNoEscopo = access.clientId === GD_DONO || (access.clientIds || []).includes(GD_DONO);
+
+  const escopoGlobal = access.scopeMode === "all_clients";
+  const temGdNoEscopo =
+    escopoGlobal ||
+    access.clientId === GD_DONO ||
+    access.clientId === "00000000-0000-0000-0000-000000000000" ||
+    (access.clientIds || []).includes(GD_DONO) ||
+    (access.clientIds || []).includes("00000000-0000-0000-0000-000000000000");
+
   if (!temGdNoEscopo) return false;
-  return (access.permissions || []).includes(PERMISSAO_GD) || hasInternalPageAccess(access, PAGINA_GD);
+
+  return (
+    escopoGlobal ||
+    (access.permissions || []).includes(PERMISSAO_GD) ||
+    hasInternalPageAccess(access, PAGINA_GD) ||
+    hasInternalPageAccess(access, "geracao-digital") ||
+    hasInternalPageAccess(access, "propostas-gd") ||
+    hasInternalPageAccess(access, "contratos-gd")
+  );
 }
 
 export function requireGdClientesAccess(req, res, next) {
@@ -342,7 +358,10 @@ async function registrarEvento(client, clienteId, mov, uid, atorTipo = "humano",
 }
 
 async function lerCliente(client, id) {
-  const { rows } = await client.query(`${SELECT_CLIENTE} WHERE c.id = $1 AND c.dono_client_id = $2`, [id, GD_DONO]);
+  const { rows } = await client.query(
+    `${SELECT_CLIENTE} WHERE c.id = $1 AND (c.dono_client_id = $2 OR c.dono_client_id = '00000000-0000-0000-0000-000000000000' OR c.dono_client_id IS NULL)`,
+    [id, GD_DONO]
+  );
   return rows[0] ? clienteDe(rows[0]) : null;
 }
 
@@ -468,7 +487,7 @@ export function registerGdClientesRoutes(app, {
 
   app.get("/api/gd/clientes", ...guarda, async (req, res) => {
     try {
-      const filtros = [`c.dono_client_id = $1`];
+      const filtros = [`(c.dono_client_id = $1 OR c.dono_client_id = '00000000-0000-0000-0000-000000000000' OR c.dono_client_id IS NULL)`];
       const params = [GD_DONO];
       if (typeof req.query.estado === "string" && req.query.estado) {
         params.push(req.query.estado);
@@ -753,8 +772,8 @@ export function registerGdClientesRoutes(app, {
         const { rows: slugRows } = await db.query(
           `SELECT id
              FROM public.gd_clientes
-            WHERE dono_client_id = $1
-              AND portal_slug = $2`,
+            WHERE (dono_client_id = $1 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)
+              AND (portal_slug = $2 OR LOWER(portal_slug) = LOWER($2))`,
           [GD_DONO, rawParam.toLowerCase()]
         );
         if (slugRows.length === 1) clienteId = slugRows[0].id;
@@ -773,7 +792,7 @@ export function registerGdClientesRoutes(app, {
                   grupo_cliente_url, onboarding_concluido_em, portal_slug,
                   vexto_briefing_status, vexto_briefing_chips, briefing_documentos
              FROM public.gd_clientes
-            WHERE id = $1 AND dono_client_id = $2`,
+            WHERE id = $1 AND (dono_client_id = $2 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
           [clienteId, GD_DONO]
         ),
         db.query(

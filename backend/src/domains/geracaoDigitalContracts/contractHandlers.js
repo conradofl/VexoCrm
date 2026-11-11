@@ -541,7 +541,7 @@ export async function uploadSignedContract(req, res) {
     }
 
     const { rows: contractRows } = await db.query(
-      "SELECT id, tenant_id, status, signed_file_path, signed_file_name, signed_uploaded_at, signed_uploaded_by, signed_file_history FROM public.gd_contracts WHERE id = $1 AND tenant_id = $2",
+      "SELECT id, tenant_id, empresa, dados, status, signed_file_path, signed_file_name, signed_uploaded_at, signed_uploaded_by, signed_file_history FROM public.gd_contracts WHERE id = $1 AND tenant_id = $2",
       [id, tenantId]
     );
 
@@ -609,6 +609,34 @@ export async function uploadSignedContract(req, res) {
         tenantId,
       ]
     );
+
+    // Dispara criação automática de pastas e grupos se houver cliente GD correspondente
+    (async () => {
+      try {
+        const dadosObj = typeof contract.dados === "string" ? JSON.parse(contract.dados) : (contract.dados || {});
+        const cnpjLimpo = String(dadosObj?.contratante_cnpj || "").replace(/\D/g, "");
+        const nomeEmpresa = String(contract.empresa || dadosObj?.contratante_razao_social || dadosObj?.empresa || "").trim();
+        if (cnpjLimpo || nomeEmpresa) {
+          const { rows: clientes } = await db.query(
+            `SELECT id, nome, grupo_cliente_jid FROM public.gd_clientes
+             WHERE ($1 <> '' AND cnpj = $1) OR ($2 <> '' AND nome ILIKE $3)
+             LIMIT 1`,
+            [cnpjLimpo, nomeEmpresa, `%${nomeEmpresa}%`]
+          );
+          if (clientes.length > 0 && !clientes[0].grupo_cliente_jid) {
+            console.log(`[Contrato Assinado] Disparando onboarding de Drive e Grupos para ${clientes[0].nome}...`);
+            const baseUrl = process.env.INTERNAL_API_URL || process.env.VITE_API_BASE_URL || "http://127.0.0.1:3001";
+            fetch(`${baseUrl}/api/gd/clientes/${clientes[0].id}/onboarding/whatsapp-groups`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: req.headers.authorization || "" },
+              body: JSON.stringify({ force: false }),
+            }).catch((e) => console.warn("[Onboarding Auto] Erro ao chamar webhook:", e.message));
+          }
+        }
+      } catch (err) {
+        console.warn("[Onboarding Auto] Falha ao verificar cliente para grupos:", err.message);
+      }
+    })();
 
     res.status(200).json(updatedRows[0]);
   } catch (error) {
