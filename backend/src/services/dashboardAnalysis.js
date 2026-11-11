@@ -13,7 +13,7 @@
 
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 import { SQL_LEAD_TEMPERATURE_BUCKET } from "./leadTemperature.js";
-import { sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
+import { sqlRunPerson, sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
 
 // Perfil só entra no ranking com volume mínimo (mesma regra 6 dos rankings da Fase 1).
 export const PROFILE_MIN_LEADS = 30;
@@ -224,7 +224,7 @@ export async function measureTopProfiles(pool, { clientId, currentStart, current
   const { rows } = await pool.query(
     `
       WITH replied_people AS (
-        SELECT DISTINCT ${SQL_CANONICAL_PHONE("r.phone")} AS cphone
+        SELECT DISTINCT ${sqlRunPerson("r")} AS cphone
         FROM public.campaign_dispatch_runs r
         WHERE r.client_id = $1
           AND r.status = 'sent'

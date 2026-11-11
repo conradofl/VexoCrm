@@ -26,7 +26,7 @@ import {
   measureBaseHealth,
   measureFirstHumanResponse,
 } from "./dashboardAnalysis.js";
-import { MESSAGE_EFFECTIVENESS_MIN_SENT, sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
+import { MESSAGE_EFFECTIVENESS_MIN_SENT, sqlRunPerson, sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
 import { resolveChipDailyLimit } from "./chipQuota.js";
 import {
   DASHBOARD_DEFAULT_TIMEZONE,
@@ -41,7 +41,7 @@ const LM_TIMESTAMP_SQL = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.cre
 // respondidos em até 14 dias. Todo bloco do Dashboard que diz "responderam" conta assim; a taxa é
 // pessoas que responderam ÷ pessoas que receberam envio. "Enviados" continua contando envios.
 const RUN_REPLIED_SQL = sqlRunRepliedWithinWindow("r");
-const RUN_PERSON_SQL = SQL_CANONICAL_PHONE("r.phone");
+const RUN_PERSON_SQL = sqlRunPerson("r");
 
 // Ranking de chips. "Envios" do chip = envios cujo UPDATE de 'sent' gravou ESTE chip em
 // campaign_dispatch_runs.evolution_instance_id (o chip que de fato enviou, rodízio ou padrão). O chip configurado

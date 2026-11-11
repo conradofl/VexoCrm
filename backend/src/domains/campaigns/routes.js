@@ -5999,15 +5999,18 @@ export function registerCampaignsRoutes(app, deps) {
         campaignId: row.campaign_id,
         campaignName: row.campaign_name,
         message: row.message || null,
+        // sentCount = ENVIOS. reachedCount e repliedCount = PESSOAS (telefone canônico distinto), a mesma
+        // definição do Dashboard. A taxa é pessoas que responderam ÷ pessoas que receberam envio.
         sentCount: row.sent_count,
+        reachedCount: row.reached_count,
         repliedCount: row.replied_count,
-        replyRate: row.sent_count > 0 ? Math.round((row.replied_count / row.sent_count) * 1000) / 10 : 0,
+        replyRate: row.reached_count > 0 ? Math.round((row.replied_count / row.reached_count) * 1000) / 10 : 0,
         // Continua no denominador (foi enviado de fato) mas nunca pode
         // contar como respondido — cada um destes puxa replyRate pra baixo
         // sem que quem lê a taxa saiba quantos são. Mesmo motivo de
         // replyWindowDays: dado que molda a taxa tem que estar visível.
         sentWithoutTimestamp: row.sent_without_timestamp,
-        // Quantos runs só contam como respondido por causa do OR canônico —
+        // Quantas PESSOAS só contam como respondidas por causa do OR canônico —
         // o tamanho medido (não estimado) do ganho do fix de telefone.
         casouSoNoCanonico: row.casou_so_no_canonico,
         // null = coluna is_group ausente nesse tenant, não medido. 0 = medido,

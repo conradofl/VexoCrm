@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { calculateDashboardMetrics, calculateDelta } from "../services/dashboardCalculations.js";
 import { measureTopProfiles } from "../services/dashboardAnalysis.js";
+import { buildMessageEffectivenessSql, MESSAGE_EFFECTIVENESS_MIN_SENT } from "../services/messageEffectiveness.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
 
 const T = "tenant-pessoas";
@@ -142,6 +143,68 @@ describe("Dashboard — 'respondeu' conta PESSOAS (definição única, 31/10/202
     const ddd34 = metrics.rankings.regions.filter((r) => r.ddd === "34");
     expect(ddd34.reduce((s, r) => s + r.replies, 0)).toBe(1);
     expect(ddd34.reduce((s, r) => s + r.reached, 0)).toBe(4);
+  });
+});
+
+describe("Uma definição só: Dashboard e relatório de eficácia dizem o MESMO número de pessoas", () => {
+  let db;
+  let metrics;
+  let relatorio;
+
+  beforeAll(async () => {
+    db = await createPgliteDb(SCHEMA);
+    await db.exec(
+      [
+        `INSERT INTO campaigns (id, client_id, name) VALUES ('${C1}', '${T}', 'Campanha A');`,
+        // UMA pessoa, TRÊS envios, e cada um dos três foi respondido (o terceiro com o telefone escrito
+        // de outro jeito). Contando envios dá 3; contando pessoas dá 1.
+        run("5534991110001", "2026-10-10T10:00:00Z"),
+        inbound("5534991110001", "2026-10-10T11:00:00Z"),
+        run("5534991110001", "2026-10-12T10:00:00Z"),
+        inbound("5534991110001", "2026-10-12T11:00:00Z"),
+        run("34991110001", "2026-10-14T10:00:00Z"),
+        inbound("34991110001", "2026-10-14T11:00:00Z"),
+        // Volume para o mínimo de envios: outra pessoa, 28 envios, nenhuma resposta.
+        ...Array.from({ length: 28 }, (_, i) => run("5534991110002", `2026-10-${String(2 + i).padStart(2, "0")}T08:00:00Z`)),
+      ].join("\n")
+    );
+    metrics = await calculateDashboardMetrics(db, T, "30d", { referenceDate: REF });
+    const { rows } = await db.query(buildMessageEffectivenessSql(true, true), [T, MESSAGE_EFFECTIVENESS_MIN_SENT]);
+    relatorio = rows;
+  });
+
+  afterAll(async () => {
+    await db?.close();
+  });
+
+  it("[TESTE OBRIGATÓRIO] 1 pessoa com 3 envios respondidos: o Dashboard diz 1, não 3", () => {
+    expect(metrics.unavailableBlocks).not.toContain("summary.replied");
+    expect(metrics.summary.replied.current).toBe(1);
+    expect(metrics.rankings.messages[0].replied_count).toBe(1);
+  });
+
+  it("[TESTE OBRIGATÓRIO] 1 pessoa com 3 envios respondidos: o relatório de eficácia diz 1, não 3", () => {
+    expect(relatorio).toHaveLength(1);
+    expect(relatorio[0].replied_count).toBe(1);
+  });
+
+  it("os dois lugares batem em envios, pessoas alcançadas e pessoas que responderam", () => {
+    const dash = metrics.rankings.messages[0];
+    const rel = relatorio[0];
+    expect(rel.sent_count).toBe(31);
+    expect(rel.reached_count).toBe(2);
+    expect({ sent: rel.sent_count, reached: rel.reached_count, replied: rel.replied_count }).toEqual({
+      sent: dash.sent_count,
+      reached: dash.reached_count,
+      replied: dash.replied_count,
+    });
+  });
+
+  it("os recortes de quem respondeu somam com o total de pessoas (não de envios)", () => {
+    const rel = relatorio[0];
+    // Sem lead cadastrado para o telefone: a única pessoa cai em lead_nao_encontrado, uma vez só.
+    expect(rel.quente + rel.morno + rel.frio + rel.sem_classificacao + rel.lead_nao_encontrado).toBe(rel.replied_count);
+    expect(rel.respostas_de_grupo).toBe(0);
   });
 });
 

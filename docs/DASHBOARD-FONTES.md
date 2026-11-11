@@ -68,12 +68,21 @@ pessoas. Os rankings de mensagem, chip e região também passam a contar pessoas
   chegou escrevendo sozinho não "respondeu", ele "chamou"**. São perguntas
   diferentes.
 
-### O que NÃO foi unificado neste PR (pendente)
+### Relatório de eficácia: unificado (10/11/2026)
 
-- **Relatório de eficácia de mensagens** (`buildMessageEffectivenessSql`, tela
-  de Campanhas) continua contando envios respondidos. É uma tela fora do
-  Dashboard, com testes e consumidores próprios. Deve seguir a mesma definição,
-  em PR separado.
+- **Relatório de eficácia de mensagens** (`buildMessageEffectivenessSql`, rota
+  `GET /api/campaigns/reports/message-effectiveness`) passou a contar PESSOAS
+  com a mesma definição: `replied_count` = `COUNT(DISTINCT sqlRunPerson())`
+  entre os envios respondidos, `reached_count` = pessoas que receberam envio, e
+  a taxa é uma sobre a outra. `sent_count` continua sendo envios (decide o
+  volume mínimo de 30). Os recortes de quem respondeu (temperatura, motivo de
+  lead não encontrado, só no canônico, grupo) também são por pessoa.
+- Diferença que sobra, e é de recorte, não de definição: o relatório olha a
+  campanha inteira (sem período) e mantém no denominador a pessoa cujo único
+  envio não tem `sent_at` (visível em `sentWithoutTimestamp`); o Dashboard
+  filtra por período de `sent_at`.
+- Teste que prova: `dashboardRespondeuPessoas.test.js`, bloco "Uma definição
+  só" (1 pessoa, 3 envios respondidos, os dois lugares dizem 1).
 
 ---
 
@@ -114,7 +123,7 @@ número não bate · **INVENTADO** = sem fonte, hoje a tela inventa.
 
 | # | Divergência | Situação depois deste PR |
 |---|---|---|
-| 1 | "Respondeu" com duas (três) definições | **Fechada no Dashboard.** Pendente no relatório de eficácia (seção 1). |
+| 1 | "Respondeu" com duas (três) definições | **Fechada** no Dashboard e no relatório de eficácia (seção 1). |
 | 2 | replyRate com telefone cru no EXISTS | O Dashboard já comparava cru OU canônico. O import-audit não foi lido nesta fase: segue aberto. |
 | 3 | Tenant sumia por `uuid = text` | Fechada no código (`::text` dos dois lados; só `42P01` é "tabela ausente"). |
 | 4 | `target_count` fabrica "N pendentes" | Não aparece no Dashboard atual. Vira bloqueio quando a fila de disparo entrar no Bloco 1: o card tem que ler o mesmo campo que o agendador. |
@@ -237,7 +246,7 @@ seção 1 está provada. Repassar o número só com a query e o `medido_em`.
 
 | Arquivo | Mudança |
 |---|---|
-| `backend/src/services/messageEffectiveness.js` | `sqlRunRepliedWithinWindow()`: o pedaço único "envio respondido em 14 dias". |
+| `backend/src/services/messageEffectiveness.js` | `sqlRunRepliedWithinWindow()`: o pedaço único "envio respondido em 14 dias". `sqlRunPerson()`: a pessoa do envio (telefone canônico). |
 | `backend/src/services/dashboardCalculations.js` | Responderam, taxa e rankings (mensagem, chip, região) contam pessoas; payload ganha `reached`/`previousReached` (pessoas alcançadas); `calculateDelta` devolve `null` sem base. |
 | `backend/src/services/dashboardAnalysis.js` | Perfil que converte: "respondeu" pela definição única. |
 | `frontend/src/lib/dashboard/formatters.ts` | `formatDelta` diferencia "sem delta" (`isMissing`) de 0%. |

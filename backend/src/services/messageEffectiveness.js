@@ -39,6 +39,22 @@ export function sqlRunRepliedWithinWindow(runAlias = "r") {
     )`;
 }
 
+/**
+ * "Quem é a pessoa deste envio?" — a outra metade da definição única: o telefone canônico do envio.
+ * Dashboard e relatório de eficácia contam COUNT(DISTINCT) DESTA expressão; nenhum dos dois tem a sua cópia.
+ * Três envios para o mesmo número (ou para 5534991110001 e 34991110001) são UMA pessoa.
+ */
+export function sqlRunPerson(runAlias = "r") {
+  return SQL_CANONICAL_PHONE(`${runAlias}.phone`);
+}
+
+/**
+ * Relatório de eficácia por campanha. Desde a Fase 0 do Dashboard, "respondeu" aqui é PESSOAS, igual ao
+ * Dashboard: replied_count = COUNT(DISTINCT pessoa) entre os envios respondidos, reached_count =
+ * COUNT(DISTINCT pessoa) que recebeu envio, e a taxa é uma sobre a outra. sent_count continua sendo ENVIOS
+ * (é ele que decide o volume mínimo). Os recortes de quem respondeu (temperatura, motivo de lead não
+ * encontrado, só-no-canônico, grupo) também são por pessoa, para somarem com replied_count.
+ */
 export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIsGroupColumn) {
   const canonicalLeadPhone = SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)");
   const lmTimestamp = MESSAGE_TIMESTAMP_SQL;
@@ -62,6 +78,7 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
         r.campaign_id,
         r.phone,
         r.lead_id,
+        ${sqlRunPerson("r")} AS person,
         (r.sent_at IS NULL) AS sent_at_missing,
         CASE WHEN r.sent_at IS NULL THEN false ELSE ${repliedExists({ phoneCondition: rawOrCanonicalPhone })} END AS replied,
         CASE WHEN r.sent_at IS NULL THEN false ELSE ${repliedExists({ phoneCondition: "lm.phone = r.phone" })} END AS replied_raw_only,
@@ -81,7 +98,8 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
       ORDER BY ${canonicalLeadPhone}, l.updated_at DESC NULLS LAST
     ),
     replied_temperature AS (
-      SELECT
+      -- Uma linha por PESSOA que respondeu na campanha (não por envio): os baldes somam com replied_count.
+      SELECT DISTINCT ON (runs.campaign_id, runs.person)
         runs.campaign_id,
         runs.phone,
         runs.lead_id,
@@ -90,6 +108,7 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
       FROM runs
       LEFT JOIN lead_by_phone lb ON lb.canonical_phone = ${SQL_CANONICAL_PHONE("runs.phone")}
       WHERE runs.replied
+      ORDER BY runs.campaign_id, runs.person, runs.lead_id NULLS LAST, runs.phone
     ),
     temperature_agg AS (
       SELECT
@@ -131,11 +150,13 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
       c.name AS campaign_name,
       c.analytics_meta->>'message' AS message,
       COUNT(*)::int AS sent_count,
-      COUNT(*) FILTER (WHERE runs.replied)::int AS replied_count,
+      COUNT(DISTINCT runs.person)::int AS reached_count,
+      COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied)::int AS replied_count,
       COUNT(*) FILTER (WHERE runs.sent_at_missing)::int AS sent_without_timestamp,
-      COUNT(*) FILTER (WHERE runs.replied AND NOT runs.replied_raw_only)::int AS casou_so_no_canonico,
+      (COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied)
+        - COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied_raw_only))::int AS casou_so_no_canonico,
       ${includeIsGroupColumn
-        ? "COUNT(*) FILTER (WHERE runs.replied AND runs.replied_without_group IS NOT TRUE)::int"
+        ? "(COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied) - COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied_without_group))::int"
         : "NULL::int"} AS respostas_de_grupo,
       COALESCE(t.quente, 0) AS quente,
       COALESCE(t.morno, 0) AS morno,
@@ -154,6 +175,6 @@ export function buildMessageEffectivenessSql(includeTemperatureColumn, includeIs
     WHERE c.client_id = $1
     GROUP BY c.id, c.name, c.analytics_meta, t.quente, t.morno, t.frio, t.sem_classificacao, t.lead_nao_encontrado, n.telefone_lid, n.sem_lead_id, n.lead_id_apagado, n.lead_id_de_outro_tenant, n.telefone_divergente
     HAVING COUNT(*) >= $2
-    ORDER BY (COUNT(*) FILTER (WHERE runs.replied))::float / COUNT(*) DESC
+    ORDER BY (COUNT(DISTINCT runs.person) FILTER (WHERE runs.replied))::float / NULLIF(COUNT(DISTINCT runs.person), 0) DESC NULLS LAST
   `;
 }
