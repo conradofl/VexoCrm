@@ -81,7 +81,8 @@ describe("Follow-up ETAPA 1 — Condições de Saída de Cadência e Guarda from
   describe("2. Casamento de Telefone Canônico (Sem colisão de 8 dígitos)", () => {
     it("SQL_CANONICAL_PHONE gera a expressão correta de normalização", () => {
       const sql = SQL_CANONICAL_PHONE("phone");
-      expect(sql).toContain("substr(regexp_replace(phone");
+      // Desde ae8a8f47 a canonicalização tira o sufixo de JID antes de contar dígitos.
+      expect(sql).toContain("substr(regexp_replace(regexp_replace(phone");
       expect(sql).toContain("55");
     });
 

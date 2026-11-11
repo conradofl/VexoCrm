@@ -497,10 +497,17 @@ describe("GET /api/gd/public/portal/:token (Consulta pública)", () => {
     });
     expect(patchRes.status).toBe(200);
 
-    // Consulta pelo slug
-    const resSlug = await chamar("GET", `/api/gd/public/portal/${slugUnico}`);
+    // O slug gravado ganha sufixo secreto; o digitado, sem sufixo, não abre o portal.
+    const slugGravado = patchRes.json.cliente.portal_slug;
+    expect(slugGravado.startsWith(`${slugUnico}-`)).toBe(true);
+    expect(slugGravado).toMatch(/-[a-z2-9]{12}$/);
+    const resSemSufixo = await chamar("GET", `/api/gd/public/portal/${slugUnico}`);
+    expect(resSemSufixo.status).toBe(404);
+
+    // Consulta pelo slug com sufixo
+    const resSlug = await chamar("GET", `/api/gd/public/portal/${slugGravado}`);
     expect(resSlug.status).toBe(200);
-    expect(resSlug.json.cliente.portal_slug).toBe(slugUnico);
+    expect(resSlug.json.cliente.portal_slug).toBe(slugGravado);
     expect(resSlug.json.cliente.grupo_cliente_url).toBe("https://chat.whatsapp.com/invitation-link-123");
     expect(resSlug.json.cliente.briefing_documentos).toBeDefined();
     expect(resSlug.json.cliente.briefing_documentos.briefing.pdf_url).toBe("https://drive.google.com/doc-b.pdf");

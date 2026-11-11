@@ -170,9 +170,9 @@ export function resolveCampaignImportSelectionStrict(campaign) {
   if (selection === "__crm__" || selection === "__all__") return selection;
   if (Array.isArray(selection) && selection.length > 0) return selection;
   if (typeof selection === "string" && selection.trim() !== "") return selection;
-  if (hasBancoAudienceCriteria(campaign)) {
-    return campaign?.import_id || "__crm__";
-  }
+  // Ausência: quem chamou precisa recusar (CAMPAIGN_WITHOUT_SOURCE). Devolver "__crm__" aqui só fazia a trava passar:
+  // o executor monta o lote com resolveCampaignImportSelection, que devolve null, e null lê todas as planilhas.
+  if (hasBancoAudienceCriteria(campaign)) return null;
   return "__all__";
 }
 

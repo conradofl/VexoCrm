@@ -51,6 +51,7 @@ import { construirEAtivarAgenteInbound } from "../../services/gdAgentBuilderServ
 import { processarReguaCustomerSuccess } from "../../services/gdCustomerSuccessSchedulerService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
 import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
+import { temSufixoSecreto } from "./portalSlug.js";
 
 export { GD_DONO, gerarPortalToken, hashPortalToken };
 const PERMISSAO_GD = "geracao_digital.proposals";
@@ -745,76 +746,18 @@ export function registerGdClientesRoutes(app, {
         // Formato não base64url ou inválido para hash, segue para verificação de slug
       }
 
-      // 2. Se não achou por token ativo, tenta resolver por portal_slug ou slug normalizado do nome
-      if (!clienteId) {
+      // 2. Sem token ativo: aceita o slug do portal, mas SÓ o que tem sufixo secreto (portalSlug.js).
+      //    Slug igual ao nome da empresa é adivinhável e não abre o portal; não há mais busca pelo nome.
+      //    Este GET não grava nada.
+      if (!clienteId && temSufixoSecreto(rawParam)) {
         const { rows: slugRows } = await db.query(
-          `SELECT id, nome, portal_slug
+          `SELECT id
              FROM public.gd_clientes
             WHERE dono_client_id = $1
-              AND (portal_slug = $2 OR LOWER(portal_slug) = LOWER($2))`,
-          [GD_DONO, rawParam]
+              AND portal_slug = $2`,
+          [GD_DONO, rawParam.toLowerCase()]
         );
-
-        if (slugRows.length > 0) {
-          clienteId = slugRows[0].id;
-        } else {
-          // Busca clientes do dono para tentar matching pelo slug normalizado de c.nome
-          const { rows: clientesRows } = await db.query(
-            `SELECT id, nome, portal_slug
-               FROM public.gd_clientes
-              WHERE dono_client_id = $1`,
-            [GD_DONO]
-          );
-
-          const normalizarSlug = (str) =>
-            String(str || "")
-              .toLowerCase()
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "")
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/^-+|-+$/g, "");
-
-          const targetSlug = normalizarSlug(rawParam);
-          const rawParamLower = rawParam.toLowerCase();
-
-          const matched = clientesRows.find((c) => {
-            if (c.portal_slug) {
-              const slugSalvo = c.portal_slug.toLowerCase();
-              if (slugSalvo === rawParamLower || normalizarSlug(slugSalvo) === targetSlug) {
-                return true;
-              }
-            }
-            const nomeNormalizado = normalizarSlug(c.nome);
-            const nomeSimples = String(c.nome || "")
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/^-+|-+$/g, "");
-
-            return (
-              nomeNormalizado === targetSlug ||
-              nomeSimples === targetSlug ||
-              nomeSimples === rawParamLower
-            );
-          });
-
-          if (matched) {
-            clienteId = matched.id;
-            // Auto-preenche portal_slug no banco caso estivesse nulo
-            if (!matched.portal_slug) {
-              const novoSlug = normalizarSlug(matched.nome) || targetSlug;
-              try {
-                await db.query(
-                  `UPDATE public.gd_clientes
-                      SET portal_slug = $1
-                    WHERE id = $2 AND portal_slug IS NULL`,
-                  [novoSlug, matched.id]
-                );
-              } catch (err) {
-                console.warn("[handlerPortalPublico] Falha ao auto-preencher portal_slug:", err?.message || err);
-              }
-            }
-          }
-        }
+        if (slugRows.length === 1) clienteId = slugRows[0].id;
       }
 
       if (!clienteId) {

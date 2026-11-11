@@ -96,7 +96,11 @@ describe("SQL_CANONICAL_PHONE_JID", () => {
 
     expect(sql).toContain("regexp_replace(x.phone, '@(s\\.whatsapp\\.net|c\\.us)$', '')");
     expect(sql).toContain(SQL_CANONICAL_PHONE("regexp_replace(x.phone, '@(s\\.whatsapp\\.net|c\\.us)$', '')")); // a mesma canonicalização de sempre
-    expect(sql).not.toMatch(/lid/); // '@lid' continua com o '@' e nunca vira telefone
+    // '@lid' continua com o '@' e nunca vira telefone: o ramo que o reconhece devolve a coluna como veio,
+    // antes de qualquer conta de dígitos. (Desde ae8a8f47 a expressão cita '@lid' justamente nesse ramo.)
+    const semSufixo = "regexp_replace(x.phone, '@(s\\.whatsapp\\.net|c\\.us)$', '')";
+    expect(sql).toContain(`WHEN ${semSufixo} LIKE '%@g.us' OR ${semSufixo} LIKE '%@lid' THEN ${semSufixo}`);
+    expect(sql.indexOf("LIKE '%@lid' THEN")).toBeLessThan(sql.indexOf("length("));
   });
 });
 

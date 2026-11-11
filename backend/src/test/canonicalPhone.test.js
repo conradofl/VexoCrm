@@ -58,8 +58,9 @@ describe("buildMessageEffectivenessSql — o EXISTS de 'respondeu' também canon
     expect(existsBlock).toContain("lm.phone = r.phone");
     // ...mas em OR com a canonicalizada dos dois lados — não só uma comparação crua sozinha
     expect(existsBlock).toMatch(/lm\.phone = r\.phone OR .*=.*\)/s);
-    expect(existsBlock).toContain("length(regexp_replace(lm.phone");
-    expect(existsBlock).toContain("length(regexp_replace(r.phone");
+    // Desde ae8a8f47 a canonicalização tira o sufixo de JID antes de contar dígitos.
+    expect(existsBlock).toContain("length(regexp_replace(regexp_replace(lm.phone");
+    expect(existsBlock).toContain("length(regexp_replace(regexp_replace(r.phone");
   });
 
   it("[TESTE OBRIGATÓRIO] runs exclui telefone vazio antes de calcular 'respondeu' — '' = '' não pode contar", () => {
