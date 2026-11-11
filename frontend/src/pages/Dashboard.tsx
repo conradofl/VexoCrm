@@ -154,6 +154,15 @@ export default function Dashboard({
               <OverviewTab data={data} periodLabel={periodLabel} />
             ) : (
               <>
+            {/* Só com as duas abas na tela: o painel anterior conta pela regra antiga (ex.: quem espera resposta). */}
+            {data.overview && (
+              <p
+                className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-[13px] font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+                data-testid="legacy-panel-notice"
+              >
+                Números pela regra antiga. A Visão geral é a referência.
+              </p>
+            )}
             {/* Primeiro bloco: o que aconteceu (5 números ou 3 dependendo dos módulos GD) */}
             <Block1WhatHappened
               summary={data.summary}

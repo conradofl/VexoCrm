@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Smartphone,
@@ -15,6 +15,28 @@ import { Button } from "@/components/ui/button";
 import { useOnboardingProgress } from "@/hooks/useOnboardingProgress";
 import { cn } from "@/lib/utils";
 
+// "Recolhido" é preferência de quem usa, por empresa: fica no navegador. A chave leva o id da empresa para a
+// escolha feita em uma não valer para outra. Navegador sem armazenamento (aba anônima, bloqueio) só perde a
+// preferência; o card funciona igual.
+const minimizedKey = (clientId?: string) => `vexo:onboarding-card:minimized:${clientId || "sem-empresa"}`;
+
+function readMinimized(clientId?: string): boolean {
+  try {
+    return window.localStorage.getItem(minimizedKey(clientId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeMinimized(clientId: string | undefined, minimized: boolean) {
+  try {
+    if (minimized) window.localStorage.setItem(minimizedKey(clientId), "1");
+    else window.localStorage.removeItem(minimizedKey(clientId));
+  } catch {
+    // sem armazenamento: vale só nesta visita
+  }
+}
+
 interface OnboardingProgressCardProps {
   clientId?: string;
   baseTotal?: number | null;
@@ -27,7 +49,15 @@ export function OnboardingProgressCard({
   className,
 }: OnboardingProgressCardProps) {
   const progress = useOnboardingProgress(clientId, { baseTotal });
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isMinimized, setIsMinimizedState] = useState(() => readMinimized(clientId));
+  // Trocar de empresa sem sair da tela: vale a preferência gravada para a empresa nova.
+  useEffect(() => {
+    setIsMinimizedState(readMinimized(clientId));
+  }, [clientId]);
+  const setIsMinimized = (minimized: boolean) => {
+    setIsMinimizedState(minimized);
+    writeMinimized(clientId, minimized);
+  };
 
   // Quando todos os 3 passos estão concluídos:
   if (progress.isFullyReady) {

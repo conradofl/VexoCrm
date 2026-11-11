@@ -233,6 +233,38 @@ describe("Nova Experiência de Onboarding & Implantação Vexo (3 Passos)", () =
       expect(screen.getByText("Implantação & Boas-Vindas Vexo OS")).toBeInTheDocument();
     });
 
+    it("Recolhido continua recolhido ao sair da tela e voltar, e vale só para aquela empresa", () => {
+      window.localStorage.clear();
+      mockSelectedClient = {
+        id: "empresa-1",
+        name: "Empresa Teste",
+        n8n_settings: { chatbot_enabled: false, evolution_instances: [] } as any,
+      };
+
+      const first = renderWithProviders(<OnboardingProgressCard clientId="empresa-1" baseTotal={0} />);
+      fireEvent.click(screen.getByRole("button", { name: /Recolher/i }));
+      first.unmount();
+
+      // Voltou para a tela: nasce recolhido.
+      const second = renderWithProviders(<OnboardingProgressCard clientId="empresa-1" baseTotal={0} />);
+      expect(screen.getByRole("button", { name: /Expandir/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Recolher/i })).not.toBeInTheDocument();
+      second.unmount();
+
+      // Outra empresa não herda a escolha.
+      const other = renderWithProviders(<OnboardingProgressCard clientId="empresa-2" baseTotal={0} />);
+      expect(screen.getByRole("button", { name: /Recolher/i })).toBeInTheDocument();
+      other.unmount();
+
+      // Expandir também é lembrado.
+      const third = renderWithProviders(<OnboardingProgressCard clientId="empresa-1" baseTotal={0} />);
+      fireEvent.click(screen.getByRole("button", { name: /Expandir/i }));
+      third.unmount();
+      renderWithProviders(<OnboardingProgressCard clientId="empresa-1" baseTotal={0} />);
+      expect(screen.getByRole("button", { name: /Recolher/i })).toBeInTheDocument();
+      window.localStorage.clear();
+    });
+
     it("Exibe badge sutil de 100% ativo quando todos os marcos estão prontos", () => {
       mockSelectedClient = {
         id: "empresa-1",
