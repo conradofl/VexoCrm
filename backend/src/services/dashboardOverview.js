@@ -215,11 +215,12 @@ export function buildFunnelMeetingsSql() {
   return `
     WITH replies AS MATERIALIZED (
       -- As respostas da empresa, com o telefone canônico calculado UMA vez. A regra por envio é a mesma de
-      -- sqlRunRepliedWithinWindow (telefone cru OU canônico, depois do envio, até ${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} dias); pedir a ela direto
-      -- recalculava o canônico de toda mensagem para cada envio (3 s medidos na maior empresa).
+      -- sqlRunRepliedWithinWindow (depois do envio, até ${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} dias); pedir a ela direto recalculava o canônico de
+      -- toda mensagem para cada envio (3 s medidos na maior empresa).
+      -- Lá a comparação é "telefone cru OU canônico". Aqui basta o canônico: ele é função só do texto do
+      -- telefone, então cru igual implica canônico igual, e a igualdade simples deixa o banco casar por hash.
       -- O corte de data é folga segura: nenhum envio dos dois períodos aceita resposta fora dele.
-      SELECT lm.phone AS raw_phone,
-             ${SQL_CANONICAL_PHONE("lm.phone")} AS cphone,
+      SELECT ${SQL_CANONICAL_PHONE("lm.phone")} AS cphone,
              ${MESSAGE_TIMESTAMP_SQL} AS ts
       FROM public.lead_messages lm
       WHERE lm.client_id = $1
@@ -227,16 +228,11 @@ export function buildFunnelMeetingsSql() {
         AND ${MESSAGE_TIMESTAMP_SQL} > LEAST($2::timestamptz, $4::timestamptz)
         AND ${MESSAGE_TIMESTAMP_SQL} <= GREATEST($3::timestamptz, $5::timestamptz) + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
     ),
-    valid_runs AS (
+    valid_runs AS MATERIALIZED (
+      -- A pessoa do envio também sai pronta daqui, uma vez por envio.
       SELECT ${sqlRunPerson("r")} AS person,
              r.sent_at,
-             (r.sent_at >= $2 AND r.sent_at < $3) AS is_current,
-             EXISTS (
-               SELECT 1 FROM replies q
-               WHERE (q.raw_phone = r.phone OR q.cphone = ${sqlRunPerson("r")})
-                 AND q.ts > r.sent_at
-                 AND q.ts <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
-             ) AS replied
+             (r.sent_at >= $2 AND r.sent_at < $3) AS is_current
       FROM public.campaign_dispatch_runs r
       WHERE r.client_id = $1
         AND r.status = 'sent'
@@ -245,10 +241,15 @@ export function buildFunnelMeetingsSql() {
         AND ((r.sent_at >= $2 AND r.sent_at < $3) OR (r.sent_at >= $4 AND r.sent_at < $5))
     ),
     responders AS (
-      SELECT person, is_current, MIN(sent_at) AS first_sent
-      FROM valid_runs
-      WHERE replied
-      GROUP BY person, is_current
+      SELECT v.person, v.is_current, MIN(v.sent_at) AS first_sent
+      FROM valid_runs v
+      WHERE EXISTS (
+        SELECT 1 FROM replies q
+        WHERE q.cphone = v.person
+          AND q.ts > v.sent_at
+          AND q.ts <= v.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+      )
+      GROUP BY v.person, v.is_current
     ),
     meetings AS MATERIALIZED (
       SELECT ${SQL_CANONICAL_PHONE("fs.phone")} AS person, fs.created_at
