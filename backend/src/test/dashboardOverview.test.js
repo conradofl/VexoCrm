@@ -300,9 +300,15 @@ describe("Tempo de primeira resposta humana, com cobertura", () => {
 });
 
 describe("'Pessoas esperam resposta' depende da tela Conversas", () => {
-  it("enquanto a consulta de lá não está no main, devolve 'pending_source' e nenhum número", async () => {
-    const r = await measureWaiting(db, { clientId: T, now: NOW });
+  it("sem a fonte, devolve 'pending_source' e nenhum número", async () => {
+    const r = await measureWaiting(db, { clientId: T, now: NOW }, { loadSource: async () => null });
     expect(r).toEqual({ status: "pending_source" });
+  });
+
+  it("a fonte está no main: a tela Conversas exporta a função do contrato", async () => {
+    const mod = await import("../services/inboxWorkState.js");
+    expect(typeof mod.countWaitingForDashboard).toBe("function");
+    expect(mod.WAITING_THRESHOLD_HOURS).toBe(3);
   });
 
   it("liga sozinho quando a fonte existir, chamando a MESMA função da tela Conversas", async () => {
@@ -329,9 +335,24 @@ describe("Payload do Dashboard: bloco `overview`", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("leva as consultas novas, e o bloco 1 sai como lugar reservado", async () => {
+  it("leva as consultas novas, e o bloco 1 sai com o número da tela Conversas", async () => {
+    // O que a consulta da fila lê e esta base de teste do Dashboard não tinha.
+    await db.exec(`
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS instance_name text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS message_text text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS contact_name text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS meta jsonb;
+      CREATE TABLE IF NOT EXISTS whatsapp_chat_states (
+        client_id text NOT NULL, phone text NOT NULL, state text NOT NULL DEFAULT 'ativa', reason text, source text, changed_by text,
+        attended_at timestamptz, attended_by text, agent_muted_at timestamptz, agent_muted_reason text, agent_muted_source text,
+        agent_mute_last_human_at timestamptz, PRIMARY KEY (client_id, phone)
+      );
+    `);
     const metrics = await calculateDashboardMetrics(db, T, "30d", { referenceDate: NOW });
-    expect(metrics.overview.waiting).toEqual({ status: "pending_source" });
+    const { countWaitingForDashboard } = await import("../services/inboxWorkState.js");
+    const direto = await countWaitingForDashboard(db, { clientId: T, now: NOW });
+    expect(metrics.overview.waiting).toEqual({ status: "ready", ...direto, thresholdHours: 3 });
+    expect(Number.isInteger(direto.waiting)).toBe(true);
     expect(metrics.overview.base.total).toBe(12);
     expect(metrics.overview.base.neverApproached.reachable).toBe(1);
     expect(metrics.overview.meetings.hasRecords).toBe(true);

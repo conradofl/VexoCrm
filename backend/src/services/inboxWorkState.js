@@ -21,10 +21,12 @@
 // 33 s a lista). Pelas grafias: 0,04 ms por conversa, mesmo lead em 1.143 de 1.143 conversas.
 
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_SPELLINGS } from "./canonicalPhone.js";
-import { SQL_WORK_QUEUE_MATCH } from "./inboxSqlMatchers.js";
+import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH, SQL_WORK_QUEUE_MATCH } from "./inboxSqlMatchers.js";
 
 export const WORK_STATES = ["esperam", "com_lead", "robo", "esfriaram"];
 export const AWAITING_WINDOW_DAYS = 7;
+// "Esperando há muito": o mesmo limite que o Dashboard mostra (SLOW_FIRST_RESPONSE_HOURS).
+export const WAITING_THRESHOLD_HOURS = 3;
 
 export function isWorkStateTab(tab) {
   return WORK_STATES.includes(tab);
@@ -111,9 +113,12 @@ export function buildWorkConvCte({ hasChipScope = false, pauseExpiredSql = "fals
       WHERE direction = 'inbound'
       ORDER BY canonical_phone, effective_timestamp DESC NULLS LAST, id DESC
     ),
-    work_conv AS (
+    conv AS (
+      -- Toda conversa, com a marca de quem está na fila de trabalho. O contador lê daqui
+      -- (uma passada só, inclusive grupos, automações e arquivadas do rodapé da coluna).
       SELECT
         m.*,
+        ${SQL_WORK_QUEUE_MATCH("m", "cs")} AS in_queue,
         li.last_in_at,
         li.lead_chip,
         (li.last_in_at IS NULL) AS lead_never_spoke,
@@ -136,7 +141,9 @@ export function buildWorkConvCte({ hasChipScope = false, pauseExpiredSql = "fals
       FROM latest_messages m
       LEFT JOIN last_inbound li ON li.phone = m.phone
       LEFT JOIN public.whatsapp_chat_states cs ON cs.client_id = $1 AND cs.phone = m.phone
-      WHERE ${SQL_WORK_QUEUE_MATCH("m", "cs")}
+    ),
+    work_conv AS (
+      SELECT * FROM conv WHERE in_queue
     )`;
 }
 
@@ -155,13 +162,37 @@ function baseParams({ clientId, now, robotChips, chipAliases }) {
   return { params, hasChipScope };
 }
 
-/** SQL do contador por estado. Exposto pelo mesmo motivo de buildWorkStatePageSql. */
+/**
+ * SQL dos contadores da coluna: UMA linha, uma passada pelas conversas.
+ *   - os quatro estados de trabalho (mesmo CASE da lista);
+ *   - quantas de "esperam" passaram de WAITING_THRESHOLD_HOURS;
+ *   - grupos, automações, arquivadas e pausadas, com os mesmos predicados das abas antigas.
+ * Exposto pelo mesmo motivo de buildWorkStatePageSql.
+ */
 export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql = "false" } = {}) {
+  const states = WORK_STATES.map(
+    (state) => `count(*) FILTER (WHERE c.in_queue AND c.work_state = '${state}')::integer AS ${state}`
+  ).join(",\n      ");
   return `
     WITH ${buildWorkConvCte({ hasChipScope, pauseExpiredSql })}
-    SELECT w.work_state, count(*)::integer AS total
-    FROM work_conv w
-    GROUP BY w.work_state`;
+    SELECT
+      ${states},
+      count(*) FILTER (
+        WHERE c.in_queue AND c.work_state = 'esperam'
+          AND c.effective_timestamp < $2::timestamptz - make_interval(hours => ${WAITING_THRESHOLD_HOURS})
+      )::integer AS esperam_over_threshold,
+      count(*) FILTER (WHERE c.is_group IS TRUE AND COALESCE(c.chat_state, 'ativa') != 'lixeira')::integer AS groups_count,
+      count(*) FILTER (WHERE c.is_group IS NOT TRUE AND c.chat_state = 'arquivada')::integer AS archived_count,
+      count(*) FILTER (
+        WHERE c.is_group IS NOT TRUE
+          AND (c.chat_state = 'automacao' OR (c.chat_state IS NULL AND ${SQL_AUTOMATION_MATCH("c.message_text")}))
+          AND NOT ${SQL_NUMBER_CHANGE_MATCH("c.message_text")}
+      )::integer AS automations_count,
+      count(*) FILTER (
+        WHERE c.is_group IS NOT TRUE AND c.agent_muted_at IS NOT NULL AND NOT c.agent_mute_expired
+          AND COALESCE(c.chat_state, 'ativa') != 'lixeira'
+      )::integer AS paused_count
+    FROM conv c`;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,17 +230,28 @@ export async function withStatementTimeout(pool, timeoutMs, fn) {
 }
 
 /**
- * Quantas conversas em cada estado. Sempre devolve as quatro chaves.
+ * Todos os contadores da coluna, de uma consulta só.
  * @param {(sql: string, params: any[]) => Promise<{rows: any[]}>} query
+ * @returns {Promise<{work: Record<string, number>, waitingOverThreshold: number, groups: number, archived: number, automations: number, paused: number}>}
  */
-export async function fetchWorkStateCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql } = {}) {
+export async function fetchInboxCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql } = {}) {
   const { params, hasChipScope } = baseParams({ clientId, now, robotChips, chipAliases });
   const { rows } = await query(buildWorkStateCountsSql({ hasChipScope, pauseExpiredSql }), params);
-  const counts = Object.fromEntries(WORK_STATES.map((s) => [s, 0]));
-  for (const row of rows) {
-    if (row.work_state in counts) counts[row.work_state] = Number(row.total) || 0;
-  }
-  return counts;
+  const row = rows[0] || {};
+  const int = (v) => Number(v) || 0;
+  return {
+    work: Object.fromEntries(WORK_STATES.map((state) => [state, int(row[state])])),
+    waitingOverThreshold: int(row.esperam_over_threshold),
+    groups: int(row.groups_count),
+    archived: int(row.archived_count),
+    automations: int(row.automations_count),
+    paused: int(row.paused_count),
+  };
+}
+
+/** Quantas conversas em cada estado de trabalho. Sempre devolve as quatro chaves. */
+export async function fetchWorkStateCounts(query, options = {}) {
+  return (await fetchInboxCounts(query, options)).work;
 }
 
 /**
@@ -379,4 +421,68 @@ export function resolveRobotChips({ settings = null, agents = [], instances = []
   }
 
   return { robotChips: Array.from(robotChips), byChip };
+}
+
+// ---------------------------------------------------------------------------
+// Contexto da fila (pausa vencida + chips do robô) e o número que o Dashboard lê
+// ---------------------------------------------------------------------------
+
+const AGENTS_SQL = `SELECT name, evolution_instance, evolution_instances, inbound_enabled, agent_kind, archived_at
+                      FROM public.followup_companies
+                     WHERE tenant_id = $1 AND archived_at IS NULL`;
+
+async function defaultLoadSettings(clientId) {
+  const { getLeadClientN8nSettings } = await import("./n8nSettings.js");
+  return getLeadClientN8nSettings(clientId);
+}
+
+async function defaultLoadInstances(clientId) {
+  const { getLeadClientEvolutionInstances } = await import("./evolution.js");
+  return getLeadClientEvolutionInstances(clientId);
+}
+
+/**
+ * O que a consulta da fila precisa saber da empresa: a expressão de "pausa vencida" e em
+ * quais chips o robô responde. A rota da aba e o Dashboard passam por aqui, para os dois
+ * contarem com a mesma regra.
+ *
+ * Falha ao ler agentes ou chips = nenhum chip de robô: na dúvida a conversa fica com a
+ * pessoa, nunca "com o robô".
+ */
+export async function loadWorkStateContext(
+  pool,
+  clientId,
+  { settings, loadSettings = defaultLoadSettings, loadInstances = defaultLoadInstances } = {}
+) {
+  const { resolveAgentPauseExpiryDays, agentPauseExpiredSql } = await import("./agentMuteGuard.js");
+  const tenantSettings = settings !== undefined ? settings : await loadSettings(clientId).catch(() => null);
+  const pauseExpiredSql = agentPauseExpiredSql(resolveAgentPauseExpiryDays(tenantSettings), "cs");
+
+  let robotInfo = { robotChips: [], byChip: {} };
+  try {
+    const [agentsRes, instances] = await Promise.all([pool.query(AGENTS_SQL, [clientId]), loadInstances(clientId)]);
+    robotInfo = resolveRobotChips({ settings: tenantSettings, agents: agentsRes?.rows || [], instances: instances || [] });
+  } catch (err) {
+    console.warn("[inboxWorkState] não foi possível resolver os chips do robô:", err?.message || err);
+  }
+  return { settings: tenantSettings, pauseExpiredSql, robotInfo };
+}
+
+/**
+ * Contrato do Dashboard ("Pessoas esperam resposta"): o número é o da aba "Esperam você",
+ * de todos os chips. Não existe segunda conta: é a mesma consulta dos contadores da aba,
+ * com o mesmo teto de tempo.
+ * @returns {Promise<{waiting: number, waitingOverThreshold: number}>}
+ */
+export async function countWaitingForDashboard(pool, { clientId, now } = {}, deps = {}) {
+  const { pauseExpiredSql, robotInfo } = await loadWorkStateContext(pool, clientId, deps);
+  const run = (query) =>
+    fetchInboxCounts(query, { clientId, now, robotChips: robotInfo.robotChips, chipAliases: null, pauseExpiredSql });
+  // O pool de produção tem connect() e a consulta roda com teto. Sem connect() (banco em
+  // memória dos testes) roda a MESMA consulta direto, sem teto.
+  const counts =
+    typeof pool?.connect === "function"
+      ? await withStatementTimeout(pool, WORK_STATE_QUERY_TIMEOUT_MS, run)
+      : await run((sql, params) => pool.query(sql, params));
+  return { waiting: counts.work.esperam, waitingOverThreshold: counts.waitingOverThreshold };
 }

@@ -7,7 +7,10 @@ import { PGlite } from "@electric-sql/pglite";
 import {
   AWAITING_WINDOW_DAYS,
   WORK_STATES,
+  WAITING_THRESHOLD_HOURS,
   buildWorkConvCte,
+  countWaitingForDashboard,
+  fetchInboxCounts,
   fetchWorkStateCounts,
   fetchWorkStatePage,
   resolveRobotChips,
@@ -337,5 +340,56 @@ describe("telefone canônico da consulta = SQL_CANONICAL_PHONE", () => {
 
   it("a limpeza do telefone aparece uma vez só na consulta (não uma por uso)", () => {
     expect(buildWorkConvCte({}).match(/regexp_replace\(regexp_replace\(/g)).toHaveLength(1);
+  });
+});
+
+describe("contadores da coluna e o número do Dashboard", () => {
+  it("uma consulta devolve os quatro estados e o rodapé (grupos, automações, arquivadas, pausadas)", async () => {
+    const counts = await fetchInboxCounts(query, base);
+    expect(counts.work).toEqual(await fetchWorkStateCounts(query, base));
+    expect(counts.groups).toBe(1);
+    expect(counts.automations).toBe(1);
+    expect(counts.archived).toBe(1);
+    expect(counts.paused).toBe(1); // P.roboPausado
+  });
+
+  it(`'esperando há muito' conta quem espera há mais de ${WAITING_THRESHOLD_HOURS} horas, e só dentro de 'Esperam você'`, async () => {
+    const counts = await fetchInboxCounts(query, base);
+    // Esperam: antiga (2 dias), média (3 h em ponto: ainda não passou), nova (1 h), robô pausado (30 min).
+    expect(counts.work.esperam).toBe(4);
+    expect(counts.waitingOverThreshold).toBe(1);
+    // Um minuto depois a de 3 h passa do limite. Esfriaram (10 dias) nunca entra na conta.
+    const later = await fetchInboxCounts(query, { ...base, now: new Date(NOW.getTime() + 60_000) });
+    expect(later.waitingOverThreshold).toBe(2);
+  });
+
+  it("countWaitingForDashboard devolve o número da aba 'Esperam você', de todos os chips", async () => {
+    const deps = {
+      settings: { chatbot_enabled: true, chatbot_instances: ["chip-robo"] },
+      loadInstances: async () => [{ id: "chip-robo", name: "chip-robo" }, { id: "chip-a", name: "chip-a" }, { id: "chip-b", name: "chip-b" }],
+    };
+    await db.exec(`CREATE TABLE IF NOT EXISTS public.followup_companies (
+      tenant_id TEXT, name TEXT, evolution_instance TEXT, evolution_instances TEXT[], inbound_enabled BOOLEAN, agent_kind TEXT, archived_at TIMESTAMPTZ
+    )`);
+    const r = await countWaitingForDashboard(db, { clientId: TENANT, now: NOW }, deps);
+    const aba = await fetchInboxCounts(query, base);
+    expect(r).toEqual({ waiting: aba.work.esperam, waitingOverThreshold: aba.waitingOverThreshold });
+    expect(r).toEqual({ waiting: 4, waitingOverThreshold: 1 });
+    // O que a lista da aba mostra é o que o Dashboard conta.
+    expect((await page("esperam")).length).toBe(r.waiting);
+  });
+
+  it("sem conseguir ler os chips do robô, ninguém fica 'com o robô': a conversa conta como esperando", async () => {
+    const r = await countWaitingForDashboard(
+      db,
+      { clientId: TENANT, now: NOW },
+      { settings: null, loadInstances: async () => { throw new Error("fora do ar"); } }
+    );
+    expect(r.waiting).toBe(5); // as 4 de antes + a do chip do robô
+  });
+
+  it("empresa sem conversa devolve zero, não nulo", async () => {
+    const r = await countWaitingForDashboard(db, { clientId: "empresa-vazia", now: NOW }, { settings: null, loadInstances: async () => [] });
+    expect(r).toEqual({ waiting: 0, waitingOverThreshold: 0 });
   });
 });

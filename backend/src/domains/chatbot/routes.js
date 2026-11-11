@@ -43,11 +43,11 @@ import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceS
 
 import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH } from "../../services/inboxSqlMatchers.js";
 import {
-  fetchWorkStateCounts,
+  fetchInboxCounts,
   fetchWorkStatePage,
   isStatementTimeout,
   isWorkStateTab,
-  resolveRobotChips,
+  loadWorkStateContext,
   withStatementTimeout,
   WORK_STATE_QUERY_TIMEOUT_MS,
 } from "../../services/inboxWorkState.js";
@@ -656,26 +656,13 @@ export function registerChatbotRoutes(app, deps) {
       // hoje não paga consulta que ela não usa.
       const useWorkState = !search && isWorkStateTab(rawTab);
 
-      // Em quais chips o robô responde, pela mesma regra do portão do webhook. Falha de
-      // leitura = nenhum chip: na dúvida a conversa fica com a pessoa, nunca "com o robô".
+      // Em quais chips o robô responde, pela mesma regra do portão do webhook (e do Dashboard).
       let robotInfo = { robotChips: [], byChip: {} };
-      if (useWorkState) try {
-        const [agentsRes, chipRows] = await Promise.all([
-          pgDatabasePool.query(
-            `SELECT name, evolution_instance, evolution_instances, inbound_enabled, agent_kind, archived_at
-               FROM public.followup_companies
-              WHERE tenant_id = $1 AND archived_at IS NULL`,
-            [clientId]
-          ),
-          getLeadClientEvolutionInstances(clientId),
-        ]);
-        robotInfo = resolveRobotChips({
+      if (useWorkState) {
+        ({ robotInfo } = await loadWorkStateContext(pgDatabasePool, clientId, {
           settings: inboxTenantSettings,
-          agents: agentsRes?.rows || [],
-          instances: chipRows || [],
-        });
-      } catch (robotErr) {
-        console.warn("[whatsapp/chats] não foi possível resolver os chips do robô:", robotErr?.message || robotErr);
+          loadInstances: getLeadClientEvolutionInstances,
+        }));
       }
       const workStateOptions = {
         clientId,
@@ -691,7 +678,8 @@ export function registerChatbotRoutes(app, deps) {
       if (instanceAliases && instanceAliases.length > 0) {
         queryParams.push(instanceAliases);
         const idx = queryParams.length;
-        instanceFilter = `AND (instance_name = ANY(\$${idx}) OR instance_name IS NULL)`;
+        // Mensagem sem chip gravado não entra em chip nenhum (antes entrava em todos).
+        instanceFilter = `AND instance_name = ANY(\$${idx})`;
       }
 
       let tabCondition = "";
@@ -806,6 +794,7 @@ export function registerChatbotRoutes(app, deps) {
           workState: row.work_state || null,
           waitingSince: row.last_in_at ? new Date(row.last_in_at).toISOString() : null,
           leadNeverSpoke: row.lead_never_spoke === true,
+          leadChip: row.lead_chip || null,
         };
       };
 
@@ -821,12 +810,16 @@ export function registerChatbotRoutes(app, deps) {
         // lentidão da primeira versão.
         try {
           const work = await withStatementTimeout(pgDatabasePool, WORK_STATE_QUERY_TIMEOUT_MS, async (runInboxQuery) => {
-            const workCounts = await fetchWorkStateCounts(runInboxQuery, workStateOptions);
+            const inboxCounts = await fetchInboxCounts(runInboxQuery, workStateOptions);
             const rows = await fetchWorkStatePage(runInboxQuery, { ...workStateOptions, state: rawTab, limit, offset, leadsTable });
-            return { workCounts, rows };
+            return { inboxCounts, rows };
           });
-          counts.work = work.workCounts;
-          total = work.workCounts?.[rawTab] || 0;
+          counts.work = work.inboxCounts.work;
+          counts.groups = work.inboxCounts.groups;
+          counts.archived = work.inboxCounts.archived;
+          counts.automations = work.inboxCounts.automations;
+          counts.paused = work.inboxCounts.paused;
+          total = work.inboxCounts.work?.[rawTab] || 0;
           items = work.rows.map(mapChatRow);
         } catch (workErr) {
           const timedOut = isStatementTimeout(workErr);
@@ -851,7 +844,7 @@ export function registerChatbotRoutes(app, deps) {
       if (!useWorkState) try {
         // 1. Apura contadores gerais para as abas
         const opIdentifiersForCount = operatorIdentifiers.length > 0 ? operatorIdentifiers : ["__NONE__"];
-        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND (instance_name = ANY($2) OR instance_name IS NULL)" : "";
+        const countInstanceFilter = instanceAliases && instanceAliases.length > 0 ? "AND instance_name = ANY($2)" : "";
         const countsParams = instanceAliases && instanceAliases.length > 0 ? [clientId, instanceAliases] : [clientId];
         countsParams.push(opIdentifiersForCount);
         const opParamIdx = countsParams.length;

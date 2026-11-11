@@ -252,12 +252,25 @@ describe("GET /api/whatsapp/chats — escopo de chip", () => {
     }
   });
 
-  it("nas abas antigas o filtro de chip segue como está em produção: mensagem sem chip entra em qualquer chip", async () => {
-    // Não é o comportamento desejado (é o defeito que as abas novas corrigem), mas este PR
-    // não muda a tela de hoje. Se alguém mexer nesse filtro, que seja de propósito.
+  it("nas abas antigas, mensagem sem chip gravado aparece em 'todos' e não entra dentro de chip nenhum", async () => {
+    // Antes ela entrava em TODOS os chips (OR instance_name IS NULL): escolher um chip
+    // mostrava conversa que não é dele, na lista e nos contadores.
+    expect(ids(await listChats({ tab: "todas" }))).toContain(P.semChip);
     for (const instanceName of ["chip-a", "chip-b", "chip-robo"]) {
-      expect(ids(await listChats({ tab: "todas", instanceName })), instanceName).toContain(P.semChip);
+      expect(ids(await listChats({ tab: "todas", instanceName })), instanceName).not.toContain(P.semChip);
     }
+  });
+
+  it("as abas novas devolvem também os contadores do rodapé (grupos, automações, arquivadas, pausadas)", async () => {
+    const body = await listChats({ tab: "esperam" });
+    for (const key of ["groups", "automations", "archived", "paused"]) {
+      expect(Number.isInteger(body.counts[key]), key).toBe(true);
+    }
+    const antigas = await listChats({ tab: "todas" });
+    expect(body.counts.groups).toBe(antigas.counts.groups);
+    expect(body.counts.automations).toBe(antigas.counts.automations);
+    expect(body.counts.archived).toBe(antigas.counts.archived);
+    expect(body.counts.paused).toBe(antigas.counts.paused);
   });
 
   it("o contador acompanha o escopo de chip", async () => {
