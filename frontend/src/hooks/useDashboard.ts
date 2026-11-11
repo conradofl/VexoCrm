@@ -18,6 +18,9 @@ export interface RepliedMetricComparison extends MetricComparison {
   // null = a taxa não pôde ser calculada (faltou o número de envios) — não é 0%
   rate: number | null;
   previousRate: number | null;
+  // Pessoas alcançadas (base da taxa). Ausente em payload gravado antes de existir.
+  reached?: number | null;
+  previousReached?: number | null;
   ruleDeclaration: string;
 }
 
@@ -138,6 +141,90 @@ export interface DashboardAnalysis {
   firstHumanResponse: FirstHumanResponse | null;
 }
 
+// ── Visão geral (Fase 1 do redesenho) ────────────────────────────────────
+// `null` em qualquer bloco = não foi possível calcular agora. Nunca zero.
+
+// "pending_source": a consulta da tela Conversas ainda não está no ar; a tela mostra o lugar reservado.
+export type OverviewWaiting =
+  | { status: "pending_source" }
+  | { status: "ready"; waiting: number; waitingOverThreshold: number | null; thresholdHours: number };
+
+export interface OverviewBaseSlices {
+  invalidPhone: number;
+  inConversation: number;
+  noReply: number;
+  neverApproached: number;
+  closedNoApproach: number;
+}
+
+export interface OverviewNeverApproached {
+  // Telefones distintos que dá para abordar (sem quem pediu para sair): o número do cartão.
+  reachable: number;
+  totalPhones: number;
+  totalLeads: number;
+  optOutDiscounted: number;
+  // false = a empresa não tem nenhum opt-out gravado
+  optOutRecorded: boolean;
+  shareOfBasePct: number | null;
+}
+
+export interface OverviewBase {
+  total: number;
+  slices: OverviewBaseSlices;
+  slicesAddUp: boolean;
+  neverApproached: OverviewNeverApproached;
+}
+
+// hasRecords=false → a empresa nunca registrou reunião: "sem registro", e current/previous vêm null.
+export interface OverviewMeetings {
+  hasRecords: boolean;
+  current: number | null;
+  previous: number | null;
+}
+
+export interface OverviewPair {
+  current: number | null;
+  previous: number | null;
+}
+
+export interface OverviewChip {
+  instanceId: string;
+  name: string;
+  sentToday: number;
+  quotaLimit: number;
+  quotaPercentage: number;
+}
+
+export interface OverviewFirstHumanResponse {
+  conversations: number;
+  measured: number;
+  indeterminate: number;
+  coveragePct: number | null;
+  coverageLevel: "ok" | "partial" | "insufficient" | "none";
+  answered: number;
+  waiting: number;
+  waitingBotOnly: number;
+  waitingOverThreshold: number;
+  answeredWithUnknownBefore: number;
+  thresholdHours: number;
+  medianMinutes: number | null;
+  p90Minutes: number | null;
+}
+
+export interface DashboardOverview {
+  waiting: OverviewWaiting | null;
+  base: OverviewBase | null;
+  meetings: OverviewMeetings | null;
+  funnel: {
+    received: OverviewPair | null;
+    replied: OverviewPair | null;
+    meetings: OverviewMeetings | null;
+  };
+  chips: OverviewChip[] | null;
+  chipsQuotaIsToday: boolean;
+  firstHumanResponse: OverviewFirstHumanResponse | null;
+}
+
 export interface ActionAlert {
   id: string;
   text: string;
@@ -175,6 +262,8 @@ export interface DashboardPayload {
   };
   analysis?: DashboardAnalysis;
   alerts: ActionAlert[];
+  // Ausente em payload gravado antes da Visão geral existir: a tela mostra o painel anterior até o recálculo.
+  overview?: DashboardOverview;
 }
 
 // Parâmetros de período na URL: atalho, ou period=custom&from=…&to=….
