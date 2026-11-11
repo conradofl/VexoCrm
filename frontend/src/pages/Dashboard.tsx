@@ -10,6 +10,7 @@ import { Block1WhatHappened } from "./Dashboard/Block1WhatHappened";
 import { Block2Rankings } from "./Dashboard/Block2Rankings";
 import { Block3ActionAlerts } from "./Dashboard/Block3ActionAlerts";
 import { Block4Analysis } from "./Dashboard/Block4Analysis";
+import { OverviewTab } from "./Dashboard/OverviewTab";
 import { SmartLinkEngagementCard } from "@/components/dashboard/SmartLinkEngagementCard";
 import { StalledLeadsAlertCard } from "@/components/dashboard/StalledLeadsAlertCard";
 import { OnboardingProgressCard } from "@/components/dashboard/OnboardingProgressCard";
@@ -39,6 +40,8 @@ export default function Dashboard({
   // Intervalo personalizado JÁ aplicado (o rascunho das datas fica no cabeçalho)
   const [customRange, setCustomRange] = useState<DashboardRange | null>(null);
   const range = period === "custom" ? customRange : null;
+  // Visão geral é a entrada. O painel anterior fica numa aba até as abas de detalhe existirem.
+  const [tab, setTab] = useState<"overview" | "legacy">("overview");
 
   const { data, isLoading, error } = useDashboard(effectiveClientId, period, range);
   const refreshMutation = useRefreshDashboard(effectiveClientId);
@@ -122,6 +125,35 @@ export default function Dashboard({
           </div>
         ) : data ? (
           <>
+            {/* Payload gravado antes da Visão geral existir não tem `overview`: mostra o painel anterior, sem abas,
+                até o próximo recálculo (o cache vence sozinho em minutos). */}
+            {data.overview && (
+              <nav aria-label="Seções do dashboard" className="flex flex-wrap gap-1 border-b border-border">
+                {([
+                  ["overview", "Visão geral"],
+                  ["legacy", "Painel anterior"],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-current={tab === key ? "page" : undefined}
+                    onClick={() => setTab(key)}
+                    className={`-mb-px min-h-[44px] border-b-2 px-3.5 text-[13.5px] ${
+                      tab === key
+                        ? "border-indigo-600 font-bold text-indigo-600 dark:border-indigo-400 dark:text-indigo-300"
+                        : "border-transparent font-semibold text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            )}
+
+            {data.overview && tab === "overview" ? (
+              <OverviewTab data={data} periodLabel={periodLabel} />
+            ) : (
+              <>
             {/* Primeiro bloco: o que aconteceu (5 números ou 3 dependendo dos módulos GD) */}
             <Block1WhatHappened
               summary={data.summary}
@@ -150,6 +182,8 @@ export default function Dashboard({
 
             {/* Terceiro bloco: o que fazer agora (no máximo 3 frases com ação direta) */}
             <Block3ActionAlerts alerts={data.alerts} incomplete={data.unavailableBlocks?.includes("alerts")} />
+              </>
+            )}
           </>
         ) : null}
       </div>
