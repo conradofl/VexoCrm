@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { describeMessageLabel } from "@/lib/inbox/messageLabel";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useIsMobile, useKeyboardOpen, useVisibleArea } from "@/hooks/useMobileViewport";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Clock3,
@@ -99,6 +102,9 @@ import { useLeads, type LeadRow } from "@/hooks/useLeads";
 import {
   useSendWhatsAppMessage,
   useSendWhatsAppMediaMessage,
+  ReplyChipUnavailableError,
+  type ReplyChipAlternative,
+  type SendWhatsAppMediaParams,
   useWhatsAppChats,
   useWhatsAppMessages,
   useClearWhatsAppChats,
@@ -252,7 +258,8 @@ function formatDaySeparator(timestamp: number | null): string {
 }
 
 function getPreview(chat: WhatsAppChat) {
-  const body = chat.lastMessage?.body?.trim();
+  // Mensagem sem texto mostra o nome do tipo ("Figurinha"), nunca o colchete cru nem "[Mensagem]".
+  const body = describeMessageLabel(chat.lastMessage?.body);
   if (!body) return "Sem mensagens recentes.";
   return body.length > 60 ? `${body.slice(0, 60)}...` : body;
 }
@@ -418,8 +425,39 @@ export default function WhatsAppInbox({
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
-  // No celular a tela mostra a fila OU a conversa.
+  // No celular a tela mostra a fila OU a conversa, sempre em tela cheia.
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
+  const isMobile = useIsMobile();
+  // Área realmente visível (sem o teclado virtual): o campo de resposta fica sempre acima do teclado.
+  const visibleArea = useVisibleArea(isMobile);
+  // Com o teclado aberto sobra pouca tela: a faixa de contexto sai para a conversa aparecer.
+  const keyboardOpen = useKeyboardOpen(isMobile, visibleArea);
+  // Onde a fila começa no celular: logo abaixo da barra do sistema (medido, não chutado).
+  // O marcador entra na tela depois do primeiro desenho; por isso é estado, não ref.
+  const [layoutAnchor, setLayoutAnchor] = useState<HTMLDivElement | null>(null);
+  const [mobileListTop, setMobileListTop] = useState(0);
+  useLayoutEffect(() => {
+    if (!isMobile || !layoutAnchor) return;
+    const measure = () => {
+      const anchor = layoutAnchor;
+      const padding = anchor.parentElement ? parseFloat(getComputedStyle(anchor.parentElement).paddingTop) || 0 : 0;
+      setMobileListTop(Math.max(0, Math.round(anchor.getBoundingClientRect().top - padding)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [isMobile, layoutAnchor]);
+  // Posição da fila quando a conversa foi aberta, para "voltar" devolver a fila no mesmo lugar.
+  const listScrollTopRef = useRef(0);
+  const openChatOnMobile = () => {
+    listScrollTopRef.current = chatsContainerRef.current?.scrollTop ?? 0;
+    setMobileView("chat");
+  };
+  useLayoutEffect(() => {
+    if (!isMobile || mobileView !== "list") return;
+    const list = chatsContainerRef.current;
+    if (list) list.scrollTop = listScrollTopRef.current;
+  }, [isMobile, mobileView]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
@@ -501,6 +539,14 @@ export default function WhatsAppInbox({
   const remindersSummaryQuery = useInboxRemindersSummary(clientId);
   const completeLeadReminder = useCompleteLeadReminder(clientId);
   const deleteLeadReminder = useDeleteLeadReminder(clientId);
+  // Envio parado pelo servidor porque o chip da conversa não pode enviar: guarda o que ia ser
+  // enviado até o operador confirmar outro chip ou desistir.
+  const [chipConfirm, setChipConfirm] = useState<{
+    chatId: string;
+    message: string;
+    alternatives: ReplyChipAlternative[];
+    pending: { kind: "text"; body: string } | { kind: "media"; params: SendWhatsAppMediaParams };
+  } | null>(null);
   const updateLeadReminder = useUpdateLeadReminder(clientId);
   const [editingReminder, setEditingReminder] = useState<LeadReminder | null>(null);
   const [showCompletedReminders, setShowCompletedReminders] = useState(false);
@@ -1195,6 +1241,14 @@ export default function WhatsAppInbox({
     return () => cancelAnimationFrame(frame);
   }, [mobileView, selectedChatId]);
 
+  // Celular: quando o teclado abre, a área visível encolhe. Quem estava no fim da conversa
+  // continua vendo a última mensagem, em vez de ela ficar escondida atrás do campo.
+  useLayoutEffect(() => {
+    if (!isMobile || mobileView !== "chat") return;
+    const container = messagesContainerRef.current;
+    if (container && isNearBottomRef.current) container.scrollTop = container.scrollHeight;
+  }, [isMobile, mobileView, visibleArea.height]);
+
   const handleMessagesScroll = () => {
     const container = messagesContainerRef.current;
     if (!container) return;
@@ -1330,11 +1384,66 @@ export default function WhatsAppInbox({
       await sendMessage.mutateAsync(trimmedDraft);
       scrollToBottom("smooth");
     } catch (error) {
+      if (error instanceof ReplyChipUnavailableError) {
+        // Nada foi enviado. O texto fica guardado até a confirmação.
+        setChipConfirm({
+          chatId: selectedChatId,
+          message: error.message,
+          alternatives: error.alternatives,
+          pending: { kind: "text", body: trimmedDraft },
+        });
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Falha ao enviar mensagem.");
     } finally {
       // Garante que mesmo após retorno da rede o foco continua na caixa
       setTimeout(() => chatTextareaRef.current?.focus(), 50);
     }
+  };
+
+  // Áudio, imagem e arquivo: mesma regra de chip do texto.
+  const sendMediaGuarded = async (params: SendWhatsAppMediaParams) => {
+    try {
+      await sendMediaMessage.mutateAsync(params);
+    } catch (error) {
+      if (error instanceof ReplyChipUnavailableError && selectedChatId) {
+        setChipConfirm({
+          chatId: selectedChatId,
+          message: error.message,
+          alternatives: error.alternatives,
+          pending: { kind: "media", params },
+        });
+        return;
+      }
+      throw error;
+    }
+  };
+
+  const handleConfirmChip = async (chipId: string) => {
+    if (!chipConfirm) return;
+    const { pending } = chipConfirm;
+    try {
+      if (pending.kind === "text") {
+        await sendMessage.mutateAsync({ body: pending.body, confirmChipId: chipId });
+      } else {
+        await sendMediaMessage.mutateAsync({ ...pending.params, confirmChipId: chipId });
+      }
+      setChipConfirm(null);
+      scrollToBottom("smooth");
+    } catch (error) {
+      if (error instanceof ReplyChipUnavailableError) {
+        setChipConfirm({ ...chipConfirm, message: error.message, alternatives: error.alternatives });
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Falha ao enviar mensagem.");
+    }
+  };
+
+  // Desistir devolve o texto ao campo: nada se perde e nada foi enviado.
+  const handleCancelChipConfirm = () => {
+    if (chipConfirm?.pending.kind === "text") setDraft(chipConfirm.pending.body);
+    setChipConfirm(null);
+    setTimeout(() => chatTextareaRef.current?.focus(), 10);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1508,15 +1617,23 @@ export default function WhatsAppInbox({
 
   const chipAliasesOf = (inst: { id?: string | null; name?: string | null; dispatch_webhook_url?: string | null }): string[] =>
     [inst.id, inst.name, String(inst.dispatch_webhook_url || "").split("/").filter(Boolean).pop()].filter(Boolean).map(String);
-  // O envio manual sai sempre pelo chip padrão ativo da empresa (mesma escolha do servidor,
-  // em POST /api/whatsapp/messages), não pelo chip em que o lead escreveu.
-  const sendChip = evolutionInstances.find((inst) => inst.active && inst.is_default) || evolutionInstances.find((inst) => inst.active) || null;
+  // Chip padrão ativo da empresa: só é usado quando a conversa não tem chip gravado.
+  const defaultChip = evolutionInstances.find((inst) => inst.active && inst.is_default) || evolutionInstances.find((inst) => inst.active) || null;
   const leadChipAlias = selectedChat?.leadChip || null;
   const leadChipInstance = leadChipAlias ? evolutionInstances.find((inst) => chipAliasesOf(inst).includes(leadChipAlias)) : null;
   const leadChipName = leadChipInstance?.name || leadChipAlias;
   const leadChipAgent = leadChipAlias ? chatsQuery.chipAgents?.[leadChipAlias] ?? null : null;
   const robotAnswersOnLeadChip = Boolean(leadChipAgent && leadChipAgent.kind !== "nenhum");
-  const sendsFromOtherChip = Boolean(leadChipAlias && sendChip && !chipAliasesOf(sendChip).includes(leadChipAlias));
+  // A resposta sai pelo chip em que o lead escreveu (regra do servidor, POST /api/whatsapp/messages).
+  // O estado abaixo é o do cadastro; quem decide de verdade é o servidor, que confere na hora do envio.
+  const leadChipDown = Boolean(
+    leadChipAlias &&
+      (!leadChipInstance ||
+        leadChipInstance.active === false ||
+        ["close", "closed", "connecting", "disconnected"].includes(String(leadChipInstance.connection_state || "").toLowerCase()))
+  );
+  // Só as abas de estado devolvem o chip da conversa. Nas outras listas a tela não sabe qual é.
+  const chipKnownForTab = ["esperam", "com_lead", "robo", "esfriaram"].includes(inboxTab);
 
   const headerName = matchedLead?.nome || selectedChat?.name || "Selecione uma conversa";
   const currentStageLabel = getStageLabel(FUNNEL_STAGES[currentStageIndex].key);
@@ -1569,6 +1686,15 @@ export default function WhatsAppInbox({
     setShowDossier(false);
     if (dossierPinned) toggleDossierPinned();
   };
+  const mountInboxLayout = (node: ReactNode) =>
+    isMobile && typeof document !== "undefined" ? createPortal(node, document.body) : node;
+
+  const mobileLayoutStyle: CSSProperties | undefined = !isMobile
+    ? undefined
+    : mobileView === "chat"
+    ? { top: visibleArea.offsetTop, height: visibleArea.height }
+    : { top: mobileListTop + visibleArea.offsetTop, height: Math.max(0, visibleArea.height - mobileListTop) };
+
   const dossierVisible = (showDossier || (dossierPinned && isWideScreen)) && Boolean(selectedChat);
   const dossierAsColumn = dossierPinned && isWideScreen;
 
@@ -1843,13 +1969,23 @@ export default function WhatsAppInbox({
             <button
               type="button"
               onClick={() => {
-                setActiveMeetingToEdit(null);
+                setActiveMeetingToEdit(activeMeeting);
                 setIsScheduleMeetingModalOpen(true);
               }}
-              title="Agendar call no Google Meet e enviar convite no WhatsApp"
-              className="min-h-9 cursor-pointer rounded-[7px] border border-border bg-card px-1 text-[11px] font-semibold text-foreground/80 hover:bg-muted"
+              data-testid="register-meeting"
+              title={
+                activeMeeting
+                  ? "Reunião já marcada para este lead. Clique para remarcar; o cancelamento fica no cartão da reunião, abaixo."
+                  : "Marcar reunião com o lead. Entra na conta de reuniões do Dashboard."
+              }
+              className={cn(
+                "min-h-9 cursor-pointer rounded-[7px] border px-1 text-[11px] font-semibold",
+                activeMeeting
+                  ? "border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                  : "border-border bg-card text-foreground/80 hover:bg-muted"
+              )}
             >
-              Reunião
+              {activeMeeting ? "Reunião marcada" : "Reunião"}
             </button>
             <button
               type="button"
@@ -1920,6 +2056,15 @@ export default function WhatsAppInbox({
                         setIsScheduleMeetingModalOpen(true);
                       }}
                       onStageChange={(newStage) => handleUpdateFunnelStage(newStage)}
+                      onCancel={async () => {
+                        try {
+                          await deleteLeadReminder.mutateAsync(activeMeeting.id);
+                          toast.success("Reunião cancelada");
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : "Não foi possível cancelar a reunião.");
+                          throw err;
+                        }
+                      }}
                     />
                   )}
 
@@ -2160,9 +2305,22 @@ export default function WhatsAppInbox({
         />
       ) : (
         /* ── PAINEL DE PLANTÃO: fila à esquerda, conversa no resto, dossiê em gaveta ── */
+        <div ref={setLayoutAnchor} data-testid="inbox-layout-anchor">
+        {/* No celular a tela vai direto para o <body>: dentro da página há elementos com efeito
+            visual (transform/blur) que prendem o "position: fixed" e deslocavam a tela em 16 px. */}
+        {mountInboxLayout(
         <div
           data-testid="inbox-layout"
-          className="flex h-[calc(100dvh-100px)] min-h-[480px] overflow-hidden rounded-2xl border border-border/80 bg-card shadow-xs"
+          data-mobile-view={isMobile ? mobileView : undefined}
+          // Celular: tela cheia. A fila começa abaixo da barra do sistema; a conversa cobre a tela
+          // toda e acompanha a área visível, então o campo de resposta nunca fica atrás do teclado.
+          style={mobileLayoutStyle}
+          className={cn(
+            "inbox-touch flex overflow-hidden bg-card",
+            isMobile
+              ? "fixed inset-x-0 z-40"
+              : "h-[calc(100dvh-100px)] min-h-[480px] rounded-2xl border border-border/80 shadow-xs"
+          )}
         >
           {/* ═══════════ COLUNA 1 — A FILA ═══════════ */}
           <aside
@@ -2333,7 +2491,7 @@ export default function WhatsAppInbox({
                       checked={selectedChatIds.has(chat.id)}
                       onSelect={() => {
                         setSelectedChatId(chat.id);
-                        setMobileView("chat");
+                        openChatOnMobile();
                       }}
                       onToggleCheck={() => toggleSelectChat(chat.id)}
                       waitingSince={chat.waitingSince}
@@ -2595,7 +2753,7 @@ export default function WhatsAppInbox({
             </header>
 
             {/* Faixa de contexto: por que esse lead está aqui */}
-            {selectedChat && (
+            {selectedChat && !keyboardOpen && (
               <div
                 className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border/60 bg-muted/30 px-3 py-[9px] sm:px-5"
                 data-testid="chat-context"
@@ -2913,7 +3071,7 @@ export default function WhatsAppInbox({
                               <MediaMessage
                                 messageId={"waMessageId" in item && item.waMessageId ? item.waMessageId : item.id}
                                 hasMedia={item.hasMedia || Boolean((item as any).media_url || (item as any).mediaUrl)}
-                                fallbackBody={item.body}
+                                fallbackBody={item.hasMedia ? item.body : describeMessageLabel(item.body)}
                                 fromMe={item.fromMe}
                                 clientId={clientId}
                                 mediaUrl={(item as any).media_url || (item as any).mediaUrl || null}
@@ -3014,7 +3172,7 @@ export default function WhatsAppInbox({
             </div>
 
             {/* Rodapé: um campo só, com o modo dentro dele */}
-            <div className="border-t border-border/60 bg-card px-3 pb-4 pt-3 sm:px-5" data-testid="composer">
+            <div className="border-t border-border/60 bg-card px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 md:pb-4 md:pt-3" data-testid="composer">
               <div
                 data-mode={isNoteMode ? "note" : "whatsapp"}
                 data-testid="composer-box"
@@ -3061,21 +3219,83 @@ export default function WhatsAppInbox({
                     <span className="pr-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200" data-testid="composer-hint">
                       o cliente NÃO vê
                     </span>
-                  ) : sendChip ? (
+                  ) : leadChipAlias && leadChipDown ? (
+                    <span
+                      className="pr-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+                      data-testid="composer-hint"
+                      title="O chip em que o lead escreveu não está conectado. Ao enviar, você escolhe por qual chip a resposta sai. Nada é enviado sem a sua confirmação."
+                    >
+                      chip {leadChipName} desconectado · vai pedir confirmação
+                    </span>
+                  ) : leadChipAlias ? (
                     <span
                       className="pr-1 text-[11px] text-muted-foreground"
                       data-testid="composer-hint"
-                      title={
-                        sendsFromOtherChip
-                          ? `O lead escreveu no chip ${leadChipName}, mas a resposta por aqui sai pelo chip padrão da empresa (${sendChip.name}).`
-                          : "A resposta por aqui sai pelo chip padrão da empresa."
-                      }
+                      title="A resposta sai pelo mesmo chip em que o lead escreveu."
                     >
-                      sai do chip <strong className="text-foreground/80">{sendChip.name}</strong>
-                      {sendsFromOtherChip && <span className="font-semibold text-amber-700 dark:text-amber-300"> · lead escreveu no {leadChipName}</span>}
+                      sai do chip <strong className="text-foreground/80">{leadChipName}</strong>
                     </span>
-                  ) : null}
+                  ) : chipKnownForTab && defaultChip ? (
+                    <span
+                      className="pr-1 text-[11px] text-muted-foreground"
+                      data-testid="composer-hint"
+                      title="Esta conversa não tem chip gravado. A resposta sai pelo chip padrão da empresa."
+                    >
+                      sai do chip <strong className="text-foreground/80">{defaultChip.name}</strong>
+                    </span>
+                  ) : (
+                    <span
+                      className="pr-1 text-[11px] text-muted-foreground"
+                      data-testid="composer-hint"
+                      title="A resposta sai pelo mesmo chip em que o lead escreveu. Se ele estiver desconectado, a tela pede confirmação antes de enviar por outro."
+                    >
+                      sai pelo chip da conversa
+                    </span>
+                  )}
                 </div>
+
+                {chipConfirm && chipConfirm.chatId === selectedChatId && (
+                  <div
+                    role="alertdialog"
+                    aria-label="Confirmar o chip de envio"
+                    data-testid="chip-confirm"
+                    className="mx-2 mt-2 rounded-[10px] border border-amber-400 bg-amber-50 p-3 text-[12.5px] text-amber-950 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-50"
+                  >
+                    <p className="font-bold">Mensagem não enviada</p>
+                    <p className="mt-0.5">{chipConfirm.message}</p>
+                    <p className="mt-1.5 truncate text-[12px] italic opacity-80" data-testid="chip-confirm-pending">
+                      {chipConfirm.pending.kind === "text"
+                        ? `“${chipConfirm.pending.body}”`
+                        : `Anexo: ${chipConfirm.pending.params.fileName || chipConfirm.pending.params.mediaType}`}
+                    </p>
+                    {chipConfirm.alternatives.length === 0 && (
+                      <p className="mt-1.5 font-semibold">Nenhum outro chip conectado. Reconecte o chip em Integrações para responder.</p>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {chipConfirm.alternatives.map((alt) => (
+                        <button
+                          key={alt.id}
+                          type="button"
+                          onClick={() => void handleConfirmChip(alt.id)}
+                          disabled={isSending}
+                          data-testid="chip-confirm-option"
+                          className="min-h-11 cursor-pointer rounded-lg bg-amber-700 px-3 text-[12.5px] font-bold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Enviar pelo chip {alt.name}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={handleCancelChipConfirm}
+                        disabled={isSending}
+                        data-testid="chip-confirm-cancel"
+                        className="min-h-11 cursor-pointer rounded-lg border border-amber-700/40 bg-transparent px-3 text-[12.5px] font-semibold hover:bg-amber-500/15"
+                      >
+                        Não enviar
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <label htmlFor="inbox-composer-text" className="sr-only">
                   {isNoteMode ? "Nota interna para a equipe" : "Mensagem para o cliente"}
@@ -3086,13 +3306,19 @@ export default function WhatsAppInbox({
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleKeyDown}
-                  rows={2}
+                  rows={isMobile ? 1 : 2}
                   disabled={!selectedChat} // NÃO desabilita no isPending para nunca perder o foco!
                   placeholder={
-                    isNoteMode ? "Anotação só para a equipe…  Enter salva" : "Escreva para o cliente…  Enter envia, Shift+Enter quebra linha"
+                    isMobile
+                      ? isNoteMode
+                        ? "Anotação só para a equipe…"
+                        : "Escreva para o cliente…"
+                      : isNoteMode
+                      ? "Anotação só para a equipe…  Enter salva"
+                      : "Escreva para o cliente…  Enter envia, Shift+Enter quebra linha"
                   }
                   className={cn(
-                    "block w-full resize-none border-0 bg-transparent px-3.5 pb-1 pt-2.5 font-sans text-sm leading-normal outline-none disabled:cursor-not-allowed disabled:opacity-60",
+                    "block w-full resize-none border-0 bg-transparent px-3.5 pb-1 pt-2.5 font-sans text-base leading-normal outline-none disabled:cursor-not-allowed disabled:opacity-60 md:text-sm",
                     isNoteMode
                       ? "text-amber-950 placeholder:text-amber-800/80 dark:text-amber-50 dark:placeholder:text-amber-200/70"
                       : "text-foreground placeholder:text-muted-foreground"
@@ -3119,9 +3345,7 @@ export default function WhatsAppInbox({
                         <Paperclip className="h-[17px] w-[17px]" />
                       </button>
                       <VoiceRecorderButton
-                        onSendAudio={async (params) => {
-                          await sendMediaMessage.mutateAsync(params);
-                        }}
+                        onSendAudio={sendMediaGuarded}
                         disabled={!selectedChat || isSending}
                       />
                     </>
@@ -3151,9 +3375,7 @@ export default function WhatsAppInbox({
             <MediaAttachmentModal
               open={attachmentModalOpen}
               onOpenChange={setAttachmentModalOpen}
-              onSendMedia={async (params) => {
-                await sendMediaMessage.mutateAsync(params);
-              }}
+              onSendMedia={sendMediaGuarded}
               disabled={!selectedChat || sendMediaMessage.isPending}
             />
 
@@ -3170,7 +3392,7 @@ export default function WhatsAppInbox({
                 />
                 <div
                   data-testid="dossier-drawer"
-                  className="absolute inset-y-0 right-0 z-30 w-full max-w-[340px] border-l border-indigo-200 shadow-2xl animate-in slide-in-from-right-4 duration-150 dark:border-indigo-500/40"
+                  className="absolute inset-y-0 right-0 z-30 w-full border-indigo-200 shadow-2xl animate-in slide-in-from-right-4 duration-150 dark:border-indigo-500/40 md:max-w-[340px] md:border-l"
                 >
                   {dossierPanel}
                 </div>
@@ -3184,6 +3406,8 @@ export default function WhatsAppInbox({
               {dossierPanel}
             </aside>
           )}
+        </div>
+        )}
         </div>
       )}
 

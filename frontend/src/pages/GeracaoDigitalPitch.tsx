@@ -13,7 +13,6 @@ import { BriefingBlockCommercial } from "./GeracaoDigitalPitch/BriefingBlockComm
 import { BriefingBlockMedia } from "./GeracaoDigitalPitch/BriefingBlockMedia";
 import { BriefingBlockTechnical } from "./GeracaoDigitalPitch/BriefingBlockTechnical";
 import { BriefingAiTranscriptModal } from "./GeracaoDigitalPitch/BriefingAiTranscriptModal";
-import { BriefingDispatchModal, DispatchConfig } from "./GeracaoDigitalPitch/BriefingDispatchModal";
 
 export default function GeracaoDigitalPitch() {
   const extractMutation = useExtractBriefing();
@@ -83,10 +82,6 @@ export default function GeracaoDigitalPitch() {
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [aiProgressText, setAiProgressText] = useState("");
 
-  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
-  const [dispatchSuccess, setDispatchSuccess] = useState(false);
-  const [dispatchResult, setDispatchResult] = useState<any>(null);
-
   // ─── HELPERS DE ATUALIZAÇÃO DE CAMPOS ──────────────────────────────────────
   const handleUpdateField = (fieldId: string, value: string) => {
     setBriefingFields((prev) =>
@@ -130,6 +125,17 @@ export default function GeracaoDigitalPitch() {
     const preset = TRANSCRIPT_OPTIONS.find((t) => t.id === presetId);
     if (!preset) return;
     setTranscriptText(preset.text);
+    if (preset.extractedValues) {
+      const ev = preset.extractedValues;
+      setClientInfo((prev) => ({
+        razaoSocial: ev.razaoSocial || ev.prospectName || prev.razaoSocial,
+        cnpj: ev.cnpj || prev.cnpj,
+        responsavel: ev.responsavel || prev.responsavel,
+        whatsapp: ev.whatsapp || prev.whatsapp,
+        email: ev.email || prev.email,
+        endereco: ev.endereco || ev.localizacao || prev.endereco,
+      }));
+    }
     toast({
       title: "Transcrição Carregada",
       description: "Áudio transcrito carregado com sucesso. Pronto para extração.",
@@ -162,17 +168,39 @@ export default function GeracaoDigitalPitch() {
       extractedValues = deriveExtractedValues(transcriptText);
     }
 
-    if (extractedValues.prospectName && !clientInfo.razaoSocial) {
-      setClientInfo((prev) => ({ ...prev, razaoSocial: extractedValues.prospectName }));
-    }
-    if (extractedValues.whatsapp && !clientInfo.whatsapp) {
-      setClientInfo((prev) => ({ ...prev, whatsapp: extractedValues.whatsapp }));
-    }
+    // Atualiza todos os 6 campos contratuais e identificadores do Bloco A
+    setClientInfo((prev) => ({
+      razaoSocial: extractedValues.razaoSocial || extractedValues.prospectName || prev.razaoSocial,
+      cnpj: extractedValues.cnpj || prev.cnpj,
+      responsavel: extractedValues.responsavel || prev.responsavel,
+      whatsapp: extractedValues.whatsapp || prev.whatsapp,
+      email: extractedValues.email || prev.email,
+      endereco: extractedValues.endereco || extractedValues.localizacao || prev.endereco,
+    }));
 
     let currentStepIndex = 0;
     const interval = setInterval(() => {
       if (currentStepIndex >= AI_PROCESSING_STEPS.length) {
         clearInterval(interval);
+        // Varredura final garantindo que todos os 30 requisitos em extractedValues estão preenchidos
+        setBriefingFields((prev) =>
+          prev.map((f) => {
+            const subfields = f.subfields?.map((sf) => ({
+              ...sf,
+              value: extractedValues[`${f.id}.${sf.id}`] || extractedValues[sf.id] || sf.value,
+            }));
+            const temSub = !!subfields?.some((sf) => sf.value);
+            const val = extractedValues[f.id] || f.value || "";
+            const achou = !!val || temSub;
+            return {
+              ...f,
+              status: achou ? "completed" : f.status,
+              value: val,
+              subfields,
+              confidence: achou ? (f.confidence || Math.round(88 + Math.random() * 11)) : f.confidence,
+            };
+          })
+        );
         setIsProcessingAI(false);
         setIsTranscriptModalOpen(false);
         playChime();
@@ -193,7 +221,7 @@ export default function GeracaoDigitalPitch() {
             if (f.id === fieldId) {
               const subfields = f.subfields?.map((sf) => ({
                 ...sf,
-                value: extractedValues[`${f.id}.${sf.id}`] || sf.value,
+                value: extractedValues[`${f.id}.${sf.id}`] || extractedValues[sf.id] || sf.value,
               }));
               const temSub = !!subfields?.some((sf) => sf.value);
               const val = extractedValues[fieldId] || "";
@@ -256,50 +284,6 @@ export default function GeracaoDigitalPitch() {
     }
   };
 
-  // ─── CONFIRMAR DISPARO PARA A ESTEIRA ─────────────────────────────────────
-  const handleConfirmDispatch = async (config: DispatchConfig) => {
-    try {
-      const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {
-        _cnpj: clientInfo.cnpj,
-        _responsavel: clientInfo.responsavel,
-        _endereco: clientInfo.endereco,
-      });
-
-      const responseData = await saveMutation.mutateAsync({
-        prospectName: clientInfo.razaoSocial || "Novo Cliente",
-        whatsappNumber: clientInfo.whatsapp || "",
-        agencyName: DEFAULT_THEME.agencyName,
-        themePreset: DEFAULT_THEME.themePreset,
-        briefingData: bData,
-        sendToProspectWhatsapp: config.sendToProspectWhatsapp,
-        sendToProspectEmail: config.sendToProspectEmail,
-        prospectEmail: config.prospectEmail,
-        sendToSectors: config.sendToSectors,
-        sectorsWhatsapp: config.sectorsWhatsapp,
-        sectorsEmail: config.sectorsEmail,
-        createWhatsappGroup: config.createWhatsappGroup,
-        whatsappGroupName: config.whatsappGroupName,
-        whatsappGroupMembers: config.whatsappGroupMembers,
-        slackChannelName: config.slackChannelName,
-      });
-
-      setDispatchResult(responseData);
-      setDispatchSuccess(true);
-      playChime();
-
-      toast({
-        title: "Esteira Ativada!",
-        description: `Dossiê gerado e enviado para a esteira operacional do cliente ${clientInfo.razaoSocial}.`,
-      });
-    } catch (error: any) {
-      toast({
-        title: "Erro no Disparo",
-        description: error.message || "Não foi possível disparar para a esteira.",
-        variant: "destructive",
-      });
-    }
-  };
-
   const totalBriefingRequirements = briefingFields.length;
   const completedBriefingRequirements = briefingFields.filter(
     (f) => f.value && f.value.trim().length > 0
@@ -318,7 +302,6 @@ export default function GeracaoDigitalPitch() {
         savingDraft={saveMutation.isPending}
         onOpenTranscriptModal={() => setIsTranscriptModalOpen(true)}
         onSaveDraft={handleSaveDraft}
-        onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
       />
 
       {/* ─── 2. OS 4 BLOCOS OPERACIONAIS ELEGANTES ───────────────────────────── */}
@@ -357,18 +340,6 @@ export default function GeracaoDigitalPitch() {
         aiProgressText={aiProgressText}
         onProcessWithAI={handleProcessBriefingWithGemini}
         onSelectPreset={handleSelectTranscriptPreset}
-      />
-
-      <BriefingDispatchModal
-        isOpen={isDispatchModalOpen}
-        onClose={() => setIsDispatchModalOpen(false)}
-        clientInfo={clientInfo}
-        briefingFields={briefingFields}
-        isDispatching={saveMutation.isPending}
-        dispatchSuccess={dispatchSuccess}
-        dispatchResult={dispatchResult}
-        onConfirmDispatch={handleConfirmDispatch}
-        onResetSuccess={() => setDispatchSuccess(false)}
       />
     </div>
   );

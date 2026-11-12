@@ -83,7 +83,7 @@ export async function enviarDocumentosParaAprovacaoInterna({
   }
 
   const { rows } = await pool.query(
-    `SELECT * FROM public.gd_clientes WHERE id = $1 AND dono_client_id = $2`,
+    `SELECT * FROM public.gd_clientes WHERE id = $1 AND (dono_client_id = $2 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
     [clienteId, GD_DONO]
   );
 
@@ -92,21 +92,21 @@ export async function enviarDocumentosParaAprovacaoInterna({
   }
 
   const cliente = rows[0];
-  const jidInterno = cliente.grupo_interno_jid;
+  const jidInterno = cliente.grupo_interno_jid || process.env.GD_CAIO_WHATSAPP || GD_CAIO_WHATSAPP_NUMERO;
 
   if (!jidInterno) {
-    throw new Error("Cliente não possui grupo interno (grupo_interno_jid) configurado.");
+    throw new Error("Cliente não possui grupo interno nem WhatsApp de contato configurado.");
   }
 
-  const docs = cliente.briefing_documentos?.documentos || {};
-  const linkB = docs.briefing?.pdf?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkBDocx = docs.briefing?.docx?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkI = docs.identidade?.pdf?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkIDocx = docs.identidade?.docx?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkR = docs.roteiros?.pdf?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkRDocx = docs.roteiros?.docx?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkP = docs.planejamento?.pdf?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkPDocx = docs.planejamento?.docx?.fileLink || cliente.drive_url || "Disponível no Google Drive";
+  const docs = cliente.briefing_documentos?.documentos || cliente.briefing_documentos || {};
+  const linkB = docs.briefing?.pdf?.fileLink || docs.briefing?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkBDocx = docs.briefing?.docx?.fileLink || docs.briefing?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkI = docs.identidade?.pdf?.fileLink || docs.identidade?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkIDocx = docs.identidade?.docx?.fileLink || docs.identidade?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkR = docs.roteiros?.pdf?.fileLink || docs.roteiros?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkRDocx = docs.roteiros?.docx?.fileLink || docs.roteiros?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkP = docs.planejamento?.pdf?.fileLink || docs.planejamento?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkPDocx = docs.planejamento?.docx?.fileLink || docs.planejamento?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
 
   const instance =
     instanceName ||
@@ -145,7 +145,7 @@ export async function enviarDocumentosParaAprovacaoInterna({
     `UPDATE public.gd_clientes
         SET briefing_aprovacao_interna_status = 'PENDENTE',
             briefing_aprovacao_interna_ressalvas = NULL
-      WHERE id = $1 AND dono_client_id = $2`,
+      WHERE id = $1 AND (dono_client_id = $2 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
     [clienteId, GD_DONO]
   );
 
@@ -193,7 +193,7 @@ export async function enviarDocumentosParaAprovacaoCliente({
   }
 
   const { rows } = await pool.query(
-    `SELECT * FROM public.gd_clientes WHERE id = $1 AND dono_client_id = $2`,
+    `SELECT * FROM public.gd_clientes WHERE id = $1 AND (dono_client_id = $2 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
     [clienteId, GD_DONO]
   );
 
@@ -202,17 +202,17 @@ export async function enviarDocumentosParaAprovacaoCliente({
   }
 
   const cliente = rows[0];
-  const jidCliente = cliente.grupo_cliente_jid;
+  const jidCliente = cliente.grupo_cliente_jid || cliente.aprovador_telefone;
 
   if (!jidCliente) {
-    throw new Error("Cliente não possui grupo de atendimento (grupo_cliente_jid) configurado.");
+    throw new Error("Cliente não possui grupo de atendimento (grupo_cliente_jid) nem telefone de aprovador configurado.");
   }
 
-  const docs = cliente.briefing_documentos?.documentos || {};
-  const linkB = docs.briefing?.pdf?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkBDocx = docs.briefing?.docx?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkP = docs.planejamento?.pdf?.fileLink || cliente.drive_url || "Disponível no Google Drive";
-  const linkPDocx = docs.planejamento?.docx?.fileLink || cliente.drive_url || "Disponível no Google Drive";
+  const docs = cliente.briefing_documentos?.documentos || cliente.briefing_documentos || {};
+  const linkB = docs.briefing?.pdf?.fileLink || docs.briefing?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkBDocx = docs.briefing?.docx?.fileLink || docs.briefing?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkP = docs.planejamento?.pdf?.fileLink || docs.planejamento?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
+  const linkPDocx = docs.planejamento?.docx?.fileLink || docs.planejamento?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
 
   const instance =
     instanceName ||
@@ -247,7 +247,7 @@ export async function enviarDocumentosParaAprovacaoCliente({
   await pool.query(
     `UPDATE public.gd_clientes
         SET briefing_aprovacao_cliente_status = 'PENDENTE'
-      WHERE id = $1 AND dono_client_id = $2`,
+      WHERE id = $1 AND (dono_client_id = $2 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
     [clienteId, GD_DONO]
   );
 

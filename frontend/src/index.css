@@ -529,3 +529,26 @@
 .dark [data-state="unchecked"].peer {
   background-color: #1e293b !important; /* slate-800 */
 }
+
+/* ── Aba Conversas no celular: alvo de toque de 44 px ──
+   Vale para tudo o que se toca dentro da tela de Conversas (e dos painéis dela que abrem
+   fora da árvore, marcados com a mesma classe). Só em tela de celular. */
+@media (max-width: 767px) {
+  .inbox-touch :is(button, a[href], select, summary, [role="button"], [role="tab"], [role="menuitem"]):not([role="switch"]):not([role="checkbox"]):not([data-touch-exempt]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Interruptor e caixa de marcar mantêm o desenho; a área de toque cresce em volta. */
+  .inbox-touch :is([role="switch"], [role="checkbox"]) {
+    position: relative;
+  }
+  .inbox-touch :is([role="switch"], [role="checkbox"])::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}

@@ -181,7 +181,7 @@ export function InboxSearchRow({
 
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-4 pb-3 pt-4">
-      <label className="flex h-[38px] min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-border bg-muted/40 px-3 focus-within:border-indigo-400">
+      <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-[10px] border border-border bg-muted/40 px-3 focus-within:border-indigo-400 md:h-[38px]">
         <Search className="h-[15px] w-[15px] shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="sr-only">Buscar conversa</span>
         <input
@@ -190,7 +190,8 @@ export function InboxSearchRow({
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Buscar nome, número ou mensagem"
           data-testid="inbox-search"
-          className="h-full min-w-0 flex-1 bg-transparent text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground"
+          // 16 px no celular: com letra menor o iPhone dá zoom na página ao tocar no campo.
+          className="h-full min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground md:text-[13.5px]"
         />
       </label>
 
@@ -211,7 +212,7 @@ export function InboxSearchRow({
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-[290px] space-y-3 p-3" data-testid="inbox-filters-panel">
+        <PopoverContent align="end" className="inbox-touch w-[290px] space-y-3 p-3" data-testid="inbox-filters-panel">
           <div className="space-y-1.5" data-testid="inbox-chip-scope">
             <label htmlFor="inbox-chip-scope-trigger" className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
               Ver conversas de

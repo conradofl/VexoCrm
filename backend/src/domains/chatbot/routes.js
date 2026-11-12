@@ -242,6 +242,9 @@ import {
   MUTE_SOURCE_MANUAL,
 } from "../../services/agentMuteGuard.js";
 
+import { describeUnrecognizedMessage, rawMessageKind } from "../../services/messageKind.js";
+import { findConversationChip, replyChipUnavailableMessage, resolveReplyChip } from "../../services/inboxReplyChip.js";
+
 export function registerChatbotRoutes(app, deps) {
   const {
     ensureDb,
@@ -334,6 +337,79 @@ export function registerChatbotRoutes(app, deps) {
         console.warn("[chatbot-schema] Aviso ao garantir media_url e retro-fill em lead_messages:", err?.message || err);
       }
     })();
+  }
+
+  // Todas as grafias em que o telefone de uma conversa pode estar gravado em lead_messages:
+  // com e sem 9º dígito, com e sem "+", com e sem JID. Grupo mantém o JID intacto.
+  function buildChatPhoneVariants(chatId, isGroup = false) {
+    if (isGroup) return { cleanPhone: chatId, phoneVariants: [chatId] };
+    const rawDigits = String(chatId).replace(/\D/g, "");
+    const canonical = sanitizePhone(rawDigits || chatId);
+    const cleanPhone = canonical || rawDigits || chatId;
+
+    const baseSet = new Set([
+      chatId,
+      cleanPhone,
+      rawDigits,
+      ...buildPhoneLookupVariants(chatId),
+      ...buildPhoneLookupVariants(rawDigits),
+    ].filter(Boolean));
+
+    if (rawDigits.startsWith("55")) {
+      const ddd = rawDigits.slice(2, 4);
+      if (rawDigits.length === 12) {
+        const rest = rawDigits.slice(4);
+        baseSet.add(`55${ddd}9${rest}`);
+        baseSet.add(`+55${ddd}9${rest}`);
+      } else if (rawDigits.length === 13 && rawDigits[4] === "9") {
+        const rest = rawDigits.slice(5);
+        baseSet.add(`55${ddd}${rest}`);
+        baseSet.add(`+55${ddd}${rest}`);
+      }
+    }
+
+    for (const v of Array.from(baseSet)) {
+      if (!v.includes("@")) {
+        baseSet.add(`${v}@s.whatsapp.net`);
+        baseSet.add(`${v}@c.us`);
+      }
+    }
+    return { cleanPhone, phoneVariants: Array.from(baseSet) };
+  }
+
+  // O que fica gravado na mensagem sobre a escolha do chip. Troca confirmada guarda de qual chip era a conversa e quem confirmou.
+  function replyChipMeta(decision, req) {
+    const meta = { replyChipReason: decision.reason };
+    if (decision.reason === "confirmed_other") {
+      meta.conversationChip = decision.conversationChip || null;
+      meta.chipConfirmedBy = req.authAccess?.uid || req.authUser?.uid || null;
+    }
+    return meta;
+  }
+
+  // Chip da resposta manual (texto e mídia): o da conversa, ou 409 pedindo confirmação. Ver services/inboxReplyChip.js.
+  // Devolve a instância escolhida, ou null depois de já ter respondido o erro.
+  async function pickReplyChip(req, res, clientId, chatId) {
+    const instances = await getLeadClientEvolutionInstances(clientId);
+    const { phoneVariants } = buildChatPhoneVariants(chatId, isGroupJid(chatId));
+    const conversationChip = await findConversationChip(pgDatabasePool.query.bind(pgDatabasePool), { clientId, phoneVariants });
+    const decision = await resolveReplyChip({
+      instances,
+      conversationChip,
+      confirmChipId: normalizeString(req.body?.confirmChipId) || null,
+    });
+    if (decision.ok) return decision;
+
+    if (decision.code === "NO_ACTIVE_WHATSAPP_CHIP") {
+      sendError(res, 400, "NO_ACTIVE_WHATSAPP_CHIP", "Não há nenhum chip WhatsApp ativo configurado para esta empresa.");
+      return null;
+    }
+    sendError(res, 409, decision.code, replyChipUnavailableMessage(decision), {
+      reason: decision.reason,
+      conversationChip: decision.conversationChipName || decision.conversationChip || null,
+      alternatives: decision.alternatives || [],
+    });
+    return null;
   }
 
   // Aceita um chip ou VÁRIOS separados por vírgula ("Chip A,Chip B") — o inbox
@@ -1665,46 +1741,7 @@ export function registerChatbotRoutes(app, deps) {
       // Suporte unificado com e sem 9º dígito brasileiro (DDD > 30 e geral) e formatos com/sem JID.
       // Conversas de grupo mantêm o JID do grupo intacto ("...@g.us").
       const isGroup = isGroupJid(chatId) || chatId.endsWith("@g.us");
-      let cleanPhone = chatId;
-      let phoneVariants = [chatId];
-
-      if (!isGroup) {
-        const rawDigits = chatId.replace(/\D/g, "");
-        const canonical = sanitizePhone(rawDigits || chatId);
-        cleanPhone = canonical || rawDigits || chatId;
-
-        const baseSet = new Set([
-          chatId,
-          cleanPhone,
-          rawDigits,
-          ...buildPhoneLookupVariants(chatId),
-          ...buildPhoneLookupVariants(rawDigits),
-        ].filter(Boolean));
-
-        if (rawDigits.startsWith("55")) {
-          const ddd = rawDigits.slice(2, 4);
-          if (rawDigits.length === 12) {
-            // 55 + DDD + 8 dígitos -> adiciona versão de 13 dígitos com 9
-            const rest = rawDigits.slice(4);
-            baseSet.add(`55${ddd}9${rest}`);
-            baseSet.add(`+55${ddd}9${rest}`);
-          } else if (rawDigits.length === 13 && rawDigits[4] === "9") {
-            // 55 + DDD + 9 + 8 dígitos -> adiciona versão de 12 dígitos sem 9
-            const rest = rawDigits.slice(5);
-            baseSet.add(`55${ddd}${rest}`);
-            baseSet.add(`+55${ddd}${rest}`);
-          }
-        }
-
-        const list = Array.from(baseSet);
-        for (const v of list) {
-          if (!v.includes("@")) {
-            baseSet.add(`${v}@s.whatsapp.net`);
-            baseSet.add(`${v}@c.us`);
-          }
-        }
-        phoneVariants = Array.from(baseSet);
-      }
+      const { cleanPhone, phoneVariants } = buildChatPhoneVariants(chatId, isGroup);
 
       const userUid = req.authAccess?.uid || req.authUser?.uid || null;
 
@@ -1951,14 +1988,10 @@ export function registerChatbotRoutes(app, deps) {
 
       const cleanPhone = sanitizePhone(chatId);
 
-      // Locate active/default Evolution instance for this client
-      const instances = await getLeadClientEvolutionInstances(clientId);
-      const activeInstance = instances.find(inst => inst.active && inst.is_default) || instances.find(inst => inst.active);
-
-      if (!activeInstance) {
-        sendError(res, 400, "NO_ACTIVE_WHATSAPP_CHIP", "Nao ha nenhum chip WhatsApp ativo configurado para esta empresa.");
-        return;
-      }
+      // Chip da resposta: o da conversa. Chip da conversa indisponível devolve 409 e nada é enviado.
+      const chipDecision = await pickReplyChip(req, res, clientId, chatId);
+      if (!chipDecision) return;
+      const activeInstance = chipDecision.instance;
 
       const webhookUrl = activeInstance.dispatch_webhook_url;
       const webhookToken = activeInstance.dispatch_webhook_token;
@@ -2040,6 +2073,7 @@ export function registerChatbotRoutes(app, deps) {
         meta: {
           source: "manual-inbox-reply",
           instanceId: activeInstance.id,
+          ...replyChipMeta(chipDecision, req),
         },
       });
 
@@ -2057,6 +2091,7 @@ export function registerChatbotRoutes(app, deps) {
           timestamp: timestampVal,
           type: "chat",
           hasMedia: false,
+          sentByChip: activeInstance.name || evoInstanceName,
         }
       });
     } catch (error) {
@@ -2320,14 +2355,10 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
 
-      // Localizar instância Evolution ativa para este cliente
-      const instances = await getLeadClientEvolutionInstances(clientId);
-      const activeInstance = instances.find((inst) => inst.active && inst.is_default) || instances.find((inst) => inst.active);
-
-      if (!activeInstance) {
-        sendError(res, 400, "NO_ACTIVE_WHATSAPP_CHIP", "Não há nenhum chip WhatsApp ativo configurado para esta empresa.");
-        return;
-      }
+      // Chip da resposta: o da conversa. Chip da conversa indisponível devolve 409 e nada é enviado.
+      const chipDecision = await pickReplyChip(req, res, clientId, chatId);
+      if (!chipDecision) return;
+      const activeInstance = chipDecision.instance;
 
       const webhookUrl = activeInstance.dispatch_webhook_url;
       const evoInstanceName = webhookUrl
@@ -2390,6 +2421,8 @@ export function registerChatbotRoutes(app, deps) {
           fileName,
           mimetype,
           caption: caption || null,
+          instanceId: activeInstance.id,
+          ...replyChipMeta(chipDecision, req),
         },
       });
 
@@ -3073,7 +3106,7 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     if (typeof messageData.text === "string" && messageData.text.trim().toLowerCase() === "unknown") {
-      messageData.text = messageData.type === "image" ? "[Imagem]" : "[Mensagem]";
+      messageData.text = messageData.type === "image" ? "[Imagem]" : describeUnrecognizedMessage(body?.data?.message || body?.message);
     }
 
     // ── ETAPA 3: GRAVAÇÃO DA MENSAGEM (SEMPRE, INBOUND OU OUTBOUND/FROM_ME) ──
@@ -3092,6 +3125,8 @@ export function registerChatbotRoutes(app, deps) {
         meta: {
           source: fromMe ? "device-whatsapp-webhook" : "hardcoded-chat-webhook",
           messageType: messageData.type || null,
+          // Tipo técnico do WhatsApp (ex.: "locationMessage"), para a tela nomear a mensagem sem adivinhar.
+          rawType: rawMessageKind(body?.data?.message || body?.message),
           transcribed: messageData.transcribed === true,
           described: messageData.described === true,
           fromMe,
