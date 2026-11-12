@@ -532,12 +532,23 @@ export default function InboundAgentConfig() {
           message: texto,
           agentId: activeCompany.id,
           simulacao: simMemoriaRef.current,
+          llmModel: inboundModel || undefined,
+          inboundPrompt: inboundPrompt || undefined,
+          spinFields: Array.isArray(spinFields)
+            ? spinFields
+                .map((f) => ({ name: (f.name || "").trim(), required: Boolean(f.required) }))
+                .filter((f) => f.name.length > 0)
+            : undefined,
         }),
       });
       const data = await res.json().catch(() => null);
       if (geracao !== simGeracaoRef.current) return;
       if (!res.ok || !data?.response) {
-        const motivo = data?.error?.message || data?.reason || `HTTP ${res.status}`;
+        const motivo =
+          data?.reason ||
+          (typeof data?.error === "string" ? data.error : data?.error?.message) ||
+          data?.message ||
+          `HTTP ${res.status}`;
         setSimMessages((prev) => [...prev, { role: "bot", text: `[falha] ${motivo}` }]);
         return;
       }

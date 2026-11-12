@@ -1583,6 +1583,8 @@ export async function runChatbotAI({
       finalizado: false,
       spin_fase: null,
       objecao_detectada: null,
+      _falhaDetalhe: lastError?.message || null,
+      _credencialInvalida: credenciaisQuebradas.size > 0 ? [...credenciaisQuebradas] : null,
     };
   }
 
@@ -2428,6 +2430,14 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
       isRecontact: isPrimeiroRecontato,
       error: err?.message || String(err),
     });
+    if (isSimulation) {
+      return {
+        mensagem: "",
+        mensagemAusente: true,
+        contratoQuebrado: true,
+        _falhaDetalhe: err?.message || String(err),
+      };
+    }
     return null;
   }
 
@@ -2438,6 +2448,15 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
       isRecontact: isPrimeiroRecontato,
       contratoQuebrado: aiResponse?.contratoQuebrado,
     });
+    if (isSimulation) {
+      return {
+        mensagem: "",
+        mensagemAusente: Boolean(aiResponse),
+        contratoQuebrado: aiResponse?.contratoQuebrado === true,
+        _falhaDetalhe: aiResponse?._falhaDetalhe || null,
+        _credencialInvalida: aiResponse?._credencialInvalida || null,
+      };
+    }
     return null;
   }
 

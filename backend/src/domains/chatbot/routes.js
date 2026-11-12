@@ -55,7 +55,7 @@ import {
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
-import { defaultLlmModel } from "../../services/llmModels.js";
+import { defaultLlmModel, providerOfModelId } from "../../services/llmModels.js";
 import {
   bufferMessage,
   resolveMessageContent,
@@ -4271,6 +4271,48 @@ export function registerChatbotRoutes(app, deps) {
         inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
       }
 
+      // Permite testar prompt, modelo e campos SPIN diretamente no simulador antes de salvar
+      const requestedLlmModel =
+        (typeof body.llmModel === "string" && body.llmModel.trim()) ||
+        (typeof body.model === "string" && body.model.trim()) ||
+        inboundConfig?.model ||
+        null;
+
+      const requestedPrompt =
+        (typeof body.inboundPrompt === "string" && body.inboundPrompt.trim()) ||
+        (typeof body.prompt === "string" && body.prompt.trim()) ||
+        inboundConfig?.prompt ||
+        null;
+
+      const requestedSpinFields =
+        Array.isArray(body.spinFields) && body.spinFields.length > 0
+          ? body.spinFields
+          : inboundConfig?.spinFields || null;
+      const spinInstruction = requestedSpinFields
+        ? buildSpinInstruction(requestedSpinFields)
+        : "";
+
+      // Se o usuário selecionou um modelo cujo provedor não possui chave no servidor, avisa claramente em vez de falhar silenciosamente
+      if (requestedLlmModel) {
+        const provider = providerOfModelId(requestedLlmModel);
+        const providerStatus = getLlmProviderStatus();
+        if (provider in providerStatus && !providerStatus[provider]) {
+          const envVarNames = {
+            gemini: "GEMINI_API_KEY (ou GOOGLE_API_KEY)",
+            openai: "OPENAI_API_KEY",
+            anthropic: "ANTHROPIC_API_KEY",
+            groq: "GROQ_API_KEY",
+          };
+          return res.status(422).json({
+            success: false,
+            error: `Chave do provedor ${provider.toUpperCase()} não configurada`,
+            reason: `A variável de ambiente ${envVarNames[provider] || provider} não está configurada no servidor (EasyPanel). Configure a chave nas variáveis de ambiente para utilizar o modelo "${requestedLlmModel}".`,
+            code: "LLM_KEY_MISSING",
+            provider,
+          });
+        }
+      }
+
       const aiResponse = await processBatch({
         clientId,
         phone,
@@ -4279,12 +4321,12 @@ export function registerChatbotRoutes(app, deps) {
         model: chatbotModel,
         promptType: "padrao",
         campaignPromptId: null,
-        llmModel: inboundConfig?.model || null,
-        inboundPrompt: inboundConfig?.prompt || null,
-        inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
+        llmModel: requestedLlmModel,
+        inboundPrompt: requestedPrompt,
+        inboundSpinInstruction: spinInstruction,
         instanceName,
         companyId: inboundConfig?.companyId || null,
-        instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
+        instructionsConsolidated: Boolean(inboundConfig?.instructionsConsolidated || requestedPrompt),
         isSimulation,
         noPersist: isSimulation,
         simulationState,
@@ -4294,14 +4336,23 @@ export function registerChatbotRoutes(app, deps) {
         // Dois motivos MUITO diferentes cabiam nesta mesma frase. Sem separar, o
         // dono lia "prompt nao configurado" quando o prompt estava certo e quem
         // falhou foi o modelo — e ia mexer no lugar errado.
-        const motivo = aiResponse?.mensagemAusente
+        let motivo = aiResponse?.mensagemAusente
           ? "O modelo respondeu, mas sem texto na chave \"mensagem\". O prompt está configurado; a resposta é que veio fora do contrato."
           : "Prompt não configurado ou chatbot silenciado para este cliente.";
-        return res.status(502).json({
+
+        if (aiResponse?._credencialInvalida?.length) {
+          motivo = `Credencial inválida ou ausente no(s) provedor(es): ${aiResponse._credencialInvalida.join(", ")}. Verifique as chaves no EasyPanel.`;
+        } else if (aiResponse?._falhaDetalhe) {
+          motivo = `Falha na execução do modelo: ${aiResponse._falhaDetalhe}`;
+        }
+
+        // NUNCA retornar 502: proxies (Vercel) convertem 502 em HTML, quebrando o parsing do front e disparando fallback CORS
+        return res.status(422).json({
           success: false,
           error: "Não foi possível gerar a resposta.",
           reason: motivo,
           code: aiResponse?.mensagemAusente ? "MODEL_EMPTY_MESSAGE" : "CHATBOT_NOT_CONFIGURED",
+          detalhe: aiResponse?._falhaDetalhe || null,
         });
       }
 
@@ -4364,7 +4415,8 @@ export function registerChatbotRoutes(app, deps) {
         });
       }
 
-      res.status(502).json({
+      // Retorna 422 em vez de 502 para evitar que Vercel intercepte e devolva HTML 502
+      res.status(422).json({
         success: false,
         error: `Falha ao processar resposta do modelo: ${detail}`,
         reason: detail,
