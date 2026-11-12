@@ -25,12 +25,13 @@ export const CHIP_ALERT_PCT = 80;
 
 export type ActionCard =
   | { kind: "waiting"; state: "pending" }
-  | { kind: "waiting"; state: "ready"; value: number; detail: string; attention: boolean; href: string; cta: string }
+  // href/cta nulos = quem vê não tem acesso à tela Conversas: o número aparece, o atalho não.
+  | { kind: "waiting"; state: "ready"; value: number; detail: string; attention: boolean; href: string | null; cta: string | null }
   | { kind: "neverApproached"; state: "unavailable" }
   | { kind: "neverApproached"; state: "ready"; value: number; detail: string; optOutNote: string; countedNote: string | null }
   | { kind: "chip"; state: "ready"; value: number; limit: number; chipName: string; detail: string; href: string; cta: string };
 
-export function buildWaitingCard(waiting: OverviewWaiting | null | undefined): ActionCard {
+export function buildWaitingCard(waiting: OverviewWaiting | null | undefined, { canOpenConversations = true } = {}): ActionCard {
   // Bloco que falhou e bloco que ainda não tem fonte mostram o mesmo lugar reservado: nenhum número.
   if (!waiting || waiting.status !== "ready") return { kind: "waiting", state: "pending" };
   const over = waiting.waitingOverThreshold;
@@ -48,8 +49,8 @@ export function buildWaitingCard(waiting: OverviewWaiting | null | undefined): A
     value: waiting.waiting,
     detail,
     attention: waiting.waiting > 0,
-    href: "/crm/whatsapp",
-    cta: "Abrir a fila de quem espera",
+    href: canOpenConversations ? "/crm/whatsapp" : null,
+    cta: canOpenConversations ? "Abrir a fila de quem espera" : null,
   };
 }
 

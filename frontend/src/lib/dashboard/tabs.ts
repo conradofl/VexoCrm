@@ -113,6 +113,8 @@ export interface QueueView {
   detail: string;
   states: Array<{ label: string; value: number }>;
   oldest: QueueRow[];
+  // O servidor não mandou a lista: quem vê não tem acesso à tela Conversas.
+  listRestricted: boolean;
 }
 
 export const CONVERSATIONS_PATH = "/crm/whatsapp";
@@ -148,6 +150,7 @@ export function buildQueueView(queue: OverviewQueue | null | undefined, now: Dat
       { label: "Esfriaram", value: queue.states.cooled },
     ],
     oldest,
+    listRestricted: queue.listRestricted === true,
   };
 }
 

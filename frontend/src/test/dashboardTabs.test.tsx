@@ -205,6 +205,19 @@ describe("Aba Atendimento — a fila é a da tela Conversas", () => {
     expect(screen.getByTestId("card-queue-waiting").className).not.toContain("orange");
   });
 
+  it("[TESTE OBRIGATÓRIO] sem acesso à tela Conversas: os números aparecem, a lista e os atalhos não", () => {
+    const restricted: OverviewQueue = { ...QUEUE, oldest: [], listRestricted: true };
+    expect(buildQueueView(restricted, NOW)).toMatchObject({ waiting: 12, detail: "7 há mais de 3 horas", oldest: [], listRestricted: true });
+
+    show(<AttendanceTab data={payload({ queue: restricted })} periodLabel="x" />);
+    expect(within(screen.getByTestId("card-queue-waiting")).getByText("12")).toBeInTheDocument();
+    expect(within(screen.getByTestId("card-queue-states")).getByText("154")).toBeInTheDocument();
+    const list = screen.getByTestId("card-queue-oldest");
+    expect(within(list).getByTestId("queue-list-restricted")).toBeInTheDocument();
+    expect(within(list).queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tab-attendance")).not.toHaveTextContent("Jéssica");
+  });
+
   it("[TESTE OBRIGATÓRIO] fila indisponível: travessão e motivo, nunca zero; os blocos que dependem dela não aparecem", () => {
     show(<AttendanceTab data={payload({ queue: null })} periodLabel="x" />);
     expect(screen.getByText("Esperando resposta agora").parentElement).toHaveTextContent("Não foi possível calcular agora.");

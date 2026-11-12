@@ -239,6 +239,10 @@ export function AttendanceTab({ data, periodLabel }: TabProps) {
             <h2 className="text-base font-bold text-foreground">Quem espera há mais tempo</h2>
             {queue.waiting === 0 ? (
               <p className={`${NOTE} mt-0.5`}>Ninguém esperando resposta agora.</p>
+            ) : queue.listRestricted ? (
+              <p className={`${NOTE} mt-0.5`} data-testid="queue-list-restricted">
+                A lista com o nome de quem espera aparece para quem tem acesso à tela Conversas.
+              </p>
             ) : (
               <>
                 <p className={`${NOTE} mb-3 mt-0.5`}>

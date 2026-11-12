@@ -160,6 +160,8 @@ export interface OverviewQueue {
   waitingOverThreshold: number;
   thresholdHours: number;
   oldest: OverviewQueueItem[];
+  // true = o servidor cortou a lista porque quem pediu não tem acesso à tela Conversas. Os números continuam.
+  listRestricted?: boolean;
 }
 
 export interface DashboardOverview {
