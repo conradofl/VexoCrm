@@ -24,6 +24,18 @@ describe("texto que vinha embrulhado e virava [Mensagem]", () => {
   });
 });
 
+describe("foto e vídeo de álbum chegam embrulhados (associatedChildMessage)", () => {
+  it("foto de álbum é reconhecida como imagem, com a legenda", () => {
+    const message = { messageContextInfo: {}, associatedChildMessage: { message: { imageMessage: { caption: "Fachada da loja" } } } };
+    expect(detectMessageType(body(message))).toBe("image");
+    expect(text(message)).toBe("Fachada da loja");
+  });
+
+  it("vídeo de álbum é reconhecido como vídeo", () => {
+    expect(detectMessageType(body({ associatedChildMessage: { message: { videoMessage: {} } } }))).toBe("video");
+  });
+});
+
 describe("tipos que não são texto ganham conteúdo ou nome", () => {
   it.each([
     ["localização com nome e endereço", { locationMessage: { name: "Padaria Central", address: "Rua A, 10", degreesLatitude: -18.9, degreesLongitude: -48.2 } }, "[Localização] Padaria Central · Rua A, 10"],
@@ -42,6 +54,13 @@ describe("tipos que não são texto ganham conteúdo ou nome", () => {
     ["mensagem editada mostra o texto novo", { editedMessage: { message: { protocolMessage: { type: "MESSAGE_EDIT", editedMessage: { conversation: "Às 15h, não 14h" } } } } }, "[Mensagem editada] Às 15h, não 14h"],
     ["convite de grupo", { groupInviteMessage: { groupName: "Obra Jardim" } }, "[Convite de grupo] Obra Jardim"],
     ["vídeo de recado", { ptvMessage: {} }, "[Vídeo de recado]"],
+    // Tipos medidos na GD em 12/11/2026 (amostra de 40 "[Mensagem]" procuradas na Evolution).
+    ["álbum com a contagem", { albumMessage: { expectedImageCount: 3, expectedVideoCount: 1 } }, "[Álbum] 3 fotos, 1 vídeo"],
+    ["álbum sem contagem", { albumMessage: {} }, "[Álbum]"],
+    ["foto de álbum sem conteúdo dentro", { associatedChildMessage: {} }, "[Foto ou vídeo de álbum]"],
+    ["conteúdo cifrado: edição de mensagem", { secretEncryptedMessage: { secretEncType: "MESSAGE_EDIT" } }, "[Mensagem editada]"],
+    ["conteúdo cifrado: evento", { secretEncryptedMessage: { secretEncType: "EVENT_EDIT" } }, "[Evento atualizado]"],
+    ["conteúdo cifrado sem tipo", { messageContextInfo: {}, secretEncryptedMessage: { encPayload: "x" } }, "[Mensagem protegida pelo WhatsApp]"],
   ])("%s", (_name, message, expected) => {
     expect(text(message)).toBe(expected);
   });
