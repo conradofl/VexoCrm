@@ -19,7 +19,10 @@ vi.mock("../services/inboundAgent.js", () => ({
   fireInboundCompletionWebhook: vi.fn(),
 }));
 
-const engineMock = { processBatch: vi.fn() };
+const engineMock = {
+  processBatch: vi.fn(),
+  getLlmProviderStatus: vi.fn(() => ({})),
+};
 vi.mock("../chatbot-ai-engine.js", () => ({
   processBatch: (...args) => engineMock.processBatch(...args),
   bufferMessage: vi.fn(),
@@ -27,7 +30,7 @@ vi.mock("../chatbot-ai-engine.js", () => ({
   isFirstCampaignReply: vi.fn(),
   extractBriefingWithAI: vi.fn(),
   LLM_MODELS: {},
-  getLlmProviderStatus: vi.fn(() => ({})),
+  getLlmProviderStatus: (...args) => engineMock.getLlmProviderStatus(...args),
 }));
 
 const { registerChatbotRoutes } = await import("../domains/chatbot/routes.js");
@@ -301,5 +304,95 @@ describe("POST /api/chatbot-test com simulacao (memória na tela)", () => {
     expect(args.simulationState ?? null).toBeNull();
     expect(args.isSimulation).toBe(false);
     expect(res.body.simulacao).toBeUndefined();
+  });
+});
+
+describe("POST /api/chatbot-test overrides e status resiliente (HTTP 422)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engineMock.getLlmProviderStatus.mockReturnValue({});
+  });
+
+  it("permite testar prompt e modelo modificados na tela antes de salvar", async () => {
+    inboundAgentMock.resolveInboundAgentConfig.mockResolvedValue({
+      companyId: "agente-1",
+      model: "openai/gpt-oss-120b",
+      prompt: "Prompt antigo salvo no banco",
+      spinFields: [],
+    });
+    engineMock.processBatch.mockResolvedValue({ mensagem: "Olá teste!" });
+
+    const handler = getRouteHandler("/api/chatbot-test");
+    const req = {
+      body: {
+        clientId: "sonhare",
+        message: "oi",
+        agentId: "agente-1",
+        llmModel: "gemini-flash-latest",
+        inboundPrompt: "Prompt novo em edição",
+        spinFields: [{ name: "Orçamento", required: true }],
+      },
+    };
+    const res = fakeRes();
+    await handler(req, res);
+
+    expect(engineMock.processBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        llmModel: "gemini-flash-latest",
+        inboundPrompt: "Prompt novo em edição",
+      })
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body.response).toBe("Olá teste!");
+  });
+
+  it("retorna 422 (e não 502) se o modelo solicitado não tiver chave configurada no servidor", async () => {
+    engineMock.getLlmProviderStatus.mockReturnValue({ gemini: false, groq: true });
+
+    const handler = getRouteHandler("/api/chatbot-test");
+    const req = {
+      body: {
+        clientId: "sonhare",
+        message: "oi",
+        agentId: "agente-1",
+        llmModel: "gemini-flash-latest",
+      },
+    };
+    const res = fakeRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(422);
+    expect(res.body.code).toBe("LLM_KEY_MISSING");
+    expect(res.body.reason).toContain("GEMINI_API_KEY");
+    expect(engineMock.processBatch).not.toHaveBeenCalled();
+  });
+
+  it("retorna 422 com código MODEL_EMPTY_MESSAGE (e não 502) quando todos os modelos falham", async () => {
+    inboundAgentMock.resolveInboundAgentConfig.mockResolvedValue({
+      companyId: "agente-1",
+      model: "gemini-flash-latest",
+      prompt: "Prompt válido",
+    });
+    engineMock.processBatch.mockResolvedValue({
+      mensagem: "",
+      mensagemAusente: true,
+      contratoQuebrado: true,
+      _falhaDetalhe: "Pedido maior que o teto (HTTP 413)",
+    });
+
+    const handler = getRouteHandler("/api/chatbot-test");
+    const req = {
+      body: {
+        clientId: "sonhare",
+        message: "oi",
+        agentId: "agente-1",
+      },
+    };
+    const res = fakeRes();
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(422);
+    expect(res.body.code).toBe("MODEL_EMPTY_MESSAGE");
+    expect(res.body.reason).toContain("Falha na execução do modelo: Pedido maior que o teto (HTTP 413)");
   });
 });

@@ -39,6 +39,7 @@ import { getDateKey } from "../services/analytics.js";
 import { pgDatabasePool } from "../services/database.js";
 import { leadsTableName } from "../services/tenant.js";
 import { evaluateStepConditions } from "./service.js";
+import { getTemplateLibraryAudioId, loadAudioForSend } from "../audioLibrary/service.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -485,13 +486,40 @@ export async function processJob(job) {
   }
 
   // Resolução de anexo de mídia (job sobrepõe template; ausente falha estrito)
-  const effectiveMediaPath = row.job_media_path || row.template_media_path;
-  const effectiveMediaType = row.job_media_type || row.template_media_type;
-  const effectiveMediaMime = row.job_media_mime || row.template_media_mime;
-  const effectiveMediaFilename = row.job_media_filename || row.template_media_filename;
+  let effectiveMediaPath = row.job_media_path || row.template_media_path;
+  let effectiveMediaType = row.job_media_type || row.template_media_type;
+  let effectiveMediaMime = row.job_media_mime || row.template_media_mime;
+  let effectiveMediaFilename = row.job_media_filename || row.template_media_filename;
 
   let mediaData = null;
-  if (effectiveMediaPath) {
+
+  // Áudio da Biblioteca de Áudios apontado pelo passo. Anexo trocado no
+  // próprio job continua vencendo (é ajuste manual daquele envio). O áudio é
+  // carregado pelo tenant DONO DO JOB: se o passo apontar para áudio de outra
+  // empresa, arquivado ou sem arquivo, o job falha com o motivo e nada é
+  // enviado — nunca cai para o texto do passo, que seria mandar "Áudio: nome"
+  // para o lead.
+  const libraryAudioId = row.job_media_path
+    ? null
+    : await getTemplateLibraryAudioId({ query }, row.template_id);
+  if (libraryAudioId) {
+    const loaded = await loadAudioForSend({ query }, { audioId: libraryAudioId, clientId: row.tenant_id });
+    if (!loaded.ok) {
+      const libraryErr = `Áudio da biblioteca indisponível (${loaded.reason}); passo não enviado.`;
+      console.error(log, libraryErr, { audioId: libraryAudioId });
+      await query("UPDATE followup_jobs SET status='failed', error_log=$1 WHERE id=$2", [libraryErr, jobId]);
+      const err = new Error(libraryErr);
+      err.code = "AUDIO_LIBRARY_UNAVAILABLE";
+      throw err;
+    }
+    mediaData = { buffer: loaded.buffer, contentType: loaded.audio.mime_type };
+    effectiveMediaPath = loaded.audio.storage_key;
+    effectiveMediaType = "audio";
+    effectiveMediaMime = loaded.audio.mime_type;
+    effectiveMediaFilename = loaded.audio.name;
+  }
+
+  if (effectiveMediaPath && !mediaData) {
     try {
       mediaData = await getFollowupMediaBuffer(effectiveMediaPath);
     } catch (readErr) {
