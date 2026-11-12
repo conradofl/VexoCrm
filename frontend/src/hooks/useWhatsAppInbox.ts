@@ -108,6 +108,28 @@ interface WhatsAppChatsPage {
   hasMore: boolean;
 }
 
+export interface ReplyChipAlternative {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+}
+
+// O chip em que o lead escreveu não pode enviar (desconectado ou fora do cadastro). O servidor não
+// enviou nada: a tela precisa de uma confirmação explícita para mandar por outro chip.
+export class ReplyChipUnavailableError extends Error {
+  reason: string;
+  conversationChip: string | null;
+  alternatives: ReplyChipAlternative[];
+
+  constructor(message: string, details: { reason?: string; conversationChip?: string | null; alternatives?: ReplyChipAlternative[] } = {}) {
+    super(message);
+    this.name = "ReplyChipUnavailableError";
+    this.reason = details.reason || "disconnected";
+    this.conversationChip = details.conversationChip ?? null;
+    this.alternatives = Array.isArray(details.alternatives) ? details.alternatives : [];
+  }
+}
+
 async function parseApiResponse<T>(res: Response): Promise<T> {
   if (res.ok) {
     return res.json();
@@ -118,7 +140,11 @@ async function parseApiResponse<T>(res: Response): Promise<T> {
   try {
     const payload = await res.json();
     message = payload?.error?.message || payload?.message || message;
-  } catch {
+    if (payload?.error?.code === "REPLY_CHIP_UNAVAILABLE") {
+      throw new ReplyChipUnavailableError(message, payload.error.details || {});
+    }
+  } catch (err) {
+    if (err instanceof ReplyChipUnavailableError) throw err;
     const text = await res.text();
     if (text) {
       message = text;
@@ -733,7 +759,10 @@ export function useSendWhatsAppMessage(clientId: string | null, chatId: string |
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (body: string) => {
+    // confirmChipId só vai quando o operador confirmou, na tela, o envio por outro chip.
+    mutationFn: async (input: string | { body: string; confirmChipId?: string }) => {
+      const body = typeof input === "string" ? input : input.body;
+      const confirmChipId = typeof input === "string" ? undefined : input.confirmChipId;
       const token = await getIdToken();
       if (!token) {
         throw new Error("Usuario nao autenticado.");
@@ -749,6 +778,7 @@ export function useSendWhatsAppMessage(clientId: string | null, chatId: string |
           clientId,
           chatId,
           body,
+          ...(confirmChipId ? { confirmChipId } : {}),
         }),
       });
 
@@ -767,6 +797,8 @@ export interface SendWhatsAppMediaParams {
   mimetype?: string;
   fileName?: string;
   caption?: string;
+  /** Só quando o operador confirmou, na tela, o envio por outro chip. */
+  confirmChipId?: string;
 }
 
 export function useSendWhatsAppMediaMessage(clientId: string | null, chatId: string | null) {

@@ -8,7 +8,10 @@
 //   - a gaveta do dossiê abre POR CIMA da conversa, fecha (X, clique fora, Esc) e a conversa volta;
 //   - trocar de aba troca a lista, e enviar mensagem chega ao servidor com o texto digitado;
 //   - quando o servidor recusa ou não responde, a coluna mostra erro com saída;
-//   - trocar de aba CANCELA o pedido anterior (o navegador aborta), não empilha.
+//   - trocar de aba CANCELA o pedido anterior (o navegador aborta), não empilha;
+//   - chip da conversa desconectado: a mensagem NÃO sai até o operador confirmar outro chip;
+//   - mensagem sem texto aparece com o nome do tipo, nunca "[Mensagem]";
+//   - Registrar → Reunião grava a reunião e a mesma gaveta cancela.
 //
 // Uso: npx playwright test --config playwright.harness.config.ts
 import { expect, test, type Page, type Route } from "@playwright/test";
@@ -25,6 +28,7 @@ const tenant = {
     evolution_instances: [
       { id: "comercial-hostery", name: "Comercial - Hostery", active: true, is_default: true },
       { id: "caio", name: "Caio", active: true, is_default: false },
+      { id: "chip-caido", name: "Chip Caído", active: true, is_default: false, connection_state: "close" },
     ],
   },
 };
@@ -57,7 +61,16 @@ function chat(i: number, tab: string) {
     agentMutedReason: i === 2 ? "Atendimento humano" : null,
     lastMessage: {
       id: String(i),
-      body: i === 1 ? "Quero aproveitar, pode mandar" : `Mensagem ${i} (${tab}): consegue me passar o valor ainda hoje, por favor?`,
+      body:
+        i === 1
+          ? "Quero aproveitar, pode mandar"
+          : i === 4
+          ? "[Mensagem]"
+          : i === 5
+          ? "[sticker]"
+          : i === 6
+          ? "[Localização] Padaria Central · Rua A, 10"
+          : `Mensagem ${i} (${tab}): consegue me passar o valor ainda hoje, por favor?`,
       fromMe,
       senderType: tab === "robo" ? "bot" : fromMe ? "device" : "lead",
       timestamp: ts,
@@ -69,7 +82,8 @@ function chat(i: number, tab: string) {
     workState: tab,
     waitingSince: fromMe ? null : new Date(ts * 1000).toISOString(),
     leadNeverSpoke: false,
-    leadChip: i === 1 ? "caio" : "comercial-hostery",
+    // Conversa 3: o lead escreveu num chip que está desconectado.
+    leadChip: i === 1 ? "caio" : i === 3 ? "chip-caido" : "comercial-hostery",
   };
 }
 
@@ -110,10 +124,13 @@ const leads = [
   },
 ];
 
+// Mensagens sem texto no meio da conversa: uma antiga (só "[Mensagem]"), uma figurinha e uma localização.
+const SPECIAL_BODIES: Record<number, string> = { 24: "[Mensagem]", 26: "[sticker]", 28: "[Localização] Padaria Central · Rua A, 10" };
+
 const messagesFor = (chatId: string) =>
   Array.from({ length: 30 }, (_, i) => ({
     id: `${chatId}-${i}`,
-    body: i % 2 === 0 ? `Mensagem do lead número ${i}, com texto suficiente para ocupar a linha.` : `Resposta nossa número ${i}.`,
+    body: SPECIAL_BODIES[i] ?? (i % 2 === 0 ? `Mensagem do lead número ${i}, com texto suficiente para ocupar a linha.` : `Resposta nossa número ${i}.`),
     fromMe: i % 2 === 1,
     senderType: i % 2 === 1 ? "device" : "lead",
     timestamp: NOW_S() - (30 - i) * 300,
@@ -126,12 +143,19 @@ const messagesFor = (chatId: string) =>
 
 type ChatsHandler = (route: Route, url: URL) => Promise<void> | void;
 interface Served {
-  sent: { chatId: string; body: string }[];
+  sent: { chatId: string; body: string; confirmChipId?: string }[];
+  /** Pedidos de envio que o servidor recusou com 409 (chip da conversa desconectado). */
+  refused: { chatId: string; body: string }[];
   tabs: string[];
+  /** Lembretes/reuniões gravados, como o servidor de verdade guardaria. */
+  reminders: Record<string, unknown>[];
+  deletedReminders: string[];
 }
 
+const CHAT_ON_DOWN_CHIP = "5534990000003";
+
 async function serve(page: Page, chats: ChatsHandler = (route, url) => ok(route, chatsPage(url.searchParams.get("tab") || "esperam"))) {
-  const served: Served = { sent: [], tabs: [] };
+  const served: Served = { sent: [], refused: [], tabs: [], reminders: [], deletedReminders: [] };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -142,8 +166,63 @@ async function serve(page: Page, chats: ChatsHandler = (route, url) => ok(route,
     }
     if (url.pathname === "/api/whatsapp/messages" && req.method() === "POST") {
       const body = req.postDataJSON();
-      served.sent.push({ chatId: body.chatId, body: body.body });
+      // Mesma regra do servidor: chip da conversa desconectado e sem confirmação = 409, nada enviado.
+      if (body.chatId === CHAT_ON_DOWN_CHIP && !body.confirmChipId) {
+        served.refused.push({ chatId: body.chatId, body: body.body });
+        return route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "REPLY_CHIP_UNAVAILABLE",
+              message: "O chip Chip Caído, em que o lead escreveu, está desconectado. Confirme por qual chip enviar.",
+              details: {
+                reason: "disconnected",
+                conversationChip: "Chip Caído",
+                alternatives: [
+                  { id: "comercial-hostery", name: "Comercial - Hostery", isDefault: true },
+                  { id: "caio", name: "Caio", isDefault: false },
+                ],
+              },
+            },
+          }),
+        });
+      }
+      served.sent.push({ chatId: body.chatId, body: body.body, ...(body.confirmChipId ? { confirmChipId: body.confirmChipId } : {}) });
       return json({ item: { id: "novo", body: body.body, fromMe: true, timestamp: NOW_S(), type: "chat", hasMedia: false } });
+    }
+    if (url.pathname === "/api/reminders/inbox-summary") {
+      const itemsByPhone: Record<string, unknown> = {};
+      for (const r of served.reminders) {
+        const phone = String(r.phone);
+        itemsByPhone[phone] = { phone, activeSchedule: null, activeReminders: [r], todayDue: null };
+      }
+      return json({ success: true, todayCount: 0, scheduledTodayCount: 0, remindersTodayCount: 0, itemsByPhone });
+    }
+    if (url.pathname === "/api/reminders" && req.method() === "POST") {
+      const body = req.postDataJSON();
+      const reminder = {
+        id: `rem-${served.reminders.length + 1}`,
+        clientId: "geracao-digital",
+        leadId: body.leadId ?? null,
+        phone: String(body.phone).replace(/\D/g, ""),
+        leadName: body.leadName ?? null,
+        title: body.title,
+        notes: body.notes ?? null,
+        remindAt: body.remindAt,
+        status: "pending",
+        activityType: body.activityType,
+        meetingUrl: body.meetingUrl ?? null,
+        createdAt: new Date().toISOString(),
+      };
+      served.reminders.push(reminder);
+      return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ success: true, reminder }) });
+    }
+    if (url.pathname.startsWith("/api/reminders/") && req.method() === "DELETE") {
+      const id = decodeURIComponent(url.pathname.split("/").pop() || "");
+      served.reminders = served.reminders.filter((r) => r.id !== id);
+      served.deletedReminders.push(id);
+      return json({ success: true, deletedId: id });
     }
     if (url.pathname === "/api/whatsapp/messages") {
       return json({ items: messagesFor(url.searchParams.get("chatId") || ""), hasMore: false });
@@ -230,9 +309,9 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(page.getByTestId("chat-responsible")).toHaveText(/Compartilhado/);
     for (const id of ["chat-header", "chat-context", "composer", "composer-send", "dossier-open", "chat-menu"]) await inViewport(page, id);
 
-    // Chip que assina o envio aparece antes de escrever; avisa quando não é o chip do lead.
-    await expect(page.getByTestId("composer-hint")).toContainText("sai do chip Comercial - Hostery");
-    await expect(page.getByTestId("composer-hint")).toContainText("lead escreveu no Caio");
+    // O chip que assina o envio aparece antes de escrever, e é o chip em que o lead escreveu
+    // (Caio), não o chip padrão da empresa (Comercial - Hostery).
+    await expect(page.getByTestId("composer-hint")).toHaveText("sai do chip Caio");
 
     const box = page.getByTestId("composer-box");
     await expect(box).toHaveAttribute("data-mode", "whatsapp");
@@ -279,6 +358,99 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await page.getByTestId("composer-send").click();
     await expect(page.getByText("cliente pediu retorno na sexta")).toBeVisible();
     expect(served.sent.length).toBe(2);
+  });
+
+  test("chip da conversa desconectado: nada sai sem confirmação, e a confirmação envia pelo chip escolhido", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await page.getByTestId(`inbox-item-${CHAT_ON_DOWN_CHIP}`).click();
+
+    // Antes de escrever a tela já avisa.
+    await expect(page.getByTestId("composer-hint")).toHaveText("chip Chip Caído desconectado · vai pedir confirmação");
+
+    const field = page.getByLabel("Mensagem para o cliente");
+    await field.fill("Gabriel, segue a proposta.");
+    await field.press("Enter");
+
+    // O servidor recusou: nada enviado, a tela pede confirmação e mostra o texto que ficou parado.
+    const confirm = page.getByTestId("chip-confirm");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText("Mensagem não enviada");
+    await expect(confirm).toContainText("está desconectado");
+    await expect(page.getByTestId("chip-confirm-pending")).toContainText("Gabriel, segue a proposta.");
+    await expect(page.getByTestId("chip-confirm-option")).toHaveCount(2);
+    expect(served.refused).toHaveLength(1);
+    expect(served.sent).toHaveLength(0);
+    await inViewport(page, "chip-confirm");
+    await page.getByTestId("composer").screenshot({ path: `${SHOTS}/chip-confirmacao.png` });
+
+    // Desistir devolve o texto ao campo e continua sem enviar nada.
+    await page.getByTestId("chip-confirm-cancel").click();
+    await expect(confirm).toHaveCount(0);
+    await expect(field).toHaveValue("Gabriel, segue a proposta.");
+    expect(served.sent).toHaveLength(0);
+
+    // Tenta de novo e confirma outro chip: aí sim envia, dizendo ao servidor qual chip foi confirmado.
+    await page.getByTestId("composer-send").click();
+    await expect(confirm).toBeVisible();
+    await page.getByTestId("chip-confirm-option").filter({ hasText: "Comercial - Hostery" }).click();
+    await expect.poll(() => served.sent.length).toBe(1);
+    expect(served.sent[0]).toEqual({ chatId: CHAT_ON_DOWN_CHIP, body: "Gabriel, segue a proposta.", confirmChipId: "comercial-hostery" });
+    await expect(confirm).toHaveCount(0);
+    await expect(field).toHaveValue("");
+  });
+
+  test("mensagem sem texto mostra o nome do tipo, na fila e na conversa, nunca [Mensagem]", async ({ page }) => {
+    await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+
+    await expect(page.getByTestId("inbox-item-5534990000004")).toContainText("Mensagem sem texto (tipo não registrado)");
+    await expect(page.getByTestId("inbox-item-5534990000005")).toContainText("Figurinha");
+    await expect(page.getByTestId("inbox-item-5534990000006")).toContainText("[Localização] Padaria Central");
+    await expect(page.getByTestId("inbox-list")).not.toContainText("[Mensagem]");
+    await expect(page.getByTestId("inbox-list")).not.toContainText("[sticker]");
+
+    await firstCard(page).click();
+    const conversation = page.getByTestId("inbox-conversation");
+    await expect(conversation.getByText("Mensagem sem texto (tipo não registrado)")).toBeVisible();
+    await expect(conversation.getByText("Figurinha", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("[Localização] Padaria Central · Rua A, 10")).toBeVisible();
+    await expect(conversation).not.toContainText("[Mensagem]");
+    await conversation.screenshot({ path: `${SHOTS}/rotulos-conversa.png` });
+  });
+
+  test("Registrar → Reunião grava a reunião, a gaveta mostra, e a mesma gaveta cancela", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await firstCard(page).click();
+    await page.getByTestId("dossier-open").click();
+
+    const register = page.getByTestId("register-meeting");
+    await expect(register).toHaveText("Reunião");
+    await register.click();
+    await page.getByRole("button", { name: "Apenas Salvar" }).click();
+
+    await expect.poll(() => served.reminders.length).toBe(1);
+    expect(served.reminders[0]).toMatchObject({ activityType: "meeting", phone: "5534990000001", leadName: "Jéssica Mendonça" });
+
+    // A gaveta passa a mostrar a reunião e o botão muda de estado.
+    await expect(register).toHaveText("Reunião marcada");
+    const cancel = page.getByTestId("meeting-cancel");
+    await expect(cancel).toBeVisible();
+    await page.getByTestId("dossier-drawer").screenshot({ path: `${SHOTS}/gaveta-reuniao-marcada.png` });
+
+    // Cancelar pede confirmação; "Manter" não cancela nada.
+    await cancel.click();
+    await expect(page.getByTestId("meeting-cancel-confirm")).toBeVisible();
+    await page.getByTestId("meeting-cancel-area").getByRole("button", { name: "Manter" }).click();
+    expect(served.deletedReminders).toHaveLength(0);
+
+    await page.getByTestId("meeting-cancel").click();
+    await page.getByTestId("meeting-cancel-confirm").click();
+    await expect.poll(() => served.deletedReminders).toEqual(["rem-1"]);
+    await expect(register).toHaveText("Reunião");
+    await expect(page.getByTestId("meeting-cancel-area")).toHaveCount(0);
   });
 
   test("gaveta do dossiê: fechada por padrão, abre por cima da conversa, e fecha por X, clique fora e Esc", async ({ page }) => {
@@ -372,7 +544,7 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(page.getByTestId("inbox-order-label")).toHaveText(/mais recente primeiro/i);
 
     await page.getByTestId("inbox-tab-robo").click();
-    await expect(page.getByTestId("inbox-list")).toContainText("Robô: Mensagem 5 (robo)");
+    await expect(page.getByTestId("inbox-list")).toContainText("Robô: Mensagem 7 (robo)");
 
     await page.getByTestId("inbox-footer-grupos").click();
     await expect.poll(() => served.tabs.includes("grupos")).toBe(true);

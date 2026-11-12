@@ -12,6 +12,8 @@ interface MeetingPostCallCheckinCardProps {
   clientId: string | null;
   onReschedule: () => void;
   onStageChange?: (newStage: string) => Promise<void> | void;
+  /** Cancela a reunião (some da gaveta e da conta de reuniões do Dashboard). */
+  onCancel?: () => Promise<void> | void;
 }
 
 export function MeetingPostCallCheckinCard({
@@ -19,9 +21,22 @@ export function MeetingPostCallCheckinCard({
   clientId,
   onReschedule,
   onStageChange,
+  onCancel,
 }: MeetingPostCallCheckinCardProps) {
   const updateReminder = useUpdateLeadReminder(clientId);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+
+  const handleCancel = async () => {
+    if (!onCancel) return;
+    setIsSubmitting(true);
+    try {
+      await onCancel();
+      setConfirmingCancel(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleOutcome = async (
     outcome: "won" | "proposal" | "no_show" | "lost",
@@ -50,7 +65,7 @@ export function MeetingPostCallCheckinCard({
   };
 
   const formattedDate = meeting.remindAt
-    ? new Date(meeting.remindAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    ? new Date(meeting.remindAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
     : "--:--";
 
   return (
@@ -63,7 +78,7 @@ export function MeetingPostCallCheckinCard({
           </div>
           <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 flex items-center gap-1">
             <Clock className="h-3 w-3 shrink-0" />
-            Horário: {formattedDate}
+            Marcada para {formattedDate}
           </p>
         </div>
         {meeting.meetingUrl && (
@@ -133,6 +148,47 @@ export function MeetingPostCallCheckinCard({
           </Button>
         </div>
       </div>
+
+      {onCancel && (
+        <div className="border-t border-emerald-500/20 pt-1.5" data-testid="meeting-cancel-area">
+          {confirmingCancel ? (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-semibold text-rose-800 dark:text-rose-200">
+                Cancelar esta reunião? Ela sai da gaveta e da conta de reuniões do Dashboard.
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={isSubmitting}
+                  data-testid="meeting-cancel-confirm"
+                  className="min-h-11 flex-1 cursor-pointer rounded-lg bg-rose-600 px-2 text-[11px] font-bold text-white hover:bg-rose-700 disabled:opacity-50 md:min-h-8"
+                >
+                  Sim, cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingCancel(false)}
+                  disabled={isSubmitting}
+                  className="min-h-11 flex-1 cursor-pointer rounded-lg border border-border bg-card px-2 text-[11px] font-semibold text-foreground/80 hover:bg-muted md:min-h-8"
+                >
+                  Manter
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingCancel(true)}
+              disabled={isSubmitting}
+              data-testid="meeting-cancel"
+              className="min-h-11 w-full cursor-pointer rounded-lg text-[11px] font-semibold text-rose-700 hover:bg-rose-500/10 dark:text-rose-300 md:min-h-7"
+            >
+              Cancelar reunião
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
