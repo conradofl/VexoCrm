@@ -130,6 +130,17 @@ export default function GeracaoDigitalPitch() {
     const preset = TRANSCRIPT_OPTIONS.find((t) => t.id === presetId);
     if (!preset) return;
     setTranscriptText(preset.text);
+    if (preset.extractedValues) {
+      const ev = preset.extractedValues;
+      setClientInfo((prev) => ({
+        razaoSocial: ev.razaoSocial || ev.prospectName || prev.razaoSocial,
+        cnpj: ev.cnpj || prev.cnpj,
+        responsavel: ev.responsavel || prev.responsavel,
+        whatsapp: ev.whatsapp || prev.whatsapp,
+        email: ev.email || prev.email,
+        endereco: ev.endereco || ev.localizacao || prev.endereco,
+      }));
+    }
     toast({
       title: "Transcrição Carregada",
       description: "Áudio transcrito carregado com sucesso. Pronto para extração.",
@@ -162,17 +173,39 @@ export default function GeracaoDigitalPitch() {
       extractedValues = deriveExtractedValues(transcriptText);
     }
 
-    if (extractedValues.prospectName && !clientInfo.razaoSocial) {
-      setClientInfo((prev) => ({ ...prev, razaoSocial: extractedValues.prospectName }));
-    }
-    if (extractedValues.whatsapp && !clientInfo.whatsapp) {
-      setClientInfo((prev) => ({ ...prev, whatsapp: extractedValues.whatsapp }));
-    }
+    // Atualiza todos os 6 campos contratuais e identificadores do Bloco A
+    setClientInfo((prev) => ({
+      razaoSocial: extractedValues.razaoSocial || extractedValues.prospectName || prev.razaoSocial,
+      cnpj: extractedValues.cnpj || prev.cnpj,
+      responsavel: extractedValues.responsavel || prev.responsavel,
+      whatsapp: extractedValues.whatsapp || prev.whatsapp,
+      email: extractedValues.email || prev.email,
+      endereco: extractedValues.endereco || extractedValues.localizacao || prev.endereco,
+    }));
 
     let currentStepIndex = 0;
     const interval = setInterval(() => {
       if (currentStepIndex >= AI_PROCESSING_STEPS.length) {
         clearInterval(interval);
+        // Varredura final garantindo que todos os 30 requisitos em extractedValues estão preenchidos
+        setBriefingFields((prev) =>
+          prev.map((f) => {
+            const subfields = f.subfields?.map((sf) => ({
+              ...sf,
+              value: extractedValues[`${f.id}.${sf.id}`] || extractedValues[sf.id] || sf.value,
+            }));
+            const temSub = !!subfields?.some((sf) => sf.value);
+            const val = extractedValues[f.id] || f.value || "";
+            const achou = !!val || temSub;
+            return {
+              ...f,
+              status: achou ? "completed" : f.status,
+              value: val,
+              subfields,
+              confidence: achou ? (f.confidence || Math.round(88 + Math.random() * 11)) : f.confidence,
+            };
+          })
+        );
         setIsProcessingAI(false);
         setIsTranscriptModalOpen(false);
         playChime();
@@ -193,7 +226,7 @@ export default function GeracaoDigitalPitch() {
             if (f.id === fieldId) {
               const subfields = f.subfields?.map((sf) => ({
                 ...sf,
-                value: extractedValues[`${f.id}.${sf.id}`] || sf.value,
+                value: extractedValues[`${f.id}.${sf.id}`] || extractedValues[sf.id] || sf.value,
               }));
               const temSub = !!subfields?.some((sf) => sf.value);
               const val = extractedValues[fieldId] || "";

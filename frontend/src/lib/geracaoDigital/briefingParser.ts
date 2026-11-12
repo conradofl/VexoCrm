@@ -142,7 +142,49 @@ export function deriveExtractedValues(transcriptText: string): Record<string, st
       if (lowerText.includes("cobertura de eventos")) detectedProds.push("Cobertura de eventos");
       if (lowerText.includes("vídeo avulso") || lowerText.includes("video avulso")) detectedProds.push("Vídeo avulso");
       
-      const produtos = detectedProds.length > 0 ? detectedProds.join(", ") : "Gestão de Tráfego Pago + Social Media";
+      const produtos = detectedProds.length > 0 ? detectedProds.join("; ") : "Gestão de tráfego google/meta ads; Gestão de redes sociais (Instagram)";
+
+      // --- Extração de Dados Contratuais e Empresa (Bloco A) ---
+      let razaoSocial = "";
+      const rzMatch = text.match(/(?:raz[ãa]o social|nome da empresa|empresa|nome fantasia|marca)\s*(?:[:=]|\sé\s|\sé a\s|\sé o\s)\s*([^,\n.]{3,60})/i)
+        || text.match(/(?:somos a|aqui é da|falo da|represento a)\s+([A-ZÀ-Ú][a-zA-Z0-9&.\- ]{2,50})/i);
+      if (rzMatch) {
+        razaoSocial = rzMatch[1].trim();
+      } else {
+        const rzAns = getAnswerForKeywords(["razão social", "razao social", "nome da empresa", "empresa", "marca"], "");
+        if (rzAns && !rzAns.toLowerCase().includes("não informado")) razaoSocial = rzAns;
+      }
+
+      let cnpj = "";
+      const cnpjMatch = text.match(/\b(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})\b/)
+        || text.match(/(?:cnpj|cadastro nacional)\s*(?:[:=]|\sé\s)?\s*([0-9./-]{14,18})/i);
+      if (cnpjMatch) {
+        cnpj = cnpjMatch[1].trim();
+      }
+
+      let responsavel = "";
+      const respMatch = text.match(/(?:respons[áa]vel|decisor|contato principal|propriet[áa]rio|s[óo]cio|diretor|fundador|meu nome [ée]|sou o|sou a)\s*(?:[:=]|\sé\s|\sé o\s|\sé a\s)?\s*([A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+){1,3})/i);
+      if (respMatch) {
+        responsavel = respMatch[1].trim();
+      } else {
+        const respAns = getAnswerForKeywords(["responsável", "responsavel", "decisor", "contato", "diretor", "sócio", "socio"], "");
+        if (respAns && !respAns.toLowerCase().includes("não informado")) responsavel = respAns;
+      }
+
+      let email = "";
+      const emailMatch = text.match(/\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b/);
+      if (emailMatch) {
+        email = emailMatch[1].trim();
+      }
+
+      let endereco = "";
+      const endMatch = text.match(/(?:endere[çc]o|sede em|ficamos em|localizados? em|rua|avenida|av\.)\s*(?:[:=]|\sé\s|\sé na\s|\sé no\s)?\s*([^;\n.]{4,80})/i);
+      if (endMatch) {
+        endereco = endMatch[1].trim();
+      }
+
+      const como_vende = getAnswerForKeywords(["como vende", "vende hoje", "processo comercial", "funil", "equipe de vendas", "balcão", "balcao", "indicação", "indicacao"], "Não preenchido");
+      const mitos_perguntas_recorrentes = getAnswerForKeywords(["mito", "mitos", "objeção", "objecoes", "preconceito", "sempre perguntam", "dúvida frequente", "duvida frequente", "perguntas frequentes"], "Não preenchido");
 
       const logoAns = getAnswerForKeywords(["logo", "logomarca"], "Não se aplica");
       const logo = logoAns.toLowerCase().includes("não se aplica") || logoAns.toLowerCase().includes("nao se aplica") ? "Não se aplica" : logoAns;
@@ -256,7 +298,15 @@ export function deriveExtractedValues(transcriptText: string): Record<string, st
       const produtos_trafego = getAnswerForKeywords(["produtos de tráfego", "produtos de trafego"], "Não preenchido");
 
       extractedValues = {
-        produtos: produtos.substring(0, 150),
+        razaoSocial: razaoSocial.substring(0, 100),
+        prospectName: razaoSocial.substring(0, 100),
+        cnpj: cnpj.substring(0, 30),
+        responsavel: responsavel.substring(0, 100),
+        email: email.substring(0, 100),
+        endereco: endereco.substring(0, 150),
+        produtos: produtos.substring(0, 250),
+        como_vende: como_vende.substring(0, 300),
+        mitos_perguntas_recorrentes: mitos_perguntas_recorrentes.substring(0, 300),
         logo: logo.substring(0, 100),
         instagram: instagram.substring(0, 100),
         facebook: facebook.substring(0, 100),
