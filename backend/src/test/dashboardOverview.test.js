@@ -24,6 +24,7 @@ const TF = "tenant-funil";
 const TR = "tenant-resposta";
 const SO_ANTIGA = "tenant-reuniao-antiga";
 const SEM_REUNIAO = "tenant-sem-reuniao";
+const SO_CADENCIA = "tenant-so-cadencia";
 const OUTRO = "tenant-outro";
 const C1 = "11111111-1111-4111-8111-111111111111";
 const CO = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-00000000000${n}`;
@@ -75,9 +76,14 @@ const SCHEMA = `
   CREATE TABLE followup_companies (id uuid PRIMARY KEY, tenant_id text NOT NULL);
   CREATE TABLE followup_schedules (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id uuid,
     company_id uuid NOT NULL,
+    lead_name text,
     phone text,
+    meeting_datetime timestamptz,
+    calendly_event_uri text,
     status text,
+    origin text,
     created_at timestamptz NOT NULL DEFAULT now()
   );
 `;
@@ -93,8 +99,17 @@ const msg = (client, phone, direction, at, senderType = null) =>
 const run = (client, phone, sentAt) =>
   `INSERT INTO campaign_dispatch_runs (client_id, campaign_id, phone, status, sent_at) VALUES ('${client}', '${C1}', '${phone}', 'sent', '${sentAt}');`;
 const company = (id, tenant) => `INSERT INTO followup_companies (id, tenant_id) VALUES ('${id}', '${tenant}');`;
-const meeting = (companyId, phone, at, status = "scheduled") =>
-  `INSERT INTO followup_schedules (company_id, phone, status, created_at) VALUES ('${companyId}', ${phone === null ? "NULL" : `'${phone}'`}, '${status}', '${at}');`;
+// Reunião de verdade: tem data de reunião E o evento que a originou (Calendly ou a gaveta de Conversas).
+let meetingSeq = 0;
+const meeting = (companyId, phone, at, status = "completed") =>
+  `INSERT INTO followup_schedules (company_id, phone, status, created_at, meeting_datetime, calendly_event_uri, origin) VALUES ('${companyId}', ${
+    phone === null ? "NULL" : `'${phone}'`
+  }, '${status}', '${at}', '${at}'::timestamptz + interval '2 days', 'lead-reminder:${++meetingSeq}', 'reuniao_conversas');`;
+// O que NÃO é reunião na mesma tabela: lead inscrito em cadência, mensagem agendada avulsa e cadência com data-alvo.
+const cadence = (companyId, phone, at, { targetDate = null, campaign = true } = {}) =>
+  `INSERT INTO followup_schedules (campaign_id, company_id, phone, status, created_at, meeting_datetime, origin) VALUES (${
+    campaign ? `'${C1}'` : "NULL"
+  }, '${companyId}', '${phone}', 'active', '${at}', ${targetDate ? `'${targetDate}'` : "NULL"}, '${campaign ? "banco_dados" : "manual"}');`;
 
 const SEED = [
   // ── Base: um lead de cada tipo ──
@@ -130,7 +145,15 @@ const SEED = [
   meeting(CO(1), "5534991110007", "2026-09-20T10:00:00Z"), // período anterior
   company(CO(2), SO_ANTIGA),
   meeting(CO(2), "5534993330001", "2026-03-01T10:00:00Z"), // tem registro, nenhum no período
+  meeting(CO(1), "5534991110006", "2026-10-24T10:00:00Z", "cancelled"), // cancelada na grafia atual do banco: não conta
+  // Na mesma tabela, o que NÃO é reunião, tudo dentro do período:
+  cadence(CO(1), "5534991110101", "2026-10-21T10:00:00Z"), // lead inscrito em cadência, sem data de reunião
+  cadence(CO(1), "5534991110102", "2026-10-21T10:00:00Z", { campaign: false }), // mensagem agendada avulsa
+  cadence(CO(1), "5534991110103", "2026-10-21T10:00:00Z", { targetDate: "2026-11-01T10:00:00Z" }), // cadência com data-alvo, sem evento
   company(CO(3), SEM_REUNIAO), // empresa de follow-up sem nenhuma reunião
+  company(CO(5), SO_CADENCIA),
+  cadence(CO(5), "5534995550001", "2026-10-21T10:00:00Z"), // usa follow-up, mas nunca registrou reunião
+  cadence(CO(5), "5534995550002", "2026-10-21T10:00:00Z", { targetDate: "2026-11-01T10:00:00Z" }),
 
   // ── Funil de coorte ──
   company(CO(4), TF),
@@ -242,6 +265,48 @@ describe("Reunião: o Dashboard só lê followup_schedules", () => {
   it("não lê crm_consultant_schedules: link de consultor não é reunião", async () => {
     // A tabela nem existe neste banco. Se a consulta a lesse, daria 42P01.
     await expect(measureMeetings(db, { clientId: T, ...PERIOD })).resolves.toBeTruthy();
+  });
+});
+
+describe("Reunião: só conta linha que é reunião de verdade", () => {
+  it("[TESTE OBRIGATÓRIO] cadência sem data de reunião, mensagem avulsa e cadência com data-alvo não contam", async () => {
+    // No período há 1 pessoa com reunião válida e 3 linhas que não são reunião (cadência, avulsa, data-alvo).
+    const r = await measureMeetings(db, { clientId: T, ...PERIOD });
+    expect(r).toEqual({ hasRecords: true, current: 1, previous: 1 });
+
+    const naoReuniao = await db.query(
+      `SELECT COUNT(*)::int AS n FROM followup_schedules fs JOIN followup_companies fc ON fc.id = fs.company_id
+       WHERE fc.tenant_id = $1 AND fs.created_at >= $2 AND fs.created_at < $3 AND fs.status = 'active'`,
+      [T, PERIOD.currentStart.toISOString(), PERIOD.currentEnd.toISOString()]
+    );
+    expect(naoReuniao.rows[0].n).toBe(3); // as três estão lá, ativas e com telefone: só não são reunião
+  });
+
+  it("[TESTE OBRIGATÓRIO] empresa que só tem cadência não 'registra reunião': sai 'sem registro', não zero", async () => {
+    const r = await measureMeetings(db, { clientId: SO_CADENCIA, ...PERIOD });
+    expect(r).toEqual({ hasRecords: false, current: null, previous: null });
+  });
+
+  it("reunião cancelada não conta, nas duas grafias que o banco já teve", async () => {
+    const canceladas = await db.query(
+      `SELECT COUNT(*)::int AS n FROM followup_schedules fs JOIN followup_companies fc ON fc.id = fs.company_id
+       WHERE fc.tenant_id = $1 AND fs.status IN ('canceled', 'cancelled') AND fs.meeting_datetime IS NOT NULL`,
+      [T]
+    );
+    expect(canceladas.rows[0].n).toBe(2);
+    expect((await measureMeetings(db, { clientId: T, ...PERIOD })).current).toBe(1);
+  });
+
+  it("o funil usa a mesma regra: quem respondeu e só entrou em cadência não 'marcou reunião'", async () => {
+    const antes = await measureFunnelMeetings(db, { clientId: TF, ...PERIOD });
+    // Todos os que responderam ganham uma linha de cadência com data-alvo depois do envio.
+    await db.exec(
+      ["5534994440001", "5534994440002", "5534994440003", "5534994440005", "5534994440006"]
+        .map((phone) => cadence(CO(4), phone, "2026-10-28T10:00:00Z", { targetDate: "2026-11-05T10:00:00Z" }))
+        .join("\n")
+    );
+    const depois = await measureFunnelMeetings(db, { clientId: TF, ...PERIOD });
+    expect(depois).toEqual(antes);
   });
 });
 

@@ -145,8 +145,20 @@ export async function measureBaseSlices(pool, { clientId, currentEnd, asOf = cur
 // Link de agenda de consultor (crm_consultant_schedules) não é reunião e não entra.
 // hasRecords = a empresa tem alguma linha, em qualquer data. Sem linha nenhuma a tela diz "sem registro";
 // zero só quando há registro e nenhum caiu no período.
+// O que é reunião em followup_schedules (critério pelo dado, 12/11/2026).
+// A tabela guarda três coisas: cadência (lead inscrito numa régua), mensagem agendada avulsa e reunião.
+// Só a reunião tem as DUAS marcas juntas:
+//   - meeting_datetime: quando a reunião acontece;
+//   - calendly_event_uri: o evento que a originou. O webhook do Calendly grava o endereço do evento; a gaveta
+//     "Reunião" da tela Conversas grava 'lead-reminder:<id>' (services/meetingSchedule.js).
+// Cadência e mensagem avulsa nascem sem data. A cadência inscrita com "data-alvo" traz data mas não traz evento:
+// a data-alvo pode ser reunião, evento ou vencimento, então sozinha não prova reunião e não conta.
+export const MEETING_ROW_SQL = (alias = "fs") =>
+  `${alias}.meeting_datetime IS NOT NULL AND COALESCE(${alias}.calendly_event_uri, '') <> ''`;
+
+// Reunião que conta: é reunião, não foi cancelada (as duas grafias que o CHECK de status já teve) e tem telefone.
 const MEETING_VALID_SQL = (alias = "fs") =>
-  `COALESCE(${alias}.status, '') NOT IN ('canceled', 'missing_phone') AND COALESCE(${alias}.phone, '') <> ''`;
+  `${MEETING_ROW_SQL(alias)} AND COALESCE(${alias}.status, '') NOT IN ('canceled', 'cancelled', 'missing_phone') AND COALESCE(${alias}.phone, '') <> ''`;
 
 export function buildMeetingsSql() {
   const person = SQL_CANONICAL_PHONE("fs.phone");
@@ -155,7 +167,7 @@ export function buildMeetingsSql() {
       EXISTS (
         SELECT 1 FROM public.followup_schedules x
         JOIN public.followup_companies xc ON xc.id = x.company_id
-        WHERE xc.tenant_id::text = $1
+        WHERE xc.tenant_id::text = $1 AND ${MEETING_ROW_SQL("x")}
       ) AS has_records,
       COUNT(DISTINCT ${person}) FILTER (WHERE fs.created_at >= $2 AND fs.created_at < $3)::int AS meetings_people_current,
       COUNT(DISTINCT ${person}) FILTER (WHERE fs.created_at >= $4 AND fs.created_at < $5)::int AS meetings_people_previous
@@ -444,4 +456,13 @@ export async function measureQueue(pool, { clientId, now }, { loadModule = () =>
       waitingSince: row.last_in_at ? iso(row.last_in_at instanceof Date ? row.last_in_at : new Date(row.last_in_at)) : null,
     })),
   };
+}
+
+// A lista de quem espera leva nome e telefone de lead. O cálculo é um só por empresa (cache compartilhado), então
+// o corte é na ENTREGA: quem não tem acesso à tela Conversas recebe os números da fila, sem a lista.
+// Devolve uma cópia; o objeto do cache nunca é alterado.
+export function redactQueueListForViewer(metrics, { canSeeConversations }) {
+  const queue = metrics?.overview?.queue;
+  if (canSeeConversations || !queue) return metrics;
+  return { ...metrics, overview: { ...metrics.overview, queue: { ...queue, oldest: [], listRestricted: true } } };
 }
