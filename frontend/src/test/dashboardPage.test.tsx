@@ -1,10 +1,10 @@
 // frontend/src/test/dashboardPage.test.tsx
 //
-// Página do Dashboard depois da remoção do "Painel anterior": a Visão geral é a tela inteira, sem abas.
+// Página do Dashboard: abre na Visão geral, com as abas de detalhe; o "Painel anterior" não existe mais.
 // Os blocos da Visão geral têm teste próprio; aqui ela é um marcador.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import Dashboard from "../pages/Dashboard";
 
 let hookResult: { data: unknown; isLoading: boolean; error: unknown } = { data: undefined, isLoading: false, error: null };
@@ -24,6 +24,12 @@ vi.mock("@/components/dashboard/OnboardingProgressCard", () => ({
 }));
 vi.mock("../pages/Dashboard/DashboardHeader", () => ({ DashboardHeader: () => null }));
 vi.mock("../pages/Dashboard/OverviewTab", () => ({ OverviewTab: () => <div data-testid="visao-geral" /> }));
+vi.mock("../pages/Dashboard/DetailTabs", () => ({
+  AttendanceTab: () => <div data-testid="aba-atendimento" />,
+  CampaignsTab: () => <div data-testid="aba-campanhas" />,
+  BaseTab: () => <div data-testid="aba-base" />,
+  ChipsTab: () => <div data-testid="aba-chips" />,
+}));
 
 const base = {
   client: { id: "c1", name: "Empresa" },
@@ -42,16 +48,30 @@ describe("Página do Dashboard — só a Visão geral", () => {
     onboardingProps.length = 0;
   });
 
-  it("a Visão geral ocupa a tela, sem abas e sem o painel anterior", () => {
+  it("abre na Visão geral, com as abas de detalhe e sem o painel anterior", () => {
     hookResult = { data: { ...base, overview: { base: { total: 80320 } } }, isLoading: false, error: null };
     render(<Dashboard fixedClientId="c1" />);
 
     expect(screen.getByTestId("visao-geral")).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Seções do dashboard" })).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Seções do dashboard" });
+    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Visão geral", "Campanhas", "Atendimento", "Base de leads", "Chips"]);
+    expect(within(nav).getByRole("button", { name: "Visão geral" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("button", { name: "Painel anterior" })).not.toBeInTheDocument();
     expect(screen.queryByText(/regra antiga/)).not.toBeInTheDocument();
     // O card de implantação lê o tamanho da base da Visão geral.
     expect(onboardingProps.at(-1)?.baseTotal).toBe(80320);
+  });
+
+  it("cada aba mostra só o seu conteúdo", () => {
+    hookResult = { data: { ...base, overview: { base: { total: 1 } } }, isLoading: false, error: null };
+    render(<Dashboard fixedClientId="c1" />);
+
+    for (const [label, testId] of [["Campanhas", "aba-campanhas"], ["Atendimento", "aba-atendimento"], ["Base de leads", "aba-base"], ["Chips", "aba-chips"], ["Visão geral", "visao-geral"]] as const) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      expect(screen.getAllByTestId(/^(aba-|visao-geral)/)).toHaveLength(1);
+      expect(screen.getByRole("button", { name: label })).toHaveAttribute("aria-current", "page");
+    }
   });
 
   it("payload de cálculo antigo, sem overview: pede para atualizar em vez de mostrar tela vazia", () => {

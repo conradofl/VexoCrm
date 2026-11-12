@@ -7,7 +7,17 @@ import { useDashboard, useRefreshDashboard, type DashboardPeriod, type Dashboard
 import { formatDateRange } from "@/lib/dashboard/formatters";
 import { DashboardHeader } from "./Dashboard/DashboardHeader";
 import { OverviewTab } from "./Dashboard/OverviewTab";
+import { AttendanceTab, BaseTab, CampaignsTab, ChipsTab } from "./Dashboard/DetailTabs";
 import { OnboardingProgressCard } from "@/components/dashboard/OnboardingProgressCard";
+
+type DashboardTab = "overview" | "campaigns" | "attendance" | "base" | "chips";
+const DASHBOARD_TABS: ReadonlyArray<readonly [DashboardTab, string]> = [
+  ["overview", "Visão geral"],
+  ["campaigns", "Campanhas"],
+  ["attendance", "Atendimento"],
+  ["base", "Base de leads"],
+  ["chips", "Chips"],
+];
 
 interface DashboardProps {
   fixedClientId?: string;
@@ -34,6 +44,8 @@ export default function Dashboard({
   // Intervalo personalizado JÁ aplicado (o rascunho das datas fica no cabeçalho)
   const [customRange, setCustomRange] = useState<DashboardRange | null>(null);
   const range = period === "custom" ? customRange : null;
+  // A Visão geral é a entrada; o detalhe de cada assunto mora na sua aba.
+  const [tab, setTab] = useState<DashboardTab>("overview");
 
   const { data, isLoading, error } = useDashboard(effectiveClientId, period, range);
   const refreshMutation = useRefreshDashboard(effectiveClientId);
@@ -104,7 +116,30 @@ export default function Dashboard({
             Carregando métricas pré-calculadas...
           </div>
         ) : data?.overview ? (
-          <OverviewTab data={data} periodLabel={periodLabel} />
+          <>
+            <nav aria-label="Seções do dashboard" className="-mx-1 flex gap-1 overflow-x-auto border-b border-border px-1">
+              {DASHBOARD_TABS.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-current={tab === key ? "page" : undefined}
+                  onClick={() => setTab(key)}
+                  className={`-mb-px min-h-[44px] flex-none whitespace-nowrap border-b-2 px-3.5 text-[13.5px] ${
+                    tab === key
+                      ? "border-indigo-600 font-bold text-indigo-600 dark:border-indigo-400 dark:text-indigo-300"
+                      : "border-transparent font-semibold text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+            {tab === "overview" && <OverviewTab data={data} periodLabel={periodLabel} />}
+            {tab === "campaigns" && <CampaignsTab data={data} periodLabel={periodLabel} />}
+            {tab === "attendance" && <AttendanceTab data={data} periodLabel={periodLabel} />}
+            {tab === "base" && <BaseTab data={data} periodLabel={periodLabel} />}
+            {tab === "chips" && <ChipsTab data={data} periodLabel={periodLabel} />}
+          </>
         ) : data ? (
           // Payload gravado antes da Visão geral existir: não há o que mostrar até o próximo recálculo.
           <div className="flex h-[200px] flex-col items-center justify-center gap-1 px-4 text-center text-sm text-muted-foreground">
