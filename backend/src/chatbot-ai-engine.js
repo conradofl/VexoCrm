@@ -1,3 +1,4 @@
+import { describeSpecialMessage, describeUnrecognizedMessage, unwrapEvolutionMessage } from "./services/messageKind.js";
 import {
   resolveLlmLadder,
   defaultLlmModel,
@@ -681,7 +682,8 @@ export function bufferMessage(clientId, phone, messageData, onProcess, instanceN
 // ─── Detecção e extração de mídia ────────────────────────────────────────────
 
 export function detectMessageType(evolutionBody) {
-  const msg = evolutionBody?.data?.message || evolutionBody?.message || {};
+  // Abre o embrulho de mensagem temporária / visualização única antes de olhar o tipo.
+  const msg = unwrapEvolutionMessage(evolutionBody?.data?.message || evolutionBody?.message || {});
 
   if (msg.audioMessage || msg.pttMessage) return "audio";
   if (msg.imageMessage) return "image";
@@ -707,7 +709,7 @@ export function detectMessageType(evolutionBody) {
 }
 
 export function extractTextFromBody(evolutionBody) {
-  const msg = evolutionBody?.data?.message || evolutionBody?.message || {};
+  const msg = unwrapEvolutionMessage(evolutionBody?.data?.message || evolutionBody?.message || {});
 
   if (msg.extendedTextMessage?.text) return msg.extendedTextMessage.text;
   if (msg.conversation) return msg.conversation;
@@ -748,12 +750,17 @@ export function extractTextFromBody(evolutionBody) {
     return msg.reactionMessage.text || "[Reação]";
   }
 
+  // Localização, contato, enquete, botão, mensagem apagada etc.: o conteúdo que existe, ou o nome do tipo.
+  const special = describeSpecialMessage(msg);
+  if (special) return special;
+
   const directText = evolutionBody?.message || evolutionBody?.text || evolutionBody?.body;
   if (typeof directText === "string" && directText.trim() && directText.trim().toLowerCase() !== "unknown") {
     return directText.trim();
   }
 
-  return "[Mensagem]";
+  // Nunca um rótulo vazio: diz o tipo técnico, ou que a mensagem veio sem conteúdo.
+  return describeUnrecognizedMessage(msg);
 }
 
 export function extractMediaBase64(evolutionBody) {
@@ -933,7 +940,9 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
 
   if (type === "text") {
     const rawText = extractTextFromBody(evolutionBody) || "";
-    const text = (!rawText || rawText.trim().toLowerCase() === "unknown") ? "[Mensagem]" : rawText;
+    const text = (!rawText || rawText.trim().toLowerCase() === "unknown")
+      ? describeUnrecognizedMessage(evolutionBody?.data?.message || evolutionBody?.message)
+      : rawText;
     return { type, text, waMessageId, messageTimestamp };
   }
 
@@ -1065,7 +1074,7 @@ export async function resolveMessageContent(evolutionBody, options = {}) {
 
   const fallbackText = extractTextFromBody(evolutionBody);
   const safeText = (!fallbackText || fallbackText.trim().toLowerCase() === "unknown")
-    ? (type ? `[${type}]` : "[Mensagem]")
+    ? (type ? `[${type}]` : describeUnrecognizedMessage(evolutionBody?.data?.message || evolutionBody?.message))
     : fallbackText;
   return {
     type: type && type !== "unknown" ? type : "text",
