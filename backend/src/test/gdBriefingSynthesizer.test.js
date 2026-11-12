@@ -98,7 +98,12 @@ async function chamar(metodo, caminho, { perfil = "equipeGd", body } = {}) {
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: res.status, json: await res.json() };
+  const ctype = res.headers.get("content-type") || "";
+  let json = null;
+  if (ctype.includes("application/json")) {
+    json = await res.json();
+  }
+  return { status: res.status, json, headers: res.headers };
 }
 
 beforeAll(async () => {
@@ -363,6 +368,13 @@ describe("Módulo de Síntese Multidocumento com Gemini (gdBriefingSynthesizerSe
     expect(resGet.json.success).toBe(true);
     expect(resGet.json.briefing_documentos).toBeDefined();
     expect(resGet.json.aprovacao_interna.status).toBe("PENDENTE");
+
+    // Download direto do PDF e DOCX gerados
+    const resDownloadPdf = await chamar("GET", `/api/gd/clientes/${clienteId}/briefing/documentos/briefing/download?formato=pdf`);
+    expect(resDownloadPdf.status).toBe(200);
+
+    const resDownloadDocx = await chamar("GET", `/api/gd/clientes/${clienteId}/briefing/documentos/briefing/download?formato=docx`);
+    expect(resDownloadDocx.status).toBe(200);
   });
 
   it("trata erro de cota da Service Account no Google Drive retornando registro seguro com isMock: false", async () => {

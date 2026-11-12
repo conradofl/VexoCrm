@@ -36,7 +36,18 @@ import {
   processarLembretesBriefing,
   GD_CAIO_WHATSAPP_PADRAO,
 } from "../../services/gdBriefingReminderService.js";
-import { executarSinteseEGeracaoBriefing } from "../../services/gdBriefingSynthesizerService.js";
+import {
+  executarSinteseEGeracaoBriefing,
+  gerarDocumentoBriefingPdf,
+  gerarDocumentoBriefingDocx,
+  gerarDocumentoIdentidadePdf,
+  gerarDocumentoIdentidadeDocx,
+  gerarDocumentoRoteirosPdf,
+  gerarDocumentoRoteirosDocx,
+  gerarDocumentoPlanejamentoPdf,
+  gerarDocumentoPlanejamentoDocx,
+  gerarSintesePadrao,
+} from "../../services/gdBriefingSynthesizerService.js";
 import {
   enviarDocumentosParaAprovacaoInterna,
   enviarDocumentosParaAprovacaoCliente,
@@ -1700,12 +1711,17 @@ export function registerGdClientesRoutes(app, {
         const db = pool();
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0];
+        const instanceName = candidate?.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate?.webhookToken || null;
+        const baseUrl = candidate?.baseUrl || null;
 
         const resultado = await internalApprovalSender({
           clienteId,
           pool: db,
           instanceName,
+          webhookToken,
+          baseUrl,
           evolutionSender: evolutionMessageSender,
           actor: ator,
         });
@@ -1731,12 +1747,17 @@ export function registerGdClientesRoutes(app, {
         const db = pool();
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0];
+        const instanceName = candidate?.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate?.webhookToken || null;
+        const baseUrl = candidate?.baseUrl || null;
 
         const resultado = await clientApprovalSender({
           clienteId,
           pool: db,
           instanceName,
+          webhookToken,
+          baseUrl,
           evolutionSender: evolutionMessageSender,
           actor: ator,
         });
@@ -1825,6 +1846,56 @@ export function registerGdClientesRoutes(app, {
         });
       } catch (err) {
         responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos");
+      }
+    }
+  );
+
+  // ─── Briefing: Download / Visualização Direta dos Documentos Oficiais ──────
+  app.get(
+    "/api/gd/clientes/:id/briefing/documentos/:tipo/download",
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const { id, tipo } = req.params;
+        const formato = String(req.query.formato || "pdf").toLowerCase();
+        const db = pool();
+        const cliente = await lerCliente(db, id);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        const sintese = cliente.briefing_documentos?.sintese || gerarSintesePadrao({ cliente });
+        let buffer;
+        let mimeType;
+        let ext;
+
+        if (formato === "docx") {
+          mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          ext = "docx";
+          if (tipo === "briefing") buffer = await gerarDocumentoBriefingDocx(sintese);
+          else if (tipo === "identidade") buffer = await gerarDocumentoIdentidadeDocx(sintese);
+          else if (tipo === "roteiros") buffer = await gerarDocumentoRoteirosDocx(sintese);
+          else if (tipo === "planejamento") buffer = await gerarDocumentoPlanejamentoDocx(sintese);
+          else throw new ErroDeRota(400, "TIPO_INVALIDO", "Tipo de documento inválido.");
+        } else {
+          mimeType = "application/pdf";
+          ext = "pdf";
+          if (tipo === "briefing") buffer = await gerarDocumentoBriefingPdf(sintese);
+          else if (tipo === "identidade") buffer = await gerarDocumentoIdentidadePdf(sintese);
+          else if (tipo === "roteiros") buffer = await gerarDocumentoRoteirosPdf(sintese);
+          else if (tipo === "planejamento") buffer = await gerarDocumentoPlanejamentoPdf(sintese);
+          else throw new ErroDeRota(400, "TIPO_INVALIDO", "Tipo de documento inválido.");
+        }
+
+        const safeNome = cliente.nome.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const filename = `${safeNome}_${tipo}.${ext}`;
+
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+        res.setHeader("Content-Length", buffer.length);
+        res.end(buffer);
+      } catch (err) {
+        responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos/:tipo/download");
       }
     }
   );
