@@ -5,6 +5,7 @@
 
 import { toCanonicalPhone, SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
 import { SQL_HOJE_REMINDERS_CONDITION, SQL_HOJE_SCHEDULES_CONDITION } from "../../services/remindersHelper.js";
+import { cancelMeetingSchedule, isMeetingReminder, registerMeetingSchedule } from "../../services/meetingSchedule.js";
 
 export function registerRemindersRoutes(app, deps) {
   const {
@@ -16,6 +17,8 @@ export function registerRemindersRoutes(app, deps) {
     resolveAuthorizedClientId,
     sendError,
   } = deps;
+
+  const dbQuery = (sql, params) => pgDatabasePool.query(sql, params);
 
   // Bootstrap idempotente da tabela lead_reminders no boot
   (async () => {
@@ -424,6 +427,18 @@ export function registerRemindersRoutes(app, deps) {
         ]
       );
 
+      // Reunião: a contagem do Dashboard lê followup_schedules. A reunião só vale se a linha de lá
+      // também foi gravada; se falhar, desfaz o lembrete e devolve erro (nada fica pela metade).
+      if (isMeetingReminder(rows[0])) {
+        try {
+          await registerMeetingSchedule(dbQuery, { tenantId: clientId, reminder: rows[0] });
+        } catch (mirrorErr) {
+          await dbQuery(`DELETE FROM public.lead_reminders WHERE id = $1 AND client_id = $2`, [rows[0].id, clientId]).catch(() => {});
+          console.error("[reminders/post] reunião não registrada em followup_schedules:", mirrorErr?.message || mirrorErr);
+          return sendError(res, 500, "MEETING_NOT_REGISTERED", "A reunião não foi registrada. Tente de novo.");
+        }
+      }
+
       return res.status(201).json({ success: true, reminder: rows[0] });
     } catch (err) {
       return sendError(res, 500, "CREATE_REMINDER_FAILED", err instanceof Error ? err.message : "Erro ao criar lembrete");
@@ -569,6 +584,13 @@ export function registerRemindersRoutes(app, deps) {
 
       const updatedReminder = rows[0];
 
+      // Reunião reagendada (ou reunião antiga, de antes de existir a linha): mantém followup_schedules em dia.
+      if (isMeetingReminder(updatedReminder) && body.remindAt !== undefined) {
+        await registerMeetingSchedule(dbQuery, { tenantId: clientId, reminder: updatedReminder }).catch((mirrorErr) => {
+          console.error("[reminders/patch] reunião não atualizada em followup_schedules:", mirrorErr?.message || mirrorErr);
+        });
+      }
+
       // Se meetingOutcome for informado, atualizar o funil do lead automaticamente
       if (body.meetingOutcome && updatedReminder) {
         const outcome = normalizeString(body.meetingOutcome);
@@ -619,6 +641,17 @@ export function registerRemindersRoutes(app, deps) {
     if (!clientId) return;
 
     try {
+      // Reunião cancelada: primeiro tira da contagem (followup_schedules), depois apaga o lembrete.
+      // Nessa ordem uma falha no meio não deixa reunião cancelada ainda contando no Dashboard.
+      const found = await dbQuery(
+        `SELECT id, activity_type FROM public.lead_reminders WHERE id = $1 AND client_id = $2`,
+        [reminderId, clientId]
+      );
+      const target = found?.rows || [];
+      if (target.length && isMeetingReminder(target[0])) {
+        await cancelMeetingSchedule(dbQuery, { reminderId });
+      }
+
       const { rowCount } = await pgDatabasePool.query(
         `DELETE FROM public.lead_reminders WHERE id = $1 AND client_id = $2`,
         [reminderId, clientId]
