@@ -323,6 +323,116 @@ export async function fetchFreeBusy({
 }
 
 /**
+ * Gera de forma determinística as 3 opções comerciais dos próximos 3 dias úteis:
+ * - Opção 1: 24h úteis às 10h00 (Manhã)
+ * - Opção 2: 48h úteis às 15h00 (Tarde)
+ * - Opção 3: 72h úteis às 10h00 (Manhã)
+ * Garante resiliência operacional total mesmo com indisponibilidade do Google Calendar ou FreeBusy.
+ */
+export function generateDeterministicBriefingSlots({
+  fromDate = new Date(),
+  targetDays = [1, 2, 3],
+  durationMinutes = 60,
+  timeZone = TIMEZONE_SAO_PAULO,
+  calendars = GD_CALENDARS,
+} = {}) {
+  try {
+    const refDate = fromDate instanceof Date && !isNaN(fromDate.getTime()) ? fromDate : new Date(fromDate || Date.now());
+    const validTargetDays = Array.isArray(targetDays) && targetDays.length > 0 ? targetDays : [1, 2, 3];
+    let targetBusinessDays = getTargetBusinessDays(refDate, validTargetDays, timeZone);
+
+    if (!targetBusinessDays || targetBusinessDays.length === 0) {
+      targetBusinessDays = validTargetDays.map((offset, idx) => ({
+        offset,
+        date: new Date(refDate.getTime() + (idx + 1) * 24 * 60 * 60 * 1000),
+      }));
+    }
+
+    const options = [];
+    const hours = [10, 15, 10]; // Opção 1: 10h00 (Manhã), Opção 2: 15h00 (Tarde), Opção 3: 10h00 (Manhã)
+    const periodos = ["manha", "tarde", "manha"];
+
+    for (let i = 0; i < targetBusinessDays.length && i < 3; i++) {
+      const { offset, date } = targetBusinessDays[i];
+      const parts = getSaoPauloDateParts(date, timeZone);
+      const dayIsoPrefix = `${parts.year}-${parts.month}-${parts.day}`;
+      const h = hours[i] ?? 10;
+      const periodo = periodos[i] ?? "manha";
+      const start = new Date(`${dayIsoPrefix}T${String(h).padStart(2, "0")}:00:00-03:00`);
+      const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+      const display = formatSlotLabel(date, h, periodo, timeZone);
+
+      options.push({
+        id: i + 1,
+        opcao: i + 1,
+        diaOffset: offset,
+        periodo,
+        inicio: start.toISOString(),
+        fim: end.toISOString(),
+        label: display.label,
+        formattedDate: display.formattedDate,
+        formattedTime: display.formattedTime,
+      });
+    }
+
+    return {
+      options,
+      allAvailableSlots: options,
+      targetDays: validTargetDays,
+      timeZone,
+      calendars,
+      fallback: true,
+    };
+  } catch (err) {
+    console.warn("[gd-calendar] Erro inesperado ao gerar slots determinísticos:", err.message);
+    const now = Date.now();
+    const fallbackOptions = [
+      {
+        id: 1,
+        opcao: 1,
+        diaOffset: 1,
+        periodo: "manha",
+        inicio: new Date(now + 24 * 3600 * 1000).toISOString(),
+        fim: new Date(now + 25 * 3600 * 1000).toISOString(),
+        label: "Amanhã às 10h00 (Manhã)",
+        formattedDate: "Amanhã",
+        formattedTime: "10h00",
+      },
+      {
+        id: 2,
+        opcao: 2,
+        diaOffset: 2,
+        periodo: "tarde",
+        inicio: new Date(now + 48 * 3600 * 1000).toISOString(),
+        fim: new Date(now + 49 * 3600 * 1000).toISOString(),
+        label: "Em 2 dias às 15h00 (Tarde)",
+        formattedDate: "Em 2 dias",
+        formattedTime: "15h00",
+      },
+      {
+        id: 3,
+        opcao: 3,
+        diaOffset: 3,
+        periodo: "manha",
+        inicio: new Date(now + 72 * 3600 * 1000).toISOString(),
+        fim: new Date(now + 73 * 3600 * 1000).toISOString(),
+        label: "Em 3 dias às 10h00 (Manhã)",
+        formattedDate: "Em 3 dias",
+        formattedTime: "10h00",
+      },
+    ];
+    return {
+      options: fallbackOptions,
+      allAvailableSlots: fallbackOptions,
+      targetDays: [1, 2, 3],
+      timeZone,
+      calendars,
+      fallback: true,
+    };
+  }
+}
+
+/**
  * Encontra slots de horários válidos e disponíveis para a Reunião de Briefing
  * nas contas oficiais (mrkgeracaodigital@gmail.com e caioalmeidmrk@gmail.com).
  *
@@ -344,135 +454,145 @@ export async function findAvailableBriefingSlots({
   mockBusyRanges = null,
   googleAccessToken = null,
 } = {}) {
-  const refDate = new Date(fromDate);
-  const targetBusinessDays = getTargetBusinessDays(refDate, targetDays, timeZone);
+  try {
+    const refDate = new Date(fromDate);
+    const targetBusinessDays = getTargetBusinessDays(refDate, targetDays, timeZone);
 
-  if (targetBusinessDays.length === 0) {
-    return { options: [], allAvailableSlots: [], targetDays, timeZone };
-  }
-
-  // Janela de busca FreeBusy
-  const firstDay = targetBusinessDays[0].date;
-  const lastDay = targetBusinessDays[targetBusinessDays.length - 1].date;
-
-  const partsFirst = getSaoPauloDateParts(firstDay, timeZone);
-  const partsLast = getSaoPauloDateParts(lastDay, timeZone);
-
-  const timeMinIso = `${partsFirst.year}-${partsFirst.month}-${partsFirst.day}T08:00:00-03:00`;
-  const timeMaxIso = `${partsLast.year}-${partsLast.month}-${partsLast.day}T19:00:00-03:00`;
-
-  const busyRanges = await fetchFreeBusy({
-    timeMin: timeMinIso,
-    timeMax: timeMaxIso,
-    calendars,
-    accessToken: googleAccessToken,
-    mockBusyRanges,
-  });
-
-  const isSlotFree = (slotStart, slotEnd) => {
-    for (const b of busyRanges) {
-      const bStart = new Date(b.start).getTime();
-      const bEnd = new Date(b.end).getTime();
-      // Sobreposição de intervalos: start < bEnd && end > bStart
-      if (slotStart.getTime() < bEnd && slotEnd.getTime() > bStart) {
-        return false;
-      }
+    if (targetBusinessDays.length === 0) {
+      return generateDeterministicBriefingSlots({ fromDate, targetDays, durationMinutes, timeZone, calendars });
     }
-    return true;
-  };
 
-  const allAvailableSlots = [];
-  const options = [];
+    // Janela de busca FreeBusy
+    const firstDay = targetBusinessDays[0].date;
+    const lastDay = targetBusinessDays[targetBusinessDays.length - 1].date;
 
-  for (let i = 0; i < targetBusinessDays.length; i++) {
-    const { offset, date } = targetBusinessDays[i];
-    const parts = getSaoPauloDateParts(date, timeZone);
-    const dayIsoPrefix = `${parts.year}-${parts.month}-${parts.day}`;
+    const partsFirst = getSaoPauloDateParts(firstDay, timeZone);
+    const partsLast = getSaoPauloDateParts(lastDay, timeZone);
 
-    // Avalia slots da Manhã (09h00, 10h00)
-    const morningSlots = [];
-    for (const h of HORAS_MANHA) {
-      const start = new Date(`${dayIsoPrefix}T${String(h).padStart(2, "0")}:00:00-03:00`);
-      const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-      if (isSlotFree(start, end)) {
-        const display = formatSlotLabel(date, h, "manha", timeZone);
-        morningSlots.push({
+    const timeMinIso = `${partsFirst.year}-${partsFirst.month}-${partsFirst.day}T08:00:00-03:00`;
+    const timeMaxIso = `${partsLast.year}-${partsLast.month}-${partsLast.day}T19:00:00-03:00`;
+
+    const busyRanges = await fetchFreeBusy({
+      timeMin: timeMinIso,
+      timeMax: timeMaxIso,
+      calendars,
+      accessToken: googleAccessToken,
+      mockBusyRanges,
+    });
+
+    const isSlotFree = (slotStart, slotEnd) => {
+      for (const b of busyRanges) {
+        const bStart = new Date(b.start).getTime();
+        const bEnd = new Date(b.end).getTime();
+        // Sobreposição de intervalos: start < bEnd && end > bStart
+        if (slotStart.getTime() < bEnd && slotEnd.getTime() > bStart) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const allAvailableSlots = [];
+    const options = [];
+
+    for (let i = 0; i < targetBusinessDays.length; i++) {
+      const { offset, date } = targetBusinessDays[i];
+      const parts = getSaoPauloDateParts(date, timeZone);
+      const dayIsoPrefix = `${parts.year}-${parts.month}-${parts.day}`;
+
+      // Avalia slots da Manhã (09h00, 10h00)
+      const morningSlots = [];
+      for (const h of HORAS_MANHA) {
+        const start = new Date(`${dayIsoPrefix}T${String(h).padStart(2, "0")}:00:00-03:00`);
+        const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+        if (isSlotFree(start, end)) {
+          const display = formatSlotLabel(date, h, "manha", timeZone);
+          morningSlots.push({
+            diaOffset: offset,
+            hour: h,
+            periodo: "manha",
+            inicio: start.toISOString(),
+            fim: end.toISOString(),
+            ...display,
+          });
+        }
+      }
+
+      // Avalia slots da Tarde (14h00, 15h00, 16h00)
+      const afternoonSlots = [];
+      for (const h of HORAS_TARDE) {
+        const start = new Date(`${dayIsoPrefix}T${String(h).padStart(2, "0")}:00:00-03:00`);
+        const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+        if (isSlotFree(start, end)) {
+          const display = formatSlotLabel(date, h, "tarde", timeZone);
+          afternoonSlots.push({
+            diaOffset: offset,
+            hour: h,
+            periodo: "tarde",
+            inicio: start.toISOString(),
+            fim: end.toISOString(),
+            ...display,
+          });
+        }
+      }
+
+      allAvailableSlots.push(...morningSlots, ...afternoonSlots);
+
+      // Seleção da melhor opção representativa para este dia:
+      // Alinha variedade comercial (Manhã ou Tarde) conforme requisito do prompt:
+      // Opção 1: 24h depois (preferência Manhã 10h ou Tarde se cheia)
+      // Opção 2: 48h depois (preferência Tarde 15h para alternar variedade, ou Manhã)
+      // Opção 3: 72h depois (preferência Manhã 10h, ou Tarde)
+      let selectedSlot = null;
+      if (i % 2 === 0) {
+        // Prioriza Manhã (preferencialmente 10h00, depois 09h00, ou fallback para Tarde)
+        selectedSlot =
+          morningSlots.find((s) => s.hour === 10) ||
+          morningSlots[0] ||
+          afternoonSlots.find((s) => s.hour === 15) ||
+          afternoonSlots[0] ||
+          null;
+      } else {
+        // Prioriza Tarde (preferencialmente 15h00, depois 14h00, depois 16h00, ou fallback para Manhã)
+        selectedSlot =
+          afternoonSlots.find((s) => s.hour === 15) ||
+          afternoonSlots.find((s) => s.hour === 14) ||
+          afternoonSlots[0] ||
+          morningSlots[0] ||
+          null;
+      }
+
+      if (selectedSlot) {
+        options.push({
+          id: i + 1,
+          opcao: i + 1,
           diaOffset: offset,
-          hour: h,
-          periodo: "manha",
-          inicio: start.toISOString(),
-          fim: end.toISOString(),
-          ...display,
+          periodo: selectedSlot.periodo,
+          inicio: selectedSlot.inicio,
+          fim: selectedSlot.fim,
+          label: selectedSlot.label,
+          formattedDate: selectedSlot.formattedDate,
+          formattedTime: selectedSlot.formattedTime,
         });
       }
     }
 
-    // Avalia slots da Tarde (14h00, 15h00, 16h00)
-    const afternoonSlots = [];
-    for (const h of HORAS_TARDE) {
-      const start = new Date(`${dayIsoPrefix}T${String(h).padStart(2, "0")}:00:00-03:00`);
-      const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-      if (isSlotFree(start, end)) {
-        const display = formatSlotLabel(date, h, "tarde", timeZone);
-        afternoonSlots.push({
-          diaOffset: offset,
-          hour: h,
-          periodo: "tarde",
-          inicio: start.toISOString(),
-          fim: end.toISOString(),
-          ...display,
-        });
-      }
+    if (options.length === 0) {
+      console.warn("[gd-calendar] Nenhum slot livre retornado pelo FreeBusy, acionando fallback determinístico.");
+      return generateDeterministicBriefingSlots({ fromDate, targetDays, durationMinutes, timeZone, calendars });
     }
 
-    allAvailableSlots.push(...morningSlots, ...afternoonSlots);
-
-    // Seleção da melhor opção representativa para este dia:
-    // Alinha variedade comercial (Manhã ou Tarde) conforme requisito do prompt:
-    // Opção 1: 24h depois (preferência Manhã 10h ou Tarde se cheia)
-    // Opção 2: 48h depois (preferência Tarde 15h para alternar variedade, ou Manhã)
-    // Opção 3: 72h depois (preferência Manhã 10h, ou Tarde)
-    let selectedSlot = null;
-    if (i % 2 === 0) {
-      // Prioriza Manhã (preferencialmente 10h00, depois 09h00, ou fallback para Tarde)
-      selectedSlot =
-        morningSlots.find((s) => s.hour === 10) ||
-        morningSlots[0] ||
-        afternoonSlots.find((s) => s.hour === 15) ||
-        afternoonSlots[0] ||
-        null;
-    } else {
-      // Prioriza Tarde (preferencialmente 15h00, depois 14h00, depois 16h00, ou fallback para Manhã)
-      selectedSlot =
-        afternoonSlots.find((s) => s.hour === 15) ||
-        afternoonSlots.find((s) => s.hour === 14) ||
-        afternoonSlots[0] ||
-        morningSlots[0] ||
-        null;
-    }
-
-    if (selectedSlot) {
-      options.push({
-        id: i + 1,
-        opcao: i + 1,
-        diaOffset: offset,
-        periodo: selectedSlot.periodo,
-        inicio: selectedSlot.inicio,
-        fim: selectedSlot.fim,
-        label: selectedSlot.label,
-        formattedDate: selectedSlot.formattedDate,
-        formattedTime: selectedSlot.formattedTime,
-      });
-    }
+    return {
+      options,
+      allAvailableSlots,
+      targetDays,
+      timeZone,
+      calendars,
+    };
+  } catch (err) {
+    console.warn("[gd-calendar] Erro ao consultar FreeBusy/Google Calendar, usando fallback determinístico:", err.message);
+    return generateDeterministicBriefingSlots({ fromDate, targetDays, durationMinutes, timeZone, calendars });
   }
-
-  return {
-    options,
-    allAvailableSlots,
-    targetDays,
-    timeZone,
-    calendars,
-  };
 }
 
 /**

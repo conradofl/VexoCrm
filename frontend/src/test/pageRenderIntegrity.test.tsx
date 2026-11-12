@@ -151,16 +151,20 @@ describe("Integridade de Renderização de Páginas e Verificação de Símbolos
     expect(screen.getByText(/Prompt Padrão \(SPIN\)/i)).toBeTruthy();
   });
 
-  it("[TESTE OBRIGATÓRIO] AgenteIA mostra exatamente duas abas no topo (Agentes, Base de Conhecimento), não quatro", async () => {
+  // Eram duas abas até a Biblioteca de Áudios (11/11/2026) entrar como terceira,
+  // a pedido do dono. O que este teste guarda continua igual: as abas antigas
+  // (Operação, Configurações, Padrões da empresa) não voltam.
+  it("[TESTE OBRIGATÓRIO] AgenteIA mostra exatamente três abas no topo (Agentes, Base de Conhecimento, Áudios), sem as antigas", async () => {
     const { default: AgenteIA } = await import("@/pages/AgenteIA");
 
     renderWithProviders(<AgenteIA />, { route: "/crm/agente" });
 
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.length).toBe(2);
+    expect(tabs.length).toBe(3);
     expect(tabs.map((t) => t.textContent)).toEqual([
       expect.stringMatching(/Agentes/),
       expect.stringMatching(/Base de Conhecimento/),
+      expect.stringMatching(/Áudios/),
     ]);
     expect(screen.queryByText(/^Operação$/)).toBeNull();
     expect(screen.queryByText(/^Configurações$/)).toBeNull();

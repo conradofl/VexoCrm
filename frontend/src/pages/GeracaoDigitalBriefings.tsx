@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Eye, Clock, CheckCircle, XCircle, Search, Trash2 } from "lucide-react";
+import { Eye, Clock, CheckCircle, XCircle, Search, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useGdClientes, useSintetizarBriefing } from "@/hooks/useGdClientes";
 
 type BriefingData = {
   id: string;
@@ -28,6 +31,30 @@ export default function GeracaoDigitalBriefings() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBriefing, setSelectedBriefing] = useState<BriefingData | null>(null);
+  const [gerarModalOpen, setGerarModalOpen] = useState(false);
+  const [selectedClienteId, setSelectedClienteId] = useState("");
+
+  const { data: gdClientes = [], isLoading: isLoadingClientes } = useGdClientes();
+  const sintetizarBriefing = useSintetizarBriefing();
+
+  const handleSintetizarCliente = async () => {
+    if (!selectedClienteId) return;
+    try {
+      await sintetizarBriefing.mutateAsync(selectedClienteId);
+      toast({
+        title: "⚡ Briefing Oficial Gerado!",
+        description: "Os 4 documentos foram sintetizados nos 11 blocos e arquivados no Google Drive.",
+      });
+      setGerarModalOpen(false);
+      setSelectedClienteId("");
+    } catch (err) {
+      toast({
+        title: "Erro ao sintetizar briefing",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    }
+  };
 
   const { data: briefings = [], isLoading } = useQuery({
     queryKey: ["geracao-digital-briefings"],
@@ -90,6 +117,15 @@ export default function GeracaoDigitalBriefings() {
       title="Briefings Salvos"
       subtitle="Acompanhe os dossiês comerciais gerados pela Geração Digital."
       compactHero
+      headerRight={
+        <Button
+          onClick={() => setGerarModalOpen(true)}
+          className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs gap-1.5 shadow-sm cursor-pointer"
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>⚡ Gerar Briefing de Cliente</span>
+        </Button>
+      }
     >
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-white dark:bg-card p-4 rounded-xl border border-slate-200 dark:border-border shadow-sm">
@@ -236,6 +272,70 @@ export default function GeracaoDigitalBriefings() {
               </div>
             </div>
           </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={gerarModalOpen} onOpenChange={setGerarModalOpen}>
+        <DialogContent className="max-w-md bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-white">
+              <Sparkles className="w-4 h-4 text-purple-600" />
+              <span>Gerar Briefing Oficial & Documentos (IA)</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Selecione um cliente da carteira da Geração Digital para compilar os 11 blocos estratégicos e produzir os 4 documentos oficiais (.docx e .pdf) arquivados automaticamente na pasta do cliente no Google Drive.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Cliente da Carteira GD
+              </label>
+              <Select value={selectedClienteId} onValueChange={setSelectedClienteId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={isLoadingClientes ? "Carregando clientes..." : "Selecione o cliente..."} />
+                </SelectTrigger>
+                <SelectContent>
+                  {gdClientes.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nome} {c.rotulo_interno ? `(${c.rotulo_interno})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setGerarModalOpen(false)}
+                disabled={sintetizarBriefing.isPending}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSintetizarCliente}
+                disabled={!selectedClienteId || sintetizarBriefing.isPending}
+                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {sintetizarBriefing.isPending ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    <span>Sintetizando com IA...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Sintetizar Briefing Oficial</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </PageShell>
