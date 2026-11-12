@@ -48,7 +48,6 @@ function payload(overview: Partial<DashboardOverview> = {}, extra: Partial<Dashb
     summary: {
       sent: { current: 1500, previous: 1300, delta: 15 },
       replied: { current: 312, previous: 223, delta: 40, rate: 25.2, previousRate: 21, reached: 1240, previousReached: 1060, ruleDeclaration: "" },
-      meetings: { current: 60, previous: 55, delta: 9 },
       proposals: { current: 18, previous: 0, delta: 0 },
       contracts: { current: 6, previous: 0, delta: 0 },
       closings: null,
@@ -63,7 +62,6 @@ function payload(overview: Partial<DashboardOverview> = {}, extra: Partial<Dashb
       regions: [],
       failureReasons: [],
     },
-    alerts: [],
     overview: { ...OVERVIEW, ...overview },
     ...extra,
   };
