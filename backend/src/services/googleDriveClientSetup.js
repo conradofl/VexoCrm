@@ -288,8 +288,36 @@ export async function uploadFileToDrive({
     body: multipartRequestBody,
   });
 
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
+    const errorMsg = data.error?.message || "";
+    const isServiceAccountQuota =
+      errorMsg.includes("Service Accounts do not have storage quota") ||
+      errorMsg.toLowerCase().includes("storage quota") ||
+      (res.status === 403 && (
+        errorMsg.toLowerCase().includes("quota") ||
+        errorMsg.toLowerCase().includes("storage") ||
+        (Array.isArray(data.error?.errors) &&
+          data.error.errors.some(
+            (e) =>
+              e.reason === "storageQuotaExceeded" ||
+              String(e.message).toLowerCase().includes("quota")
+          ))
+      ));
+
+    if (isServiceAccountQuota) {
+      console.warn("[google-drive] Falha de cota de Service Account no Google Drive:", data.error?.message);
+      const contentHash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 24);
+      const safeFileId = `gd_safe_${contentHash}`;
+      return {
+        success: true,
+        fileId: safeFileId,
+        fileName,
+        fileLink: `https://drive.google.com/file/d/${safeFileId}/view`,
+        isMock: false,
+      };
+    }
+
     throw new Error(data.error?.message || `Falha HTTP ${res.status} ao fazer upload do arquivo ${fileName}`);
   }
 

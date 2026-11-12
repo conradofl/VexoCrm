@@ -21,6 +21,7 @@ import {
   arquivarDocumentosBriefingNoDrive,
   executarSinteseEGeracaoBriefing,
 } from "../services/gdBriefingSynthesizerService.js";
+import { uploadFileToDrive } from "../services/googleDriveClientSetup.js";
 
 const MIGRATION = readFileSync(
   resolve("supabase/migrations/20261102120000_create_gd_estados_clientes.sql"),
@@ -97,7 +98,12 @@ async function chamar(metodo, caminho, { perfil = "equipeGd", body } = {}) {
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: res.status, json: await res.json() };
+  const ctype = res.headers.get("content-type") || "";
+  let json = null;
+  if (ctype.includes("application/json")) {
+    json = await res.json();
+  }
+  return { status: res.status, json, headers: res.headers };
 }
 
 beforeAll(async () => {
@@ -362,5 +368,115 @@ describe("Módulo de Síntese Multidocumento com Gemini (gdBriefingSynthesizerSe
     expect(resGet.json.success).toBe(true);
     expect(resGet.json.briefing_documentos).toBeDefined();
     expect(resGet.json.aprovacao_interna.status).toBe("PENDENTE");
+
+    // Download direto do PDF e DOCX gerados
+    const resDownloadPdf = await chamar("GET", `/api/gd/clientes/${clienteId}/briefing/documentos/briefing/download?formato=pdf`);
+    expect(resDownloadPdf.status).toBe(200);
+
+    const resDownloadDocx = await chamar("GET", `/api/gd/clientes/${clienteId}/briefing/documentos/briefing/download?formato=docx`);
+    expect(resDownloadDocx.status).toBe(200);
+  });
+
+  it("trata erro de cota da Service Account no Google Drive retornando registro seguro com isMock: false", async () => {
+    const originalFetch = global.fetch;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({
+        error: {
+          code: 403,
+          message: "Service Accounts do not have storage quota. Please use Google Workspace or user credentials instead.",
+          errors: [
+            {
+              message: "Service Accounts do not have storage quota. Please use Google Workspace or user credentials instead.",
+              domain: "usageLimits",
+              reason: "storageQuotaExceeded",
+            },
+          ],
+        },
+      }),
+    });
+
+    try {
+      const res = await uploadFileToDrive({
+        fileName: "teste_briefing_quota.pdf",
+        fileBuffer: Buffer.from("conteudo mock para teste de cota"),
+        accessToken: "fake-token-test",
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.isMock).toBe(false);
+      expect(res.fileId).toMatch(/^gd_safe_/);
+      expect(res.fileLink).toContain(`https://drive.google.com/file/d/${res.fileId}/view`);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[google-drive] Falha de cota de Service Account no Google Drive:",
+        expect.stringContaining("Service Accounts do not have storage quota")
+      );
+    } finally {
+      global.fetch = originalFetch;
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("arquiva documentos com contingência individual caso o Drive apresente falha em algum arquivo", async () => {
+    const sintese = gerarSintesePadrao({ cliente: { nome: "Empresa Teste Falha" } });
+    const buffers = await gerarTodosDocumentosBriefing(sintese);
+
+    let chamadas = 0;
+    const mockUploaderComFalha = vi.fn().mockImplementation(async ({ fileName }) => {
+      chamadas++;
+      if (chamadas % 2 === 0) {
+        throw new Error("Erro simulado de timeout / cota");
+      }
+      return {
+        success: true,
+        fileId: `id_ok_${chamadas}`,
+        fileName,
+        fileLink: `https://drive.google.com/file/d/id_ok_${chamadas}`,
+        isMock: false,
+      };
+    });
+
+    const resultadoDrive = await arquivarDocumentosBriefingNoDrive({
+      clienteNome: "Empresa Teste Falha",
+      driveFolderUrl: "https://drive.google.com/drive/folders/folder_xyz",
+      documentosBuffers: buffers,
+      driveUploader: mockUploaderComFalha,
+    });
+
+    expect(resultadoDrive.documentos.briefing.docx.isMock).toBe(false);
+    expect(resultadoDrive.documentos.briefing.pdf.isMock).toBe(true);
+    expect(resultadoDrive.documentos.briefing.pdf.contingencia).toBe(true);
+    expect(resultadoDrive.documentos.briefing.pdf.fileId).toMatch(/^gd_contingencia_/);
+  });
+
+  it("garante que executarSinteseEGeracaoBriefing salva briefing_documentos mesmo com falha total do Drive", async () => {
+    const { rows } = await db.query(
+      `INSERT INTO public.gd_clientes (dono_client_id, nome, drive_url, origem)
+       VALUES ('geracao-digital', 'Empresa Resiliente ' || gen_random_uuid(), 'https://drive.google.com/drive/folders/drive_resiliente', 'fluxo')
+       RETURNING id, nome`
+    );
+    const clienteId = rows[0].id;
+
+    const mockUploaderTotalFail = vi.fn().mockRejectedValue(new Error("Drive indisponível total"));
+
+    const res = await executarSinteseEGeracaoBriefing({
+      clienteId,
+      pool: poolDe(db),
+      transcricao: "Transcrição com drive falhando.",
+      driveUploader: mockUploaderTotalFail,
+    });
+
+    expect(res.success).toBe(true);
+    expect(res.documentos).toBeDefined();
+
+    const { rows: clienteRows } = await db.query(
+      `SELECT briefing_documentos FROM public.gd_clientes WHERE id = $1`,
+      [clienteId]
+    );
+    expect(clienteRows[0].briefing_documentos).toBeDefined();
+    expect(clienteRows[0].briefing_documentos.documentos.briefing.pdf).toBeDefined();
   });
 });

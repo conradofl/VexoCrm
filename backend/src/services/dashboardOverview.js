@@ -11,7 +11,12 @@
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 import { SLOW_FIRST_RESPONSE_HOURS, VALID_CANONICAL_PHONE_REGEX } from "./dashboardAnalysis.js";
 import { sqlStalledStageCondition } from "./leadReactivationEngine.js";
-import { sqlRunPerson, sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
+import {
+  MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS,
+  MESSAGE_TIMESTAMP_SQL,
+  REPLY_MESSAGE_FILTER_SQL,
+  sqlRunPerson,
+} from "./messageEffectiveness.js";
 
 const MSG_TS = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
 const iso = (d) => (d instanceof Date ? d.toISOString() : String(d));
@@ -66,40 +71,53 @@ export function buildBaseSlicesSql() {
       WHERE o.client_id::text = $1 AND COALESCE(o.phone, '') <> ''
       GROUP BY 1
     ),
-    f AS (
+    per_tel AS (
+      -- Uma linha por telefone, em uma passada só. OFFSET 0 é cerca: as três expressões saem prontas da leitura da
+      -- tabela e metadata/dados não viajam adiante. Sem isso a ordenação carregava a linha inteira (27 MB em disco
+      -- para 80 mil leads) e cada COUNT(DISTINCT) ordenava tudo de novo.
       SELECT b.tel,
-             b.estagio_aberto,
-             b.opt_flag,
-             COALESCE(b.tel ~ '${VALID_CANONICAL_PHONE_REGEX}', false) AS valido,
-             (COALESCE(m.teve_saida, false) OR s.cphone IS NOT NULL) AS com_envio,
-             COALESCE(m.teve_entrada, false) AS com_entrada,
-             (o.cphone IS NOT NULL) AS opt_tabela
+             COUNT(*) AS n,
+             COUNT(*) FILTER (WHERE b.estagio_aberto) AS n_open,
+             COUNT(*) FILTER (WHERE b.opt_flag) AS n_opt,
+             COALESCE(bool_or(b.estagio_aberto AND NOT b.opt_flag), false) AS open_no_opt,
+             COALESCE(bool_or(b.estagio_aberto AND b.opt_flag), false) AS open_opt
       FROM (
         SELECT COALESCE(l.telefone, l.phone) AS tel,
                (${sqlStalledStageCondition("l")}) AS estagio_aberto,
                COALESCE(l.opt_out IS TRUE OR l.metadata->>'opt_out' = 'true' OR l.dados->>'opt_out' = 'true', false) AS opt_flag
         FROM public.leads l
         WHERE l.client_id = $1 AND l.created_at < $2
+        OFFSET 0
       ) b
-      LEFT JOIN msg m ON m.cphone = b.tel
-      LEFT JOIN sent_runs s ON s.cphone = b.tel
-      LEFT JOIN optout o ON o.cphone = b.tel
+      GROUP BY b.tel
+    ),
+    f AS (
+      SELECT t.n, t.n_open, t.n_opt, t.open_no_opt, t.open_opt,
+             COALESCE(t.tel ~ '${VALID_CANONICAL_PHONE_REGEX}', false) AS valido,
+             (COALESCE(m.teve_saida, false) OR s.cphone IS NOT NULL) AS com_envio,
+             COALESCE(m.teve_entrada, false) AS com_entrada,
+             (o.cphone IS NOT NULL) AS opt_tabela
+      FROM per_tel t
+      LEFT JOIN msg m ON m.cphone = t.tel
+      LEFT JOIN sent_runs s ON s.cphone = t.tel
+      LEFT JOIN optout o ON o.cphone = t.tel
     )
+    -- Fatias contam LEADS (soma de n); os três últimos contam TELEFONES (uma linha de f é um telefone).
     SELECT
-      COUNT(*)::int AS base_total,
-      COUNT(*) FILTER (WHERE NOT valido)::int AS slice_invalid_phone,
-      COUNT(*) FILTER (WHERE valido AND com_entrada)::int AS slice_in_conversation,
-      COUNT(*) FILTER (WHERE valido AND NOT com_entrada AND com_envio)::int AS slice_no_reply,
-      COUNT(*) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio AND estagio_aberto)::int AS slice_never_approached,
-      COUNT(*) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio AND NOT estagio_aberto)::int AS slice_closed_no_approach,
-      COUNT(DISTINCT tel) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio AND estagio_aberto)::int AS never_approached_phones,
-      COUNT(DISTINCT tel) FILTER (
-        WHERE valido AND NOT com_entrada AND NOT com_envio AND estagio_aberto AND NOT (opt_flag OR opt_tabela)
+      COALESCE(SUM(n), 0)::int AS base_total,
+      COALESCE(SUM(n) FILTER (WHERE NOT valido), 0)::int AS slice_invalid_phone,
+      COALESCE(SUM(n) FILTER (WHERE valido AND com_entrada), 0)::int AS slice_in_conversation,
+      COALESCE(SUM(n) FILTER (WHERE valido AND NOT com_entrada AND com_envio), 0)::int AS slice_no_reply,
+      COALESCE(SUM(n_open) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio), 0)::int AS slice_never_approached,
+      COALESCE(SUM(n - n_open) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio), 0)::int AS slice_closed_no_approach,
+      COUNT(*) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio AND n_open > 0)::int AS never_approached_phones,
+      COUNT(*) FILTER (
+        WHERE valido AND NOT com_entrada AND NOT com_envio AND NOT opt_tabela AND open_no_opt
       )::int AS reachable_phones,
-      COUNT(DISTINCT tel) FILTER (
-        WHERE valido AND NOT com_entrada AND NOT com_envio AND estagio_aberto AND (opt_flag OR opt_tabela)
+      COUNT(*) FILTER (
+        WHERE valido AND NOT com_entrada AND NOT com_envio AND ((opt_tabela AND n_open > 0) OR open_opt)
       )::int AS optout_discounted_phones,
-      (COUNT(*) FILTER (WHERE opt_flag) + (SELECT COUNT(*) FROM optout))::int AS optout_recorded
+      (COALESCE(SUM(n_opt), 0) + (SELECT COUNT(*) FROM optout))::int AS optout_recorded
     FROM f;
   `;
 }
@@ -207,11 +225,26 @@ export async function measureMeetings(pool, { clientId, currentStart, currentEnd
 // em measureMeetings ("reuniões no período"), que é outro número, com outro nome.
 export function buildFunnelMeetingsSql() {
   return `
-    WITH valid_runs AS (
+    WITH replies AS MATERIALIZED (
+      -- As respostas da empresa, com o telefone canônico calculado UMA vez. A regra por envio é a mesma de
+      -- sqlRunRepliedWithinWindow (depois do envio, até ${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} dias); pedir a ela direto recalculava o canônico de
+      -- toda mensagem para cada envio (3 s medidos na maior empresa).
+      -- Lá a comparação é "telefone cru OU canônico". Aqui basta o canônico: ele é função só do texto do
+      -- telefone, então cru igual implica canônico igual, e a igualdade simples deixa o banco casar por hash.
+      -- O corte de data é folga segura: nenhum envio dos dois períodos aceita resposta fora dele.
+      SELECT ${SQL_CANONICAL_PHONE("lm.phone")} AS cphone,
+             ${MESSAGE_TIMESTAMP_SQL} AS ts
+      FROM public.lead_messages lm
+      WHERE lm.client_id = $1
+        AND ${REPLY_MESSAGE_FILTER_SQL}
+        AND ${MESSAGE_TIMESTAMP_SQL} > LEAST($2::timestamptz, $4::timestamptz)
+        AND ${MESSAGE_TIMESTAMP_SQL} <= GREATEST($3::timestamptz, $5::timestamptz) + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+    ),
+    valid_runs AS MATERIALIZED (
+      -- A pessoa do envio também sai pronta daqui, uma vez por envio.
       SELECT ${sqlRunPerson("r")} AS person,
              r.sent_at,
-             (r.sent_at >= $2 AND r.sent_at < $3) AS is_current,
-             ${sqlRunRepliedWithinWindow("r")} AS replied
+             (r.sent_at >= $2 AND r.sent_at < $3) AS is_current
       FROM public.campaign_dispatch_runs r
       WHERE r.client_id = $1
         AND r.status = 'sent'
@@ -220,10 +253,15 @@ export function buildFunnelMeetingsSql() {
         AND ((r.sent_at >= $2 AND r.sent_at < $3) OR (r.sent_at >= $4 AND r.sent_at < $5))
     ),
     responders AS (
-      SELECT person, is_current, MIN(sent_at) AS first_sent
-      FROM valid_runs
-      WHERE replied
-      GROUP BY person, is_current
+      SELECT v.person, v.is_current, MIN(v.sent_at) AS first_sent
+      FROM valid_runs v
+      WHERE EXISTS (
+        SELECT 1 FROM replies q
+        WHERE q.cphone = v.person
+          AND q.ts > v.sent_at
+          AND q.ts <= v.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days'
+      )
+      GROUP BY v.person, v.is_current
     ),
     meetings AS MATERIALIZED (
       SELECT ${SQL_CANONICAL_PHONE("fs.phone")} AS person, fs.created_at

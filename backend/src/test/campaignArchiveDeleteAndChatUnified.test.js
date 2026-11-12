@@ -173,10 +173,10 @@ describe("TAREFA CONSOLIDADA: Validações Automatizadas", () => {
 
     it("nunca devolve 'unknown' nem string vazia quando WhatsApp envia conteúdo desconhecido", () => {
       const payload1 = { message: "unknown" };
-      expect(extractTextFromBody(payload1)).toBe("[Mensagem]");
+      expect(extractTextFromBody(payload1)).toBe("[Mensagem sem conteúdo]");
 
       const payload2 = { data: { message: {} } };
-      expect(extractTextFromBody(payload2)).toBe("[Mensagem]");
+      expect(extractTextFromBody(payload2)).toBe("[Mensagem sem conteúdo]");
     });
   });
 

@@ -8,169 +8,14 @@
 //   - a gaveta do dossiê abre POR CIMA da conversa, fecha (X, clique fora, Esc) e a conversa volta;
 //   - trocar de aba troca a lista, e enviar mensagem chega ao servidor com o texto digitado;
 //   - quando o servidor recusa ou não responde, a coluna mostra erro com saída;
-//   - trocar de aba CANCELA o pedido anterior (o navegador aborta), não empilha.
+//   - trocar de aba CANCELA o pedido anterior (o navegador aborta), não empilha;
+//   - chip da conversa desconectado: a mensagem NÃO sai até o operador confirmar outro chip;
+//   - mensagem sem texto aparece com o nome do tipo, nunca "[Mensagem]";
+//   - Registrar → Reunião grava a reunião e a mesma gaveta cancela.
 //
 // Uso: npx playwright test --config playwright.harness.config.ts
-import { expect, test, type Page, type Route } from "@playwright/test";
-
-const PAGE_URL = "/e2e/harness/conversas-pagina.html";
-const TOTAL = 883;
-const SHOTS = process.env.HARNESS_SHOTS_DIR || "test-results/harness";
-const NOW_S = () => Math.floor(Date.now() / 1000);
-
-const tenant = {
-  id: "geracao-digital",
-  name: "Geração Digital",
-  n8n_settings: {
-    evolution_instances: [
-      { id: "comercial-hostery", name: "Comercial - Hostery", active: true, is_default: true },
-      { id: "caio", name: "Caio", active: true, is_default: false },
-    ],
-  },
-};
-
-const NAMES = ["Jéssica Mendonça", "AM. Conrado — 30.09", "Gabriel Oliveira", "+55 (34) 9 9221-0017", "Moacir Pires"];
-
-function chat(i: number, tab: string) {
-  const phone = `55349${String(90000000 + i).padStart(8, "0")}`;
-  // Fila "esperam": o mais parado primeiro. 1º há 2 dias, 2º há 38 min, 3º há 1h12, depois crescente.
-  const waitedMin = i === 1 ? 2 * 24 * 60 : i === 2 ? 38 : i === 3 ? 72 : 5 + i;
-  const ts = NOW_S() - waitedMin * 60 - 20; // 20 s de folga: o rótulo não vira o minuto no meio do teste
-  const fromMe = tab === "com_lead" || tab === "robo";
-  return {
-    id: phone,
-    name: NAMES[i - 1] || `Contato ${i} da Silva Albuquerque`,
-    profilePic: null,
-    isGroup: tab === "grupos",
-    unreadCount: 0,
-    timestamp: ts,
-    archived: false,
-    state: "ativa",
-    stateReason: null,
-    stateSource: "auto",
-    isNumberChange: false,
-    pinned: false,
-    muted: false,
-    attendedAt: null,
-    attendedBy: null,
-    agentMutedAt: i === 2 ? new Date(Date.now() - 3_600_000).toISOString() : null,
-    agentMutedReason: i === 2 ? "Atendimento humano" : null,
-    lastMessage: {
-      id: String(i),
-      body: i === 1 ? "Quero aproveitar, pode mandar" : `Mensagem ${i} (${tab}): consegue me passar o valor ainda hoje, por favor?`,
-      fromMe,
-      senderType: tab === "robo" ? "bot" : fromMe ? "device" : "lead",
-      timestamp: ts,
-      type: "chat",
-      meta: null,
-    },
-    leadOrigin: i === 1 || i === 3 ? "campaign" : null,
-    sourceCampaignId: i === 1 ? "camp-1" : null,
-    workState: tab,
-    waitingSince: fromMe ? null : new Date(ts * 1000).toISOString(),
-    leadNeverSpoke: false,
-    leadChip: i === 1 ? "caio" : "comercial-hostery",
-  };
-}
-
-const COUNTS = {
-  active: TOTAL,
-  awaiting: 60,
-  automations: 17,
-  groups: 72,
-  archived: 5,
-  paused: 2,
-  myUnopened: 0,
-  work: { esperam: 14, com_lead: 31, robo: 171, esfriaram: 667 },
-};
-
-const chatsPage = (tab = "esperam") => ({
-  items: Array.from({ length: 40 }, (_, i) => chat(i + 1, tab)),
-  total: TOTAL,
-  counts: COUNTS,
-  chipAgents: {
-    "comercial-hostery": { kind: "empresa", agentName: null, reason: "robo_da_empresa" },
-    caio: { kind: "nenhum", agentName: null, reason: "chip_pessoal" },
-  },
-  nextOffset: 40,
-  hasMore: true,
-});
-
-const leads = [
-  {
-    id: "lead-1",
-    client_id: "geracao-digital",
-    telefone: "5534990000001",
-    nome: "Jéssica Mendonça",
-    stage: "inquiry",
-    status: "inquiry",
-    assigned_to: null,
-    dados: {},
-    created_at: "2026-11-03T12:00:00Z",
-  },
-];
-
-const messagesFor = (chatId: string) =>
-  Array.from({ length: 30 }, (_, i) => ({
-    id: `${chatId}-${i}`,
-    body: i % 2 === 0 ? `Mensagem do lead número ${i}, com texto suficiente para ocupar a linha.` : `Resposta nossa número ${i}.`,
-    fromMe: i % 2 === 1,
-    senderType: i % 2 === 1 ? "device" : "lead",
-    timestamp: NOW_S() - (30 - i) * 300,
-    type: "chat",
-    hasMedia: false,
-    from: null,
-    to: null,
-    author: null,
-  }));
-
-type ChatsHandler = (route: Route, url: URL) => Promise<void> | void;
-interface Served {
-  sent: { chatId: string; body: string }[];
-  tabs: string[];
-}
-
-async function serve(page: Page, chats: ChatsHandler = (route, url) => ok(route, chatsPage(url.searchParams.get("tab") || "esperam"))) {
-  const served: Served = { sent: [], tabs: [] };
-  await page.route("**/api/**", async (route) => {
-    const req = route.request();
-    const url = new URL(req.url());
-    const json = (body: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-    if (url.pathname === "/api/whatsapp/chats") {
-      served.tabs.push(url.searchParams.get("tab") || "");
-      return chats(route, url);
-    }
-    if (url.pathname === "/api/whatsapp/messages" && req.method() === "POST") {
-      const body = req.postDataJSON();
-      served.sent.push({ chatId: body.chatId, body: body.body });
-      return json({ item: { id: "novo", body: body.body, fromMe: true, timestamp: NOW_S(), type: "chat", hasMedia: false } });
-    }
-    if (url.pathname === "/api/whatsapp/messages") {
-      return json({ items: messagesFor(url.searchParams.get("chatId") || ""), hasMore: false });
-    }
-    if (url.pathname === "/api/lead-clients") return json({ items: [tenant] });
-    if (url.pathname === "/api/leads") return json({ items: leads });
-    if (url.pathname === "/api/campaigns") return json({ items: [{ id: "camp-1", name: "teste de bastão" }] });
-    return json({ items: [], data: [], success: true });
-  });
-  return served;
-}
-
-const ok = (route: Route, body: unknown = chatsPage()) =>
-  route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-
-const inViewport = async (page: Page, testId: string) => {
-  const box = await page.getByTestId(testId).boundingBox();
-  const vp = page.viewportSize()!;
-  expect(box, testId).not.toBeNull();
-  expect(box!.x, `${testId} x`).toBeGreaterThanOrEqual(0);
-  expect(box!.y, `${testId} y`).toBeGreaterThanOrEqual(0);
-  expect(box!.x + box!.width, `${testId} direita`).toBeLessThanOrEqual(vp.width + 0.5);
-  expect(box!.y + box!.height, `${testId} base`).toBeLessThanOrEqual(vp.height + 0.5);
-  return box!;
-};
-
-const firstCard = (page: Page) => page.getByTestId("inbox-item-5534990000001");
+import { expect, test } from "@playwright/test";
+import { CHAT_ON_DOWN_CHIP, COUNTS, NAMES, NOW_S, PAGE_URL, SHOTS, SPECIAL_BODIES, TOTAL, chat, chatsPage, firstCard, inViewport, leads, messagesFor, ok, serve, tenant } from "./conversas-servidor";
 
 test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
@@ -230,9 +75,9 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(page.getByTestId("chat-responsible")).toHaveText(/Compartilhado/);
     for (const id of ["chat-header", "chat-context", "composer", "composer-send", "dossier-open", "chat-menu"]) await inViewport(page, id);
 
-    // Chip que assina o envio aparece antes de escrever; avisa quando não é o chip do lead.
-    await expect(page.getByTestId("composer-hint")).toContainText("sai do chip Comercial - Hostery");
-    await expect(page.getByTestId("composer-hint")).toContainText("lead escreveu no Caio");
+    // O chip que assina o envio aparece antes de escrever, e é o chip em que o lead escreveu
+    // (Caio), não o chip padrão da empresa (Comercial - Hostery).
+    await expect(page.getByTestId("composer-hint")).toHaveText("sai do chip Caio");
 
     const box = page.getByTestId("composer-box");
     await expect(box).toHaveAttribute("data-mode", "whatsapp");
@@ -279,6 +124,99 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await page.getByTestId("composer-send").click();
     await expect(page.getByText("cliente pediu retorno na sexta")).toBeVisible();
     expect(served.sent.length).toBe(2);
+  });
+
+  test("chip da conversa desconectado: nada sai sem confirmação, e a confirmação envia pelo chip escolhido", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await page.getByTestId(`inbox-item-${CHAT_ON_DOWN_CHIP}`).click();
+
+    // Antes de escrever a tela já avisa.
+    await expect(page.getByTestId("composer-hint")).toHaveText("chip Chip Caído desconectado · vai pedir confirmação");
+
+    const field = page.getByLabel("Mensagem para o cliente");
+    await field.fill("Gabriel, segue a proposta.");
+    await field.press("Enter");
+
+    // O servidor recusou: nada enviado, a tela pede confirmação e mostra o texto que ficou parado.
+    const confirm = page.getByTestId("chip-confirm");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText("Mensagem não enviada");
+    await expect(confirm).toContainText("está desconectado");
+    await expect(page.getByTestId("chip-confirm-pending")).toContainText("Gabriel, segue a proposta.");
+    await expect(page.getByTestId("chip-confirm-option")).toHaveCount(2);
+    expect(served.refused).toHaveLength(1);
+    expect(served.sent).toHaveLength(0);
+    await inViewport(page, "chip-confirm");
+    await page.getByTestId("composer").screenshot({ path: `${SHOTS}/chip-confirmacao.png` });
+
+    // Desistir devolve o texto ao campo e continua sem enviar nada.
+    await page.getByTestId("chip-confirm-cancel").click();
+    await expect(confirm).toHaveCount(0);
+    await expect(field).toHaveValue("Gabriel, segue a proposta.");
+    expect(served.sent).toHaveLength(0);
+
+    // Tenta de novo e confirma outro chip: aí sim envia, dizendo ao servidor qual chip foi confirmado.
+    await page.getByTestId("composer-send").click();
+    await expect(confirm).toBeVisible();
+    await page.getByTestId("chip-confirm-option").filter({ hasText: "Comercial - Hostery" }).click();
+    await expect.poll(() => served.sent.length).toBe(1);
+    expect(served.sent[0]).toEqual({ chatId: CHAT_ON_DOWN_CHIP, body: "Gabriel, segue a proposta.", confirmChipId: "comercial-hostery" });
+    await expect(confirm).toHaveCount(0);
+    await expect(field).toHaveValue("");
+  });
+
+  test("mensagem sem texto mostra o nome do tipo, na fila e na conversa, nunca [Mensagem]", async ({ page }) => {
+    await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+
+    await expect(page.getByTestId("inbox-item-5534990000004")).toContainText("Mensagem sem texto (tipo não registrado)");
+    await expect(page.getByTestId("inbox-item-5534990000005")).toContainText("Figurinha");
+    await expect(page.getByTestId("inbox-item-5534990000006")).toContainText("[Localização] Padaria Central");
+    await expect(page.getByTestId("inbox-list")).not.toContainText("[Mensagem]");
+    await expect(page.getByTestId("inbox-list")).not.toContainText("[sticker]");
+
+    await firstCard(page).click();
+    const conversation = page.getByTestId("inbox-conversation");
+    await expect(conversation.getByText("Mensagem sem texto (tipo não registrado)")).toBeVisible();
+    await expect(conversation.getByText("Figurinha", { exact: true })).toBeVisible();
+    await expect(conversation.getByText("[Localização] Padaria Central · Rua A, 10")).toBeVisible();
+    await expect(conversation).not.toContainText("[Mensagem]");
+    await conversation.screenshot({ path: `${SHOTS}/rotulos-conversa.png` });
+  });
+
+  test("Registrar → Reunião grava a reunião, a gaveta mostra, e a mesma gaveta cancela", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await firstCard(page).click();
+    await page.getByTestId("dossier-open").click();
+
+    const register = page.getByTestId("register-meeting");
+    await expect(register).toHaveText("Reunião");
+    await register.click();
+    await page.getByRole("button", { name: "Apenas Salvar" }).click();
+
+    await expect.poll(() => served.reminders.length).toBe(1);
+    expect(served.reminders[0]).toMatchObject({ activityType: "meeting", phone: "5534990000001", leadName: "Jéssica Mendonça" });
+
+    // A gaveta passa a mostrar a reunião e o botão muda de estado.
+    await expect(register).toHaveText("Reunião marcada");
+    const cancel = page.getByTestId("meeting-cancel");
+    await expect(cancel).toBeVisible();
+    await page.getByTestId("dossier-drawer").screenshot({ path: `${SHOTS}/gaveta-reuniao-marcada.png` });
+
+    // Cancelar pede confirmação; "Manter" não cancela nada.
+    await cancel.click();
+    await expect(page.getByTestId("meeting-cancel-confirm")).toBeVisible();
+    await page.getByTestId("meeting-cancel-area").getByRole("button", { name: "Manter" }).click();
+    expect(served.deletedReminders).toHaveLength(0);
+
+    await page.getByTestId("meeting-cancel").click();
+    await page.getByTestId("meeting-cancel-confirm").click();
+    await expect.poll(() => served.deletedReminders).toEqual(["rem-1"]);
+    await expect(register).toHaveText("Reunião");
+    await expect(page.getByTestId("meeting-cancel-area")).toHaveCount(0);
   });
 
   test("gaveta do dossiê: fechada por padrão, abre por cima da conversa, e fecha por X, clique fora e Esc", async ({ page }) => {
@@ -372,7 +310,7 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(page.getByTestId("inbox-order-label")).toHaveText(/mais recente primeiro/i);
 
     await page.getByTestId("inbox-tab-robo").click();
-    await expect(page.getByTestId("inbox-list")).toContainText("Robô: Mensagem 5 (robo)");
+    await expect(page.getByTestId("inbox-list")).toContainText("Robô: Mensagem 7 (robo)");
 
     await page.getByTestId("inbox-footer-grupos").click();
     await expect.poll(() => served.tabs.includes("grupos")).toBe(true);
@@ -390,14 +328,19 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await panel.getByTestId("inbox-footer-esfriaram").click();
     await expect.poll(() => served.tabs.includes("esfriaram")).toBe(true);
     await expect(page.getByTestId("inbox-order-label")).toHaveText(/Esfriaram · mais parado primeiro/i);
+    await expect(panel).toBeHidden(); // escolher uma lista fecha o painel; espera fechar antes de reabrir
 
     // "Todos os chips" abre o mesmo painel.
     await page.getByTestId("inbox-chip-link").click();
     await expect(panel).toBeVisible();
     // O painel só escuta o Esc depois de receber o foco (um instante depois de aparecer).
     await expect.poll(() => panel.evaluate((el) => el.contains(document.activeElement))).toBe(true);
-    await page.keyboard.press("Escape");
-    await expect(panel).toBeHidden(); // espera a animação de fechar antes de abrir de novo
+    // O Esc fecha a camada de cima. Se uma dica (tooltip) abriu sob o mouse parado, o primeiro Esc
+    // fecha a dica e o seguinte fecha o painel: aperta até o painel sumir.
+    await expect(async () => {
+      await page.keyboard.press("Escape");
+      await expect(panel).toBeHidden({ timeout: 700 });
+    }).toPass({ timeout: 6000 });
 
     // Seleção em massa: nada disso sumiu.
     await page.getByTestId("inbox-filters-button").click();
@@ -450,8 +393,9 @@ test.describe("aba Conversas — tela nova, celular (375x812)", () => {
     await page.getByTestId("dossier-open").click();
     const drawer = page.getByTestId("dossier-drawer");
     await expect(drawer).toBeVisible();
+    await expect.poll(async () => (await drawer.boundingBox())!.x).toBe(0); // espera a gaveta terminar de entrar
     const box = await inViewport(page, "dossier-drawer");
-    expect(box.width).toBeGreaterThan(300);
+    expect(box.width).toBe(375); // no celular a gaveta cobre a tela inteira
     await inViewport(page, "dossier-close");
     await page.screenshot({ path: `${SHOTS}/gaveta-375.png` });
     await page.getByTestId("dossier-close").click();
