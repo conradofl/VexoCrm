@@ -383,10 +383,12 @@ describe("[TESTE OBRIGATÓRIO 5] envio antigo com a coluna NULL continua no tota
   }, SLOW);
 
   it("na tela: 'sem chip registrado' aparece com a contagem (não é escondido)", () => {
-    const tela = readFileSync(resolve("../frontend/src/pages/Dashboard/Block2Rankings.tsx"), "utf8");
+    // O painel anterior saiu (12/11/2026). O aviso mora no cartão de chips da Visão geral.
+    const tela = readFileSync(resolve("../frontend/src/pages/Dashboard/OverviewTab.tsx"), "utf8");
 
-    expect(tela).toMatch(/envios sem chip registrado/);
+    expect(tela).toMatch(/envios do período sem chip registrado/);
     expect(tela).toMatch(/formatMetricNumber\(unattributedSent\)/);
+    expect(tela).toMatch(/data\.rankings\.chipsUnattributedSent/);
   });
 });
 

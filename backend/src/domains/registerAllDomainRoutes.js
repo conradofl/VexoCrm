@@ -6,6 +6,7 @@ import { registerContractRoutes } from "./geracaoDigitalContracts/contractRoutes
 import { registerContractWebhookRoutes } from "./geracaoDigitalContracts/webhookRoutes.js";
 import { registerGdClientesRoutes } from "./gdClientes/routes.js";
 import { registerRagRoutes } from "../rag/routes.js";
+import { registerAudioLibraryRoutes } from "../audioLibrary/routes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { registerEventosRoutes } from "./eventos/routes.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -67,6 +68,9 @@ export function registerAllDomainRoutes(app) {
 
   // ─── Base de Conhecimento RAG (upload/indexação, fila própria) ────────────
   registerRagRoutes(app);
+
+  // ─── Biblioteca de Áudios (áudios do cliente, reutilizáveis) ──────────────
+  registerAudioLibraryRoutes(app);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);

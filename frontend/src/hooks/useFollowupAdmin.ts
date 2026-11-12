@@ -84,6 +84,10 @@ export interface FupTemplate {
   media_type?: "image" | "audio" | "document" | "video" | null;
   media_mime?: string | null;
   media_filename?: string | null;
+  /** Áudio da Biblioteca de Áudios usado neste passo (no lugar de anexo solto). */
+  audio_library_id?: string | null;
+  /** Só leitura: vem da lista de passos, para mostrar o nome sem buscar a biblioteca. */
+  audio_library?: { name: string; durationSeconds: number; archived: boolean } | null;
   step_type?: "message" | "internal_action";
   action_type?: "create_reminder" | "change_stage" | "assign_operator" | "add_tag" | null;
   action_payload?: Record<string, any>;

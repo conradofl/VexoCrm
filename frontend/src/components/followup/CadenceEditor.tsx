@@ -9,6 +9,7 @@ import {
   GripVertical,
   Copy,
   Paperclip,
+  Mic,
   RotateCcw,
   Clock,
   Pencil,
@@ -507,6 +508,17 @@ export default function CadenceEditor({ companyId }: { companyId: string }) {
                                   {step.scheduled_time ? `às ${step.scheduled_time}` : "dentro da janela"}
                                 </span>
                               </div>
+
+                              {/* ÁUDIO DA BIBLIOTECA */}
+                              {step.audio_library_id && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 gap-1"
+                                >
+                                  <Mic className="h-3 w-3" />
+                                  <span>áudio: {step.audio_library?.name || "da biblioteca"}</span>
+                                </Badge>
+                              )}
 
                               {/* ANEXO */}
                               {step.media_path && (

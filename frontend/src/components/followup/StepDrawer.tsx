@@ -17,6 +17,7 @@ import {
   Repeat,
   Filter,
   MessageSquare,
+  Mic,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import {
   type AnchorFieldOption,
 } from "@/hooks/useFollowupAdmin";
 import { isTimeOutsideSendWindow } from "@/lib/followup/describeStep";
+import { formatAudioDuration, useAudioLibrary, useAudioLibraryAccess } from "@/hooks/useAudioLibrary";
 
 type WhenMode = "evento" | "datas_fixas" | "recorrente";
 
@@ -117,6 +119,16 @@ export default function StepDrawer({
   } | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
 
+  // Áudio da Biblioteca de Áudios (aba "Áudios" do Agente IA). Não convive com
+  // anexo solto: escolher um limpa o outro. A lista só é buscada para quem o
+  // backend deixa usar a biblioteca — quem não pode simplesmente não vê o seletor.
+  const [libraryAudioId, setLibraryAudioId] = useState<string | null>(null);
+  const libraryClientId = isOpen ? selectedCrmClient?.id : undefined;
+  const libraryAccess = useAudioLibraryAccess(libraryClientId);
+  const { data: libraryAudios = [] } = useAudioLibrary(
+    libraryAccess.data?.allowed === true ? libraryClientId : undefined
+  );
+
   // Inicializa ou limpa os campos ao abrir/trocar editingStep
   useEffect(() => {
     if (!isOpen) return;
@@ -183,8 +195,10 @@ export default function StepDrawer({
       } else {
         setStepMedia(null);
       }
+      setLibraryAudioId(editingStep.audio_library_id || null);
     } else {
       // Criação limpa
+      setLibraryAudioId(null);
       setStepName("");
       setStepMessage("");
       setStepType("message");
@@ -236,6 +250,10 @@ export default function StepDrawer({
     Boolean(stepScheduledDate) &&
     stepScheduledDate < todayStr;
 
+  const selectedLibraryAudio = libraryAudioId
+    ? libraryAudios.find((audio) => audio.id === libraryAudioId) || null
+    : null;
+
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !selectedCrmClient?.id) return;
@@ -253,6 +271,7 @@ export default function StepDrawer({
         media_filename: result.media_filename,
         size_bytes: result.size_bytes,
       });
+      setLibraryAudioId(null);
       toast.success("Arquivo anexado.");
     } catch {
       toast.error("Falha ao enviar o arquivo.");
@@ -262,7 +281,10 @@ export default function StepDrawer({
   }
 
   async function handleSave() {
-    if (stepType === "message" && !stepMessage.trim()) {
+    // Passo com áudio da biblioteca não precisa de texto: o WhatsApp não manda
+    // legenda junto com áudio.
+    const usesLibraryAudio = stepType === "message" && Boolean(libraryAudioId);
+    if (stepType === "message" && !usesLibraryAudio && !stepMessage.trim()) {
       toast.error("Escreva a mensagem do passo.");
       return;
     }
@@ -379,10 +401,11 @@ export default function StepDrawer({
       scheduled_time: stepScheduledTime || null,
       scheduled_date: finalScheduledDate,
       anchor_field: finalAnchorField,
-      media_path: stepType === "message" ? (stepMedia?.media_path || null) : null,
-      media_type: stepType === "message" ? (stepMedia?.media_type || null) : null,
-      media_mime: stepType === "message" ? (stepMedia?.media_mime || null) : null,
-      media_filename: stepType === "message" ? (stepMedia?.media_filename || null) : null,
+      media_path: stepType === "message" && !usesLibraryAudio ? (stepMedia?.media_path || null) : null,
+      media_type: stepType === "message" && !usesLibraryAudio ? (stepMedia?.media_type || null) : null,
+      media_mime: stepType === "message" && !usesLibraryAudio ? (stepMedia?.media_mime || null) : null,
+      media_filename: stepType === "message" && !usesLibraryAudio ? (stepMedia?.media_filename || null) : null,
+      audio_library_id: usesLibraryAudio ? libraryAudioId : null,
     };
 
     try {
@@ -951,8 +974,81 @@ export default function StepDrawer({
             )}
           </div>
 
-          {/* Anexo de Mídia (somente para mensagem) */}
-          {stepType === "message" && (
+          {/* Áudio da biblioteca (somente para mensagem) */}
+          {stepType === "message" && (libraryAudioId || libraryAudios.length > 0) && (
+            <div className="space-y-2 p-3 rounded-lg border border-border/70 bg-muted/20" data-testid="step-library-audio">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                  <Mic className="h-3.5 w-3.5 text-emerald-500" />
+                  Áudio da biblioteca (Opcional)
+                </Label>
+                <span className="text-[10px] text-muted-foreground">Gravado por você, na aba Áudios</span>
+              </div>
+
+              {libraryAudioId ? (
+                <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-background border border-border">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="p-1.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 shrink-0">
+                      <Music className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">
+                        {selectedLibraryAudio?.name || editingStep?.audio_library?.name || "Áudio da biblioteca"}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {selectedLibraryAudio
+                          ? formatAudioDuration(selectedLibraryAudio.durationSeconds)
+                          : editingStep?.audio_library
+                            ? formatAudioDuration(editingStep.audio_library.durationSeconds)
+                            : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setLibraryAudioId(null)}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                    title="Tirar o áudio deste passo"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <Select
+                  value=""
+                  onValueChange={(value) => {
+                    setLibraryAudioId(value);
+                    setStepMedia(null);
+                  }}
+                >
+                  <SelectTrigger className="text-xs" aria-label="Escolher áudio da biblioteca">
+                    <SelectValue placeholder="Escolher um áudio da biblioteca" />
+                  </SelectTrigger>
+                  {/* Largura presa à do campo: nome comprido quebra a linha em vez de
+                      abrir a lista para fora da tela no celular. */}
+                  <SelectContent className="max-w-[var(--radix-select-trigger-width)]">
+                    {libraryAudios.map((audio) => (
+                      <SelectItem key={audio.id} value={audio.id} className="text-xs whitespace-normal break-words">
+                        {audio.name} · {formatAudioDuration(audio.durationSeconds)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {libraryAudioId && (
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
+                  Neste passo vai só o áudio. O WhatsApp não manda texto junto com áudio, então a mensagem escrita acima
+                  não é enviada.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Anexo de Mídia (somente para mensagem; não convive com áudio da biblioteca) */}
+          {stepType === "message" && !libraryAudioId && (
             <div className="space-y-2 p-3 rounded-lg border border-border/70 bg-muted/20">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold flex items-center gap-1.5">
@@ -1024,7 +1120,7 @@ export default function StepDrawer({
             onClick={handleSave}
             disabled={
               isSaving ||
-              (stepType === "message" && !stepMessage.trim()) ||
+              (stepType === "message" && !libraryAudioId && !stepMessage.trim()) ||
               (stepType === "internal_action" && actionType === "change_stage" && !actionStage.trim()) ||
               (stepType === "internal_action" && actionType === "assign_operator" && !actionAssignedTo.trim()) ||
               (stepType === "internal_action" && actionType === "add_tag" && !actionTag.trim())
