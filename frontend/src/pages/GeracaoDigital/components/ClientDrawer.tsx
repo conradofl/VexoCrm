@@ -13,6 +13,12 @@ import {
   Video,
   CheckCircle2,
   Clock,
+  Sparkles,
+  RotateCw,
+  FileText,
+  Palette,
+  Film,
+  CalendarDays,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +28,7 @@ import {
   useEmitirGdPortalToken,
   useOferecerHorariosBriefing,
   useConfirmarAgendamentoBriefing,
+  useSintetizarBriefing,
 } from "@/hooks/useGdClientes";
 import type { PortfolioClient } from "./PortfolioTable";
 
@@ -54,11 +61,43 @@ function formatarDataHora(iso?: string | null): string {
   }
 }
 
+const DOCS_CONFIG = [
+  {
+    key: "briefing" as const,
+    titulo: "01. Briefing Consolidado (11 Blocos)",
+    descricao: "Resumo, concorrência, dores, pauta e próximos passos",
+    icone: FileText,
+    cor: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+  },
+  {
+    key: "identidade" as const,
+    titulo: "02. Identidade Visual & Diretrizes",
+    descricao: "Regra de ouro, personalidade, cores, fontes e fotos reais",
+    icone: Palette,
+    cor: "text-purple-500 bg-purple-500/10 border-purple-500/20",
+  },
+  {
+    key: "roteiros" as const,
+    titulo: "03. Roteiros de Gravação (3 Meses)",
+    descricao: "Roteiros categorizados prontos para gravação e reels",
+    icone: Film,
+    cor: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+  },
+  {
+    key: "planejamento" as const,
+    titulo: "04. Planejamento Trimestral",
+    descricao: "Cronograma de produção, metas e canais de aquisição",
+    icone: CalendarDays,
+    cor: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
+  },
+];
+
 export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
   const criarGrupos = useCriarGruposWhatsapp();
   const emitirPortal = useEmitirGdPortalToken();
   const oferecerBriefing = useOferecerHorariosBriefing();
   const confirmarBriefing = useConfirmarAgendamentoBriefing();
+  const sintetizarBriefing = useSintetizarBriefing();
 
   const [criandoGrupos, setCriandoGrupos] = React.useState(false);
   const [abrindoPortal, setAbrindoPortal] = React.useState(false);
@@ -66,8 +105,29 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
   const [copiado, setCopiado] = React.useState(false);
   const [oferecendoBriefing, setOferecendoBriefing] = React.useState(false);
   const [confirmandoOpcao, setConfirmandoOpcao] = React.useState<number | null>(null);
+  const [sintetizandoBriefing, setSintetizandoBriefing] = React.useState(false);
 
   if (!client) return null;
+
+  const handleSintetizarBriefing = async () => {
+    if (!client?.id) return;
+    setSintetizandoBriefing(true);
+    try {
+      await sintetizarBriefing.mutateAsync(client.id);
+      toast({
+        title: "⚡ Briefing e Documentos Gerados!",
+        description: "Os 4 documentos oficiais nos 11 blocos foram gerados com IA e salvos no Google Drive.",
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao sintetizar briefing",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setSintetizandoBriefing(false);
+    }
+  };
 
   const handleCriarGrupos = async () => {
     if (!client?.id) return;
@@ -372,6 +432,138 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Documentos Oficiais & Síntese de Briefing (11 Blocos) */}
+        <div className="space-y-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+              <span>Documentos Oficiais (IA)</span>
+            </p>
+            {client.briefingDocumentos && Object.keys(client.briefingDocumentos).length > 0 ? (
+              <Badge className="bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 text-[10px] font-bold">
+                4 Documentos Prontos
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-bold">
+                Pendente
+              </Badge>
+            )}
+          </div>
+
+          {client.briefingDocumentos && Object.keys(client.briefingDocumentos).length > 0 ? (
+            <div className="space-y-2 pt-1">
+              {DOCS_CONFIG.map(({ key, titulo, descricao, icone: Icone, cor }) => {
+                const doc = client.briefingDocumentos?.[key];
+                const linkVisualizar = doc?.pdfUrl || doc?.docxUrl;
+                return (
+                  <div
+                    key={key}
+                    className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col gap-1.5 shadow-xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`p-1.5 rounded-md border shrink-0 ${cor}`}>
+                          <Icone className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-800 dark:text-slate-200 truncate text-[11px]">
+                            {titulo}
+                          </p>
+                          <p className="text-[10px] text-slate-400 truncate">{descricao}</p>
+                        </div>
+                      </div>
+                      {linkVisualizar && (
+                        <a
+                          href={linkVisualizar}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="shrink-0 text-purple-600 hover:text-purple-700 dark:text-purple-400 text-[11px] font-bold flex items-center gap-1 hover:underline pt-0.5"
+                        >
+                          <span>Acessar</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                    {(doc?.pdfUrl || doc?.docxUrl) && (
+                      <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60 text-[10px]">
+                        {doc.pdfUrl && (
+                          <a
+                            href={doc.pdfUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-red-600 dark:text-red-400 hover:underline font-semibold flex items-center gap-0.5"
+                          >
+                            <span>PDF ↗</span>
+                          </a>
+                        )}
+                        {doc.docxUrl && (
+                          <a
+                            href={doc.docxUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline font-semibold flex items-center gap-0.5"
+                          >
+                            <span>DOCX ↗</span>
+                          </a>
+                        )}
+                        {doc.versao && (
+                          <span className="ml-auto text-slate-400 font-mono text-[9px]">
+                            {doc.versao}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleSintetizarBriefing}
+                disabled={sintetizandoBriefing}
+                className="w-full justify-center gap-2 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer text-xs mt-2"
+              >
+                {sintetizandoBriefing ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0 text-purple-600" />
+                    <span>Regerando Briefing com IA...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCw className="w-3.5 h-3.5 text-slate-500" />
+                    <span>🔄 Regerar Briefing Oficial</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2 pt-1">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Gere os 4 documentos oficiais da Geração Digital (Briefing 11 Blocos, Identidade Visual, Roteiros de 3 Meses e Planejamento Trimestral) estruturados com IA e arquivados no Google Drive.
+              </p>
+              <Button
+                type="button"
+                onClick={handleSintetizarBriefing}
+                disabled={sintetizandoBriefing}
+                className="w-full justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold py-2.5 rounded-xl shadow-xs cursor-pointer transition-all disabled:opacity-50 text-xs"
+              >
+                {sintetizandoBriefing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Sintetizando Briefing com IA...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>⚡ Gerar Briefing Oficial & Documentos (IA)</span>
+                  </>
+                )}
+              </Button>
             </div>
           )}
         </div>

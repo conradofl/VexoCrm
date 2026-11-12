@@ -96,9 +96,9 @@ export function gerarSintesePadrao({ cliente, transcricao = "", respostasFormula
   const publico = respostasFormulario?.publico_alvo || "Consumidores finais e tomadores de decisão qualificados";
   const objetivo = respostasFormulario?.objetivo_principal || "Crescimento de autoridade, geração constante de leads e escala de vendas";
 
-  // 1. Briefing Consolidado
+  // 1. Briefing Consolidado (11 Blocos Oficiais Geração Digital / Tinge Brasil & Litoral Norte)
   const briefingConsolidado = {
-    titulo: `Briefing Estratégico Consolidado · ${nome}`,
+    titulo: `Briefing Estratégico Consolidado (11 Blocos) · ${nome}`,
     clienteNome: nome,
     responsavel,
     cnpj: cliente?.cnpj || "A confirmar",
@@ -139,12 +139,219 @@ export function gerarSintesePadrao({ cliente, transcricao = "", respostasFormula
       "Geração de no mínimo 30 a 60 conversas qualificadas no WhatsApp/mês",
       "Consolidação de prova social com retenção orgânica de seguidores",
     ],
+
+    // ── 01. Resumo da Estratégia
+    bloco01_resumoEstrategia: {
+      ideiaCentral: `Consolidar a ${nome} como a escolha incontestável em ${setor}, unindo autoridade técnica, atendimento ágil e conversão ativa no WhatsApp.`,
+      pilaresRapidos: [
+        "Autoridade & Excelência Operacional",
+        "Atendimento Consultivo Humanizado",
+        "Previsibilidade de Demanda via Vexo OS",
+        "Conversão Ágil no WhatsApp",
+      ],
+      tabelaComparativa: [
+        {
+          pontoComparacao: "Tempo de Resposta",
+          cliente: "Atendimento imediato via WhatsApp com especialista em até 5 minutos",
+          concorrencia: "Formulários lentos e respostas automáticas sem acompanhamento",
+        },
+        {
+          pontoComparacao: "Padrão de Qualidade",
+          cliente: "Processo rigoroso com acompanhamento passo a passo e garantia formal",
+          concorrencia: "Soluções padronizadas e suporte genérico pós-fechamento",
+        },
+        {
+          pontoComparacao: "Comunicação Digital",
+          cliente: "Conteúdo autoral, fotos reais da equipe e posicionamento de autoridade",
+          concorrencia: "Bancos de imagem genéricos e postagens sem estratégia clara",
+        },
+        {
+          pontoComparacao: "Relacionamento com o Cliente",
+          cliente: "Régua de cuidado contínua no Vexo OS e fidelização ativa pós-venda",
+          concorrencia: "Contato apenas no momento da venda, sem pós-venda estruturado",
+        },
+      ],
+      mensagemPrincipal: `Na ${nome}, cada cliente recebe atendimento consultivo de alto nível, com processos transparentes, equipe especializada e compromisso total com o resultado final.`,
+    },
+
+    // ── 02. Público-Alvo
+    bloco02_publicoAlvo: {
+      publicoPrincipal: {
+        faixaEtaria: "28 a 55 anos",
+        classes: "Classes A e B",
+        perfil: "Decisores práticos e consumidores exigentes que priorizam segurança, pontualidade, atendimento humano e valor agregado sobre preço baixo.",
+        descricao: `Pessoas que buscam soluções definitivas em ${setor}, pesquisam a reputação da empresa e querem ter a certeza de que estão contratando profissionais qualificados.`,
+      },
+      publicosDeApoio: [
+        "Homens & Decisores Práticos: Foco em agilidade, custo-benefício e resolução rápida sem burocracia.",
+        "Mães & Gestoras Familiares: Preocupação com acolhimento, segurança, higiene e confiança no time.",
+        "Pais & Famílias: Foco em durabilidade, recomendações e tranquilidade no médio e longo prazo.",
+        "Empresas & Parceiros B2B: Busca por confiabilidade, nota fiscal, pontualidade e contratos recorrentes.",
+      ],
+    },
+
+    // ── 03. Canais de Aquisição
+    bloco03_canaisAquisicao: {
+      baseAtualVexo: "Reativação imediata de clientes inativos e follow-up contínuo através da régua de automação Vexo OS.",
+      indicacoes: "Programa estruturado de recomendação de clientes satisfeitos com incentivos mútuos de fidelidade.",
+      redeVp: "Ativação de conexões na rede Via Permuta e parcerias comerciais estratégicas no ecossistema local.",
+      balcaoDaLoja: "Mostruário físico, atendimento consultivo presencial e QR Code no balcão para captura de leads e avaliações.",
+      instagramOrganico: "Produção contínua de Reels e Carrosséis focados em autoridade, bastidores e quebra de objeções.",
+      googleAds: "Campanhas de busca de alta intenção capturando demandas ativas no raio geográfico da operação.",
+    },
+
+    // ── 04. Banco de Dados e Automação (VEXO)
+    bloco04_bancoDeDadosEAutomacao: {
+      totalContatos: "Base consolidada e higienizada com segmentação de clientes ativos, inativos e prospects frios.",
+      etapasFluxo: [
+        {
+          etapa: "Etapa 1: Higienização & Estruturação da Base",
+          descricao: "Importação e limpeza dos contatos com classificação por perfil e histórico.",
+          responsavel: "Gabriel",
+          lado: "Agência",
+        },
+        {
+          etapa: "Etapa 2: Configuração dos Chips & Gatilhos no Vexo OS",
+          descricao: "Ativação das instâncias de WhatsApp e testes das mensagens de abordagem.",
+          responsavel: "Gabriel",
+          lado: "Agência",
+        },
+        {
+          etapa: "Etapa 3: Disparo da Campanha de Reativação",
+          descricao: "Envio de sondagens e ofertas de oportunidade para a base qualificada.",
+          responsavel: "Gabriel",
+          lado: "Agência",
+        },
+        {
+          etapa: "Etapa 4: Atendimento Consultivo & Fechamento",
+          descricao: "Recepção dos leads aquecidos no WhatsApp e fechamento de novos negócios.",
+          responsavel,
+          lado: "Cliente",
+        },
+      ],
+    },
+
+    // ── 05. Serviço em Destaque
+    bloco05_servicoEmDestaque: {
+      carroChefe: `Atendimento e Serviços Especializados de Alto Padrão em ${setor}.`,
+      itensAceitos: [
+        "Demandas completas e projetos personalizados com escopo bem definido",
+        "Atendimento presencial e consultoria técnica especializada",
+        "Serviços com padrão de acabamento e controle de qualidade rigoroso",
+        "Contratos corporativos e parcerias com demandas programadas",
+      ],
+      itensNaoAceitos: [
+        "Serviços emergenciais sem margem de planejamento prévio",
+        "Demandas que desrespeitem os critérios técnicos de segurança e qualidade",
+        "Propostas que exijam materiais de padrão inferior não homologados",
+      ],
+      paletaCoresProduto: "Tons nobres e acabamentos neutros que reforçam sofisticação, higiene e precisão técnica.",
+    },
+
+    // ── 06. Mitos para Derrubar
+    bloco06_mitosParaDerrubar: [
+      {
+        mito: `Todo fornecedor em ${setor} entrega o mesmo resultado no final.`,
+        verdade: "A metodologia, qualificação da equipe e padrões de garantia fazem com que soluções baratas custem o dobro após alguns meses.",
+      },
+      {
+        mito: "O processo é muito demorado, complexo e burocrático.",
+        verdade: "Com cronograma transparente e comunicação no WhatsApp, o cliente acompanha cada avanço em tempo real sem estresse.",
+      },
+      {
+        mito: "Empresas consolidadas têm preço inacessível para quem precisa de agilidade.",
+        verdade: "Nosso modelo oferece previsibilidade orçamentária e excelente relação entre investimento e retorno palpável.",
+      },
+      {
+        mito: "Atendimento digital não resolve dúvidas complexas.",
+        verdade: "Nossos canais digitais são operados por especialistas humanos prontos para esclarecer cada detalhe técnico.",
+      },
+    ],
+
+    // ── 07. Problemas que Resolve (6 Dores Reais para Antes e Depois)
+    bloco07_problemasQueResolve: [
+      "1. Medo de ser enganado por orçamentos imprecisos ou cobranças extras inesperadas.",
+      "2. Frustração por falta de cumprimento de prazos combinados por prestadores anteriores.",
+      "3. Desgaste com comunicação confusa, atraso de respostas e atendentes despreparados.",
+      "4. Dificuldade de encontrar profissionais que compreendam as particularidades do projeto.",
+      "5. Receio de receber serviços que percam a qualidade logo após a entrega final.",
+      "6. Falta de tempo para acompanhar de perto a execução e necessidade de confiança total na equipe.",
+    ],
+
+    // ── 08. Pauta de Conteúdo
+    bloco08_pautaConteudo: {
+      conveniencia: "Facilidade de contato via WhatsApp, orçamento ágil e comodidade no atendimento.",
+      servico: "Passo a passo dos procedimentos, critérios técnicos e rigor na execução do carro-chefe.",
+      prova: "Depoimentos reais, transformações antes/depois e avaliações 5 estrelas no Google.",
+      educacao: "Mitos derrubados, dicas práticas de manutenção e como escolher o melhor serviço.",
+      nichos: "Soluções personalizadas para diferentes perfis e necessidades específicas de clientes.",
+      empresas: "Modelos de atendimento corporativo, pontualidade em larga escala e condições para parceiros.",
+    },
+
+    // ── 09. Depoimentos e Comunicação na Loja
+    bloco09_depoimentosEComunicacaoLoja: {
+      provaSocialParceiros: "Vídeos curtos de parceiros e clientes fiéis destacando a seriedade e o compromisso da equipe.",
+      mostruarioBalcao: "Expositores táteis e material gráfico elegante no balcão mostrando os padrões de entrega.",
+      qrCodeGoogleAvaliacoes: "Placas acrílicas no balcão com QR Code incentivando clientes satisfeitos a deixarem reviews no Google.",
+    },
+
+    // ── 10. Próximos Passos
+    bloco10_proximosPassos: [
+      { acao: "Envio de fotos e vídeos reais do espaço e da equipe", responsavel, lado: "Cliente" },
+      { acao: "Validação final do Manual de Identidade Visual e cores", responsavel, lado: "Cliente" },
+      { acao: "Estruturação dos chips virtuais e automação Vexo OS", responsavel: "Gabriel", lado: "Agência" },
+      { acao: "Produção do primeiro lote mensal de 20 criativos", responsavel: "Santana & Equipe de Arte", lado: "Agência" },
+      { acao: "Gravação presencial de depoimentos e bastidores", responsavel: `Carlos & ${responsavel}`, lado: "Agência" },
+      { acao: "Instalação da placa de QR Code de avaliações no balcão", responsavel, lado: "Cliente" },
+    ],
+
+    // ── 11. Identidade Visual
+    bloco11_identidadeVisual: {
+      coresHex: [
+        { nome: "Azul Petróleo Nobre (Primária)", hex: "#0B192C", rgb: "RGB(11, 25, 44)", uso: "Fundos principais, autoridade e sofisticação." },
+        { nome: "Azul Profundo Estratégico (Secundária)", hex: "#1E3E62", rgb: "RGB(30, 62, 98)", uso: "Lâminas de carrossel e contrastes médios." },
+        { nome: "Laranja Aceleração (CTA / Destaque)", hex: "#FF6500", rgb: "RGB(255, 101, 0)", uso: "Botões de ação, setas e números em destaque." },
+        { nome: "Branco Neve (Neutro)", hex: "#FFFFFF", rgb: "RGB(255, 255, 255)", uso: "Textos claros, fundos de leitura e respiros." },
+      ],
+      tipografia: {
+        titulos: "Montserrat / Poppins (Bold 700-800)",
+        subtitulos: "Montserrat / Inter (SemiBold 600)",
+        corpo: "Open Sans / Inter (Regular 400-500)",
+      },
+      diretrizesDesign: [
+        "A regra de ouro: 'Uma peça. Uma dor. Uma virada. Uma chamada.'",
+        "Design mobile-first com margens de segurança de 88px no Feed 1080×1350.",
+        "Fotografia com pessoas reais da empresa, proibido uso de fotos genéricas de banco.",
+      ],
+    },
   };
 
-  // 2. Identidade Visual & Diretrizes da Marca
+  // 2. Identidade Visual & Diretrizes da Marca (Padrão Via Permuta Litoral Norte)
   const identidadeVisual = {
     titulo: `Manual de Identidade Visual & Diretrizes · ${nome}`,
     clienteNome: nome,
+    regraDeOuro: "Uma peça. Uma dor. Uma virada. Uma chamada.",
+    personalidadeMarca: {
+      aMarcaE: "Especialista, acolhedora, transparente, resolutiva e pontual.",
+      masNuncaE: "Amadora, sensacionalista, agressiva, prolixa ou com poluição visual.",
+      naPratica: "Comunicação visual direta, alto contraste, foco em solucionar a dor do cliente, fotos autênticas e tipografia limpa.",
+    },
+    formatosEGrids: [
+      {
+        formato: "Feed Instagram: 1080×1350 px (4:5)",
+        diretriz: "Margens de segurança de 88px nas 4 bordas. Garante que títulos e CTAs não sejam cortados na visualização em grade 1:1 do perfil.",
+      },
+      {
+        formato: "Stories & Reels: 1080×1920 px (9:16)",
+        diretriz: "Área nobre central livre das sobreposições da interface do Instagram (foto de perfil no topo, botões de curtir/comentar na direita e legenda no rodapé).",
+      },
+    ],
+    diretrizesFotoVideo: [
+      "Pessoas reais do negócio: priorizar sócios, especialistas e colaboradores reais atuando no dia a dia da empresa.",
+      "Zero banco de imagens genérico: bancos de imagem artificiais reduzem a percepção de verdade e autoridade local.",
+      "Iluminação natural & nitidez: fotos frontais bem iluminadas destacando os detalhes do produto ou da infraestrutura física.",
+      "Captação em alta resolução: vídeos gravados em 4K/60fps com celular estabilizado e microfone de lapela para áudio cristalino.",
+    ],
     conceito: `Identidade desenvolvida para transmitir solidez, dinamismo e elegância. O design visual equilibra estética premium com clareza funcional, assegurando legibilidade instantânea em formatos mobile.`,
     paletaCores: [
       { nome: "Azul Petróleo Nobre (Primária)", hex: "#0B192C", rgb: "RGB(11, 25, 44)", uso: "Fundos principais, tipografia de destaque e elementos institucionais de autoridade." },
@@ -342,6 +549,45 @@ export async function sintetizarBriefingComGemini({
 Você é o Diretor Estratégico de Marketing e Criação da Geração Digital (agência especializada em growth, branding e inbound sales com Vexo OS).
 Sua missão é sintetizar TODOS os insumos fornecidos a seguir e produzir os 4 documentos estratégicos oficiais para o cliente ${cliente?.nome || "Cliente"}.
 
+ESTRUTURA DOS 11 BLOCOS OFICIAIS DO BRIEFING CONSOLIDADO (Padrão Tinge Brasil & Litoral Norte):
+01. Resumo da Estratégia:
+    - ideiaCentral: Visão central da estratégia da marca.
+    - pilaresRapidos: Array com 4 pilares rápidos.
+    - tabelaComparativa: Array de objetos com { pontoComparacao, cliente, concorrencia } comparando diferenciais claros.
+    - mensagemPrincipal: Frase principal e promessa de valor inegociável da marca.
+02. Público-Alvo:
+    - publicoPrincipal: { faixaEtaria, classes, perfil, descricao }
+    - publicosDeApoio: Array de 4 perfis complementares (Homens/Decisores, Mães/Gestoras, Pais/Famílias, Empresas/B2B).
+03. Canais de Aquisição:
+    - Objeto com { baseAtualVexo, indicacoes, redeVp, balcaoDaLoja, instagramOrganico, googleAds }.
+04. Banco de Dados e Automação (VEXO):
+    - totalContatos: Diagnóstico do volume e qualidade da base.
+    - etapasFluxo: Array de 4 etapas atribuídas a Gabriel (Agência) e Cliente ({ etapa, descricao, responsavel, lado: "Agência" | "Cliente" }).
+05. Serviço em Destaque:
+    - carroChefe: Nome e descrição do produto/serviço principal.
+    - itensAceitos: Array de serviços/peças aceitas.
+    - itensNaoAceitos: Array de serviços/peças recusadas (filtro de entrada).
+    - paletaCoresProduto: Paleta de cores ou acabamentos do produto.
+06. Mitos para Derrubar:
+    - Array de objetos { mito, verdade } desmistificando crenças do mercado.
+07. Problemas que Resolve:
+    - Array de exatamente 6 dores reais dos clientes para pauta de "Antes e Depois".
+08. Pauta de Conteúdo:
+    - Objeto categorizado por formato e objetivo: { conveniencia, servico, prova, educacao, nichos, empresas }.
+09. Depoimentos e Comunicação na Loja:
+    - Objeto com { provaSocialParceiros, mostruarioBalcao, qrCodeGoogleAvaliacoes }.
+10. Próximos Passos:
+    - Tabela/Array de objetos { acao, responsavel, lado: "Agência" | "Cliente" }.
+11. Identidade Visual:
+    - Objeto com { coresHex (array de { nome, hex, rgb, uso }), tipografia ({ titulos, subtitulos, corpo }), diretrizesDesign (array) }.
+
+DIRETRIZES DO DOCUMENTO 2 - IDENTIDADE VISUAL (Padrão Via Permuta Litoral Norte):
+- Regra de Ouro: "Uma peça. Uma dor. Uma virada. Uma chamada."
+- Personalidade da Marca: { aMarcaE, masNuncaE, naPratica }
+- Formatos e Grids Recomendados: Feed 1080×1350 (margens de 88px) e Reels/Stories 1080×1920.
+- Diretrizes de Foto/Vídeo: Pessoas reais do negócio (proibido fotos genéricas de banco).
+- Conceito, paletaCores, tipografia, diretrizesLogo, elementosGraficos, referenciasNicho.
+
 INSUMOS FORNECIDOS:
 1. TRANSCRIÇÃO DA REUNIÃO NO GOOGLE MEET:
 ${transcricao || "(Reunião realizada com alinhamento geral de objetivos e posicionamento comercial)"}
@@ -357,8 +603,8 @@ ${templateGd || "Padrão premium, foco em autoridade, conversão no WhatsApp, de
 
 SAÍDA OBRIGATÓRIA:
 Retorne APENAS um objeto JSON válido (sem blocos markdown soltos fora do json) contendo exatamente as seguintes 4 propriedades:
-1. "briefingConsolidado": Objeto com titulo, clienteNome, responsavel, cnpj, dataBriefing, visaoGeral, posicionamento, propostaDeValor, publicoAlvo, personas (array), tomDeVoz, diferenciais (array), concorrentesEBenchmarks (array), canaisEstrategicos (array), cotasEntregaveis, kpisEsperados (array).
-2. "identidadeVisual": Objeto com titulo, clienteNome, conceito, paletaCores (array com nome, hex, rgb, uso), tipografia (com titulos, subtitulos, corpo), diretrizesLogo (array), elementosGraficos (array), referenciasNicho (array).
+1. "briefingConsolidado": Objeto contendo os 11 blocos descritos acima (bloco01_resumoEstrategia, bloco02_publicoAlvo, bloco03_canaisAquisicao, bloco04_bancoDeDadosEAutomacao, bloco05_servicoEmDestaque, bloco06_mitosParaDerrubar, bloco07_problemasQueResolve, bloco08_pautaConteudo, bloco09_depoimentosEComunicacaoLoja, bloco10_proximosPassos, bloco11_identidadeVisual), além de titulo, clienteNome, responsavel, cnpj, dataBriefing, visaoGeral, posicionamento, propostaDeValor, publicoAlvo.
+2. "identidadeVisual": Objeto com titulo, clienteNome, regraDeOuro, personalidadeMarca, formatosEGrids, diretrizesFotoVideo, conceito, paletaCores, tipografia, diretrizesLogo, elementosGraficos, referenciasNicho.
 3. "roteirosTrimestrais": Objeto com titulo, clienteNome, resumoCota (objeto), pilares (array), semanas (array com 12 semanas, cada semana com semana, mes, temaCentral, conteudos contendo codigo, formato, pilar, titulo, gancho, estrutura, cta, direcionamentoVisual).
 4. "planejamentoTrimestral": Objeto com titulo, clienteNome, resumoExecutivo, fases (array com os 3 meses), matrizSemanal (array), governancaECheckpoints (array).
 `;
@@ -504,34 +750,169 @@ function buildDocxCallout(text, title = "") {
   });
 }
 
-// Documento 1: Briefing Consolidado (DOCX)
+function buildDocxSimpleTable(headers, rowsData) {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        tableHeader: true,
+        children: headers.map((h) =>
+          new TableCell({
+            shading: { fill: GD_COLORS.navyMedium, type: ShadingType.CLEAR },
+            margins: { top: 100, bottom: 100, left: 120, right: 120 },
+            children: [
+              new Paragraph({
+                children: [new TextRun({ text: h, bold: true, color: GD_COLORS.white, size: 20, font: "Arial" })],
+              }),
+            ],
+          })
+        ),
+      }),
+      ...rowsData.map((row, rIdx) =>
+        new TableRow({
+          children: row.map((cellText) =>
+            new TableCell({
+              shading: { fill: rIdx % 2 === 0 ? GD_COLORS.white : GD_COLORS.grayLight, type: ShadingType.CLEAR },
+              margins: { top: 80, bottom: 80, left: 120, right: 120 },
+              children: [
+                new Paragraph({
+                  children: [new TextRun({ text: String(cellText || ""), color: GD_COLORS.grayDark, size: 19, font: "Arial" })],
+                }),
+              ],
+            })
+          ),
+        })
+      ),
+    ],
+  });
+}
+
+// Documento 1: Briefing Consolidado (11 Blocos Oficiais) (DOCX)
 export async function gerarDocumentoBriefingDocx(sintese) {
   const b = sintese.briefingConsolidado;
+  const b1 = b.bloco01_resumoEstrategia || {};
+  const b2 = b.bloco02_publicoAlvo || {};
+  const b3 = b.bloco03_canaisAquisicao || {};
+  const b4 = b.bloco04_bancoDeDadosEAutomacao || {};
+  const b5 = b.bloco05_servicoEmDestaque || {};
+  const b6 = b.bloco06_mitosParaDerrubar || [];
+  const b7 = b.bloco07_problemasQueResolve || [];
+  const b8 = b.bloco08_pautaConteudo || {};
+  const b9 = b.bloco09_depoimentosEComunicacaoLoja || {};
+  const b10 = b.bloco10_proximosPassos || [];
+  const b11 = b.bloco11_identidadeVisual || {};
+
   const doc = new Document({
     sections: [
       {
         children: [
-          ...buildDocxHeader(b.titulo, `Documento Oficial de Alinhamento Estratégico · ${b.clienteNome}`),
-          buildDocxCallout(`Cliente: ${b.clienteNome} | Responsável: ${b.responsavel} | Data: ${b.dataBriefing}`, "Ficha do Cliente"),
-          buildDocxSectionHeading("1. Visão Geral & Histórico da Marca"),
-          buildDocxParagraph(b.visaoGeral),
-          buildDocxSectionHeading("2. Posicionamento & Proposta Única de Valor"),
-          buildDocxParagraph(b.posicionamento, "Posicionamento Central:"),
-          buildDocxParagraph(b.propostaDeValor, "Proposta de Valor:"),
-          buildDocxSectionHeading("3. Público-Alvo & Personas"),
-          buildDocxParagraph(b.publicoAlvo, "Público-Alvo:"),
-          ...(b.personas || []).flatMap((p) => [
-            buildDocxParagraph(`${p.perfil}\n• Dores: ${p.dores}\n• Desejos: ${p.desejos}`, `• ${p.nome}:`),
-          ]),
-          buildDocxSectionHeading("4. Tom de Voz & Diretrizes de Comunicação"),
-          buildDocxParagraph(b.tomDeVoz),
-          buildDocxSectionHeading("5. Diferenciais Competitivos"),
-          ...(b.diferenciais || []).map((d) => buildDocxParagraph(d, "✓")),
-          buildDocxSectionHeading("6. Canais & Cotas de Conteúdo"),
-          buildDocxParagraph(b.cotasEntregaveis, "Volume de Entregáveis Acordados:"),
-          buildDocxParagraph((b.canaisEstrategicos || []).join(" | "), "Canais Oficiais:"),
-          buildDocxSectionHeading("7. Metas & KPIs Esperados"),
-          ...(b.kpisEsperados || []).map((k) => buildDocxParagraph(k, "→")),
+          ...buildDocxHeader(b.titulo, `Documento Oficial de Alinhamento Estratégico (11 Blocos) · ${b.clienteNome}`),
+          buildDocxCallout(`Cliente: ${b.clienteNome} | Responsável: ${b.responsavel} | Data: ${b.dataBriefing} | CNPJ: ${b.cnpj || "A confirmar"}`, "Ficha Cadastral Oficial"),
+
+          // 01. Resumo da Estratégia
+          buildDocxSectionHeading("01. Resumo da Estratégia"),
+          buildDocxParagraph(b1.ideiaCentral || b.posicionamento, "Ideia Central:"),
+          buildDocxParagraph((b1.pilaresRapidos || []).join(" • "), "4 Pilares Rápidos:"),
+          ...(b1.tabelaComparativa?.length > 0
+            ? [
+                new Paragraph({ spacing: { before: 100, after: 60 }, children: [new TextRun({ text: "Comparativo de Mercado vs. Concorrência:", bold: true, size: 21, color: GD_COLORS.navyMedium, font: "Arial" })] }),
+                buildDocxSimpleTable(
+                  ["Ponto de Comparação", b.clienteNome, "Concorrência"],
+                  b1.tabelaComparativa.map((t) => [t.pontoComparacao, t.cliente, t.concorrencia])
+                ),
+              ]
+            : []),
+          buildDocxCallout(b1.mensagemPrincipal || b.propostaDeValor, "Mensagem Principal da Marca"),
+
+          // 02. Público-Alvo
+          buildDocxSectionHeading("02. Público-Alvo"),
+          buildDocxParagraph(
+            `${b2.publicoPrincipal?.faixaEtaria || "28 a 55 anos"} | ${b2.publicoPrincipal?.classes || "Classes A e B"}\n${b2.publicoPrincipal?.perfil || b.publicoAlvo}\n${b2.publicoPrincipal?.descricao || ""}`,
+            "Público Principal:"
+          ),
+          buildDocxParagraph("Segmentos e personas complementares de compra:", "Públicos de Apoio:"),
+          ...(b2.publicosDeApoio || []).map((pa) => buildDocxParagraph(pa, "•")),
+
+          // 03. Canais de Aquisição
+          buildDocxSectionHeading("03. Canais de Aquisição"),
+          buildDocxParagraph(b3.baseAtualVexo || "Reativação e régua no Vexo OS", "1. Base Atual VEXO:"),
+          buildDocxParagraph(b3.indicacoes || "Member-get-member estruturado", "2. Indicações:"),
+          buildDocxParagraph(b3.redeVp || "Alavancagem de parcerias da rede", "3. Rede VP (Via Permuta / Parceiros):"),
+          buildDocxParagraph(b3.balcaoDaLoja || "Displays e QR Code de balcão", "4. Balcão da Loja / Ponto Físico:"),
+          buildDocxParagraph(b3.instagramOrganico || "Linha editorial de Reels e Carrosséis", "5. Instagram Orgânico:"),
+          buildDocxParagraph(b3.googleAds || "Campanhas de busca de alta intenção", "6. Google Ads:"),
+
+          // 04. Banco de Dados e Automação (VEXO)
+          buildDocxSectionHeading("04. Banco de Dados e Automação (VEXO)"),
+          buildDocxParagraph(b4.totalContatos || "Base total de contatos da empresa", "Volume da Base:"),
+          ...(b4.etapasFluxo?.length > 0
+            ? [
+                buildDocxSimpleTable(
+                  ["Etapa", "Descrição", "Responsável", "Lado"],
+                  b4.etapasFluxo.map((e) => [e.etapa, e.descricao, e.responsavel, e.lado])
+                ),
+              ]
+            : []),
+
+          // 05. Serviço em Destaque
+          buildDocxSectionHeading("05. Serviço em Destaque"),
+          buildDocxParagraph(b5.carroChefe || b.visaoGeral, "Carro-Chefe:"),
+          buildDocxParagraph((b5.itensAceitos || []).join("; "), "✓ Peças / Serviços Aceitos:"),
+          buildDocxParagraph((b5.itensNaoAceitos || []).join("; "), "✗ Não Aceitos (Filtro de Entrada):"),
+          buildDocxParagraph(b5.paletaCoresProduto || "Tons institucionais alinhados à marca", "Paleta de Cores do Produto:"),
+
+          // 06. Mitos para Derrubar
+          buildDocxSectionHeading("06. Mitos para Derrubar"),
+          ...(b6.length > 0
+            ? [
+                buildDocxSimpleTable(
+                  ["Mito do Mercado", "A Verdade da Marca"],
+                  b6.map((m) => [m.mito, m.verdade])
+                ),
+              ]
+            : []),
+
+          // 07. Problemas que Resolve
+          buildDocxSectionHeading("07. Problemas que Resolve (Dores para Antes e Depois)"),
+          ...(b7.map((dor) => buildDocxParagraph(dor, "⚠"))),
+
+          // 08. Pauta de Conteúdo
+          buildDocxSectionHeading("08. Pauta de Conteúdo (Formatos & Objetivos)"),
+          buildDocxParagraph(b8.conveniencia || "", "• Conveniência:"),
+          buildDocxParagraph(b8.servico || "", "• Serviço (Técnico / Carro-Chefe):"),
+          buildDocxParagraph(b8.prova || "", "• Prova Social & Casos de Sucesso:"),
+          buildDocxParagraph(b8.educacao || "", "• Educação & Mitos:"),
+          buildDocxParagraph(b8.nichos || "", "• Nichos Específicos:"),
+          buildDocxParagraph(b8.empresas || "", "• Empresas & B2B:"),
+
+          // 09. Depoimentos e Comunicação na Loja
+          buildDocxSectionHeading("09. Depoimentos e Comunicação na Loja"),
+          buildDocxParagraph(b9.provaSocialParceiros || "", "Prova Social de Parceiros:"),
+          buildDocxParagraph(b9.mostruarioBalcao || "", "Mostruário de Balcão:"),
+          buildDocxParagraph(b9.qrCodeGoogleAvaliacoes || "", "QR Code Google Avaliações:"),
+
+          // 10. Próximos Passos
+          buildDocxSectionHeading("10. Próximos Passos & Cronograma"),
+          ...(b10.length > 0
+            ? [
+                buildDocxSimpleTable(
+                  ["Ação", "Responsável", "Lado"],
+                  b10.map((p) => [p.acao, p.responsavel, p.lado])
+                ),
+              ]
+            : []),
+
+          // 11. Identidade Visual
+          buildDocxSectionHeading("11. Identidade Visual & Diretrizes"),
+          buildDocxParagraph(
+            (b11.coresHex || []).map((c) => `${c.nome}: ${c.hex}`).join(" | "),
+            "Cores Principais:"
+          ),
+          buildDocxParagraph(
+            `Títulos: ${b11.tipografia?.titulos || "Montserrat"} | Corpo: ${b11.tipografia?.corpo || "Open Sans"}`,
+            "Tipografia:"
+          ),
+          ...(b11.diretrizesDesign || []).map((dir) => buildDocxParagraph(dir, "•")),
         ],
       },
     ],
@@ -539,28 +920,44 @@ export async function gerarDocumentoBriefingDocx(sintese) {
   return await Packer.toBuffer(doc);
 }
 
-// Documento 2: Identidade Visual (DOCX)
+// Documento 2: Identidade Visual (DOCX - Padrão Via Permuta Litoral Norte)
 export async function gerarDocumentoIdentidadeDocx(sintese) {
   const iv = sintese.identidadeVisual;
+  const pm = iv.personalidadeMarca || {};
   const doc = new Document({
     sections: [
       {
         children: [
           ...buildDocxHeader(iv.titulo, `Manual de Identidade Visual e Diretrizes de Marca · ${iv.clienteNome}`),
-          buildDocxCallout(iv.conceito, "Conceito & Atmosfera Visual"),
-          buildDocxSectionHeading("1. Paleta de Cores Oficial"),
+          buildDocxCallout(iv.regraDeOuro || "Uma peça. Uma dor. Uma virada. Uma chamada.", "A Regra de Ouro (Via Permuta Litoral Norte)"),
+          buildDocxSectionHeading("1. Conceito & Atmosfera Visual"),
+          buildDocxParagraph(iv.conceito),
+          buildDocxSectionHeading("2. Personalidade da Marca"),
+          buildDocxParagraph(pm.aMarcaE || "Especialista, acolhedora, transparente e resolutiva.", "A Marca É:"),
+          buildDocxParagraph(pm.masNuncaE || "Amadora, agressiva, prolixa ou com poluição visual.", "Mas NUNCA É:"),
+          buildDocxParagraph(pm.naPratica || "Comunicação direta, alto contraste e fotos autênticas.", "Na Prática:"),
+          buildDocxSectionHeading("3. Formatos e Grids Recomendados"),
+          ...(Array.isArray(iv.formatosEGrids)
+            ? iv.formatosEGrids.map((f) => buildDocxParagraph(typeof f === "string" ? f : `${f.formato}: ${f.diretriz}`, "📐"))
+            : [
+                buildDocxParagraph("Feed Instagram: 1080×1350 px (4:5) com margens de segurança de 88px nas 4 bordas.", "•"),
+                buildDocxParagraph("Stories & Reels: 1080×1920 px (9:16) com área nobre central livre.", "•"),
+              ]),
+          buildDocxSectionHeading("4. Diretrizes de Foto & Vídeo (Pessoas Reais)"),
+          ...(iv.diretrizesFotoVideo || []).map((dfv) => buildDocxParagraph(dfv, "📷")),
+          buildDocxSectionHeading("5. Paleta de Cores Oficial"),
           ...(iv.paletaCores || []).map((c) =>
             buildDocxParagraph(`${c.hex} | ${c.rgb} — ${c.uso}`, `• ${c.nome}:`)
           ),
-          buildDocxSectionHeading("2. Tipografia & Hierarquia de Textos"),
+          buildDocxSectionHeading("6. Tipografia & Hierarquia de Textos"),
           buildDocxParagraph(iv.tipografia?.titulos || "", "Títulos & Headings:"),
           buildDocxParagraph(iv.tipografia?.subtitulos || "", "Subtítulos & Chamadas:"),
           buildDocxParagraph(iv.tipografia?.corpo || "", "Corpo de Texto & Legendas:"),
-          buildDocxSectionHeading("3. Regras e Uso do Logotipo"),
+          buildDocxSectionHeading("7. Regras e Uso do Logotipo"),
           ...(iv.diretrizesLogo || []).map((r) => buildDocxParagraph(r, "⚠")),
-          buildDocxSectionHeading("4. Elementos Gráficos & Estilo Visual"),
+          buildDocxSectionHeading("8. Elementos Gráficos & Estilo Visual"),
           ...(iv.elementosGraficos || []).map((e) => buildDocxParagraph(e, "•")),
-          buildDocxSectionHeading("5. Benchmarks & Referências do Nicho"),
+          buildDocxSectionHeading("9. Benchmarks & Referências do Nicho"),
           ...(iv.referenciasNicho || []).map((ref) => buildDocxParagraph(ref, "★")),
         ],
       },
@@ -692,45 +1089,197 @@ function renderPdfCallout(doc, title, text) {
   doc.y = startY + 48;
 }
 
-// Documento 1: Briefing Consolidado (PDF)
+function renderPdfTable(doc, headers, rowsData, colWidths = null) {
+  const margin = 40;
+  const availableWidth = doc.page.width - margin * 2;
+  const numCols = headers.length;
+  const widths = colWidths || headers.map(() => availableWidth / numCols);
+
+  doc.moveDown(0.3);
+  let startY = doc.y;
+
+  // Se estiver muito perto do rodapé, avança página
+  if (startY > doc.page.height - 70) {
+    doc.addPage();
+    setupPdfHeaderFooter(doc, "");
+    startY = doc.y;
+  }
+
+  // Header da tabela
+  doc.rect(margin, startY, availableWidth, 18).fillColor("#1E3E62").fill();
+  let currentX = margin;
+  headers.forEach((h, i) => {
+    doc.fillColor("#FFFFFF").fontSize(8).font("Helvetica-Bold")
+      .text(h, currentX + 6, startY + 5, { width: widths[i] - 12 });
+    currentX += widths[i];
+  });
+  doc.y = startY + 18;
+
+  // Linhas da tabela
+  rowsData.forEach((row, rIdx) => {
+    let rowY = doc.y;
+    if (rowY > doc.page.height - 50) {
+      doc.addPage();
+      setupPdfHeaderFooter(doc, "");
+      rowY = doc.y;
+    }
+
+    let maxCellHeight = 16;
+    row.forEach((cell, i) => {
+      const cellHeight = doc.heightOfString(String(cell || ""), { width: widths[i] - 12, fontSize: 8 });
+      if (cellHeight + 8 > maxCellHeight) maxCellHeight = cellHeight + 8;
+    });
+
+    if (rIdx % 2 === 1) {
+      doc.rect(margin, rowY, availableWidth, maxCellHeight).fillColor("#F9FAFB").fill();
+    }
+    doc.rect(margin, rowY, availableWidth, maxCellHeight).strokeColor("#E5E7EB").lineWidth(0.5).stroke();
+
+    let cellX = margin;
+    row.forEach((cell, i) => {
+      doc.fillColor("#1F2937").fontSize(8).font("Helvetica")
+        .text(String(cell || ""), cellX + 6, rowY + 4, { width: widths[i] - 12 });
+      cellX += widths[i];
+    });
+    doc.y = rowY + maxCellHeight;
+  });
+  doc.moveDown(0.4);
+}
+
+// Documento 1: Briefing Consolidado (11 Blocos Oficiais) (PDF)
 export async function gerarDocumentoBriefingPdf(sintese) {
   return new Promise((resolve, reject) => {
     try {
       const b = sintese.briefingConsolidado;
+      const b1 = b.bloco01_resumoEstrategia || {};
+      const b2 = b.bloco02_publicoAlvo || {};
+      const b3 = b.bloco03_canaisAquisicao || {};
+      const b4 = b.bloco04_bancoDeDadosEAutomacao || {};
+      const b5 = b.bloco05_servicoEmDestaque || {};
+      const b6 = b.bloco06_mitosParaDerrubar || [];
+      const b7 = b.bloco07_problemasQueResolve || [];
+      const b8 = b.bloco08_pautaConteudo || {};
+      const b9 = b.bloco09_depoimentosEComunicacaoLoja || {};
+      const b10 = b.bloco10_proximosPassos || [];
+      const b11 = b.bloco11_identidadeVisual || {};
+
       const doc = new PDFDocument({ margin: 40, size: "A4" });
       const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
       setupPdfHeaderFooter(doc, b.titulo);
-      renderPdfTitleBlock(doc, b.titulo, `Documento Oficial de Alinhamento Estratégico · ${b.clienteNome}`);
-      renderPdfCallout(doc, "Ficha do Cliente", `Cliente: ${b.clienteNome} | Responsável: ${b.responsavel} | Data: ${b.dataBriefing}`);
+      renderPdfTitleBlock(doc, b.titulo, `Documento Oficial de Alinhamento Estratégico (11 Blocos) · ${b.clienteNome}`);
+      renderPdfCallout(doc, "Ficha Cadastral Oficial", `Cliente: ${b.clienteNome} | Responsável: ${b.responsavel} | Data: ${b.dataBriefing} | CNPJ: ${b.cnpj || "A confirmar"}`);
 
-      renderPdfSection(doc, "1. Visão Geral & Histórico da Marca");
-      renderPdfParagraph(doc, b.visaoGeral);
+      // 01. Resumo da Estratégia
+      renderPdfSection(doc, "01. Resumo da Estratégia");
+      renderPdfParagraph(doc, b1.ideiaCentral || b.posicionamento, "Ideia Central:");
+      renderPdfParagraph(doc, (b1.pilaresRapidos || []).join(" • "), "4 Pilares Rápidos:");
+      if (b1.tabelaComparativa?.length > 0) {
+        doc.moveDown(0.2);
+        renderPdfParagraph(doc, "Comparativo com o Mercado e Concorrência:", "Tabela Comparativa:");
+        renderPdfTable(
+          doc,
+          ["Ponto de Comparação", b.clienteNome, "Concorrência"],
+          b1.tabelaComparativa.map((t) => [t.pontoComparacao, t.cliente, t.concorrencia]),
+          [140, 185, 185]
+        );
+      }
+      renderPdfCallout(doc, "Mensagem Principal da Marca", b1.mensagemPrincipal || b.propostaDeValor);
 
-      renderPdfSection(doc, "2. Posicionamento & Proposta Única de Valor");
-      renderPdfParagraph(doc, b.posicionamento, "Posicionamento Central:");
-      renderPdfParagraph(doc, b.propostaDeValor, "Proposta de Valor:");
+      // 02. Público-Alvo
+      renderPdfSection(doc, "02. Público-Alvo");
+      renderPdfParagraph(
+        doc,
+        `${b2.publicoPrincipal?.faixaEtaria || "28 a 55 anos"} | ${b2.publicoPrincipal?.classes || "Classes A e B"}\n${b2.publicoPrincipal?.perfil || b.publicoAlvo}\n${b2.publicoPrincipal?.descricao || ""}`,
+        "Público Principal:"
+      );
+      renderPdfParagraph(doc, "Segmentos complementares de compra:", "Públicos de Apoio:");
+      (b2.publicosDeApoio || []).forEach((pa) => renderPdfParagraph(doc, pa, "•"));
 
-      renderPdfSection(doc, "3. Público-Alvo & Personas");
-      renderPdfParagraph(doc, b.publicoAlvo, "Público-Alvo:");
-      (b.personas || []).forEach((p) => {
-        renderPdfParagraph(doc, `${p.perfil} | Dores: ${p.dores} | Desejos: ${p.desejos}`, `• ${p.nome}:`);
-      });
+      // 03. Canais de Aquisição
+      renderPdfSection(doc, "03. Canais de Aquisição");
+      renderPdfParagraph(doc, b3.baseAtualVexo || "Reativação e régua no Vexo OS", "1. Base Atual VEXO:");
+      renderPdfParagraph(doc, b3.indicacoes || "Member-get-member estruturado", "2. Indicações:");
+      renderPdfParagraph(doc, b3.redeVp || "Alavancagem de parcerias da rede", "3. Rede VP (Via Permuta / Parceiros):");
+      renderPdfParagraph(doc, b3.balcaoDaLoja || "Displays e QR Code de balcão", "4. Balcão da Loja / Ponto Físico:");
+      renderPdfParagraph(doc, b3.instagramOrganico || "Linha editorial de Reels e Carrosséis", "5. Instagram Orgânico:");
+      renderPdfParagraph(doc, b3.googleAds || "Campanhas de busca de alta intenção", "6. Google Ads:");
 
-      renderPdfSection(doc, "4. Tom de Voz & Diretrizes de Comunicação");
-      renderPdfParagraph(doc, b.tomDeVoz);
+      // 04. Banco de Dados e Automação (VEXO)
+      renderPdfSection(doc, "04. Banco de Dados e Automação (VEXO)");
+      renderPdfParagraph(doc, b4.totalContatos || "Base total de contatos da empresa", "Volume da Base:");
+      if (b4.etapasFluxo?.length > 0) {
+        renderPdfTable(
+          doc,
+          ["Etapa", "Descrição", "Responsável", "Lado"],
+          b4.etapasFluxo.map((e) => [e.etapa, e.descricao, e.responsavel, e.lado]),
+          [130, 210, 90, 80]
+        );
+      }
 
-      renderPdfSection(doc, "5. Diferenciais Competitivos");
-      (b.diferenciais || []).forEach((d) => renderPdfParagraph(doc, d, "✓"));
+      // 05. Serviço em Destaque
+      renderPdfSection(doc, "05. Serviço em Destaque");
+      renderPdfParagraph(doc, b5.carroChefe || b.visaoGeral, "Carro-Chefe:");
+      renderPdfParagraph(doc, (b5.itensAceitos || []).join("; "), "✓ Peças / Serviços Aceitos:");
+      renderPdfParagraph(doc, (b5.itensNaoAceitos || []).join("; "), "✗ Não Aceitos (Filtro de Entrada):");
+      renderPdfParagraph(doc, b5.paletaCoresProduto || "Tons institucionais alinhados à marca", "Paleta de Cores do Produto:");
 
-      renderPdfSection(doc, "6. Canais & Cotas de Conteúdo");
-      renderPdfParagraph(doc, b.cotasEntregaveis, "Volume de Entregáveis Acordados:");
-      renderPdfParagraph(doc, (b.canaisEstrategicos || []).join(" | "), "Canais Oficiais:");
+      // 06. Mitos para Derrubar
+      renderPdfSection(doc, "06. Mitos para Derrubar");
+      if (b6.length > 0) {
+        renderPdfTable(
+          doc,
+          ["Mito do Mercado", "A Verdade da Marca"],
+          b6.map((m) => [m.mito, m.verdade]),
+          [220, 290]
+        );
+      }
 
-      renderPdfSection(doc, "7. Metas & KPIs Esperados");
-      (b.kpisEsperados || []).forEach((k) => renderPdfParagraph(doc, k, "→"));
+      // 07. Problemas que Resolve
+      renderPdfSection(doc, "07. Problemas que Resolve (Dores para Antes e Depois)");
+      b7.forEach((dor) => renderPdfParagraph(doc, dor, "⚠"));
+
+      // 08. Pauta de Conteúdo
+      renderPdfSection(doc, "08. Pauta de Conteúdo (Formatos & Objetivos)");
+      renderPdfParagraph(doc, b8.conveniencia || "", "• Conveniência:");
+      renderPdfParagraph(doc, b8.servico || "", "• Serviço (Técnico / Carro-Chefe):");
+      renderPdfParagraph(doc, b8.prova || "", "• Prova Social & Casos de Sucesso:");
+      renderPdfParagraph(doc, b8.educacao || "", "• Educação & Mitos:");
+      renderPdfParagraph(doc, b8.nichos || "", "• Nichos Específicos:");
+      renderPdfParagraph(doc, b8.empresas || "", "• Empresas & B2B:");
+
+      // 09. Depoimentos e Comunicação na Loja
+      renderPdfSection(doc, "09. Depoimentos e Comunicação na Loja");
+      renderPdfParagraph(doc, b9.provaSocialParceiros || "", "Prova Social de Parceiros:");
+      renderPdfParagraph(doc, b9.mostruarioBalcao || "", "Mostruário de Balcão:");
+      renderPdfParagraph(doc, b9.qrCodeGoogleAvaliacoes || "", "QR Code Google Avaliações:");
+
+      // 10. Próximos Passos
+      renderPdfSection(doc, "10. Próximos Passos & Cronograma");
+      if (b10.length > 0) {
+        renderPdfTable(
+          doc,
+          ["Ação", "Responsável", "Lado"],
+          b10.map((p) => [p.acao, p.responsavel, p.lado]),
+          [270, 140, 100]
+        );
+      }
+
+      // 11. Identidade Visual
+      renderPdfSection(doc, "11. Identidade Visual & Diretrizes");
+      renderPdfParagraph(
+        doc,
+        (b11.coresHex || []).map((c) => `${c.nome}: ${c.hex}`).join(" | "),
+        "Cores Principais:"
+      );
+      renderPdfParagraph(
+        doc,
+        `Títulos: ${b11.tipografia?.titulos || "Montserrat"} | Corpo: ${b11.tipografia?.corpo || "Open Sans"}`,
+        "Tipografia:"
+      );
+      (b11.diretrizesDesign || []).forEach((dir) => renderPdfParagraph(doc, dir, "•"));
 
       doc.end();
     } catch (err) {
@@ -739,11 +1288,12 @@ export async function gerarDocumentoBriefingPdf(sintese) {
   });
 }
 
-// Documento 2: Identidade Visual (PDF)
+// Documento 2: Identidade Visual (PDF - Padrão Via Permuta Litoral Norte)
 export async function gerarDocumentoIdentidadePdf(sintese) {
   return new Promise((resolve, reject) => {
     try {
       const iv = sintese.identidadeVisual;
+      const pm = iv.personalidadeMarca || {};
       const doc = new PDFDocument({ margin: 40, size: "A4" });
       const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
@@ -751,25 +1301,43 @@ export async function gerarDocumentoIdentidadePdf(sintese) {
 
       setupPdfHeaderFooter(doc, iv.titulo);
       renderPdfTitleBlock(doc, iv.titulo, `Manual de Identidade Visual e Diretrizes de Marca · ${iv.clienteNome}`);
-      renderPdfCallout(doc, "Conceito & Atmosfera Visual", iv.conceito);
+      renderPdfCallout(doc, "A Regra de Ouro (Via Permuta Litoral Norte)", iv.regraDeOuro || "Uma peça. Uma dor. Uma virada. Uma chamada.");
 
-      renderPdfSection(doc, "1. Paleta de Cores Oficial");
+      renderPdfSection(doc, "1. Conceito & Atmosfera Visual");
+      renderPdfParagraph(doc, iv.conceito);
+
+      renderPdfSection(doc, "2. Personalidade da Marca");
+      renderPdfParagraph(doc, pm.aMarcaE || "Especialista, acolhedora, transparente e resolutiva.", "A Marca É:");
+      renderPdfParagraph(doc, pm.masNuncaE || "Amadora, agressiva, prolixa ou com poluição visual.", "Mas NUNCA É:");
+      renderPdfParagraph(doc, pm.naPratica || "Comunicação direta, alto contraste e fotos autênticas.", "Na Prática:");
+
+      renderPdfSection(doc, "3. Formatos e Grids Recomendados");
+      if (Array.isArray(iv.formatosEGrids)) {
+        iv.formatosEGrids.forEach((f) => {
+          renderPdfParagraph(doc, typeof f === "string" ? f : `${f.formato} — ${f.diretriz}`, "📐");
+        });
+      }
+
+      renderPdfSection(doc, "4. Diretrizes de Foto & Vídeo (Pessoas Reais)");
+      (iv.diretrizesFotoVideo || []).forEach((dfv) => renderPdfParagraph(doc, dfv, "📷"));
+
+      renderPdfSection(doc, "5. Paleta de Cores Oficial");
       (iv.paletaCores || []).forEach((c) => {
         renderPdfParagraph(doc, `${c.hex} | ${c.rgb} — ${c.uso}`, `• ${c.nome}:`);
       });
 
-      renderPdfSection(doc, "2. Tipografia & Hierarquia de Textos");
+      renderPdfSection(doc, "6. Tipografia & Hierarquia de Textos");
       renderPdfParagraph(doc, iv.tipografia?.titulos || "", "Títulos & Headings:");
       renderPdfParagraph(doc, iv.tipografia?.subtitulos || "", "Subtítulos & Chamadas:");
       renderPdfParagraph(doc, iv.tipografia?.corpo || "", "Corpo de Texto & Legendas:");
 
-      renderPdfSection(doc, "3. Regras e Uso do Logotipo");
+      renderPdfSection(doc, "7. Regras e Uso do Logotipo");
       (iv.diretrizesLogo || []).forEach((r) => renderPdfParagraph(doc, r, "⚠"));
 
-      renderPdfSection(doc, "4. Elementos Gráficos & Estilo Visual");
+      renderPdfSection(doc, "8. Elementos Gráficos & Estilo Visual");
       (iv.elementosGraficos || []).forEach((e) => renderPdfParagraph(doc, e, "•"));
 
-      renderPdfSection(doc, "5. Benchmarks & Referências do Nicho");
+      renderPdfSection(doc, "9. Benchmarks & Referências do Nicho");
       (iv.referenciasNicho || []).forEach((ref) => renderPdfParagraph(doc, ref, "★"));
 
       doc.end();
@@ -1023,7 +1591,7 @@ export async function executarSinteseEGeracaoBriefing({
   }
 
   const { rows } = await pool.query(
-    `SELECT * FROM public.gd_clientes WHERE id = $1 AND dono_client_id = $2`,
+    `SELECT * FROM public.gd_clientes WHERE id = $1 AND (dono_client_id = $2 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
     [clienteId, GD_DONO]
   );
 
@@ -1071,7 +1639,7 @@ export async function executarSinteseEGeracaoBriefing({
             briefing_transcricao = COALESCE($2, briefing_transcricao),
             briefing_formulario_respostas = COALESCE($3::jsonb, briefing_formulario_respostas),
             briefing_aprovacao_interna_status = 'PENDENTE'
-      WHERE id = $4 AND dono_client_id = $5`,
+      WHERE id = $4 AND (dono_client_id = $5 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
     [
       JSON.stringify(briefingDocsMetadata),
       effectiveTranscricao || null,

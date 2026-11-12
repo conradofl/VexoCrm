@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
-import { textoDoPrazo, type GdPrazo } from "@/lib/gdClientes";
+import { textoDoPrazo, type GdPrazo, type GdBriefingDocumentos } from "@/lib/gdClientes";
 import { useEmitirGdPortalToken } from "@/hooks/useGdClientes";
 
 export interface PortfolioClient {
@@ -42,6 +42,7 @@ export interface PortfolioClient {
   briefingAgendadoInicio?: string | null;
   briefingMeetUrl?: string | null;
   briefingSlotsOferecidos?: Array<{ id: number; opcao: number; label: string; inicio: string }> | null;
+  briefingDocumentos?: GdBriefingDocumentos | null;
 }
 
 function isValidDriveUrl(url?: string | null): boolean {
