@@ -146,7 +146,7 @@ export async function measureBaseSlices(pool, { clientId, currentEnd, asOf = cur
 // hasRecords = a empresa tem alguma linha, em qualquer data. Sem linha nenhuma a tela diz "sem registro";
 // zero só quando há registro e nenhum caiu no período.
 const MEETING_VALID_SQL = (alias = "fs") =>
-  `COALESCE(${alias}.status, '') NOT IN ('canceled', 'missing_phone') AND COALESCE(${alias}.phone, '') <> ''`;
+  `COALESCE(${alias}.status, '') NOT IN ('canceled', 'cancelled', 'missing_phone') AND COALESCE(${alias}.phone, '') <> ''`;
 
 export function buildMeetingsSql() {
   const person = SQL_CANONICAL_PHONE("fs.phone");
