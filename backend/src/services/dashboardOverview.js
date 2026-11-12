@@ -390,8 +390,29 @@ export async function measureWaiting(pool, { clientId, now }, { loadSource = def
 // teto de tempo. O Dashboard só escolhe quantas linhas mostrar.
 export const QUEUE_OLDEST_LIMIT = 5;
 
+// A fila guarda o chip pelo nome técnico da instância (o fim do endereço de envio, ex.: "empresa-pessoal-caio").
+// Na tela vale o nome que o dono deu ao chip. Mesma regra de apelidos da tela Conversas: id, nome e o último
+// trecho do endereço. Daqui só sai o NOME; endereço e credencial nunca entram no payload.
+async function defaultLoadChipInstances(clientId) {
+  const { getLeadClientEvolutionInstances } = await import("./evolution.js");
+  return getLeadClientEvolutionInstances(clientId);
+}
+
+export function buildChipNameResolver(instances) {
+  const names = new Map();
+  for (const inst of Array.isArray(instances) ? instances : []) {
+    const name = String(inst?.name ?? "").trim();
+    if (!name) continue;
+    const suffix = String(inst?.dispatch_webhook_url ?? "").trim().split("/").filter(Boolean).pop() || "";
+    for (const alias of [String(inst?.id ?? "").trim(), name, suffix]) if (alias && !names.has(alias)) names.set(alias, name);
+  }
+  return (alias) => (alias ? names.get(alias) ?? alias : null);
+}
+
 export async function measureQueue(pool, { clientId, now }, { loadModule = () => import("./inboxWorkState.js"), deps = {} } = {}) {
   const queue = await loadModule();
+  // Sem a lista de chips o cartão ainda funciona: mostra o nome técnico em vez de falhar.
+  const chipName = buildChipNameResolver(await (deps.loadInstances ?? defaultLoadChipInstances)(clientId).catch(() => []));
   const { pauseExpiredSql, robotInfo } = await queue.loadWorkStateContext(pool, clientId, deps);
   const options = { clientId, now, robotChips: robotInfo.robotChips, chipAliases: null, pauseExpiredSql };
   const run = async (query) => {
@@ -419,7 +440,7 @@ export async function measureQueue(pool, { clientId, now }, { loadModule = () =>
     oldest: oldest.map((row) => ({
       phone: row.phone_number,
       name: row.lead_name || row.contact_name || row.profile_name || null,
-      chip: row.lead_chip || null,
+      chip: chipName(row.lead_chip),
       waitingSince: row.last_in_at ? iso(row.last_in_at instanceof Date ? row.last_in_at : new Date(row.last_in_at)) : null,
     })),
   };
