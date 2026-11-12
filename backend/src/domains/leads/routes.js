@@ -72,6 +72,7 @@ import {
   buildImportPreview as defaultBuildImportPreview,
 } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
+import { registerOptOut, revokeOptOut, OPTOUT_SOURCE_MANUAL } from "../../services/optOut.js";
 import {
   IMPORT_BATCH_SIZE,
   ImportError,
@@ -3131,25 +3132,37 @@ export function registerLeadsRoutes(app, deps) {
       if (req.body.temperature !== undefined) updates.temperature = req.body.temperature;
       if (req.body.nome !== undefined) updates.nome = req.body.nome;
       if (req.body.opt_out !== undefined) {
+        // Interruptor "Bloquear disparos em massa": a decisão é gravada na fonte única (lead_optouts, por empresa e telefone
+        // canônico; services/optOut.js). Ligar registra com origem "manual"; desligar REVOGA (não apaga), venha o pedido de
+        // onde vier (tela, palavra, sem interesse). leads.opt_out e metadata.opt_out ficam só como espelho para a tela.
+        // Erro aqui SOBE e vira 500: a tela não pode mostrar bloqueado sem ter gravado.
         const isOptOut = Boolean(req.body.opt_out);
         updates.opt_out = isOptOut;
         if (pgDatabasePool) {
-          try {
-            await pgDatabasePool.query(
-              `UPDATE public.leads 
-               SET opt_out = $1, 
-                   metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('opt_out', $2::text),
-                   updated_at = now() 
-               WHERE id = $3 AND client_id = $4`,
-              [isOptOut, isOptOut ? "true" : "false", id, leadClientId]
-            );
-          } catch (e) {
-            console.warn("[leads/patch] erro ao persistir opt_out via pool:", e?.message || e);
+          const { rows: foneRows } = await pgDatabasePool.query(
+            `SELECT telefone FROM public.leads WHERE id = $1 AND client_id = $2 LIMIT 1`,
+            [id, leadClientId]
+          );
+          const leadPhone = foneRows[0]?.telefone || null;
+          if (isOptOut) {
+            await registerOptOut(pgDatabasePool, {
+              clientId: leadClientId,
+              phone: leadPhone,
+              source: OPTOUT_SOURCE_MANUAL,
+              reason: "Marcado na tela",
+              createdBy: req.authAccess?.uid || null,
+            });
+          } else {
+            await revokeOptOut(pgDatabasePool, { clientId: leadClientId, phone: leadPhone, revokedBy: req.authAccess?.uid || null });
           }
         }
       }
       if (req.body.metadata !== undefined && typeof req.body.metadata === "object") {
         updates.metadata = req.body.metadata;
+      }
+      if (req.body.opt_out !== undefined && updates.metadata) {
+        // O espelho no metadata acompanha o interruptor mesmo quando a tela manda o metadata inteiro.
+        updates.metadata = { ...updates.metadata, opt_out: updates.opt_out ? "true" : "false" };
       }
       if (req.body.assigned_to !== undefined || req.body.assignedTo !== undefined) {
         if (!isManagerOrAdmin(req.authAccess)) {

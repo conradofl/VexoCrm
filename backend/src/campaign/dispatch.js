@@ -57,7 +57,7 @@ import { createLeadMessaging } from "../domains/shared/leadMessaging.js";
 import { claimQueueLead, isStaleQueueClaim, releaseQueueLead } from "./queueClaim.js";
 import { evaluateQueueSendWindow, nextDayWindowOpening } from "./queueBrakes.js";
 import { DEFERRAL_REASON, clearQueueDeferral, deferQueue, hasQueueDeferral } from "./queueDeferral.js";
-import { isPhoneOptedOut } from "./queueOptOut.js";
+import { isPhoneOptedOut } from "../services/optOut.js";
 import { buildQuotaGateForWebhook } from "../services/campaignQuotaGate.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 
@@ -206,29 +206,12 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
   let from = 0;
   let hasMore = true;
 
-  // ITEM B.4: Exclusão de Leads com Opt-out ("Não Enviar Mais Mensagens")
-  const optOutPhones = new Set();
-  if (pgDatabasePool) {
-    try {
-      const { rows = [] } = await pgDatabasePool.query(
-        `SELECT regexp_replace(l.telefone, '\\D', '', 'g') AS phone
-         FROM public.leads l
-         WHERE l.client_id = $1
-           AND (
-             l.opt_out IS TRUE
-             OR l.metadata->>'opt_out' = 'true'
-             OR l.dados->>'opt_out' = 'true'
-           )
-           AND l.telefone IS NOT NULL AND l.telefone <> ''`,
-        [clientId]
-      );
-      for (const r of rows) {
-        if (r.phone) optOutPhones.add(r.phone);
-      }
-    } catch {
-      // fallback silencioso caso colunas/pool não estejam disponíveis
-    }
-  }
+  // Opt-out NÃO filtra esta lista, de propósito. Quem pediu para sair continua na lista e é pulado no ENVIO
+  // (dispatchCampaignSequence, lendo a fonte única em services/optOut.js), onde o lote registra o run 'skipped'.
+  // Tirar daqui mexia em duas coisas que dependem de a lista ser estável: a janela limit/offset dos lotes (um pedido de
+  // saída entre dois lotes deslocava a janela do seguinte) e o fechamento do lote (alvo congelado maior que o processado
+  // deixava o lote 'interrupted' com pendente que nunca seria enviado). Efeito colateral aceito: prévia e contagem de
+  // público incluem quem está em opt-out.
 
   while (hasMore) {
     let query;
@@ -302,15 +285,6 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
             ? item
             : (item.normalized_data && typeof item.normalized_data === "object" ? item.normalized_data : {});
 
-          const isOptOut =
-            item.opt_out === true ||
-            item.metadata?.opt_out === "true" ||
-            item.metadata?.opt_out === true ||
-            normalizedData.opt_out === true ||
-            normalizedData.opt_out === "true" ||
-            item.dados?.opt_out === true ||
-            item.dados?.opt_out === "true";
-
           return {
             id: item.id,
             import_id: isCrm ? "__crm__" : item.import_id,
@@ -327,16 +301,9 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
             data_hora: normalizeIsoDate(isCrm ? item.created_at : normalizedData.data_hora),
             qualificacao: normalizeString(isCrm ? item.qualificacao : normalizedData.qualificacao),
             created_at: item.created_at,
-            opt_out: isOptOut,
           };
         })
         .filter((item) => !!item.telefone)
-        .filter((item) => {
-          if (item.opt_out) return false;
-          const cleanPhone = (normalizeString(item.telefone) || "").replace(/\D/g, "");
-          if (cleanPhone && optOutPhones.has(cleanPhone)) return false;
-          return true;
-        })
         .filter((item) => segMatcher(item))
         .map((item) => [item.telefone, item])
     ).values()
@@ -2362,6 +2329,18 @@ const REPLY_DISPATCH_LOCK_TTL_MS = 10_000;
 export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt, campaignMatch, replyPayload = {} }) {
   if (!supabase || !clientId || !phone || !campaignMatch?.id) {
     return { continued: false, reason: "missing_context" };
+  }
+
+  // Opt-out: quem pediu para sair não recebe o próximo passo, nem tem o progresso mexido. O envio em si confere de novo
+  // (dispatchCampaignSequence); aqui é para sair antes de qualquer escrita. Erro de leitura = não continua (nunca libera).
+  try {
+    if (await isPhoneOptedOut(pgDatabasePool, { clientId, phone })) {
+      logCampaignReplyFlow("info", "reply_progression_skipped_opt_out", { clientId, campaignId: campaignMatch.id, phone: maskPhoneForLog(phone) });
+      return { continued: false, reason: "opt_out" };
+    }
+  } catch (err) {
+    console.error("[continueCampaignLeadFromReply] falha ao checar opt-out; passo não enviado:", err?.message || err);
+    return { continued: false, reason: "opt_out_check_failed" };
   }
 
   // Trava de concorrência por lead e campanha
