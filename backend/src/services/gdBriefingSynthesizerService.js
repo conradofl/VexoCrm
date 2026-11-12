@@ -1042,109 +1042,275 @@ export async function gerarDocumentoPlanejamentoDocx(sintese) {
 
 // ─── Geradores de PDF Profissionais (PDFKit) ───────────────────────────────
 
-function setupPdfHeaderFooter(doc, title) {
-  const margin = 40;
-  // Header
-  doc.fillColor("#1E3E62").fontSize(8).text("GERAÇÃO DIGITAL · MARKETING & VENDAS", margin, 20, { align: "left" });
-  doc.fillColor("#6B7280").fontSize(8).text("DOCUMENTO OFICIAL", margin, 20, { align: "right" });
-  doc.moveTo(margin, 32).lineTo(doc.page.width - margin, 32).strokeColor("#E5E7EB").lineWidth(0.5).stroke();
+const PDF_METRICS = {
+  margin: 42,
+  pageWidth: 595.28,
+  pageHeight: 841.89,
+  contentWidth: 595.28 - 42 * 2, // 511.28 pt
+  headerY: 22,
+  footerY: 841.89 - 30,
+  topContentY: 52,
+  bottomContentLimit: 841.89 - 50,
+};
 
-  // Move cursor para início do conteúdo
-  doc.y = 48;
+const PDF_COLORS = {
+  navyDark: "#0B192C",
+  navyMedium: "#1E3E62",
+  accentBlue: "#2563EB",
+  textDark: "#1F2937",
+  textMuted: "#6B7280",
+  borderLight: "#E5E7EB",
+  bgCallout: "#F0F6FF",
+  borderCallout: "#BFDBFE",
+  bgZebra: "#F9FAFB",
+};
+
+function ensurePdfSpace(doc, requiredHeight) {
+  if (doc.y + requiredHeight > PDF_METRICS.bottomContentLimit) {
+    doc.addPage();
+    doc.y = PDF_METRICS.topContentY;
+    doc.x = PDF_METRICS.margin;
+  }
 }
 
 function renderPdfTitleBlock(doc, title, subtitle) {
-  doc.fillColor("#0B192C").fontSize(18).font("Helvetica-Bold").text(title, { align: "center" });
+  doc.y = PDF_METRICS.topContentY;
+  doc.x = PDF_METRICS.margin;
+  doc.fillColor(PDF_COLORS.navyDark).fontSize(17).font("Helvetica-Bold")
+    .text(title, PDF_METRICS.margin, doc.y, { width: PDF_METRICS.contentWidth, align: "center" });
   doc.moveDown(0.3);
-  doc.fillColor("#6B7280").fontSize(10).font("Helvetica-Oblique").text(subtitle, { align: "center" });
-  doc.moveDown(0.8);
+  doc.fillColor(PDF_COLORS.textMuted).fontSize(9.5).font("Helvetica-Oblique")
+    .text(subtitle, PDF_METRICS.margin, doc.y, { width: PDF_METRICS.contentWidth, align: "center" });
+  doc.moveDown(0.7);
+  doc.x = PDF_METRICS.margin;
 }
 
 function renderPdfSection(doc, title) {
-  doc.moveDown(0.6);
+  ensurePdfSpace(doc, 48);
+  doc.moveDown(0.5);
   const startY = doc.y;
-  // Barrinha colorida
-  doc.rect(40, startY + 2, 4, 14).fillColor("#2563EB").fill();
-  doc.fillColor("#0B192C").fontSize(12).font("Helvetica-Bold").text(title, 50, startY);
-  doc.moveDown(0.4);
+
+  // Barra de destaque azul lateral
+  doc.rect(PDF_METRICS.margin, startY + 2, 4, 15).fillColor(PDF_COLORS.accentBlue).fill();
+  doc.fillColor(PDF_COLORS.navyDark).fontSize(12).font("Helvetica-Bold")
+    .text(title, PDF_METRICS.margin + 12, startY + 1, { width: PDF_METRICS.contentWidth - 12 });
+
+  doc.y = Math.max(doc.y, startY + 20);
+  doc.moveDown(0.2);
+  doc.x = PDF_METRICS.margin;
+}
+
+function renderPdfSubSection(doc, title) {
+  ensurePdfSpace(doc, 32);
+  doc.moveDown(0.35);
+  doc.fillColor(PDF_COLORS.navyMedium).fontSize(11).font("Helvetica-Bold")
+    .text(title, PDF_METRICS.margin, doc.y, { width: PDF_METRICS.contentWidth });
+  doc.moveDown(0.15);
+  doc.x = PDF_METRICS.margin;
 }
 
 function renderPdfParagraph(doc, text, boldPrefix = "") {
-  doc.font("Helvetica").fontSize(9.5).fillColor("#1F2937");
-  if (boldPrefix) {
-    doc.font("Helvetica-Bold").text(boldPrefix + " ", { continued: true });
+  if (!text && !boldPrefix) return;
+  ensurePdfSpace(doc, 22);
+
+  const cleanPrefix = String(boldPrefix || "")
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .trim();
+  const cleanText = String(text || "")
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .trim();
+
+  doc.fontSize(10).fillColor(PDF_COLORS.textDark);
+  if (cleanPrefix) {
+    doc.font("Helvetica-Bold").text(cleanPrefix + " ", PDF_METRICS.margin, doc.y, {
+      continued: true,
+      width: PDF_METRICS.contentWidth,
+    });
   }
-  doc.font("Helvetica").text(text, { lineGap: 2.5, paragraphGap: 3 });
+  doc.font("Helvetica").text(cleanText, {
+    width: PDF_METRICS.contentWidth,
+    lineGap: 3,
+    paragraphGap: 3.5,
+  });
+  doc.x = PDF_METRICS.margin;
+}
+
+function renderPdfBullet(doc, text, boldLabel = "") {
+  if (!text && !boldLabel) return;
+  ensurePdfSpace(doc, 20);
+
+  const cleanLabel = String(boldLabel || "")
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .trim();
+  const cleanText = String(text || "")
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .trim();
+
+  const bulletX = PDF_METRICS.margin + 4;
+  const textX = PDF_METRICS.margin + 16;
+  const textW = PDF_METRICS.contentWidth - 16;
+  const startY = doc.y;
+
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(PDF_COLORS.accentBlue)
+    .text("•", bulletX, startY, { width: 10 });
+
+  doc.y = startY;
+  doc.fontSize(10).fillColor(PDF_COLORS.textDark);
+  if (cleanLabel) {
+    doc.font("Helvetica-Bold").text(cleanLabel + " ", textX, startY, {
+      continued: true,
+      width: textW,
+    });
+  }
+  doc.font("Helvetica").text(cleanText, {
+    width: textW,
+    lineGap: 3,
+    paragraphGap: 3,
+  });
+  doc.x = PDF_METRICS.margin;
 }
 
 function renderPdfCallout(doc, title, text) {
-  const margin = 40;
-  const width = doc.page.width - margin * 2;
+  if (!text) return;
+  const margin = PDF_METRICS.margin;
+  const width = PDF_METRICS.contentWidth;
+  const innerWidth = width - 24;
+
+  const cleanTitle = String(title || "")
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .trim();
+  const cleanText = String(text || "")
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, "")
+    .trim();
+
+  doc.font("Helvetica-Bold").fontSize(10.5);
+  const titleH = cleanTitle ? doc.heightOfString(cleanTitle, { width: innerWidth }) : 0;
+  doc.font("Helvetica").fontSize(9.5);
+  const textH = doc.heightOfString(cleanText, { width: innerWidth, lineGap: 2.5 });
+  const boxH = titleH + textH + 18;
+
+  ensurePdfSpace(doc, boxH + 8);
   const startY = doc.y;
 
-  doc.rect(margin, startY, width, 40).fillAndStroke("#EFF6FF", "#BFDBFE");
-  doc.rect(margin, startY, 4, 40).fillColor("#2563EB").fill();
+  doc.roundedRect(margin, startY, width, boxH, 4).fillAndStroke(PDF_COLORS.bgCallout, PDF_COLORS.borderCallout);
+  doc.roundedRect(margin, startY, 4, boxH, 2).fillColor(PDF_COLORS.accentBlue).fill();
 
-  doc.fillColor("#0B192C").fontSize(9.5).font("Helvetica-Bold").text(title, margin + 12, startY + 6);
-  doc.fillColor("#1F2937").fontSize(9).font("Helvetica").text(text, margin + 12, startY + 20, { width: width - 24 });
-  doc.y = startY + 48;
+  let textCursorY = startY + 7;
+  if (cleanTitle) {
+    doc.fillColor(PDF_COLORS.navyDark).fontSize(10.5).font("Helvetica-Bold")
+      .text(cleanTitle, margin + 12, textCursorY, { width: innerWidth });
+    textCursorY += titleH + 4;
+  }
+
+  doc.fillColor(PDF_COLORS.textDark).fontSize(9.5).font("Helvetica")
+    .text(cleanText, margin + 12, textCursorY, { width: innerWidth, lineGap: 2.5 });
+
+  doc.y = startY + boxH + 8;
+  doc.x = margin;
 }
 
 function renderPdfTable(doc, headers, rowsData, colWidths = null) {
-  const margin = 40;
-  const availableWidth = doc.page.width - margin * 2;
+  const margin = PDF_METRICS.margin;
+  const availableWidth = PDF_METRICS.contentWidth;
   const numCols = headers.length;
   const widths = colWidths || headers.map(() => availableWidth / numCols);
 
-  doc.moveDown(0.3);
+  doc.moveDown(0.2);
+  ensurePdfSpace(doc, 45);
   let startY = doc.y;
 
-  // Se estiver muito perto do rodapé, avança página
-  if (startY > doc.page.height - 70) {
-    doc.addPage();
-    setupPdfHeaderFooter(doc, "");
-    startY = doc.y;
-  }
+  const drawHeader = (y) => {
+    doc.rect(margin, y, availableWidth, 20).fillColor(PDF_COLORS.navyMedium).fill();
+    let currentX = margin;
+    headers.forEach((h, i) => {
+      doc.fillColor("#FFFFFF").fontSize(9).font("Helvetica-Bold")
+        .text(h, currentX + 6, y + 5, { width: widths[i] - 12 });
+      currentX += widths[i];
+    });
+    return y + 20;
+  };
 
-  // Header da tabela
-  doc.rect(margin, startY, availableWidth, 18).fillColor("#1E3E62").fill();
-  let currentX = margin;
-  headers.forEach((h, i) => {
-    doc.fillColor("#FFFFFF").fontSize(8).font("Helvetica-Bold")
-      .text(h, currentX + 6, startY + 5, { width: widths[i] - 12 });
-    currentX += widths[i];
-  });
-  doc.y = startY + 18;
+  startY = drawHeader(startY);
+  doc.y = startY;
 
-  // Linhas da tabela
   rowsData.forEach((row, rIdx) => {
-    let rowY = doc.y;
-    if (rowY > doc.page.height - 50) {
-      doc.addPage();
-      setupPdfHeaderFooter(doc, "");
-      rowY = doc.y;
-    }
-
-    let maxCellHeight = 16;
+    doc.font("Helvetica").fontSize(9);
+    let maxCellHeight = 18;
     row.forEach((cell, i) => {
-      const cellHeight = doc.heightOfString(String(cell || ""), { width: widths[i] - 12, fontSize: 8 });
-      if (cellHeight + 8 > maxCellHeight) maxCellHeight = cellHeight + 8;
+      const cellHeight = doc.heightOfString(String(cell || ""), {
+        width: widths[i] - 12,
+        fontSize: 9,
+        lineGap: 2,
+      });
+      if (cellHeight + 10 > maxCellHeight) maxCellHeight = cellHeight + 10;
     });
 
-    if (rIdx % 2 === 1) {
-      doc.rect(margin, rowY, availableWidth, maxCellHeight).fillColor("#F9FAFB").fill();
+    if (doc.y + maxCellHeight > PDF_METRICS.bottomContentLimit) {
+      doc.addPage();
+      doc.y = PDF_METRICS.topContentY;
+      doc.y = drawHeader(doc.y);
     }
-    doc.rect(margin, rowY, availableWidth, maxCellHeight).strokeColor("#E5E7EB").lineWidth(0.5).stroke();
+
+    const rowY = doc.y;
+    if (rIdx % 2 === 1) {
+      doc.rect(margin, rowY, availableWidth, maxCellHeight).fillColor(PDF_COLORS.bgZebra).fill();
+    }
+    doc.rect(margin, rowY, availableWidth, maxCellHeight).strokeColor(PDF_COLORS.borderLight).lineWidth(0.5).stroke();
 
     let cellX = margin;
     row.forEach((cell, i) => {
-      doc.fillColor("#1F2937").fontSize(8).font("Helvetica")
-        .text(String(cell || ""), cellX + 6, rowY + 4, { width: widths[i] - 12 });
+      doc.fillColor(PDF_COLORS.textDark).fontSize(9).font("Helvetica")
+        .text(String(cell || ""), cellX + 6, rowY + 5, {
+          width: widths[i] - 12,
+          lineGap: 2,
+        });
       cellX += widths[i];
     });
     doc.y = rowY + maxCellHeight;
   });
-  doc.moveDown(0.4);
+
+  doc.moveDown(0.35);
+  doc.x = margin;
+}
+
+function applyPdfHeadersAndFooters(doc, docTitle) {
+  const range = doc.bufferedPageRange();
+  const totalPages = range.count;
+
+  for (let pIdx = range.start; pIdx < range.start + range.count; pIdx++) {
+    doc.switchToPage(pIdx);
+    const pageNum = pIdx - range.start + 1;
+
+    // Header superior
+    doc.fillColor(PDF_COLORS.navyMedium).fontSize(8).font("Helvetica-Bold")
+      .text("GERAÇÃO DIGITAL · MARKETING & VENDAS", PDF_METRICS.margin, PDF_METRICS.headerY, {
+        width: PDF_METRICS.contentWidth / 2,
+        align: "left",
+      });
+    doc.fillColor(PDF_COLORS.textMuted).fontSize(8).font("Helvetica")
+      .text(docTitle, PDF_METRICS.margin + PDF_METRICS.contentWidth / 2, PDF_METRICS.headerY, {
+        width: PDF_METRICS.contentWidth / 2,
+        align: "right",
+      });
+    doc.moveTo(PDF_METRICS.margin, PDF_METRICS.headerY + 12)
+      .lineTo(PDF_METRICS.pageWidth - PDF_METRICS.margin, PDF_METRICS.headerY + 12)
+      .strokeColor(PDF_COLORS.borderLight).lineWidth(0.5).stroke();
+
+    // Rodapé oficial com numeração
+    doc.moveTo(PDF_METRICS.margin, PDF_METRICS.footerY - 6)
+      .lineTo(PDF_METRICS.pageWidth - PDF_METRICS.margin, PDF_METRICS.footerY - 6)
+      .strokeColor(PDF_COLORS.borderLight).lineWidth(0.5).stroke();
+    doc.fillColor(PDF_COLORS.textMuted).fontSize(8).font("Helvetica")
+      .text("Documento Oficial · Vexo OS · Confidencial", PDF_METRICS.margin, PDF_METRICS.footerY, {
+        width: PDF_METRICS.contentWidth / 2,
+        align: "left",
+      });
+    doc.fillColor(PDF_COLORS.textMuted).fontSize(8).font("Helvetica-Bold")
+      .text(`Página ${pageNum} de ${totalPages}`, PDF_METRICS.margin + PDF_METRICS.contentWidth / 2, PDF_METRICS.footerY, {
+        width: PDF_METRICS.contentWidth / 2,
+        align: "right",
+      });
+  }
 }
 
 // Documento 1: Briefing Consolidado (11 Blocos Oficiais) (PDF)
@@ -1164,12 +1330,20 @@ export async function gerarDocumentoBriefingPdf(sintese) {
       const b10 = b.bloco10_proximosPassos || [];
       const b11 = b.bloco11_identidadeVisual || {};
 
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const doc = new PDFDocument({
+        size: "A4",
+        margins: {
+          top: PDF_METRICS.topContentY,
+          bottom: 50,
+          left: PDF_METRICS.margin,
+          right: PDF_METRICS.margin,
+        },
+        bufferPages: true,
+      });
       const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
-      setupPdfHeaderFooter(doc, b.titulo);
       renderPdfTitleBlock(doc, b.titulo, `Documento Oficial de Alinhamento Estratégico (11 Blocos) · ${b.clienteNome}`);
       renderPdfCallout(doc, "Ficha Cadastral Oficial", `Cliente: ${b.clienteNome} | Responsável: ${b.responsavel} | Data: ${b.dataBriefing} | CNPJ: ${b.cnpj || "A confirmar"}`);
 
@@ -1197,7 +1371,7 @@ export async function gerarDocumentoBriefingPdf(sintese) {
         "Público Principal:"
       );
       renderPdfParagraph(doc, "Segmentos complementares de compra:", "Públicos de Apoio:");
-      (b2.publicosDeApoio || []).forEach((pa) => renderPdfParagraph(doc, pa, "•"));
+      (b2.publicosDeApoio || []).forEach((pa) => renderPdfBullet(doc, pa));
 
       // 03. Canais de Aquisição
       renderPdfSection(doc, "03. Canais de Aquisição");
@@ -1223,8 +1397,8 @@ export async function gerarDocumentoBriefingPdf(sintese) {
       // 05. Serviço em Destaque
       renderPdfSection(doc, "05. Serviço em Destaque");
       renderPdfParagraph(doc, b5.carroChefe || b.visaoGeral, "Carro-Chefe:");
-      renderPdfParagraph(doc, (b5.itensAceitos || []).join("; "), "✓ Peças / Serviços Aceitos:");
-      renderPdfParagraph(doc, (b5.itensNaoAceitos || []).join("; "), "✗ Não Aceitos (Filtro de Entrada):");
+      renderPdfParagraph(doc, (b5.itensAceitos || []).join("; "), "[Aceito] Peças / Serviços:");
+      renderPdfParagraph(doc, (b5.itensNaoAceitos || []).join("; "), "[Filtro] Não Aceitos:");
       renderPdfParagraph(doc, b5.paletaCoresProduto || "Tons institucionais alinhados à marca", "Paleta de Cores do Produto:");
 
       // 06. Mitos para Derrubar
@@ -1240,16 +1414,16 @@ export async function gerarDocumentoBriefingPdf(sintese) {
 
       // 07. Problemas que Resolve
       renderPdfSection(doc, "07. Problemas que Resolve (Dores para Antes e Depois)");
-      b7.forEach((dor) => renderPdfParagraph(doc, dor, "⚠"));
+      b7.forEach((dor) => renderPdfBullet(doc, dor, "Dor / Problema:"));
 
       // 08. Pauta de Conteúdo
       renderPdfSection(doc, "08. Pauta de Conteúdo (Formatos & Objetivos)");
-      renderPdfParagraph(doc, b8.conveniencia || "", "• Conveniência:");
-      renderPdfParagraph(doc, b8.servico || "", "• Serviço (Técnico / Carro-Chefe):");
-      renderPdfParagraph(doc, b8.prova || "", "• Prova Social & Casos de Sucesso:");
-      renderPdfParagraph(doc, b8.educacao || "", "• Educação & Mitos:");
-      renderPdfParagraph(doc, b8.nichos || "", "• Nichos Específicos:");
-      renderPdfParagraph(doc, b8.empresas || "", "• Empresas & B2B:");
+      renderPdfBullet(doc, b8.conveniencia || "", "Conveniência:");
+      renderPdfBullet(doc, b8.servico || "", "Serviço Técnico:");
+      renderPdfBullet(doc, b8.prova || "", "Prova Social:");
+      renderPdfBullet(doc, b8.educacao || "", "Educação & Mitos:");
+      renderPdfBullet(doc, b8.nichos || "", "Nichos Específicos:");
+      renderPdfBullet(doc, b8.empresas || "", "Empresas & B2B:");
 
       // 09. Depoimentos e Comunicação na Loja
       renderPdfSection(doc, "09. Depoimentos e Comunicação na Loja");
@@ -1280,8 +1454,9 @@ export async function gerarDocumentoBriefingPdf(sintese) {
         `Títulos: ${b11.tipografia?.titulos || "Montserrat"} | Corpo: ${b11.tipografia?.corpo || "Open Sans"}`,
         "Tipografia:"
       );
-      (b11.diretrizesDesign || []).forEach((dir) => renderPdfParagraph(doc, dir, "•"));
+      (b11.diretrizesDesign || []).forEach((dir) => renderPdfBullet(doc, dir));
 
+      applyPdfHeadersAndFooters(doc, b.titulo);
       doc.end();
     } catch (err) {
       reject(err);
@@ -1295,12 +1470,20 @@ export async function gerarDocumentoIdentidadePdf(sintese) {
     try {
       const iv = sintese.identidadeVisual;
       const pm = iv.personalidadeMarca || {};
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const doc = new PDFDocument({
+        size: "A4",
+        margins: {
+          top: PDF_METRICS.topContentY,
+          bottom: 50,
+          left: PDF_METRICS.margin,
+          right: PDF_METRICS.margin,
+        },
+        bufferPages: true,
+      });
       const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
-      setupPdfHeaderFooter(doc, iv.titulo);
       renderPdfTitleBlock(doc, iv.titulo, `Manual de Identidade Visual e Diretrizes de Marca · ${iv.clienteNome}`);
       renderPdfCallout(doc, "A Regra de Ouro (Via Permuta Litoral Norte)", iv.regraDeOuro || "Uma peça. Uma dor. Uma virada. Uma chamada.");
 
@@ -1315,16 +1498,17 @@ export async function gerarDocumentoIdentidadePdf(sintese) {
       renderPdfSection(doc, "3. Formatos e Grids Recomendados");
       if (Array.isArray(iv.formatosEGrids)) {
         iv.formatosEGrids.forEach((f) => {
-          renderPdfParagraph(doc, typeof f === "string" ? f : `${f.formato} — ${f.diretriz}`, "📐");
+          const txt = typeof f === "string" ? f : `${f.formato} — ${f.diretriz}`;
+          renderPdfBullet(doc, txt, "Formato:");
         });
       }
 
       renderPdfSection(doc, "4. Diretrizes de Foto & Vídeo (Pessoas Reais)");
-      (iv.diretrizesFotoVideo || []).forEach((dfv) => renderPdfParagraph(doc, dfv, "📷"));
+      (iv.diretrizesFotoVideo || []).forEach((dfv) => renderPdfBullet(doc, dfv, "Diretriz:"));
 
       renderPdfSection(doc, "5. Paleta de Cores Oficial");
       (iv.paletaCores || []).forEach((c) => {
-        renderPdfParagraph(doc, `${c.hex} | ${c.rgb} — ${c.uso}`, `• ${c.nome}:`);
+        renderPdfBullet(doc, `${c.hex} | ${c.rgb} — ${c.uso}`, `${c.nome}:`);
       });
 
       renderPdfSection(doc, "6. Tipografia & Hierarquia de Textos");
@@ -1333,14 +1517,15 @@ export async function gerarDocumentoIdentidadePdf(sintese) {
       renderPdfParagraph(doc, iv.tipografia?.corpo || "", "Corpo de Texto & Legendas:");
 
       renderPdfSection(doc, "7. Regras e Uso do Logotipo");
-      (iv.diretrizesLogo || []).forEach((r) => renderPdfParagraph(doc, r, "⚠"));
+      (iv.diretrizesLogo || []).forEach((r) => renderPdfBullet(doc, r, "Regra de Uso:"));
 
       renderPdfSection(doc, "8. Elementos Gráficos & Estilo Visual");
-      (iv.elementosGraficos || []).forEach((e) => renderPdfParagraph(doc, e, "•"));
+      (iv.elementosGraficos || []).forEach((e) => renderPdfBullet(doc, e));
 
       renderPdfSection(doc, "9. Benchmarks & Referências do Nicho");
-      (iv.referenciasNicho || []).forEach((ref) => renderPdfParagraph(doc, ref, "★"));
+      (iv.referenciasNicho || []).forEach((ref) => renderPdfBullet(doc, ref, "Referência:"));
 
+      applyPdfHeadersAndFooters(doc, iv.titulo);
       doc.end();
     } catch (err) {
       reject(err);
@@ -1353,12 +1538,20 @@ export async function gerarDocumentoRoteirosPdf(sintese) {
   return new Promise((resolve, reject) => {
     try {
       const r = sintese.roteirosTrimestrais;
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const doc = new PDFDocument({
+        size: "A4",
+        margins: {
+          top: PDF_METRICS.topContentY,
+          bottom: 50,
+          left: PDF_METRICS.margin,
+          right: PDF_METRICS.margin,
+        },
+        bufferPages: true,
+      });
       const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
-      setupPdfHeaderFooter(doc, r.titulo);
       renderPdfTitleBlock(doc, r.titulo, `Roteiros Estruturados para 3 Meses (12 Semanas) · ${r.clienteNome}`);
       renderPdfCallout(
         doc,
@@ -1368,15 +1561,14 @@ export async function gerarDocumentoRoteirosPdf(sintese) {
 
       renderPdfSection(doc, "Pilares Editoriais");
       (r.pilares || []).forEach((p) => {
-        renderPdfParagraph(doc, `${p.foco} (Distribuição: ${p.peso})`, `• ${p.nome}:`);
+        renderPdfBullet(doc, `${p.foco} (Distribuição: ${p.peso})`, `${p.nome}:`);
       });
 
       (r.semanas || []).forEach((sem) => {
         renderPdfSection(doc, `${sem.temaCentral} (Mês ${sem.mes})`);
         (sem.conteudos || []).forEach((c) => {
-          doc.moveDown(0.2);
-          doc.font("Helvetica-Bold").fontSize(10).fillColor("#1E3E62").text(`[${c.codigo}] ${c.titulo}`);
-          renderPdfParagraph(doc, `${c.formato} | Pilar: ${c.pilar}`, "Formato:");
+          renderPdfSubSection(doc, `[${c.codigo}] ${c.titulo}`);
+          renderPdfParagraph(doc, `${c.formato} | Pilar: ${c.pilar}`, "Formato & Pilar:");
           renderPdfParagraph(doc, c.gancho, "Gancho (0-3s):");
           renderPdfParagraph(doc, c.estrutura, "Estrutura:");
           renderPdfParagraph(doc, c.cta, "CTA:");
@@ -1384,6 +1576,7 @@ export async function gerarDocumentoRoteirosPdf(sintese) {
         });
       });
 
+      applyPdfHeadersAndFooters(doc, r.titulo);
       doc.end();
     } catch (err) {
       reject(err);
@@ -1396,34 +1589,52 @@ export async function gerarDocumentoPlanejamentoPdf(sintese) {
   return new Promise((resolve, reject) => {
     try {
       const p = sintese.planejamentoTrimestral;
-      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const doc = new PDFDocument({
+        size: "A4",
+        margins: {
+          top: PDF_METRICS.topContentY,
+          bottom: 50,
+          left: PDF_METRICS.margin,
+          right: PDF_METRICS.margin,
+        },
+        bufferPages: true,
+      });
       const buffers = [];
       doc.on("data", buffers.push.bind(buffers));
       doc.on("end", () => resolve(Buffer.concat(buffers)));
 
-      setupPdfHeaderFooter(doc, p.titulo);
       renderPdfTitleBlock(doc, p.titulo, `Resumo Executivo do Cronograma Trimestral · ${p.clienteNome}`);
       renderPdfCallout(doc, "Visão Executiva do Trimestre", p.resumoExecutivo);
 
       renderPdfSection(doc, "1. Evolução Mensal Estratégica (Roadmap 90 Dias)");
-      (p.fases || []).forEach((f) => {
-        doc.moveDown(0.2);
-        doc.font("Helvetica-Bold").fontSize(10).fillColor("#1E3E62").text(f.mes);
+      (p.fases || []).forEach((f, idx) => {
+        renderPdfSubSection(doc, `Fase ${idx + 1}: ${f.mes}`);
         renderPdfParagraph(doc, f.foco, "Foco Principal:");
         renderPdfParagraph(doc, (f.entregasChave || []).join("; "), "Entregas-Chave:");
         renderPdfParagraph(doc, f.kpisMeta, "Meta do Mês:");
       });
 
       renderPdfSection(doc, "2. Matriz Semanal de Publicações");
-      (p.matrizSemanal || []).forEach((m) => {
-        renderPdfParagraph(doc, `${m.formato} — ${m.objetivo}`, `• ${m.dia}:`);
-      });
+      if (Array.isArray(p.matrizSemanal) && p.matrizSemanal.length > 0) {
+        renderPdfTable(
+          doc,
+          ["Dia da Semana", "Formato Recomendado", "Objetivo Estratégico"],
+          p.matrizSemanal.map((m) => [m.dia || "", m.formato || "", m.objetivo || ""]),
+          [120, 160, 231]
+        );
+      }
 
       renderPdfSection(doc, "3. Governança, Reuniões e Checkpoints");
-      (p.governancaECheckpoints || []).forEach((chk) => {
-        renderPdfParagraph(doc, chk.descricao, `[${chk.marco}]`);
-      });
+      if (Array.isArray(p.governancaECheckpoints) && p.governancaECheckpoints.length > 0) {
+        renderPdfTable(
+          doc,
+          ["Marco / Prazo", "Descrição do Checkpoint de Alinhamento"],
+          p.governancaECheckpoints.map((chk) => [chk.marco || "", chk.descricao || ""]),
+          [120, 391]
+        );
+      }
 
+      applyPdfHeadersAndFooters(doc, p.titulo);
       doc.end();
     } catch (err) {
       reject(err);
