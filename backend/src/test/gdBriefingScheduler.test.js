@@ -290,11 +290,13 @@ describe("Agendador Autônomo de Briefing (Frente 4)", () => {
       expect(r.json.mensagem).toContain("3️⃣ *Opção 3:* Quinta-feira, 12/11 às 10h00 (Manhã)");
 
       // Verifica envio para a Evolution API
-      expect(mockEvolutionMessageSender).toHaveBeenCalledWith({
-        instanceName: "vexo-adm",
-        number: "120363000999@g.us",
-        text: expect.stringContaining("Reunião de Briefing e Alinhamento Estratégico"),
-      });
+      expect(mockEvolutionMessageSender).toHaveBeenCalledWith(
+        expect.objectContaining({
+          instanceName: "vexo-adm",
+          number: "120363000999@g.us",
+          text: expect.stringContaining("Reunião de Briefing e Alinhamento Estratégico"),
+        })
+      );
 
       // Verifica se gravou no banco
       const { rows } = await db.query(
@@ -303,6 +305,27 @@ describe("Agendador Autônomo de Briefing (Frente 4)", () => {
       );
       expect(rows[0].briefing_slots_oferecidos).toHaveLength(3);
       expect(rows[0].briefing_slots_oferecidos[0].opcao).toBe(1);
+    });
+
+    it("não falha a rota se o envio para a Evolution API falhar, salvando os slots e retornando whatsapp_disparado=false", async () => {
+      mockEvolutionMessageSender.mockRejectedValueOnce(new Error("Evolution offline"));
+      const clienteId = await criarClienteExemplo();
+
+      const r = await chamar("POST", `/api/gd/clientes/${clienteId}/briefing/oferecer-horarios`, {
+        body: { instance_name: "vexo-adm" },
+      });
+
+      expect(r.status).toBe(200);
+      expect(r.json.success).toBe(true);
+      expect(r.json.whatsapp_disparado).toBe(false);
+      expect(r.json.whatsapp_erro).toBe("Evolution offline");
+
+      // Confirma que os slots foram salvos mesmo com a falha de envio
+      const { rows } = await db.query(
+        "SELECT briefing_slots_oferecidos FROM public.gd_clientes WHERE id = $1",
+        [clienteId]
+      );
+      expect(rows[0].briefing_slots_oferecidos).toHaveLength(3);
     });
 
     it("retorna 422 se o cliente não tiver grupo de atendimento configurado", async () => {

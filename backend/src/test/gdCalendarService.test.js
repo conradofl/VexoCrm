@@ -141,6 +141,45 @@ describe("GD Calendar Service · Agendador Autônomo de Briefing", () => {
         expect(opt.formattedTime).not.toBe("13h00");
       }
     });
+
+    it("gera de forma determinística as 3 opções comerciais (10h, 15h, 10h) em caso de falha ou agenda cheia", async () => {
+      const ref = new Date("2026-11-09T13:00:00.000Z"); // Segunda-feira
+      // Simula ocupação em todos os horários para forçar o fallback determinístico de resiliência
+      const mockBusyRanges = [
+        {
+          calendar: GD_CALENDAR_CAIO,
+          start: new Date("2026-11-01T00:00:00.000Z"),
+          end: new Date("2026-11-30T23:59:59.000Z"),
+        },
+      ];
+
+      const res = await findAvailableBriefingSlots({
+        fromDate: ref,
+        targetDays: [1, 2, 3],
+        mockBusyRanges,
+      });
+
+      expect(res.options).toHaveLength(3);
+      expect(res.fallback).toBe(true);
+
+      // Opção 1: 24h úteis às 10h00
+      expect(res.options[0].opcao).toBe(1);
+      expect(res.options[0].diaOffset).toBe(1);
+      expect(res.options[0].periodo).toBe("manha");
+      expect(res.options[0].formattedTime).toBe("10h00");
+
+      // Opção 2: 48h úteis às 15h00
+      expect(res.options[1].opcao).toBe(2);
+      expect(res.options[1].diaOffset).toBe(2);
+      expect(res.options[1].periodo).toBe("tarde");
+      expect(res.options[1].formattedTime).toBe("15h00");
+
+      // Opção 3: 72h úteis às 10h00
+      expect(res.options[2].opcao).toBe(3);
+      expect(res.options[2].diaOffset).toBe(3);
+      expect(res.options[2].periodo).toBe("manha");
+      expect(res.options[2].formattedTime).toBe("10h00");
+    });
   });
 
   describe("createBriefingCalendarEvent · Criação de Evento com Google Meet", () => {
