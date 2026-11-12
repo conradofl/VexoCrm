@@ -16,6 +16,11 @@ import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { sendError } from "../services/httpInfra.js";
 import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "migrations");
 
 const A = "empresa-a";
 const B = "empresa-b";
@@ -73,6 +78,8 @@ describe("PATCH e DELETE /api/leads/:id conferem a empresa do lead", () => {
 
   beforeAll(async () => {
     db = await createPgliteDb(SCHEMA);
+    // O interruptor de opt-out grava na fonte única (lead_optouts), criada por esta migration.
+    await db.exec(await readFile(join(MIGRATIONS, "20261112010000_lead_optouts_fonte_unica.sql"), "utf8"));
     await db.exec(`INSERT INTO leads_clients (id, name) VALUES ('${A}', 'Empresa A'), ('${B}', 'Empresa B')`);
     const pool = { query: (sql, params) => db.query(sql, params) };
 
@@ -109,7 +116,7 @@ describe("PATCH e DELETE /api/leads/:id conferem a empresa do lead", () => {
     claims = CLAIMS.usuarioA;
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
-    await db.exec("DELETE FROM leads");
+    await db.exec("DELETE FROM leads; DELETE FROM lead_optouts;");
     const ins = (cid, fone, nome) =>
       db.query("INSERT INTO leads (client_id, telefone, nome, tags) VALUES ($1, $2, $3, ARRAY['original']) RETURNING id", [cid, fone, nome]);
     leadA = (await ins(A, "5534990000001", "Lead da A")).rows[0].id;
@@ -133,6 +140,7 @@ describe("PATCH e DELETE /api/leads/:id conferem a empresa do lead", () => {
     expect(depois.metadata).toEqual({});
     expect(depois.tags).toEqual(["original"]);
     expect(depois.dados).toEqual({});
+    expect((await db.query("SELECT count(*)::int AS n FROM lead_optouts")).rows[0].n).toBe(0);
   });
 
   it("[OBRIGATÓRIO] usuário da empresa A NÃO apaga lead da empresa B: 403 e o lead continua lá", async () => {
