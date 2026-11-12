@@ -236,4 +236,3 @@ export const inViewport = async (page: Page, testId: string) => {
 };
 
 export const firstCard = (page: Page) => page.getByTestId("inbox-item-5534990000001");
-
