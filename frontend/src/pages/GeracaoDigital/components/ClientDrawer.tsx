@@ -9,11 +9,20 @@ import {
   Loader2,
   Copy,
   Check,
+  Calendar,
+  Video,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
-import { useCriarGruposWhatsapp, useEmitirGdPortalToken } from "@/hooks/useGdClientes";
+import {
+  useCriarGruposWhatsapp,
+  useEmitirGdPortalToken,
+  useOferecerHorariosBriefing,
+  useConfirmarAgendamentoBriefing,
+} from "@/hooks/useGdClientes";
 import type { PortfolioClient } from "./PortfolioTable";
 
 interface ClientDrawerProps {
@@ -29,13 +38,34 @@ function isValidDriveUrl(url?: string | null): boolean {
   return trimmed.startsWith("http://") || trimmed.startsWith("https://");
 }
 
+function formatarDataHora(iso?: string | null): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
   const criarGrupos = useCriarGruposWhatsapp();
   const emitirPortal = useEmitirGdPortalToken();
+  const oferecerBriefing = useOferecerHorariosBriefing();
+  const confirmarBriefing = useConfirmarAgendamentoBriefing();
+
   const [criandoGrupos, setCriandoGrupos] = React.useState(false);
   const [abrindoPortal, setAbrindoPortal] = React.useState(false);
   const [copiandoPortal, setCopiandoPortal] = React.useState(false);
   const [copiado, setCopiado] = React.useState(false);
+  const [oferecendoBriefing, setOferecendoBriefing] = React.useState(false);
+  const [confirmandoOpcao, setConfirmandoOpcao] = React.useState<number | null>(null);
 
   if (!client) return null;
 
@@ -107,6 +137,46 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
       });
     } finally {
       setCopiandoPortal(false);
+    }
+  };
+
+  const handleOferecerBriefing = async () => {
+    if (!client?.id) return;
+    setOferecendoBriefing(true);
+    try {
+      await oferecerBriefing.mutateAsync(client.id);
+      toast({
+        title: "📅 Horários Oferecidos!",
+        description: "Opções de horários de briefing enviadas no WhatsApp do cliente.",
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao oferecer horários",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setOferecendoBriefing(false);
+    }
+  };
+
+  const handleConfirmarOpcao = async (opcao: number) => {
+    if (!client?.id) return;
+    setConfirmandoOpcao(opcao);
+    try {
+      await confirmarBriefing.mutateAsync({ clienteId: client.id, opcao });
+      toast({
+        title: "✅ Briefing Agendado!",
+        description: `Opção ${opcao} confirmada no Google Calendar e no grupo.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao agendar briefing",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setConfirmandoOpcao(null);
     }
   };
 
@@ -206,6 +276,104 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
             </p>
             <p className="text-[10px] text-slate-500 mt-0.5">Status: {client.trafficStatus}</p>
           </div>
+        </div>
+
+        {/* Briefing & Google Meet */}
+        <div className="space-y-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40">
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-purple-600" />
+              <span>Briefing & Reunião Inicial</span>
+            </p>
+            {client.briefingAgendadoInicio ? (
+              <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
+                <CheckCircle2 className="w-3 h-3 mr-1" /> Briefing Confirmado
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-bold">
+                <Clock className="w-3 h-3 mr-1" /> Pendente
+              </Badge>
+            )}
+          </div>
+
+          {client.briefingAgendadoInicio ? (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-semibold text-xs">
+                <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{formatarDataHora(client.briefingAgendadoInicio)}</span>
+              </div>
+              {client.briefingMeetUrl && (
+                <a
+                  href={client.briefingMeetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-center gap-2 w-full p-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold transition-all shadow-xs"
+                >
+                  <Video className="w-4 h-4" />
+                  <span>Entrar no Google Meet ↗</span>
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5 pt-1">
+              <Button
+                type="button"
+                onClick={handleOferecerBriefing}
+                disabled={oferecendoBriefing}
+                variant="outline"
+                className="w-full justify-center gap-2 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 font-bold hover:bg-purple-50 dark:hover:bg-purple-950/40 cursor-pointer"
+              >
+                {oferecendoBriefing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Oferecendo Horários...</span>
+                  </>
+                ) : (
+                  <>
+                    <Calendar className="w-4 h-4" />
+                    <span>📅 Oferecer Horários no WhatsApp</span>
+                  </>
+                )}
+              </Button>
+
+              {client.briefingSlotsOferecidos && client.briefingSlotsOferecidos.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Horários oferecidos (Confirmação Manual):
+                  </p>
+                  <div className="space-y-1">
+                    {client.briefingSlotsOferecidos.map((slot) => {
+                      const numOpcao = slot.opcao ?? slot.id;
+                      return (
+                        <div
+                          key={numOpcao}
+                          className="flex items-center justify-between p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs"
+                        >
+                          <span className="text-slate-700 dark:text-slate-300 font-medium truncate max-w-[180px]">
+                            {slot.label || formatarDataHora(slot.inicio)}
+                          </span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={confirmandoOpcao !== null}
+                            onClick={() => handleConfirmarOpcao(numOpcao)}
+                            className="h-7 text-[11px] font-bold px-2.5 cursor-pointer"
+                          >
+                            {confirmandoOpcao === numOpcao ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              `Confirmar Opção ${numOpcao}`
+                            )}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Ações Operacionais */}

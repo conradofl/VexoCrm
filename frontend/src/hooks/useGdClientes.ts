@@ -166,3 +166,26 @@ export function useCriarGruposWhatsapp() {
     onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
   });
 }
+
+export function useOferecerHorariosBriefing() {
+  const chamar = useChamar();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clienteId: string) =>
+      chamar(`/api/gd/clientes/${clienteId}/briefing/oferecer-horarios`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
+  });
+}
+
+export function useConfirmarAgendamentoBriefing() {
+  const chamar = useChamar();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clienteId, opcao }: { clienteId: string; opcao: number }) =>
+      chamar(`/api/gd/clientes/${clienteId}/briefing/agendar`, {
+        method: "POST",
+        body: JSON.stringify({ opcao }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
+  });
+}

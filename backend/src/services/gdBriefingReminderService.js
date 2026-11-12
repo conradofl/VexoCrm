@@ -46,7 +46,7 @@ export async function processarLembretesBriefing({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    "geracao-digital-comercial-hostery";
   const caioNumero = process.env.GD_CAIO_WHATSAPP || GD_CAIO_WHATSAPP_PADRAO;
 
   // Busca clientes com briefing agendado cujo fim ainda não passou
@@ -286,7 +286,7 @@ export async function processarRespostaBriefingNoWhatsApp({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    "geracao-digital-comercial-hostery";
 
   // Cria evento no Google Calendar com Google Meet
   const eventResult = await calendarEventCreator({

@@ -92,6 +92,9 @@ export default function ClientPortfolioDashboard({
         trelloActiveCards: 0,
         trelloOverdueCards: cliente.prazo?.atrasado ? 1 : 0,
         driveFolderUrl: cliente.drive_url || null,
+        briefingAgendadoInicio: cliente.briefing_agendado_inicio,
+        briefingMeetUrl: cliente.briefing_meet_url,
+        briefingSlotsOferecidos: cliente.briefing_slots_oferecidos,
       };
     });
   }, [clientes]);

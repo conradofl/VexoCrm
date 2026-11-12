@@ -39,6 +39,9 @@ export interface PortfolioClient {
   trelloOverdueCards: number;
   driveFolderUrl?: string | null;
   slackChannel?: string;
+  briefingAgendadoInicio?: string | null;
+  briefingMeetUrl?: string | null;
+  briefingSlotsOferecidos?: Array<{ id: number; opcao: number; label: string; inicio: string }> | null;
 }
 
 function isValidDriveUrl(url?: string | null): boolean {

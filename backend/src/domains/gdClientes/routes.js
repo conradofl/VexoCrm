@@ -1358,11 +1358,8 @@ export function registerGdClientesRoutes(app, {
           throw new ErroDeRota(422, "GRUPO_CLIENTE_NAO_CONFIGURADO", "Cliente ainda não possui grupo de atendimento criado.");
         }
 
-        const instanceName =
-          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
-          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-          process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+        const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
+        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
 
         const slotsRes = await calendarSlotFinder({
           fromDate: req.body?.from_date ? new Date(req.body.from_date) : new Date(),
@@ -1463,11 +1460,8 @@ export function registerGdClientesRoutes(app, {
           cliente.google_calendar_email ||
           null;
 
-        const instanceName =
-          (typeof body.instance_name === "string" && body.instance_name.trim()) ||
-          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-          process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+        const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
+        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
 
         // Cria o evento no Google Calendar com Google Meet e convidados
         const eventResult = await calendarEventCreator({
@@ -1615,11 +1609,8 @@ export function registerGdClientesRoutes(app, {
     async (req, res) => {
       try {
         const db = pool();
-        const instanceName =
-          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
-          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-          process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+        const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
+        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
         const now = req.body?.now ? new Date(req.body.now) : new Date();
 
         const resultado = await reminderProcessor({
@@ -1683,11 +1674,8 @@ export function registerGdClientesRoutes(app, {
         const clienteId = req.params.id;
         const db = pool();
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
-        const instanceName =
-          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
-          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-          process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+        const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
+        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
 
         const resultado = await internalApprovalSender({
           clienteId,
@@ -1717,11 +1705,8 @@ export function registerGdClientesRoutes(app, {
         const clienteId = req.params.id;
         const db = pool();
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
-        const instanceName =
-          (typeof req.body?.instance_name === "string" && req.body.instance_name.trim()) ||
-          process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-          process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+        const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
+        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
 
         const resultado = await clientApprovalSender({
           clienteId,

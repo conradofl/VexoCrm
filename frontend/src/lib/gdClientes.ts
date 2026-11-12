@@ -40,6 +40,10 @@ export interface GdCliente {
   grupo_cliente_jid?: string | null;
   grupo_cliente_url?: string | null;
   onboarding_concluido_em?: string | null;
+  briefing_slots_oferecidos?: Array<{ id: number; opcao: number; label: string; inicio: string; fim?: string }> | null;
+  briefing_agendado_inicio?: string | null;
+  briefing_agendado_fim?: string | null;
+  briefing_meet_url?: string | null;
   escopo: Escopo[] | null;
   escopo_original: string | null;
   origem: "fluxo" | "importacao_inicial";

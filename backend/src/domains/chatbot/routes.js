@@ -10,6 +10,7 @@
 // invocação da factory para as rotas de campaigns que ficam lá) — sem duplicar a função.
 
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
+import { processarRespostaBriefingNoWhatsApp } from "../../services/gdBriefingReminderService.js";
 import { summarizeChatWithAI } from "../leads/chatInsight.js";
 import { saveLeadAgreement } from "../../services/leadAgreement.js";
 import { applyCorsHeaders } from "../../services/corsPolicy.js";
@@ -2991,7 +2992,36 @@ export function registerChatbotRoutes(app, deps) {
 
     // Descarta mensagem de GRUPO/broadcast antes de qualquer lookup no banco ou chatbot.
     const rawRemoteJid = body.data?.key?.remoteJid ?? body.remoteJid ?? body.senderJid ?? null;
+    const rawInstanceName = body.instance || body.instanceName || req.query.instanceName || req.query.instance || null;
+
     if (isGroupJid(rawRemoteJid)) {
+      // Intercepta escolha de horários de briefing do cliente no grupo da GD
+      try {
+        const text =
+          (typeof body.text === "string" && body.text.trim()) ||
+          (typeof body.content === "string" && body.content.trim()) ||
+          (typeof body.data?.message?.conversation === "string" && body.data.message.conversation.trim()) ||
+          (typeof body.data?.message?.extendedTextMessage?.text === "string" && body.data.message.extendedTextMessage.text.trim()) ||
+          (typeof body.message?.conversation === "string" && body.message.conversation.trim()) ||
+          (typeof body.message?.extendedTextMessage?.text === "string" && body.message.extendedTextMessage.text.trim()) ||
+          "";
+
+        if (text) {
+          const briefingRes = await processarRespostaBriefingNoWhatsApp({
+            pool: pgDatabasePool,
+            groupJid: rawRemoteJid,
+            text,
+            instanceName: rawInstanceName,
+          });
+          if (briefingRes && briefingRes.handled) {
+            console.log(`[GD-Briefing] Escolha de briefing processada no grupo ${rawRemoteJid}`);
+            return res.status(200).json({ status: "handled_gd_briefing" });
+          }
+        }
+      } catch (err) {
+        console.warn(`[GD-Briefing] Erro ao processar resposta de briefing em grupo:`, err.message);
+      }
+
       descartar("group", { remoteJid: rawRemoteJid });
       return;
     }
@@ -3013,7 +3043,6 @@ export function registerChatbotRoutes(app, deps) {
       return;
     }
 
-    const rawInstanceName = body.instance || body.instanceName || req.query.instanceName || req.query.instance || null;
     const { canonicalName, chip: matchedChip } = await resolveInstanceIdentifier({
       clientId,
       identifier: rawInstanceName,
