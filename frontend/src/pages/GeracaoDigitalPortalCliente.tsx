@@ -320,7 +320,7 @@ export default function GeracaoDigitalPortalCliente() {
   const dataDesdeFormatada = formatarData(cliente.estado_desde);
 
   const suporteWhatsapp = suporte?.whatsapp || "5534997719779";
-  const linkGoogleReview = suporte?.google_review_url || "https://g.page/r/geracaodigital/review";
+  const linkGoogleReview = suporte?.google_review_url || "https://g.page/r/CQma70R-HfV7EBM/review";
   const mensagemContextual = `Olá! Sou do projeto ${cliente.nome} e gostaria de tirar uma dúvida sobre a etapa atual: ${rotuloAtual}`;
   const linkWhatsAppSuporte = `https://wa.me/${suporteWhatsapp}?text=${encodeURIComponent(mensagemContextual)}`;
 

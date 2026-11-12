@@ -36,7 +36,18 @@ import {
   processarLembretesBriefing,
   GD_CAIO_WHATSAPP_PADRAO,
 } from "../../services/gdBriefingReminderService.js";
-import { executarSinteseEGeracaoBriefing } from "../../services/gdBriefingSynthesizerService.js";
+import {
+  executarSinteseEGeracaoBriefing,
+  gerarDocumentoBriefingPdf,
+  gerarDocumentoBriefingDocx,
+  gerarDocumentoIdentidadePdf,
+  gerarDocumentoIdentidadeDocx,
+  gerarDocumentoRoteirosPdf,
+  gerarDocumentoRoteirosDocx,
+  gerarDocumentoPlanejamentoPdf,
+  gerarDocumentoPlanejamentoDocx,
+  gerarSintesePadrao,
+} from "../../services/gdBriefingSynthesizerService.js";
 import {
   enviarDocumentosParaAprovacaoInterna,
   enviarDocumentosParaAprovacaoCliente,
@@ -855,7 +866,7 @@ export function registerGdClientesRoutes(app, {
 
       const suporte = {
         whatsapp: process.env.GD_SUPORTE_WHATSAPP || "5534997719779",
-        google_review_url: process.env.GD_GOOGLE_REVIEW_URL || "https://g.page/r/geracaodigital/review",
+        google_review_url: process.env.GD_GOOGLE_REVIEW_URL || "https://g.page/r/CQma70R-HfV7EBM/review",
         instagram_url: process.env.GD_INSTAGRAM_URL || "https://instagram.com/geracaodigital",
       };
 
@@ -938,7 +949,10 @@ export function registerGdClientesRoutes(app, {
         }
 
         const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0] || {};
+        const instanceName = candidate.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate.webhookToken || null;
+        const baseUrl = candidate.baseUrl || null;
 
         // Equipe GD (8 colaboradores oficiais)
         const envEquipe = process.env.GD_ONBOARDING_EQUIPE_TELEFONES;
@@ -1359,7 +1373,10 @@ export function registerGdClientesRoutes(app, {
         }
 
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0] || {};
+        const instanceName = candidate.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate.webhookToken || null;
+        const baseUrl = candidate.baseUrl || null;
 
         const slotsRes = await calendarSlotFinder({
           fromDate: req.body?.from_date ? new Date(req.body.from_date) : new Date(),
@@ -1379,16 +1396,26 @@ export function registerGdClientesRoutes(app, {
           slots: slotsRes.options,
         });
 
-        await evolutionMessageSender({
-          instanceName,
-          number: jidCliente,
-          text: textoOferta,
-        });
+        let whatsappDisparado = false;
+        let whatsappErro = null;
+        try {
+          await evolutionMessageSender({
+            instanceName,
+            number: jidCliente,
+            text: textoOferta,
+            webhookToken,
+            baseUrl,
+          });
+          whatsappDisparado = true;
+        } catch (e) {
+          whatsappErro = e.message;
+          console.warn(`[GD-Briefing] Falha ao enviar oferta de horários no grupo (${jidCliente}):`, e.message);
+        }
 
         await db.query(
           `UPDATE public.gd_clientes
               SET briefing_slots_oferecidos = $1::jsonb
-            WHERE id = $2 AND dono_client_id = $3`,
+            WHERE id = $2 AND (dono_client_id = $3 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
           [JSON.stringify(slotsRes.options), clienteId, GD_DONO]
         );
 
@@ -1400,6 +1427,8 @@ export function registerGdClientesRoutes(app, {
           grupo_cliente_jid: jidCliente,
           slots: slotsRes.options,
           mensagem: textoOferta,
+          whatsapp_disparado: whatsappDisparado,
+          whatsapp_erro: whatsappErro,
           cliente: clienteAtualizado,
         });
       } catch (err) {
@@ -1461,7 +1490,10 @@ export function registerGdClientesRoutes(app, {
           null;
 
         const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0] || {};
+        const instanceName = candidate.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate.webhookToken || null;
+        const baseUrl = candidate.baseUrl || null;
 
         // Cria o evento no Google Calendar com Google Meet e convidados
         const eventResult = await calendarEventCreator({
@@ -1494,7 +1526,7 @@ export function registerGdClientesRoutes(app, {
                     briefing_lembrete_vespera_enviado_em = NULL,
                     briefing_lembrete_1h_enviado_em = NULL,
                     google_calendar_email = COALESCE($7, google_calendar_email)
-              WHERE id = $8 AND dono_client_id = $9`,
+              WHERE id = $8 AND (dono_client_id = $9 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
             [
               slotStart,
               slotEnd,
@@ -1554,6 +1586,8 @@ export function registerGdClientesRoutes(app, {
               instanceName,
               number: cliente.grupo_cliente_jid,
               text: textoCliente,
+              webhookToken,
+              baseUrl,
             });
           } catch (e) {
             console.warn(`[GD-Briefing] Falha ao enviar confirmação no grupo do cliente (${cliente.grupo_cliente_jid}):`, e.message);
@@ -1575,6 +1609,8 @@ export function registerGdClientesRoutes(app, {
             instanceName,
             number: caioNumero,
             text: textoCaio,
+            webhookToken,
+            baseUrl,
           });
         } catch (e) {
           console.warn(`[GD-Briefing] Falha ao enviar aviso de agendamento para o Caio:`, e.message);
@@ -1675,12 +1711,17 @@ export function registerGdClientesRoutes(app, {
         const db = pool();
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0];
+        const instanceName = candidate?.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate?.webhookToken || null;
+        const baseUrl = candidate?.baseUrl || null;
 
         const resultado = await internalApprovalSender({
           clienteId,
           pool: db,
           instanceName,
+          webhookToken,
+          baseUrl,
           evolutionSender: evolutionMessageSender,
           actor: ator,
         });
@@ -1706,12 +1747,17 @@ export function registerGdClientesRoutes(app, {
         const db = pool();
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const candidate = candidateInstances[0];
+        const instanceName = candidate?.slug || "geracao-digital-comercial-hostery";
+        const webhookToken = candidate?.webhookToken || null;
+        const baseUrl = candidate?.baseUrl || null;
 
         const resultado = await clientApprovalSender({
           clienteId,
           pool: db,
           instanceName,
+          webhookToken,
+          baseUrl,
           evolutionSender: evolutionMessageSender,
           actor: ator,
         });
@@ -1800,6 +1846,56 @@ export function registerGdClientesRoutes(app, {
         });
       } catch (err) {
         responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos");
+      }
+    }
+  );
+
+  // ─── Briefing: Download / Visualização Direta dos Documentos Oficiais ──────
+  app.get(
+    "/api/gd/clientes/:id/briefing/documentos/:tipo/download",
+    async (req, res) => {
+      try {
+        exigirUuid(req.params.id);
+        const { id, tipo } = req.params;
+        const formato = String(req.query.formato || "pdf").toLowerCase();
+        const db = pool();
+        const cliente = await lerCliente(db, id);
+        if (!cliente) {
+          throw new ErroDeRota(404, "CLIENTE_NAO_ENCONTRADO", "Cliente não encontrado.");
+        }
+
+        const sintese = cliente.briefing_documentos?.sintese || gerarSintesePadrao({ cliente });
+        let buffer;
+        let mimeType;
+        let ext;
+
+        if (formato === "docx") {
+          mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          ext = "docx";
+          if (tipo === "briefing") buffer = await gerarDocumentoBriefingDocx(sintese);
+          else if (tipo === "identidade") buffer = await gerarDocumentoIdentidadeDocx(sintese);
+          else if (tipo === "roteiros") buffer = await gerarDocumentoRoteirosDocx(sintese);
+          else if (tipo === "planejamento") buffer = await gerarDocumentoPlanejamentoDocx(sintese);
+          else throw new ErroDeRota(400, "TIPO_INVALIDO", "Tipo de documento inválido.");
+        } else {
+          mimeType = "application/pdf";
+          ext = "pdf";
+          if (tipo === "briefing") buffer = await gerarDocumentoBriefingPdf(sintese);
+          else if (tipo === "identidade") buffer = await gerarDocumentoIdentidadePdf(sintese);
+          else if (tipo === "roteiros") buffer = await gerarDocumentoRoteirosPdf(sintese);
+          else if (tipo === "planejamento") buffer = await gerarDocumentoPlanejamentoPdf(sintese);
+          else throw new ErroDeRota(400, "TIPO_INVALIDO", "Tipo de documento inválido.");
+        }
+
+        const safeNome = cliente.nome.replace(/[^a-zA-Z0-9_-]/g, "_");
+        const filename = `${safeNome}_${tipo}.${ext}`;
+
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+        res.setHeader("Content-Length", buffer.length);
+        res.end(buffer);
+      } catch (err) {
+        responderErro(res, err, "GET /api/gd/clientes/:id/briefing/documentos/:tipo/download");
       }
     }
   );

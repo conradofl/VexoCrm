@@ -21,6 +21,24 @@ export interface GdPrazo {
   calculo: "ok" | "pendente" | "sem_prazo";
 }
 
+export interface GdBriefingDocumentoItem {
+  nome: string;
+  docxUrl?: string | null;
+  pdfUrl?: string | null;
+  driveFileIdDocx?: string | null;
+  driveFileIdPdf?: string | null;
+  versao?: string | null;
+  sintetizadoEm?: string | null;
+}
+
+export interface GdBriefingDocumentos {
+  briefing?: GdBriefingDocumentoItem;
+  identidade?: GdBriefingDocumentoItem;
+  roteiros?: GdBriefingDocumentoItem;
+  planejamento?: GdBriefingDocumentoItem;
+  [key: string]: GdBriefingDocumentoItem | undefined;
+}
+
 export interface GdCliente {
   id: string;
   nome: string;
@@ -35,6 +53,7 @@ export interface GdCliente {
   briefing_url?: string | null;
   ficha_vexo_url?: string | null;
   planejamento_url?: string | null;
+  briefing_documentos?: GdBriefingDocumentos | null;
   grupo_interno_jid?: string | null;
   grupo_interno_url?: string | null;
   grupo_cliente_jid?: string | null;

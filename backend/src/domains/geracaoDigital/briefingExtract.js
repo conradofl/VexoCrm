@@ -11,6 +11,8 @@
 // com OpenAI) — sem dependência nem chave nova.
 import { sendError } from "../../services/httpInfra.js";
 import { defaultGroqModel } from "../../services/llmModels.js";
+import { extractJsonFromLlmText } from "../../services/jsonExtractor.js";
+import { callLlmChatCompletion } from "../../chatbot-ai-engine.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_GROQ_MODEL = defaultGroqModel();
@@ -20,40 +22,56 @@ function getModel() {
   return process.env.GROQ_CAMPAIGN_AI_MODEL || DEFAULT_GROQ_MODEL;
 }
 
-// Campos do formulário de briefing. As descrições são o que guia a IA, então
-// valem mais que o nome da chave. Espelham DEFAULT_BRIEFING_FIELDS no front.
+// Campos do formulário de briefing. As descrições guiam a IA.
+// Espelham DEFAULT_BRIEFING_FIELDS no front e o ClientContractInfo.
 const CAMPOS = {
-  logo: "Onde está a logomarca em alta resolução ou como será enviada",
-  instagram: "Login, usuário ou forma de acesso ao Instagram",
-  facebook: "Login ou forma de acesso ao Facebook / página comercial",
-  possui_bm: "Se a empresa possui Business Manager. Responda exatamente Sim, Não ou Não sei",
-  google: "Login ou forma de acesso ao Google Ads / Analytics",
-  site: "Endereço do site da empresa",
-  dominios_dns: "Onde o domínio está hospedado (Cloudflare, Registro.br, etc.)",
-  whatsapp: "Número de WhatsApp comercial",
+  // Bloco A - Dados Contratuais e Empresa
+  razaoSocial: "Razão social ou nome fantasia da empresa / cliente (ex: Sonhare Colchões, Ótica Visão Prime, Burger Flow)",
+  cnpj: "CNPJ da empresa contratante formatado (ex: 00.000.000/0001-00) ou apenas dígitos se citado",
+  responsavel: "Nome completo do responsável principal ou decisor da empresa (ex: Caio Almeida, Dr. Silva, Conrado)",
+  whatsapp: "Número de WhatsApp comercial do cliente com DDD",
+  email: "E-mail comercial ou financeiro corporativo da empresa",
+  endereco: "Endereço completo da empresa (rua, número, bairro, cidade, estado/região)",
+  produtos: "Lista dos produtos ou serviços contratados pelo cliente (ex: Gestão de redes sociais (Instagram), Gestão de redes sociais (Facebook), Gestão de tráfego google/meta ads, Google ads, Google meu negócio, Landing Page\\site, E-commerce, Logomarca, Branding)",
+
+  // Bloco B - Diagnóstico Comercial & Funil
   concorrentes: "Principais concorrentes diretos citados",
-  inspiracao: "Perfis ou marcas citados como referência de estética",
+  como_vende: "Como a empresa vende hoje (processo comercial, funil atual, equipe de vendas, WhatsApp manual, balcão, indicação)",
   servicos: "Produtos e serviços que a empresa vende (core business) E o diferencial competitivo, o que faz o cliente escolher este negócio em vez do concorrente",
-  localizacao: "Região, cidade ou abrangência geográfica de atuação",
-  ticket_margem: "Ticket médio e margem de lucro",
-  ja_rodou_trafego: "Se já investiu em tráfego pago antes. Responda exatamente Sim, Não ou Não sei",
-  trafego_historico: "Com quem já rodou tráfego, resultados obtidos, o que funcionou e o que não funcionou",
-  dores_publico: "Dores e necessidades do público-alvo",
-  base_existente: "Se tem base de clientes, lista de e-mail ou seguidores para remarketing",
-  produtos_trafego: "Quais produtos ou serviços serão o foco das campanhas pagas",
-  objetivo_trafego: "Objetivo das campanhas (reconhecimento, alcance, leads, engajamento, vendas, remarketing)",
-  verba: "Valor de verba disponível para anúncios",
-  verba_periodicidade: "Periodicidade da verba. Responda exatamente Mensal, Semanal ou Por campanha/período",
-  divisao_verba: "Como a verba se divide entre Google e Meta",
-  sazonalidade: "Datas comemorativas, lançamentos ou promoções que puxam a demanda",
-  tipo_pagamento: "Forma de pagamento da mídia",
-  bloqueado: "Assuntos que a empresa NÃO quer abordar nos perfis",
-  temas: "Temas que combinam com a empresa e devem ser abordados",
-  "publico_alvo.genero": "Gênero do público-alvo",
-  "publico_alvo.idade": "Faixa etária do público-alvo",
-  "publico_alvo.classe": "Classe social do público-alvo",
-  "publico_alvo.interesses": "Interesses e comportamentos do público-alvo",
-  "publico_alvo.outros_detalhes": "Outros detalhes do público-alvo",
+  mitos_perguntas_recorrentes: "Mitos, objeções, preconceitos e dúvidas mais frequentes que os clientes sempre fazem antes de comprar",
+  temas: "Temas e assuntos que combinam com a marca e devem ser abordados nos conteúdos",
+  base_existente: "Se possui base de clientes cadastrada, lista de contatos, WhatsApp ou e-mails para remarketing",
+  publico_alvo: "Visão geral do público-alvo e clientes ideais",
+  "publico_alvo.genero": "Gênero predominante do público-alvo (Homens, Mulheres, Unissex/Todos)",
+  "publico_alvo.idade": "Faixa etária do público-alvo (ex: 25 a 45 anos)",
+  "publico_alvo.classe": "Classe social ou poder aquisitivo do público-alvo (ex: Classe A/B, Classe C)",
+  "publico_alvo.interesses": "Interesses, estilo de vida e comportamentos do público-alvo",
+  "publico_alvo.outros_detalhes": "Outros detalhes ou hábitos específicos do público-alvo",
+  dores_publico: "Principais dores, frustrações e necessidades que levam o cliente a procurar a empresa",
+  bloqueado: "Assuntos proibidos que a empresa NÃO quer que sejam abordados nos perfis (política, concorrência, etc.)",
+  inspiracao: "Perfis, concorrentes indiretos ou marcas citadas como referência visual ou estética",
+
+  // Bloco C - Mídia & Tráfego
+  objetivo_trafego: "Objetivo principal do tráfego (reconhecimento, alcance, leads no whatsapp, vendas, conversão, remarketing)",
+  verba: "Valor total de verba disponível para anúncios (ex: R$ 3.000 / mês)",
+  verba_periodicidade: "Periodicidade da verba. Responda exatamente: Mensal, Semanal ou Por campanha/período",
+  divisao_verba: "Como a verba se divide entre Google e Meta (ex: 70% Meta e 30% Google)",
+  tipo_pagamento: "Forma de pagamento da mídia. Responda exatamente: Cartão de crédito virtual, PIX ou Boleto",
+  ticket_margem: "Ticket médio dos produtos/serviços e margem de lucro aproximada",
+  ja_rodou_trafego: "Se já investiu em tráfego pago antes. Responda exatamente: Sim, Não ou Não sei",
+  trafego_historico: "Histórico com agências ou gestores anteriores, o que funcionou e o que não funcionou",
+  produtos_trafego: "Quais produtos ou serviços específicos serão o foco das campanhas pagas",
+  sazonalidade: "Datas comemorativas, épocas do ano, lançamentos ou sazonalidades que puxam as vendas",
+
+  // Bloco D - Técnico & Acessos
+  logo: "Onde está a logomarca em alta resolução ou link de drive/vetores",
+  instagram: "Login, usuário (@usuario) ou forma de acesso ao Instagram",
+  facebook: "Login, link ou forma de acesso à página comercial do Facebook",
+  possui_bm: "Se a empresa possui Business Manager configurada. Responda exatamente: Sim, Não ou Não sei",
+  google: "Login ou forma de acesso ao Google Ads / Analytics / Perfil da Empresa",
+  site: "Endereço do site ou página web ativa da empresa",
+  dominios_dns: "Onde o domínio/DNS está hospedado (ex: Cloudflare, Registro.br, Hostgator, etc.)",
+  localizacao: "Região, bairros, cidade ou abrangência geográfica de atendimento",
 };
 
 // json_schema não aceita ponto no nome da propriedade em todos os modelos, então
@@ -92,47 +110,78 @@ export async function extractBriefingFields(req, res) {
       return sendError(res, 400, "BAD_REQUEST", "Cole a transcrição da reunião para a IA extrair os campos.");
     }
 
-    if (!process.env.GROQ_API_KEY) {
-      return sendError(res, 503, "AI_DISABLED", "IA indisponível: GROQ_API_KEY não configurada no servidor.");
+    let parsed = null;
+
+    // 1. Tenta Groq diretamente se houver chave configurada
+    if (process.env.GROQ_API_KEY) {
+      const model = getModel();
+      const payload = {
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `Extraia os campos do briefing da transcrição abaixo:\n\n"""\n${String(transcricao).slice(0, 24000)}\n"""`,
+          },
+        ],
+        response_format: STRICT_JSON_MODELS.has(model)
+          ? { type: "json_schema", json_schema: { name: "briefing_fields", strict: true, schema: BRIEFING_SCHEMA } }
+          : { type: "json_object" },
+      };
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45_000);
+      try {
+        const response = await fetch(GROQ_BASE_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const rawBody = await response.text();
+        if (response.ok) {
+          const data = JSON.parse(rawBody);
+          const content = data?.choices?.[0]?.message?.content;
+          if (content) {
+            parsed = extractJsonFromLlmText(content);
+          }
+        }
+      } catch (groqErr) {
+        console.warn("[extractBriefingFields] Falha temporária na Groq, acionando motor central de LLM:", groqErr?.message);
+      } finally {
+        clearTimeout(timeout);
+      }
     }
 
-    const model = getModel();
-    const payload = {
-      model,
-      temperature: 0,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Extraia os campos do briefing da transcrição abaixo:\n\n"""\n${String(transcricao).slice(0, 24000)}\n"""`,
-        },
-      ],
-      response_format: STRICT_JSON_MODELS.has(model)
-        ? { type: "json_schema", json_schema: { name: "briefing_fields", strict: true, schema: BRIEFING_SCHEMA } }
-        : { type: "json_object" },
-    };
+    // 2. Fallback robusto para o motor central de LLM (Gemini, OpenAI, ladder)
+    if (!parsed || typeof parsed !== "object") {
+      try {
+        const raw = await callLlmChatCompletion({
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `Extraia todos os campos do briefing em formato JSON estrito para cada chave solicitada:\nCampos esperados: ${Object.keys(CAMPOS).join(", ")}\n\nTranscrição:\n"""\n${String(transcricao).slice(0, 24000)}\n"""`,
+            },
+          ],
+          temperature: 0,
+          max_tokens: 3500,
+          response_format: { type: "json_object" },
+        });
+        if (raw) {
+          parsed = extractJsonFromLlmText(raw);
+        }
+      } catch (ladderErr) {
+        console.error("[extractBriefingFields] Falha no motor central de LLM:", ladderErr?.message);
+      }
+    }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45_000);
-    let parsed;
-    try {
-      const response = await fetch(GROQ_BASE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-      const rawBody = await response.text();
-      if (!response.ok) throw new Error(rawBody || `Groq HTTP ${response.status}`);
-      const data = JSON.parse(rawBody);
-      const content = data?.choices?.[0]?.message?.content;
-      if (!content) throw new Error("A IA retornou uma resposta vazia.");
-      parsed = JSON.parse(content);
-    } finally {
-      clearTimeout(timeout);
+    if (!parsed || typeof parsed !== "object") {
+      return sendError(res, 503, "AI_UNAVAILABLE", "Não foi possível extrair com IA no momento. O formulário usará o assistente heurístico local.");
     }
 
     // Rede de segurança: mesmo instruída, a IA pode devolver o nome do falante.
@@ -147,6 +196,10 @@ export async function extractBriefingFields(req, res) {
       const bruto = parsed?.[paraChaveIA(chave)] ?? parsed?.[chave];
       out[chave] = typeof bruto === "string" ? limparFalante(bruto) : "";
     }
+
+    // Aliases bidirecionais para compatibilidade total front/back
+    if (out.razaoSocial && !out.prospectName) out.prospectName = out.razaoSocial;
+    if (out.prospectName && !out.razaoSocial) out.razaoSocial = out.prospectName;
 
     res.json({ success: true, data: out });
   } catch (error) {

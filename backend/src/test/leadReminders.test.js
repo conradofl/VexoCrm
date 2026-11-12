@@ -552,6 +552,7 @@ describe("Lembretes e Agendamento com Estado (6 Blocos de Verificação)", () =>
 
     it("DELETE em lead_reminders de outro tenant resulta em rowCount = 0 e devolve 404", async () => {
       // Simula pool retornando rowCount = 0 porque WHERE client_id não bateu
+      mockPgPool.query.mockResolvedValueOnce({ rows: [] }); // leitura do lembrete (é reunião?), também filtrada por client_id
       mockPgPool.query.mockResolvedValueOnce({ rowCount: 0 });
 
       const req = {
