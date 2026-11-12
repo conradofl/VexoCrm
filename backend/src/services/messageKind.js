@@ -5,7 +5,9 @@
 // temporárias, visualização única). Aqui o embrulho é aberto e cada tipo ganha o conteúdo que
 // tem, ou o nome do tipo. Rótulo vazio nunca.
 
-const WRAPPERS = ["ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"];
+// associatedChildMessage: cada foto ou vídeo de um álbum chega embrulhado assim (medido na GD em
+// 12/11/2026: 9 de 40 "[Mensagem]" eram esse embrulho).
+const WRAPPERS = ["ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension", "associatedChildMessage"];
 // Chaves que acompanham a mensagem mas não são o conteúdo dela.
 const NOT_CONTENT = new Set(["messageContextInfo", "senderKeyDistributionMessage"]);
 
@@ -92,7 +94,25 @@ export function describeSpecialMessage(message) {
   if (msg.productMessage) return withDetail("Produto", msg.productMessage.product?.title);
   if (msg.orderMessage) return withDetail("Pedido", msg.orderMessage.orderTitle);
   if (msg.ptvMessage) return "[Vídeo de recado]";
-  if (msg.albumMessage) return "[Álbum de fotos]";
+  if (msg.albumMessage) {
+    const photos = Number(msg.albumMessage.expectedImageCount) || 0;
+    const videos = Number(msg.albumMessage.expectedVideoCount) || 0;
+    const parts = [
+      photos ? `${photos} ${photos === 1 ? "foto" : "fotos"}` : "",
+      videos ? `${videos} ${videos === 1 ? "vídeo" : "vídeos"}` : "",
+    ].filter(Boolean);
+    return withDetail("Álbum", parts.join(", "));
+  }
+  // Embrulho de álbum que chegou sem o conteúdo dentro.
+  if (msg.associatedChildMessage) return "[Foto ou vídeo de álbum]";
+  // Conteúdo cifrado pelo WhatsApp (medido na GD: 18 de 40 "[Mensagem]"). O sistema não consegue ler
+  // o texto; diz o que dá para saber: edição de mensagem, atualização de evento, ou só "protegida".
+  if (msg.secretEncryptedMessage) {
+    const kind = String(msg.secretEncryptedMessage.secretEncType ?? "").toUpperCase();
+    if (kind === "MESSAGE_EDIT" || kind === "2") return "[Mensagem editada]";
+    if (kind === "EVENT_EDIT" || kind === "1") return "[Evento atualizado]";
+    return "[Mensagem protegida pelo WhatsApp]";
+  }
   if (msg.call || msg.callLogMesssage || msg.callLogMessage) return "[Chamada]";
 
   return null;
