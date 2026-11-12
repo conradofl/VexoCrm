@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { OptOutSkipNotice } from "@/components/leads/OptOutSkipNotice";
 
 interface DispatchRecipientsDialogProps {
   dispatchId: string | null;
@@ -256,6 +257,8 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
             </Button>
           </div>
         </DialogHeader>
+
+        <OptOutSkipNotice count={data?.optedOutPendingCount} context="lote" className="mt-3 rounded-md px-2.5 py-1.5" />
 
         {/* Filtros e Busca */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3">

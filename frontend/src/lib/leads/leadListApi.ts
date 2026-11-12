@@ -164,6 +164,8 @@ export interface AudienceResponse {
   items: AudienceLead[];
   total: number;
   truncated: boolean;
+  /** Quantos do público pediram para sair e serão pulados no envio. O total não muda. null = o servidor não soube contar. */
+  optedOut?: number | null;
   importNotFound?: boolean;
   scopeUnavailable?: boolean;
   reason?: string;
@@ -379,6 +381,7 @@ export async function fetchCampaignAudience(
     items: data.items ?? [],
     total: data.total ?? data.items?.length ?? 0,
     truncated: Boolean(data.truncated),
+    optedOut: typeof data.optedOut === "number" ? data.optedOut : null,
     importNotFound: Boolean(data.importNotFound),
     scopeUnavailable: Boolean(data.scopeUnavailable),
     reason: data.reason,

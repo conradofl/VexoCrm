@@ -194,7 +194,7 @@ async function mundo({ falharContagem = false, falharOptOut = false, nLeads = 7 
   const runsDoLote = async () =>
     (await db.query("SELECT phone, status, error_message FROM campaign_dispatch_runs WHERE dispatch_id = $1 ORDER BY created_at, phone", [lote.id])).rows;
   const estado = async () => (await db.query("SELECT status, sent_count FROM campaign_dispatches WHERE id = $1", [lote.id])).rows[0];
-  return { db, camp, leads, lote, rodar, runsDoLote, estado, gravarProgressoDaFila, routes };
+  return { db, camp, leads, lote, rodar, runsDoLote, estado, gravarProgressoDaFila, routes, handlers };
 }
 
 // Faz o envio do lead N disparar um gancho: simula a fila gravando o progresso de OUTRO lead no meio do lote.
@@ -246,6 +246,29 @@ describe("o lote respeita a lista de opt-out (lead_optouts)", () => {
     expect(doLead2[0].status).toBe("skipped");
     expect(doLead2[0].error_message).toMatch(/opt-out/i);
     expect((await w.estado()).status).toBe("done");
+  }, SLOW);
+
+  it("[OBRIGATÓRIO] destinatários do lote avisam quantos NÃO PROCESSADOS serão pulados por opt-out, sem mudar total nem pendentes", async () => {
+    const w = await mundo({ nLeads: 3 });
+    const handler = w.handlers["GET /api/campaigns/dispatches/:dispatchId/recipients"];
+    const ler = async () => {
+      const res = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {}, send(b) { this.body = b; return this; } };
+      await handler({ params: { dispatchId: w.lote.id }, query: {}, headers: {}, authAccess: { isAdmin: true } }, res);
+      expect(res.statusCode).toBe(200);
+      return res.body;
+    };
+
+    const antes = await ler();
+    expect(antes).toMatchObject({ total: 3, pendingCount: 3, optedOutPendingCount: 0 });
+
+    await registerOptOut({ query: (s, p) => w.db.query(s, p) }, { clientId: T, phone: w.leads[1].telefone, source: "palavra" });
+    const depois = await ler();
+    expect(depois).toMatchObject({ total: 3, pendingCount: 3, optedOutPendingCount: 1 });
+
+    // depois do envio o lead em opt-out já foi processado ('skipped'): não há mais pendente a avisar
+    await w.rodar();
+    const fim = await ler();
+    expect(fim).toMatchObject({ total: 3, pendingCount: 0, skippedCount: 1, optedOutPendingCount: 0 });
   }, SLOW);
 
   it("pedido REVOGADO não bloqueia: o lead volta a receber do lote", async () => {

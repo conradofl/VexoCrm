@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { ALL_IMPORTS_VALUE, CRM_BASE_VALUE, type LeadImportItem } from "@/hooks/useLeadImports";
 import { getLeadField, type FilterRule, type ColumnMappingItem, type CustomFieldType, type CustomFieldDefinition } from "@/lib/leadImports/spreadsheet";
 import { darkSelectContentClass, darkSelectItemClass } from "./styles";
+import { OptOutSkipNotice } from "@/components/leads/OptOutSkipNotice";
 
 export interface PhoneAuditStats {
   total: number;
@@ -29,6 +30,8 @@ export interface PhoneAuditStats {
 export interface BancoAudienceInfo {
   description: string;
   count: number;
+  /** Quantos do público pediram para sair e serão pulados no envio (aviso; o total não muda). */
+  optedOut?: number | null;
 }
 
 interface LeadSourceStepProps {
@@ -216,6 +219,7 @@ export function LeadSourceStep({
               <div>
                 <p className="font-semibold text-foreground">Público do Banco de Dados Ativo</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">{bancoAudience.description}</p>
+                <OptOutSkipNotice count={bancoAudience.optedOut} className="mt-1.5 rounded-md px-2 py-1" />
               </div>
             </div>
             <Button

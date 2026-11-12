@@ -72,7 +72,7 @@ import {
   buildImportPreview as defaultBuildImportPreview,
 } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
-import { registerOptOut, revokeOptOut, OPTOUT_SOURCE_MANUAL } from "../../services/optOut.js";
+import { registerOptOut, revokeOptOut, countOptedOutPhones, OPTOUT_SOURCE_MANUAL } from "../../services/optOut.js";
 import {
   IMPORT_BATCH_SIZE,
   ImportError,
@@ -1484,7 +1484,13 @@ export function registerLeadsRoutes(app, deps) {
         sendError(res, 400, "IMPORT_SCOPE_UNAVAILABLE", result.reason);
         return;
       }
-      res.json(result);
+      // Aviso, não filtro: quantos deste público pediram para sair e serão pulados no envio. O total e a lista não mudam
+      // (a lista estável é o que mantém a janela e o fechamento dos lotes). null = não deu para saber.
+      const optedOut = await countOptedOutPhones(pgDatabasePool, {
+        clientId,
+        phones: (result.items || []).map((item) => item.telefone || item.phone),
+      });
+      res.json({ ...result, optedOut });
     } catch (error) {
       console.error("[leads-audience] falhou:", error?.message || error);
       sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.", { cause: errorCause(error) });
