@@ -193,7 +193,9 @@ export function PlanTab({ data, clientId, companyName }: PlanTabProps) {
             </div>
           )}
 
-          <p className={NOTE}>Dono e prazo ficam guardados neste navegador, para esta empresa.</p>
+          <p className={NOTE} data-testid="plan-storage-note">
+            O plano fica salvo só neste navegador. Outra pessoa, ou você em outro computador, não vê o que foi marcado aqui.
+          </p>
         </section>
       </div>
     </div>

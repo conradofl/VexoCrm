@@ -179,6 +179,12 @@ describe("Plano de ação — a tela", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
+  it("[TESTE OBRIGATÓRIO] a tela diz que o plano fica salvo só neste navegador", () => {
+    show();
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("O plano fica salvo só neste navegador.");
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("não vê o que foi marcado aqui");
+  });
+
   it("o que ainda não existe não é prometido: sem Slack, sem planilha, sem 'se cobra sozinho'", () => {
     show();
     const tab = screen.getByTestId("tab-plan");
