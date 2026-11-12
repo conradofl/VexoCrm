@@ -42,7 +42,7 @@ export const LLM_MODELS = [
   // Gemini / Google — o padrao desde 30/10/2026. So APELIDOS (-latest): apelido
   // nao morre por rotacao de versao. gemini-2.0-flash, 1.5-flash e 1.5-pro
   // estavam aqui como versao fixa, morreram, e o primeiro derrubou o agente.
-  { id: "gemini-flash-latest", name: "Gemini Flash (padrão)", provider: "gemini", providerName: "Gemini / Google" },
+  { id: "gemini-flash-latest", name: "Gemini Flash", provider: "gemini", providerName: "Gemini / Google" },
   { id: "gemini-flash-lite-latest", name: "Gemini Flash Lite", provider: "gemini", providerName: "Gemini / Google" },
   { id: "gemini-pro-latest", name: "Gemini Pro", provider: "gemini", providerName: "Gemini / Google" },
 
@@ -414,6 +414,23 @@ export async function callLlmChatCompletion({
         `[chatbot-ai-engine] MODELO INEXISTENTE: "${m}" (HTTP ${r.status}). ` +
           `O provedor descontinuou este modelo. Atualize LLM_MODEL_LADDER ou o modelo do tenant — ` +
           `enquanto ele estiver na lista, toda chamada perde uma ida de rede aqui.`
+      );
+      continue;
+    }
+
+    if (diagnostico.tipo === "SALDO_ESGOTADO") {
+      credenciaisQuebradas.add(provider);
+      console.error(
+        `[chatbot-ai-engine] SALDO ESGOTADO no provedor "${provider}" (HTTP ${r.status}, modelo "${m}"). ` +
+          "Os créditos pré-pagos da conta acabaram. Recarregue no AI Studio/Google Cloud ou use outra chave."
+      );
+      modelsToTry = [
+        ...modelsToTry.slice(0, cursor),
+        ...modelsToTry.slice(cursor).filter((x) => detectLlmProvider(x) !== provider),
+      ];
+      lastError = new Error(
+        diagnostico.motivo ||
+        `Os créditos pré-pagos da conta do ${adaptador.nome} acabaram (HTTP ${r.status}). Recarregue em https://ai.studio/projects.`
       );
       continue;
     }
@@ -1568,7 +1585,10 @@ export async function runChatbotAI({
 
   if (!finalResposta || !String(finalResposta.mensagem || "").trim()) {
     let motivoDetalhado = lastError?.message || null;
-    if (errosPorModelo.length > 1) {
+    const erroSaldo = errosPorModelo.find((e) => /prepayment credits are depleted|HTTP 402|créditos pré-pagos/i.test(e.erro));
+    if (erroSaldo) {
+      motivoDetalhado = `Os créditos pré-pagos da conta Google Gemini (Google AI Studio) estão esgotados (HTTP 402). Acesse https://ai.studio/projects para recarregar o saldo ou use uma chave de API de um projeto com créditos/plano ativo.`;
+    } else if (errosPorModelo.length > 1) {
       const primeiro = errosPorModelo[0];
       const ultimo = errosPorModelo[errosPorModelo.length - 1];
       motivoDetalhado = `Modelo ${primeiro.modelo} falhou: ${primeiro.erro}. Contingência (${ultimo.modelo}) também falhou: ${ultimo.erro}.`;
