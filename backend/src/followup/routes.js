@@ -36,6 +36,7 @@ import { fetchDynamicPrompt, fetchTemplate } from "../chatbot-ai-engine.js";
 import { auditAgentInstructionSources, validateAutonomousPrompt, checkAgentEnableGuard } from "../services/agentInstructionAudit.js";
 import { findChipExclusivityConflict } from "../services/chipExclusivity.js";
 import { deleteAgentPermanently, listArchivedAgents } from "../services/agentPermanentDelete.js";
+import { assertAudioUsableByCampaign, mapLibraryAudioByTemplate } from "../audioLibrary/service.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -46,6 +47,21 @@ function sendErr(res, status, code, message) {
 
 function str(v) {
   return typeof v === "string" ? v.trim() || null : null;
+}
+
+// Passo de follow-up que usa áudio da Biblioteca de Áudios. O áudio tem que
+// ser do MESMO tenant da cadência — quem confere é o banco (cadência -> agente
+// -> tenant), nunca o payload. Erro de regra vira 400 com a mensagem pronta;
+// erro de banco sobe para o catch da rota.
+const AUDIO_RULE_CODES = new Set(["INVALID_AUDIO", "AUDIO_NOT_AVAILABLE"]);
+async function resolveLibraryAudioForStep({ audioLibraryId, campaignId }) {
+  try {
+    const audio = await assertAudioUsableByCampaign({ query }, { audioId: audioLibraryId, campaignId });
+    return { audio, error: null };
+  } catch (err) {
+    if (AUDIO_RULE_CODES.has(err?.code)) return { audio: null, error: err };
+    throw err;
+  }
 }
 
 // Recusa da trava "agente de atendimento não liga sem prompt". Além do código e
@@ -1112,7 +1128,13 @@ function normalizeInstanceList(list, fallback) {
 
       let clonedTemplatesCount = 0;
       if (templates && templates.length > 0) {
+        // A cópia fica no MESMO agente (mesmo tenant), então o passo pode levar
+        // o áudio da biblioteca junto. Sem isso o passo clonado sairia como
+        // texto ("Áudio: nome") em vez do áudio. A chave só entra quando algum
+        // passo usa a biblioteca (schema antigo não tem a coluna).
+        const algumPassoComBiblioteca = templates.some((tpl) => tpl.audio_library_id);
         const templatesToInsert = templates.map((tpl) => ({
+          ...(algumPassoComBiblioteca ? { audio_library_id: tpl.audio_library_id || null } : {}),
           campaign_id: newCampaign.id,
           name: tpl.name,
           message: tpl.message,
@@ -1939,7 +1961,18 @@ function normalizeInstanceList(list, fallback) {
         .eq("campaign_id", campaignId)
         .order("order_index", { ascending: true });
       if (error) throw error;
-      return res.json({ success: true, templates: data || [] });
+      // audio_library_id é lido à parte (ver audioLibrary/service.js): a lista
+      // de passos não pode cair se a coluna ainda não existir no banco.
+      const libraryByTemplate = await mapLibraryAudioByTemplate({ query }, campaignId);
+      const templates = (data || []).map((tpl) => {
+        const lib = libraryByTemplate[tpl.id];
+        return {
+          ...tpl,
+          audio_library_id: lib?.audioLibraryId || null,
+          audio_library: lib ? { name: lib.name, durationSeconds: lib.durationSeconds, archived: lib.archived } : null,
+        };
+      });
+      return res.json({ success: true, templates });
     } catch (err) {
       return sendErr(res, 500, "TEMPLATES_FETCH_FAILED", err.message);
     }
@@ -1953,6 +1986,7 @@ function normalizeInstanceList(list, fallback) {
       is_active, order_index,
       scheduled_time, scheduled_date, anchor_field,
       media_path, media_type, media_mime, media_filename,
+      audio_library_id,
       step_type, action_type, action_payload, conditions,
     } = req.body || {};
 
@@ -1960,6 +1994,24 @@ function normalizeInstanceList(list, fallback) {
     let finalMessage = str(message);
     if (resolvedStepType === "internal_action" && !finalMessage) {
       finalMessage = (action_payload && action_payload.title) || str(action_type) || "Ação interna";
+    }
+
+    // Áudio da biblioteca: confere o tenant antes de qualquer gravação. O
+    // WhatsApp não aceita legenda em áudio, então o texto do passo não é
+    // enviado — sem texto digitado, o campo guarda só o nome do áudio.
+    let libraryAudio = null;
+    if (audio_library_id && resolvedStepType === "message" && str(campaign_id)) {
+      try {
+        const resolved = await resolveLibraryAudioForStep({
+          audioLibraryId: str(audio_library_id),
+          campaignId: str(campaign_id),
+        });
+        if (resolved.error) return sendErr(res, 400, resolved.error.code, resolved.error.message);
+        libraryAudio = resolved.audio;
+      } catch (err) {
+        return sendErr(res, 500, "TEMPLATE_CREATE_FAILED", err.message);
+      }
+      if (!finalMessage) finalMessage = `Áudio: ${libraryAudio.name}`;
     }
 
     if (!str(campaign_id) || !str(name) || !finalMessage || !str(trigger_type)) {
@@ -1995,10 +2047,14 @@ function normalizeInstanceList(list, fallback) {
           scheduled_time: scheduled_time ? str(scheduled_time) : null,
           scheduled_date: scheduled_date ? str(scheduled_date) : null,
           anchor_field: anchor_field ? str(anchor_field) : null,
-          media_path: media_path ? str(media_path) : null,
-          media_type: media_type ? str(media_type) : null,
-          media_mime: media_mime ? str(media_mime) : null,
-          media_filename: media_filename ? str(media_filename) : null,
+          // Áudio da biblioteca e anexo solto não convivem no mesmo passo.
+          media_path: !libraryAudio && media_path ? str(media_path) : null,
+          media_type: !libraryAudio && media_type ? str(media_type) : null,
+          media_mime: !libraryAudio && media_mime ? str(media_mime) : null,
+          media_filename: !libraryAudio && media_filename ? str(media_filename) : null,
+          // A chave só entra no INSERT quando há áudio: criar passo comum tem
+          // que funcionar mesmo se a coluna ainda não existir no banco.
+          ...(libraryAudio ? { audio_library_id: libraryAudio.id } : {}),
           step_type: resolvedStepType,
           action_type: action_type ? str(action_type) : null,
           action_payload: action_payload && typeof action_payload === "object" ? action_payload : {},
@@ -2070,6 +2126,33 @@ function normalizeInstanceList(list, fallback) {
         if (k in (req.body || {})) {
           patch[k] = req.body[k] === null ? null : req.body[k];
         }
+      }
+
+      // Áudio da biblioteca (fora da lista `allowed` de propósito: precisa de
+      // conferência de tenant, não é cópia direta do payload).
+      if ("audio_library_id" in (req.body || {})) {
+        const requestedAudioId = req.body.audio_library_id ? str(req.body.audio_library_id) : null;
+        if (requestedAudioId) {
+          const resolved = await resolveLibraryAudioForStep({
+            audioLibraryId: requestedAudioId,
+            campaignId: existing.campaign_id,
+          });
+          if (resolved.error) return sendErr(res, 400, resolved.error.code, resolved.error.message);
+          patch.audio_library_id = resolved.audio.id;
+          // Não convive com anexo solto.
+          patch.media_path = null;
+          patch.media_type = null;
+          patch.media_mime = null;
+          patch.media_filename = null;
+          if ("message" in patch && !str(patch.message)) patch.message = `Áudio: ${resolved.audio.name}`;
+        } else if (existing.audio_library_id) {
+          // Só grava NULL quando havia áudio: a coluna não entra no UPDATE de
+          // passo comum (que tem que funcionar mesmo sem a coluna no banco).
+          patch.audio_library_id = null;
+        }
+      } else if (req.body?.media_path && existing.audio_library_id) {
+        // Anexou arquivo solto num passo que tinha áudio da biblioteca: o anexo vence.
+        patch.audio_library_id = null;
       }
       const { data, error } = await supabase
         .from("followup_templates")

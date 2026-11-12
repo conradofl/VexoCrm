@@ -1,10 +1,11 @@
 import { useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Bot, BookOpen, Database } from "lucide-react";
+import { Bot, BookOpen, Database, Mic } from "lucide-react";
 import InboundAgentConfig from "./InboundAgentConfig";
 import ChatbotDocs from "./ChatbotDocs";
 import { KnowledgeBaseRagTab } from "@/components/agente/KnowledgeBaseRagTab";
+import { AudioLibraryTab } from "@/components/agente/AudioLibraryTab";
 import { UpsellCard } from "@/components/UpsellCard";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -31,7 +32,7 @@ export default function AgenteIA() {
   const hasDocs = isAdminUser && isVexoAdmTenant;
 
   const rawTab = searchParams.get("tab");
-  const validTabs = ["agentes", "rag", ...(hasDocs ? ["docs"] : [])];
+  const validTabs = ["agentes", "rag", "audios", ...(hasDocs ? ["docs"] : [])];
   const activeTab = validTabs.includes(rawTab || "") ? (rawTab as string) : "agentes";
 
   const handleTabChange = (val: string) => {
@@ -91,6 +92,12 @@ export default function AgenteIA() {
                     Base de Conhecimento
                   </TabsTrigger>
                 )}
+                {hasAgente && (
+                  <TabsTrigger value="audios" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
+                    <Mic className="h-3.5 w-3.5 mr-1.5 text-emerald-500" />
+                    Áudios
+                  </TabsTrigger>
+                )}
                 {hasDocs && (
                   <TabsTrigger value="docs" className="flex-1 text-xs data-[state=active]:bg-background data-[state=active]:text-foreground">
                     <BookOpen className="h-3.5 w-3.5 mr-1.5" />
@@ -132,6 +139,16 @@ export default function AgenteIA() {
                         <KnowledgeBaseRagTab />
                       </UpsellCard>
                     )}
+                  </TenantScopeBoundary>
+                </ErrorBoundary>
+              </TabsContent>
+            )}
+
+            {hasAgente && (
+              <TabsContent value="audios" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
+                <ErrorBoundary>
+                  <TenantScopeBoundary tenantId={activeClientId}>
+                    <AudioLibraryTab />
                   </TenantScopeBoundary>
                 </ErrorBoundary>
               </TabsContent>
