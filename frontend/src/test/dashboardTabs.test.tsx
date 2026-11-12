@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { AttendanceTab, BaseTab, CampaignsTab, ChipsTab } from "@/pages/Dashboard/DetailTabs";
+import { AttendanceTab, BaseTab, CampaignsTab, ChipsTab, sharePct } from "@/pages/Dashboard/DetailTabs";
 import type { DashboardOverview, DashboardPayload, OverviewFirstHumanResponse, OverviewQueue } from "@/hooks/useDashboard";
 import {
   buildChipRows,
@@ -272,6 +272,16 @@ describe("Aba Base de leads", () => {
     expect(within(screen.getByTestId("card-regions")).getByText("33,3")).toBeInTheDocument();
   });
 
+  it("[TESTE OBRIGATÓRIO] fatia que existe nunca aparece como 0%", () => {
+    expect(sharePct(7, (7 / 80320) * 100)).toBe("menos de 0,1%");
+    expect(sharePct(0, 0)).toBe("0%");
+    expect(sharePct(63, (63 / 80320) * 100)).toBe("0,1%");
+    show(<BaseTab data={payload()} periodLabel="x" />);
+    const slices = screen.getByTestId("card-base-slices");
+    expect(within(slices).getByText("menos de 0,1%")).toBeInTheDocument();
+    expect(within(slices).queryByText("0%")).not.toBeInTheDocument();
+  });
+
   it("base indisponível: motivo, sem número; e o cartão de abordáveis não existe", () => {
     show(<BaseTab data={payload({ base: null })} periodLabel="x" />);
     expect(screen.getByTestId("card-base-slices")).toHaveTextContent("Não foi possível calcular agora.");
@@ -297,6 +307,7 @@ describe("Aba Chips", () => {
     show(<ChipsTab data={payload({ chipsQuotaIsToday: false })} periodLabel="x" />);
     const card = screen.getByTestId("card-chips");
     expect(within(card).queryByText("Cota de hoje")).not.toBeInTheDocument();
+    expect(within(card).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Chip", "Estado", "Envios", "Responderam"]);
     expect(within(card).queryByText("36 de 40")).not.toBeInTheDocument();
   });
 

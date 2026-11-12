@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { DashboardPayload } from "@/hooks/useDashboard";
 import { formatMetricNumber } from "@/lib/dashboard/formatters";
@@ -21,8 +21,6 @@ const BIG_NUMBER = "font-bold leading-none tracking-tight tabular-nums";
 const LABEL = "text-[13px] font-semibold text-muted-foreground";
 const NOTE = "text-[12.5px] text-muted-foreground";
 const UNAVAILABLE = "Não foi possível calcular agora.";
-const TH = "px-3 py-2 text-left text-[11.5px] font-bold uppercase tracking-wider text-muted-foreground";
-const TD = "px-3 py-2.5 text-[13px] text-foreground";
 
 const SLICE_COLOR: Record<BaseSliceKey, string> = {
   inConversation: "bg-indigo-600",
@@ -32,9 +30,67 @@ const SLICE_COLOR: Record<BaseSliceKey, string> = {
   invalidPhone: "bg-slate-300 dark:bg-slate-600",
 };
 
+// Fração da base. Fatia que existe nunca aparece como "0%": abaixo de 0,1% diz isso.
+export function sharePct(value: number, pct: number): string {
+  if (value > 0 && pct < 0.05) return "menos de 0,1%";
+  return `${String(Math.round(pct * 10) / 10).replace(".", ",")}%`;
+}
+
 interface TabProps {
   data: DashboardPayload;
   periodLabel: string;
+}
+
+interface DataColumn {
+  header: string;
+  // Alinhamento no computador; no celular a célula vira "rótulo valor" numa linha que quebra.
+  align?: "left" | "right";
+  // Ocupa a linha inteira no celular (nome, barra).
+  wide?: boolean;
+}
+
+/**
+ * Tabela no computador, linhas empilhadas no celular: mesma marcação, sem rolagem lateral e sem esconder número.
+ * `template` são as colunas da grade no computador.
+ */
+function DataList({ label, columns, template, rows }: { label: string; columns: DataColumn[]; template: string; rows: Array<{ id: string; cells: ReactNode[] }> }) {
+  return (
+    <div role="table" aria-label={label}>
+      <div role="row" className="hidden gap-x-3 border-b border-border sm:grid" style={{ gridTemplateColumns: template }}>
+        {columns.map((column) => (
+          <div
+            key={column.header}
+            role="columnheader"
+            className={`py-2 text-[11.5px] font-bold uppercase tracking-wider text-muted-foreground ${column.align === "right" ? "text-right" : ""}`}
+          >
+            {column.header}
+          </div>
+        ))}
+      </div>
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          role="row"
+          className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b border-border/60 py-2.5 last:border-b-0 sm:grid sm:gap-x-3"
+          style={{ gridTemplateColumns: template }}
+        >
+          {row.cells.map((cell, index) => {
+            const column = columns[index];
+            return (
+              <div
+                key={column.header}
+                role="cell"
+                className={`min-w-0 text-[13px] text-foreground ${column.wide ? "w-full sm:w-auto" : ""} ${column.align === "right" ? "tabular-nums sm:text-right" : ""}`}
+              >
+                {index > 0 && !column.wide && <span className="mr-1.5 text-muted-foreground sm:hidden">{column.header}</span>}
+                {cell}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Unavailable({ title }: { title: string }) {
@@ -197,8 +253,11 @@ export function AttendanceTab({ data, periodLabel }: TabProps) {
                   {queue.oldest.map((row) => (
                     <li key={row.phone} className="border-b border-border/60 last:border-b-0">
                       <Link to={row.href} className="flex min-h-[48px] items-center gap-3 py-1 hover:bg-muted/40">
-                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{row.name}</span>
-                        {row.chip && <span className="max-w-[40%] flex-none truncate text-xs text-muted-foreground">chip {row.chip}</span>}
+                        {/* No celular o chip desce para baixo do nome, para o nome não ser cortado. */}
+                        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
+                          <span className="truncate text-sm font-semibold text-foreground sm:flex-1">{row.name}</span>
+                          {row.chip && <span className="truncate text-xs text-muted-foreground sm:max-w-[40%] sm:flex-none">chip {row.chip}</span>}
+                        </span>
                         <span
                           className={`w-16 flex-none text-right text-[13.5px] font-bold tabular-nums ${
                             row.late ? "text-orange-800 dark:text-orange-300" : "text-foreground"
@@ -272,35 +331,25 @@ export function CampaignsTab({ data, periodLabel }: TabProps) {
           ) : rows.length === 0 ? (
             <p className={NOTE}>Nenhuma campanha com envios suficientes neste período.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] border-collapse">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className={TH}>Campanha</th>
-                    <th className={`${TH} text-right`}>Envios</th>
-                    <th className={`${TH} text-right`}>Responderam</th>
-                    <th className={`${TH} w-[34%]`}>De cada 100</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.id} className="border-b border-border/60 last:border-b-0">
-                      <td className={`${TD} max-w-[260px] truncate font-semibold`}>{row.name}</td>
-                      <td className={`${TD} text-right tabular-nums`}>{formatMetricNumber(row.sent)}</td>
-                      <td className={`${TD} text-right tabular-nums`}>{formatMetricNumber(row.replied)}</td>
-                      <td className={TD}>
-                        <div className="flex items-center gap-2.5">
-                          <div className="h-2.5 flex-1 rounded-md bg-muted">
-                            <div className="h-full rounded-md bg-indigo-600" style={{ width: `${row.widthPct}%` }} />
-                          </div>
-                          <span className="w-10 flex-none text-right font-bold tabular-nums">{row.per100}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataList
+              label="Campanhas do período"
+              template="minmax(0,1fr) 90px 120px minmax(160px,34%)"
+              columns={[{ header: "Campanha", wide: true }, { header: "Envios", align: "right" }, { header: "Responderam", align: "right" }, { header: "De cada 100", wide: true }]}
+              rows={rows.map((row) => ({
+                id: row.id,
+                cells: [
+                  <span className="block truncate font-semibold">{row.name}</span>,
+                  formatMetricNumber(row.sent),
+                  formatMetricNumber(row.replied),
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-2.5 flex-1 rounded-md bg-muted">
+                      <div className="h-full rounded-md bg-indigo-600" style={{ width: `${row.widthPct}%` }} />
+                    </div>
+                    <span className="w-10 flex-none text-right font-bold tabular-nums">{row.per100}</span>
+                  </div>,
+                ],
+              }))}
+            />
           )}
         </section>
       )}
@@ -373,7 +422,7 @@ export function BaseTab({ data, periodLabel }: TabProps) {
                   </dt>
                   <dd className="flex-none tabular-nums text-foreground">
                     <strong>{formatMetricNumber(slice.value)}</strong>
-                    <span className="ml-2 text-muted-foreground">{String(Math.round(slice.widthPct * 10) / 10).replace(".", ",")}%</span>
+                    <span className="ml-2 text-muted-foreground">{sharePct(slice.value, slice.widthPct)}</span>
                   </dd>
                 </div>
               ))}
@@ -400,28 +449,20 @@ export function BaseTab({ data, periodLabel }: TabProps) {
           ) : regions.length === 0 ? (
             <p className={NOTE}>Nenhuma região com envios suficientes neste período.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[440px] border-collapse">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className={TH}>Região</th>
-                    <th className={`${TH} text-right`}>Envios</th>
-                    <th className={`${TH} text-right`}>Responderam</th>
-                    <th className={`${TH} text-right`}>De cada 100</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {regions.map((row) => (
-                    <tr key={row.id} className="border-b border-border/60 last:border-b-0">
-                      <td className={`${TD} max-w-[240px] truncate font-semibold`}>{row.label}</td>
-                      <td className={`${TD} text-right tabular-nums`}>{formatMetricNumber(row.sent)}</td>
-                      <td className={`${TD} text-right tabular-nums`}>{formatMetricNumber(row.replied)}</td>
-                      <td className={`${TD} text-right font-bold tabular-nums`}>{row.per100}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataList
+              label="Regiões do período"
+              template="minmax(0,1fr) 90px 120px 110px"
+              columns={[{ header: "Região", wide: true }, { header: "Envios", align: "right" }, { header: "Responderam", align: "right" }, { header: "De cada 100", align: "right" }]}
+              rows={regions.map((row) => ({
+                id: row.id,
+                cells: [
+                  <span className="block truncate font-semibold">{row.label}</span>,
+                  formatMetricNumber(row.sent),
+                  formatMetricNumber(row.replied),
+                  <strong>{row.per100}</strong>,
+                ],
+              }))}
+            />
           )}
         </section>
       )}
@@ -450,43 +491,41 @@ export function ChipsTab({ data, periodLabel }: TabProps) {
         ) : rows.length === 0 ? (
           <p className={NOTE}>Nenhum chip ativo cadastrado.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] border-collapse">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className={TH}>Chip</th>
-                  <th className={TH}>Estado</th>
-                  <th className={`${TH} text-right`}>Envios</th>
-                  <th className={`${TH} text-right`}>Responderam</th>
-                  {quotaIsToday && <th className={`${TH} w-[30%]`}>Cota de hoje</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id} className="border-b border-border/60 last:border-b-0">
-                    <td className={`${TD} max-w-[220px] truncate font-semibold`}>{row.name}</td>
-                    <td className={TD}>{row.state || "—"}</td>
-                    <td className={`${TD} text-right tabular-nums`}>{row.sent === null ? "—" : formatMetricNumber(row.sent)}</td>
-                    <td className={`${TD} text-right tabular-nums`}>{row.replied === null ? "—" : formatMetricNumber(row.replied)}</td>
-                    {quotaIsToday && (
-                      <td className={TD}>
-                        {row.quotaText ? (
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-2.5 flex-1 rounded-md bg-muted">
-                              <div className={`h-full rounded-md ${row.attention ? "bg-orange-500" : "bg-indigo-600"}`} style={{ width: `${row.quotaWidthPct}%` }} />
-                            </div>
-                            <span className={`flex-none font-bold tabular-nums ${row.attention ? "text-orange-800 dark:text-orange-300" : ""}`}>{row.quotaText}</span>
+          <DataList
+            label="Chips ativos"
+            template={quotaIsToday ? "minmax(0,1fr) 110px 80px 110px minmax(170px,30%)" : "minmax(0,1fr) 110px 80px 110px"}
+            columns={[
+              { header: "Chip", wide: true },
+              { header: "Estado" },
+              { header: "Envios", align: "right" },
+              { header: "Responderam", align: "right" },
+              ...(quotaIsToday ? [{ header: "Cota de hoje", wide: true }] : []),
+            ]}
+            rows={rows.map((row) => ({
+              id: row.id,
+              cells: [
+                <span className="block truncate font-semibold">{row.name}</span>,
+                row.state || "—",
+                row.sent === null ? "—" : formatMetricNumber(row.sent),
+                row.replied === null ? "—" : formatMetricNumber(row.replied),
+                ...(quotaIsToday
+                  ? [
+                      row.quotaText ? (
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex-none text-muted-foreground sm:hidden">Cota de hoje</span>
+                          <div className="h-2.5 flex-1 rounded-md bg-muted">
+                            <div className={`h-full rounded-md ${row.attention ? "bg-orange-500" : "bg-indigo-600"}`} style={{ width: `${row.quotaWidthPct}%` }} />
                           </div>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          <span className={`flex-none font-bold tabular-nums ${row.attention ? "text-orange-800 dark:text-orange-300" : ""}`}>{row.quotaText}</span>
+                        </div>
+                      ) : (
+                        "—"
+                      ),
+                    ]
+                  : []),
+              ],
+            }))}
+          />
         )}
         {rows && rows.length > 0 && quotaIsToday && <p className={`${NOTE} mt-3`}>Laranja = acima de 80% da cota.</p>}
         {typeof unattributed === "number" && unattributed > 0 && (
