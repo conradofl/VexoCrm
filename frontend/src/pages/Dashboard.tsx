@@ -6,13 +6,7 @@ import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { useDashboard, useRefreshDashboard, type DashboardPeriod, type DashboardRange } from "@/hooks/useDashboard";
 import { formatDateRange } from "@/lib/dashboard/formatters";
 import { DashboardHeader } from "./Dashboard/DashboardHeader";
-import { Block1WhatHappened } from "./Dashboard/Block1WhatHappened";
-import { Block2Rankings } from "./Dashboard/Block2Rankings";
-import { Block3ActionAlerts } from "./Dashboard/Block3ActionAlerts";
-import { Block4Analysis } from "./Dashboard/Block4Analysis";
 import { OverviewTab } from "./Dashboard/OverviewTab";
-import { SmartLinkEngagementCard } from "@/components/dashboard/SmartLinkEngagementCard";
-import { StalledLeadsAlertCard } from "@/components/dashboard/StalledLeadsAlertCard";
 import { OnboardingProgressCard } from "@/components/dashboard/OnboardingProgressCard";
 
 interface DashboardProps {
@@ -40,8 +34,6 @@ export default function Dashboard({
   // Intervalo personalizado JÁ aplicado (o rascunho das datas fica no cabeçalho)
   const [customRange, setCustomRange] = useState<DashboardRange | null>(null);
   const range = period === "custom" ? customRange : null;
-  // Visão geral é a entrada. O painel anterior fica numa aba até as abas de detalhe existirem.
-  const [tab, setTab] = useState<"overview" | "legacy">("overview");
 
   const { data, isLoading, error } = useDashboard(effectiveClientId, period, range);
   const refreshMutation = useRefreshDashboard(effectiveClientId);
@@ -59,18 +51,6 @@ export default function Dashboard({
         return "Últimos 30 dias";
     }
   }, [period, range]);
-
-  const periodDays = useMemo(() => {
-    if (period === "7d") return 7;
-    if (period === "this_month") return 30;
-    if (period === "custom" && customRange?.from && customRange?.to) {
-      const from = new Date(customRange.from).getTime();
-      const to = new Date(customRange.to).getTime();
-      const diffDays = Math.round(Math.abs(to - from) / (1000 * 60 * 60 * 24));
-      return Math.max(1, diffDays);
-    }
-    return 30;
-  }, [period, customRange]);
 
   if (!effectiveClientId) {
     return (
@@ -102,7 +82,7 @@ export default function Dashboard({
       <div className="space-y-6">
         <OnboardingProgressCard
           clientId={effectiveClientId}
-          baseTotal={data?.analysis?.leadClassification?.total ?? data?.analysis?.baseHealth?.total}
+          baseTotal={data?.overview?.base?.total}
         />
         <DashboardHeader
           period={period}
@@ -123,77 +103,14 @@ export default function Dashboard({
           <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground animate-pulse">
             Carregando métricas pré-calculadas...
           </div>
+        ) : data?.overview ? (
+          <OverviewTab data={data} periodLabel={periodLabel} />
         ) : data ? (
-          <>
-            {/* Payload gravado antes da Visão geral existir não tem `overview`: mostra o painel anterior, sem abas,
-                até o próximo recálculo (o cache vence sozinho em minutos). */}
-            {data.overview && (
-              <nav aria-label="Seções do dashboard" className="flex flex-wrap gap-1 border-b border-border">
-                {([
-                  ["overview", "Visão geral"],
-                  ["legacy", "Painel anterior"],
-                ] as const).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-current={tab === key ? "page" : undefined}
-                    onClick={() => setTab(key)}
-                    className={`-mb-px min-h-[44px] border-b-2 px-3.5 text-[13.5px] ${
-                      tab === key
-                        ? "border-indigo-600 font-bold text-indigo-600 dark:border-indigo-400 dark:text-indigo-300"
-                        : "border-transparent font-semibold text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </nav>
-            )}
-
-            {data.overview && tab === "overview" ? (
-              <OverviewTab data={data} periodLabel={periodLabel} />
-            ) : (
-              <>
-            {/* Só com as duas abas na tela: o painel anterior conta pela regra antiga (ex.: quem espera resposta). */}
-            {data.overview && (
-              <p
-                className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-[13px] font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
-                data-testid="legacy-panel-notice"
-              >
-                Números pela regra antiga. A Visão geral é a referência.
-              </p>
-            )}
-            {/* Primeiro bloco: o que aconteceu (5 números ou 3 dependendo dos módulos GD) */}
-            <Block1WhatHappened
-              summary={data.summary}
-              hasProposalsAndContracts={data.hasProposalsAndContracts}
-              periodLabel={periodLabel}
-              unavailableBlocks={data.unavailableBlocks}
-              comparison={data.periodInfo}
-            />
-
-            {/* Card de Engajamento de Links & Cliques em Tempo Real */}
-            <SmartLinkEngagementCard
-              clientId={effectiveClientId}
-              periodDays={periodDays}
-            />
-
-            {/* Pilar 1: Aviso de Lead Parado (Nenhum Lead Esquecido) */}
-            <StalledLeadsAlertCard
-              clientId={effectiveClientId}
-            />
-
-            {/* Segundo bloco: o que está indo bem e o que não está (4 rankings curtos) */}
-            <Block2Rankings rankings={data.rankings} />
-
-            {/* Análise: leads por temperatura/estágio, perfil que converte, saúde da base, tempo de resposta */}
-            <Block4Analysis analysis={data.analysis} />
-
-            {/* Terceiro bloco: o que fazer agora (no máximo 3 frases com ação direta) */}
-            <Block3ActionAlerts alerts={data.alerts} incomplete={data.unavailableBlocks?.includes("alerts")} />
-              </>
-            )}
-          </>
+          // Payload gravado antes da Visão geral existir: não há o que mostrar até o próximo recálculo.
+          <div className="flex h-[200px] flex-col items-center justify-center gap-1 px-4 text-center text-sm text-muted-foreground">
+            <p>Os números desta empresa ainda são de um cálculo antigo.</p>
+            <p>Clique em “Atualizar agora” para recalcular.</p>
+          </div>
         ) : null}
       </div>
     </PageShell>
