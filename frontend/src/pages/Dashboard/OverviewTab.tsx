@@ -141,6 +141,7 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
   const selection = useMemo(() => buildFunnelSelection(data, funnel, selected), [data, funnel, selected]);
   const messages = useMemo(() => buildMessageRows(data.rankings.messages), [data.rankings.messages]);
   const chips = useMemo(() => buildChipUsage(overview?.chips), [overview?.chips]);
+  const unattributedSent = data.rankings.chipsUnattributedSent;
   const slices = useMemo(() => buildBaseSlices(overview?.base), [overview?.base]);
 
   return (
@@ -311,6 +312,12 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
               ))}
               <p className="text-[11.5px] text-muted-foreground">Laranja = acima de 80% da cota.</p>
             </div>
+          )}
+          {/* Envio sem chip gravado não entra na conta de nenhum chip: aparece aqui, com a contagem, nunca escondido. */}
+          {typeof unattributedSent === "number" && unattributedSent > 0 && (
+            <p className="mt-3 text-[11.5px] text-muted-foreground" data-testid="chips-unattributed">
+              {formatMetricNumber(unattributedSent)} {unattributedSent === 1 ? "envio do período sem chip registrado." : "envios do período sem chip registrado."}
+            </p>
           )}
         </div>
 

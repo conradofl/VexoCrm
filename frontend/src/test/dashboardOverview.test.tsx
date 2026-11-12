@@ -216,6 +216,14 @@ describe("Frases sem fonte não aparecem", () => {
 });
 
 describe("Leituras de apoio", () => {
+  it("[TESTE OBRIGATÓRIO] envio sem chip registrado aparece com a contagem; sem nenhum, a frase não existe", () => {
+    const { unmount } = show(payload({}, { rankings: { ...payload().rankings, chipsUnattributedSent: 64 } }));
+    expect(screen.getByTestId("chips-unattributed")).toHaveTextContent("64 envios do período sem chip registrado.");
+    unmount();
+    show(payload({}, { rankings: { ...payload().rankings, chipsUnattributedSent: 0 } }));
+    expect(screen.queryByTestId("chips-unattributed")).not.toBeInTheDocument();
+  });
+
   it("cota por chip: o rótulo diz o que o contador enxerga", () => {
     show(payload());
     expect(screen.getByText("46 de 50")).toBeInTheDocument();
