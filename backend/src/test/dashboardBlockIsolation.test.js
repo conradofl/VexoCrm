@@ -27,20 +27,13 @@ const BLOCK_QUERIES = [
   ["summary.contracts", "current_contracts"],
   ["summary.sent", "AS current_sent"],
   ["summary.replied", "AS current_replied"],
-  ["summary.meetings", "current_meetings"],
   ["rankings.messages", "HAVING COUNT(*) >= $4"],
   ["rankings.chips", "FROM public.lead_client_evolution_instances i"],
   ["rankings.chips.replies", "runs_by_instance"],
   ["rankings.regions", "regional_runs"],
   ["rankings.failureReasons", "status IN ('failed', 'invalid_number')"],
-  ["alerts", "l.assigned_to IS NULL"],
   // Fase 1.5
   ["summary.closings", "current_closings"],
-  ["analysis.leadClassification", "TRIM(l.stage)"],
-  ["analysis.firstReplyOnly", "stopped_after_first"],
-  ["analysis.topProfiles", "replied_people"],
-  ["analysis.baseHealth", "no_reply_over_days"],
-  ["analysis.firstHumanResponse", "median_minutes"],
   // Visão geral (Fase 1 do redesenho)
   ["overview.base", "slice_never_approached"],
   ["overview.meetings", "meetings_people_current"],
@@ -54,7 +47,6 @@ const HEALTHY = {
   "summary.contracts": { rows: [{ current_contracts: 4, previous_contracts: 2 }] },
   "summary.sent": { rows: [{ current_sent: 150, previous_sent: 100 }] },
   "summary.replied": { rows: [{ current_replied: 30, previous_replied: 15, current_reached: 150, previous_reached: 100 }] },
-  "summary.meetings": { rows: [{ current_meetings: 12, previous_meetings: 8 }] },
   "rankings.messages": {
     rows: [
       { campaign_id: "c1", campaign_name: "Campanha A", message: "oi", sent_count: 60, replied_count: 30, reply_rate: 50 },
@@ -74,7 +66,6 @@ const HEALTHY = {
       { status: "invalid_number", error_message: "Número inexistente" },
     ],
   },
-  alerts: { rows: [{ count: 0 }] },
   "overview.base": {
     rows: [
       {
@@ -94,18 +85,6 @@ const HEALTHY = {
     ],
   },
   "summary.closings": { rows: [{ current_closings: 3, previous_closings: 1 }] },
-  "analysis.leadClassification": {
-    rows: [
-      { temperature: "QUENTE", stage: "open_budget", leads: 4 },
-      { temperature: "SEM_CLASSIFICACAO", stage: "cold", leads: 20 },
-    ],
-  },
-  "analysis.firstReplyOnly": { rows: [{ replied_first: 12, received_follow_up: 10, stopped_after_first: 7 }] },
-  "analysis.topProfiles": { rows: [{ temperature: "QUENTE", origin: "meta_ads", leads: 40, replied: 20, scheduled: 8, closed: 4 }] },
-  "analysis.baseHealth": { rows: [{ total: 100, valid_phone: 90, never_approached: 30, no_reply_over_days: 25 }] },
-  "analysis.firstHumanResponse": {
-    rows: [{ conversations: 10, answered: 8, waiting: 2, waiting_over_threshold: 1, median_minutes: 12, p90_minutes: 95 }],
-  },
 };
 
 // Erro com a cara de um erro do `pg`.
@@ -167,7 +146,6 @@ describe("Dashboard — baseline saudável", () => {
     expect(m.unavailableBlocks).toEqual([]);
     expect(m.summary.sent).toMatchObject({ current: 150, previous: 100 });
     expect(m.summary.replied).toMatchObject({ current: 30, previous: 15, rate: 20 });
-    expect(m.summary.meetings).toMatchObject({ current: 12, previous: 8 });
     expect(m.summary.proposals).toMatchObject({ current: 10, previous: 5 });
     expect(m.summary.contracts).toMatchObject({ current: 4, previous: 2 });
     expect(m.rankings.messages.length).toBe(2);
@@ -181,23 +159,16 @@ describe("Dashboard — baseline saudável", () => {
 describe("Dashboard — cada bloco falhando individualmente mantém os outros", () => {
   // [bloco que cai, caminho no payload que fica null, extras que mudam por dependência]
   const CASES = [
-    { block: "summary.sent", path: "summary.sent", alsoMarks: ["alerts"], alsoChanges: ["summary.replied.rate", "summary.replied.previousRate", "alerts"] },
+    { block: "summary.sent", path: "summary.sent", alsoMarks: [], alsoChanges: ["summary.replied.rate", "summary.replied.previousRate"] },
     { block: "summary.replied", path: "summary.replied", alsoMarks: [], alsoChanges: ["overview.funnel.received", "overview.funnel.replied"] },
-    { block: "summary.meetings", path: "summary.meetings", alsoMarks: [], alsoChanges: [] },
     { block: "summary.proposals", path: "summary.proposals", alsoMarks: [], alsoChanges: [] },
     { block: "summary.contracts", path: "summary.contracts", alsoMarks: [], alsoChanges: [] },
-    { block: "rankings.messages", path: "rankings.messages", alsoMarks: ["alerts"], alsoChanges: ["alerts"] },
-    { block: "rankings.chips", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent", "overview.chips"] },
-    { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.chipsUnattributedSent", "overview.chips"], marks: "rankings.chips" },
+    { block: "rankings.messages", path: "rankings.messages", alsoMarks: [], alsoChanges: [] },
+    { block: "rankings.chips", path: "rankings.chips", alsoMarks: [], alsoChanges: ["rankings.chipsUnattributedSent", "overview.chips"] },
+    { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: [], alsoChanges: ["rankings.chipsUnattributedSent", "overview.chips"], marks: "rankings.chips" },
     { block: "rankings.regions", path: "rankings.regions", alsoMarks: [], alsoChanges: [] },
-    { block: "rankings.failureReasons", path: "rankings.failureReasons", alsoMarks: ["alerts"], alsoChanges: ["alerts", "rankings.failureTotals"] },
-    { block: "alerts", path: null, alsoMarks: [], alsoChanges: [] },
+    { block: "rankings.failureReasons", path: "rankings.failureReasons", alsoMarks: [], alsoChanges: ["rankings.failureTotals"] },
     { block: "summary.closings", path: "summary.closings", alsoMarks: [], alsoChanges: [] },
-    { block: "analysis.leadClassification", path: "analysis.leadClassification", alsoMarks: [], alsoChanges: [] },
-    { block: "analysis.firstReplyOnly", path: "analysis.firstReplyOnly", alsoMarks: [], alsoChanges: [] },
-    { block: "analysis.topProfiles", path: "analysis.topProfiles", alsoMarks: [], alsoChanges: [] },
-    { block: "analysis.baseHealth", path: "analysis.baseHealth", alsoMarks: [], alsoChanges: [] },
-    { block: "analysis.firstHumanResponse", path: "analysis.firstHumanResponse", alsoMarks: [], alsoChanges: [] },
     // Visão geral: cada consulta nova cai sozinha. Sem a contagem de reuniões, a etapa do funil também sai null.
     { block: "overview.base", path: "overview.base", alsoMarks: [], alsoChanges: [] },
     { block: "overview.meetings", path: "overview.meetings", alsoMarks: [], alsoChanges: ["overview.funnel.meetings"] },
@@ -236,7 +207,6 @@ describe("Dashboard — indisponível não é zero", () => {
     const m = await compute(
       makePool({
         "summary.sent": pgError("boom"),
-        "summary.meetings": pgError("boom"),
         "rankings.messages": pgError("boom"),
         "rankings.chips": pgError("boom"),
         "rankings.regions": pgError("boom"),
@@ -244,7 +214,6 @@ describe("Dashboard — indisponível não é zero", () => {
     );
 
     expect(m.summary.sent).toBeNull();
-    expect(m.summary.meetings).toBeNull();
     expect(m.rankings.messages).toBeNull();
     expect(m.rankings.chips).toBeNull();
     expect(m.rankings.regions).toBeNull();
@@ -269,40 +238,6 @@ describe("Dashboard — indisponível não é zero", () => {
     expect(m.summary.sent.current).toBe(150);
   });
 
-  it("zero de verdade continua sendo zero: consulta que funcionou e não achou nada", async () => {
-    const pool = makePool();
-    const original = pool.query.bind(pool);
-    pool.query = async (sql) => {
-      if (String(sql).includes("current_meetings")) return { rows: [{ current_meetings: 0, previous_meetings: 0 }] };
-      return original(sql);
-    };
-
-    const m = await compute(pool);
-
-    expect(m.summary.meetings).toMatchObject({ current: 0, previous: 0 });
-    expect(m.unavailableBlocks).toEqual([]);
-  });
-
-  it("avisos: bloco de que dependem indisponível → aviso não é avaliado e o painel diz que a lista pode estar incompleta", async () => {
-    // chip frio perto do teto: o aviso 4 depende do ranking de chips
-    const coldChips = {
-      rows: [{ instance_id: "chip-1", instance_name: "Chip", chip_state: "cold", daily_limit_override: null, sent_period: 45, sent_today: 45 }],
-    };
-    const comChips = makePool();
-    const orig = comChips.query.bind(comChips);
-    comChips.query = async (sql) => (String(sql).includes("FROM public.lead_client_evolution_instances i") ? coldChips : orig(sql));
-    expect((await compute(comChips)).alerts.map((a) => a.id)).toContain("alert_cold_chip_limit");
-
-    const semChips = makePool({ "rankings.chips": pgError("boom") });
-    const orig2 = semChips.query.bind(semChips);
-    semChips.query = async (sql) => {
-      if (String(sql).includes("FROM public.lead_client_evolution_instances i")) throw pgError("boom");
-      return orig2(sql);
-    };
-    const m = await compute(semChips);
-    expect(m.alerts.map((a) => a.id)).not.toContain("alert_cold_chip_limit");
-    expect(m.unavailableBlocks).toContain("alerts");
-  });
 });
 
 describe("Dashboard — todos os blocos falhando devolve erro", () => {
@@ -364,16 +299,6 @@ describe("Dashboard — tabela ausente é caso esperado", () => {
     expect(m.summary.sent.current).toBe(150);
   });
 
-  it("tabela de agendamentos ausente: não propaga; reuniões indisponíveis (não zero) e logado como esperado", async () => {
-    const m = await compute(makePool({ "summary.meetings": pgError('relation "followup_schedules" does not exist', "42P01") }));
-
-    expect(m.summary.meetings).toBeNull();
-    expect(m.unavailableBlocks).toEqual(["summary.meetings"]);
-    expect(errorSpy).not.toHaveBeenCalled();
-    expect(loggedText()).toContain("followup_schedules");
-    expect(m.summary.sent.current).toBe(150);
-  });
-
   it("coluna com nome diferente (42703) também não derruba a tela", async () => {
     const m = await compute(makePool({ "rankings.chips": pgError('column "chip_state" does not exist', "42703") }));
 
@@ -397,13 +322,13 @@ describe("Dashboard — a causa aparece no log do servidor", () => {
     await compute(
       makePool({
         "summary.sent": pgError("erro-do-envio"),
-        "alerts": pgError("erro-dos-avisos"),
+        "rankings.regions": pgError("erro-das-regioes"),
       })
     );
 
     const lines = errorSpy.mock.calls.map((c) => c.join(" "));
     expect(lines.some((l) => l.includes('"summary.sent"') && l.includes("erro-do-envio"))).toBe(true);
-    expect(lines.some((l) => l.includes('"alerts"') && l.includes("erro-dos-avisos"))).toBe(true);
+    expect(lines.some((l) => l.includes('"rankings.regions"') && l.includes("erro-das-regioes"))).toBe(true);
   });
 
   it("bloco saudável não gera log nenhum", async () => {

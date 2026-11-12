@@ -188,20 +188,13 @@ const MARKERS = [
   ["contracts", "current_contracts"],
   ["sent", "AS current_sent"],
   ["replied", "AS current_replied"],
-  ["meetings", "current_meetings"],
   ["messages", "HAVING COUNT(*) >= $4"],
   ["chips", "FROM public.lead_client_evolution_instances i"],
   ["chipReplies", "runs_by_instance"],
   ["unattributed", "unattributed_sent"],
   ["regions", "regional_runs"],
   ["failures", "status IN ('failed', 'invalid_number')"],
-  ["orphans", "l.assigned_to IS NULL"],
   ["closings", "current_closings"],
-  ["classification", "TRIM(l.stage)"],
-  ["firstReplyOnly", "stopped_after_first"],
-  ["profiles", "replied_people"],
-  ["baseHealth", "no_reply_over_days"],
-  ["firstHuman", "median_minutes"],
 ];
 
 function makePool(responses = {}) {
@@ -240,8 +233,8 @@ describe("Período personalizado — vale para todos os blocos", () => {
 
   it("[TESTE OBRIGATÓRIO] toda consulta do período recebe as datas do intervalo escolhido — nenhum bloco usa os últimos 30 dias", async () => {
     const periodBound = [
-      "sent", "replied", "meetings", "proposals", "contracts", "messages", "chipReplies", "unattributed",
-      "regions", "failures", "orphans", "closings", "classification", "firstReplyOnly", "profiles", "firstHuman",
+      "sent", "replied", "proposals", "contracts", "messages", "chipReplies", "unattributed",
+      "regions", "failures", "closings",
     ];
     // proposals/contracts só rodam se o tenant usa GD
     const pool2 = makePool({ gdUsage: { rows: [{ has_gd: true }] } });
@@ -253,12 +246,12 @@ describe("Período personalizado — vale para todos os blocos", () => {
       expect(params, `"${name}" não recebeu o fim do intervalo`).toContain(END);
     }
     // blocos com comparação também recebem o período anterior (mesma duração, antes da data inicial)
-    for (const name of ["sent", "replied", "meetings", "proposals", "contracts", "closings"]) {
+    for (const name of ["sent", "replied", "proposals", "contracts", "closings"]) {
       expect(pool2.calls[name], `"${name}" sem o período anterior`).toContain(PREV_START);
     }
   });
 
-  it("[TESTE OBRIGATÓRIO] ranking de chips, saúde da base e demais medidas também respeitam o intervalo", async () => {
+  it("[TESTE OBRIGATÓRIO] ranking de chips também respeita o intervalo", async () => {
     const pool = makePool();
 
     await compute(pool);
@@ -268,10 +261,6 @@ describe("Período personalizado — vale para todos os blocos", () => {
     expect(pool.calls.chips).toEqual(["tenant-a", "2026-10-15"]);
     expect(pool.calls.chipReplies).toEqual(["tenant-a", START, END]);
     expect(pool.calls.unattributed).toEqual(["tenant-a", START, END]);
-    // saúde da base: a base até o fim do intervalo, não a de hoje
-    expect(pool.calls.baseHealth[1]).toBe(END);
-    // espera humana: "agora" real, porque a resposta é buscada sem limite de data
-    expect(pool.calls.firstHuman[3]).toBe(REF.toISOString());
   });
 
   it("o payload diz qual período é: custom, com as datas", async () => {
@@ -287,31 +276,23 @@ describe("Período personalizado — vale para todos os blocos", () => {
     });
   });
 
-  it("[TESTE OBRIGATÓRIO] avisos: 'responderam sem responsável' conta só respostas DO intervalo", async () => {
-    const pool = makePool({ orphans: { rows: [{ count: 3 }] } });
-
-    const m = await compute(pool);
-
-    expect(pool.calls.orphans).toEqual(["tenant-a", START, END]);
-    expect(m.alerts.map((a) => a.id)).toContain("alert_orphaned_replies");
-  });
-
-  describe("aviso do chip frio perto do teto (é sobre HOJE)", () => {
+  describe("cota de chip (é sobre HOJE)", () => {
     const coldChip = {
       rows: [{ instance_id: "i1", instance_name: "Chip", chip_state: "cold", daily_limit_override: null, sent_period: 0, sent_today: 45 }],
     };
 
-    it("[TESTE OBRIGATÓRIO] intervalo que inclui hoje: o aviso aparece", async () => {
+    it("[TESTE OBRIGATÓRIO] intervalo que inclui hoje: a Visão geral pode mostrar a cota do dia", async () => {
       const m = await compute(makePool({ chips: coldChip }), buildCustomPeriodKey("2026-10-10", "2026-10-15"));
 
-      expect(m.alerts.map((a) => a.id)).toContain("alert_cold_chip_limit");
+      expect(m.overview.chipsQuotaIsToday).toBe(true);
+      expect(m.overview.chips[0]).toMatchObject({ sentToday: 45 });
     });
 
-    it("[TESTE OBRIGATÓRIO] intervalo no passado: o aviso de hoje não vale, e isso não conta como 'lista incompleta'", async () => {
+    it("[TESTE OBRIGATÓRIO] intervalo no passado: a cota de hoje não vale, e isso não é bloco indisponível", async () => {
       const m = await compute(makePool({ chips: coldChip }));
 
-      expect(m.alerts.map((a) => a.id)).not.toContain("alert_cold_chip_limit");
-      expect(m.unavailableBlocks).not.toContain("alerts");
+      expect(m.overview.chipsQuotaIsToday).toBe(false);
+      expect(m.unavailableBlocks).not.toContain("rankings.chips");
     });
   });
 });

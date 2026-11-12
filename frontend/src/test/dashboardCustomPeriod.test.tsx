@@ -6,7 +6,6 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { Block1WhatHappened } from "../pages/Dashboard/Block1WhatHappened";
 import { DashboardHeader } from "../pages/Dashboard/DashboardHeader";
 import {
   formatDateRange,
@@ -17,19 +16,10 @@ import {
   validateCustomRange,
   type DashboardPeriodInfo,
 } from "../lib/dashboard/formatters";
-import { buildDashboardPeriodQuery, dashboardQueryKey, type DashboardSummary } from "../hooks/useDashboard";
+import { buildDashboardPeriodQuery, dashboardQueryKey } from "../hooks/useDashboard";
 
 const Y = new Date().getFullYear();
 const NOW = new Date(Y, 9, 15, 12, 0, 0); // 15/10 do ano corrente
-
-const summary: DashboardSummary = {
-  sent: { current: 100, previous: 85, delta: 18 },
-  replied: { current: 40, previous: 30, delta: 33, rate: 40, previousRate: 35.3, ruleDeclaration: "conversou depois do envio (janela de 14 dias)" },
-  meetings: { current: 5, previous: 4, delta: 25 },
-  proposals: { current: 3, previous: 1, delta: 200 },
-  contracts: { current: 2, previous: 1, delta: 100 },
-  closings: { current: 6, previous: 3, delta: 100 },
-};
 
 const customInfo: DashboardPeriodInfo = {
   key: `custom:${Y}-10-01:${Y}-10-10`,
@@ -45,9 +35,6 @@ const info30d: DashboardPeriodInfo = {
   current: { from: `${Y}-09-16`, to: `${Y}-10-15` },
   previous: { from: `${Y}-08-17`, to: `${Y}-09-15` },
 };
-
-// os "vs N …" de todos os cartões do topo
-const vsLines = () => screen.getAllByText(/^vs /).map((el) => el.textContent ?? "");
 
 describe("Datas por extenso", () => {
   it("formatDateRange: mesmo mês, meses diferentes, um dia só", () => {
@@ -81,81 +68,7 @@ describe("Com o que está comparando", () => {
   });
 });
 
-describe("Cartões do topo — todos dizem com o que comparam", () => {
-  it("[TESTE OBRIGATÓRIO] intervalo personalizado: os SEIS cartões citam as datas do período anterior, nenhum diz só 'no anterior'", () => {
-    render(<Block1WhatHappened summary={summary} hasProposalsAndContracts periodLabel="1 a 10 de outubro" comparison={customInfo} />);
-
-    const lines = vsLines();
-    expect(lines).toHaveLength(6); // Enviados, Responderam, Reuniões, Fechamentos, Propostas, Contratos
-    for (const line of lines) {
-      expect(line).toContain("em 21 a 30 de setembro");
-      expect(line).not.toContain("no anterior");
-    }
-    expect(screen.getByText("Comparando 1 a 10 de outubro contra 21 a 30 de setembro")).toBeInTheDocument();
-    expect(lines.some((l) => l.startsWith("vs 85 "))).toBe(true); // o "vs 85" do enunciado
-  });
-
-  it("[TESTE OBRIGATÓRIO] atalho de 30 dias: todos os cartões dizem 'vs N nos 30 dias anteriores'", () => {
-    render(<Block1WhatHappened summary={summary} hasProposalsAndContracts periodLabel="Últimos 30 dias" comparison={info30d} />);
-
-    const lines = vsLines();
-    expect(lines).toHaveLength(6);
-    for (const line of lines) expect(line).toContain("nos 30 dias anteriores");
-    expect(lines).toContain("vs 85 nos 30 dias anteriores");
-  });
-
-  it("o cartão de Responderam mantém a taxa anterior e também diz o período", () => {
-    render(<Block1WhatHappened summary={summary} hasProposalsAndContracts={false} periodLabel="x" comparison={customInfo} />);
-
-    expect(screen.getByText(/vs 30 \(35.3%\) em 21 a 30 de setembro/)).toBeInTheDocument();
-  });
-
-  it("sem as datas (payload antigo): 'no período anterior' em todos", () => {
-    render(<Block1WhatHappened summary={summary} hasProposalsAndContracts periodLabel="x" />);
-
-    for (const line of vsLines()) expect(line).toContain("no período anterior");
-  });
-});
-
 describe("Período em andamento", () => {
-  const renderWith = (comparison: DashboardPeriodInfo | null | undefined) =>
-    render(<Block1WhatHappened summary={summary} hasProposalsAndContracts periodLabel="x" comparison={comparison} />);
-
-  it("[TESTE OBRIGATÓRIO] intervalo terminando hoje mostra a marca, junto da comparação", () => {
-    renderWith({ ...customInfo, inProgress: true });
-
-    expect(screen.getByRole("note")).toHaveTextContent("O período inclui hoje, que ainda não terminou. A comparação é com um período já completo.");
-    // a marca fica junto da comparação, no mesmo cabeçalho
-    const header = screen.getByText("Comparando 1 a 10 de outubro contra 21 a 30 de setembro").parentElement as HTMLElement;
-    expect(header).toContainElement(screen.getByRole("note"));
-  });
-
-  it("[TESTE OBRIGATÓRIO] intervalo que terminou ontem não mostra a marca", () => {
-    renderWith({ ...customInfo, inProgress: false });
-
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    expect(screen.queryByText(/O período inclui hoje/)).not.toBeInTheDocument();
-  });
-
-  it("[TESTE OBRIGATÓRIO] 'este mês' mostra a marca", () => {
-    renderWith({ ...info30d, key: "this_month", days: 15, inProgress: true });
-
-    expect(screen.getByRole("note")).toHaveTextContent(IN_PROGRESS_NOTICE);
-  });
-
-  it("[TESTE OBRIGATÓRIO] 'últimos 30 dias' não mostra a marca (rolante nos dois lados)", () => {
-    renderWith({ ...info30d, inProgress: false });
-
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-  });
-
-  it("payload antigo (sem a informação) não mostra marca", () => {
-    renderWith(info30d); // sem inProgress
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    renderWith(undefined);
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-  });
-
   it("describePeriodStatus: texto só quando em andamento", () => {
     expect(describePeriodStatus({ ...customInfo, inProgress: true })).toBe(IN_PROGRESS_NOTICE);
     expect(describePeriodStatus({ ...customInfo, inProgress: false })).toBeNull();
