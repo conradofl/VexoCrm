@@ -603,5 +603,55 @@ describe("Agendador Autônomo de Briefing (Frente 4)", () => {
       expect(() => startGdBriefingReminderScheduler({ intervalMs: 60000 })).not.toThrow();
       expect(() => stopGdBriefingReminderScheduler()).not.toThrow();
     });
+
+    it("rejeita instância legada vexo-adm-vexo-atende e prioriza geracao-digital-comercial-hostery", async () => {
+      const prevEnv = process.env.GD_ONBOARDING_EVOLUTION_INSTANCE;
+      process.env.GD_ONBOARDING_EVOLUTION_INSTANCE = "vexo-adm-vexo-atende";
+      try {
+        const clienteId = await criarClienteExemplo({
+          estado: "BRIEFING_AGENDADO",
+          grupoClienteJid: "120363000888@g.us",
+        });
+
+        const agora = new Date("2026-11-10T12:05:00.000Z");
+        await db.query(
+          `UPDATE public.gd_clientes
+              SET briefing_agendado_inicio = '2026-11-10T13:00:00.000Z',
+                  briefing_agendado_fim = '2026-11-10T14:00:00.000Z',
+                  briefing_meet_url = 'https://meet.google.com/vexo-teste',
+                  briefing_lembrete_vespera_agendado_para = '2026-11-09T22:00:00.000Z',
+                  briefing_lembrete_vespera_enviado_em = '2026-11-09T22:01:00.000Z',
+                  briefing_lembrete_1h_agendado_para = '2026-11-10T12:00:00.000Z'
+            WHERE id = $1`,
+          [clienteId]
+        );
+
+        const res = await processarLembretesBriefing({
+          pool: poolDe(db),
+          now: agora,
+          evolutionSender: mockEvolutionMessageSender,
+          instanceName: "vexo-adm-vexo-atende",
+          clienteId,
+        });
+
+        expect(res.lembretes1h).toBe(1);
+
+        // Garante que vexo-adm-vexo-atende nunca é enviado para a Evolution
+        expect(mockEvolutionMessageSender).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            instanceName: "vexo-adm-vexo-atende",
+          })
+        );
+
+        // Garante que a instância foi sanitizada para geracao-digital-comercial-hostery
+        expect(mockEvolutionMessageSender).toHaveBeenCalledWith(
+          expect.objectContaining({
+            instanceName: "geracao-digital-comercial-hostery",
+          })
+        );
+      } finally {
+        process.env.GD_ONBOARDING_EVOLUTION_INSTANCE = prevEnv;
+      }
+    });
   });
 });

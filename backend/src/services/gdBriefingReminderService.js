@@ -20,9 +20,11 @@ import {
 } from "./gdCalendarService.js";
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { pgDatabasePool } from "./database.js";
+import { resolveCandidateEvolutionInstances } from "../domains/geracaoDigitalContracts/contractEvolutionResolver.js";
 
 export const GD_CAIO_WHATSAPP_PADRAO = "5534997719779";
 export const DEFAULT_TICK_INTERVAL_MS = 30_000; // 30 segundos
+export const LEGACY_INVALID_INSTANCES = new Set(["vexo-adm-vexo-atende"]);
 
 let _schedulerInterval = null;
 let _isProcessing = false;
@@ -42,11 +44,25 @@ export async function processarLembretesBriefing({
     return { processados: 0, lembretesVespera: 0, lembretes1h: 0, error: "DATABASE_UNAVAILABLE" };
   }
 
-  const effectiveInstance =
-    instanceName ||
-    process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-    process.env.GD_EVOLUTION_INSTANCE ||
+  // Resolução dinâmica de instância Evolution (prioriza instâncias ativas conectadas e rejeita legadas inválidas)
+  const candidateInstances = await resolveCandidateEvolutionInstances(db, instanceName).catch(() => []);
+  const validCandidates = (candidateInstances || []).filter(
+    (c) => c && c.slug && !LEGACY_INVALID_INSTANCES.has(c.slug)
+  );
+  const candidate = validCandidates[0] || {};
+  let effectiveInstance =
+    candidate.slug ||
+    (instanceName && !LEGACY_INVALID_INSTANCES.has(instanceName) ? instanceName : null) ||
+    (process.env.GD_ONBOARDING_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_ONBOARDING_EVOLUTION_INSTANCE) ? process.env.GD_ONBOARDING_EVOLUTION_INSTANCE : null) ||
+    (process.env.GD_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_EVOLUTION_INSTANCE) ? process.env.GD_EVOLUTION_INSTANCE : null) ||
     "geracao-digital-comercial-hostery";
+
+  if (LEGACY_INVALID_INSTANCES.has(effectiveInstance)) {
+    effectiveInstance = "geracao-digital-comercial-hostery";
+  }
+
+  const webhookToken = candidate.webhookToken || null;
+  const baseUrl = candidate.baseUrl || null;
   const caioNumero = process.env.GD_CAIO_WHATSAPP || GD_CAIO_WHATSAPP_PADRAO;
 
   // Busca clientes com briefing agendado cujo fim ainda não passou
@@ -96,6 +112,8 @@ export async function processarLembretesBriefing({
             instanceName: effectiveInstance,
             number: c.grupo_cliente_jid,
             text: textoCliente,
+            ...(webhookToken ? { webhookToken } : {}),
+            ...(baseUrl ? { baseUrl } : {}),
           });
         } catch (err) {
           console.warn(`[gdBriefingReminder] Falha ao enviar lembrete véspera no grupo ${c.grupo_cliente_jid}:`, err.message);
@@ -116,6 +134,8 @@ export async function processarLembretesBriefing({
           instanceName: effectiveInstance,
           number: caioNumero,
           text: textoCaio,
+          ...(webhookToken ? { webhookToken } : {}),
+          ...(baseUrl ? { baseUrl } : {}),
         });
       } catch (err) {
         console.warn(`[gdBriefingReminder] Falha ao enviar lembrete véspera para o Caio:`, err.message);
@@ -151,6 +171,8 @@ export async function processarLembretesBriefing({
             instanceName: effectiveInstance,
             number: c.grupo_cliente_jid,
             text: textoCliente,
+            ...(webhookToken ? { webhookToken } : {}),
+            ...(baseUrl ? { baseUrl } : {}),
           });
         } catch (err) {
           console.warn(`[gdBriefingReminder] Falha ao enviar lembrete 1h no grupo ${c.grupo_cliente_jid}:`, err.message);
@@ -170,6 +192,8 @@ export async function processarLembretesBriefing({
           instanceName: effectiveInstance,
           number: caioNumero,
           text: textoCaio,
+          ...(webhookToken ? { webhookToken } : {}),
+          ...(baseUrl ? { baseUrl } : {}),
         });
       } catch (err) {
         console.warn(`[gdBriefingReminder] Falha ao enviar lembrete 1h para o Caio:`, err.message);
@@ -282,11 +306,26 @@ export async function processarRespostaBriefingNoWhatsApp({
   const slotStart = slotEscolhido.inicio;
   const slotEnd = slotEscolhido.fim;
   const clientCalendarEmail = cliente.google_calendar_email || null;
-  const effectiveInstance =
-    instanceName ||
-    process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
-    process.env.GD_EVOLUTION_INSTANCE ||
+
+  // Resolução dinâmica de instância Evolution (prioriza instâncias ativas conectadas e rejeita legadas inválidas)
+  const candidateInstances = await resolveCandidateEvolutionInstances(pool, instanceName).catch(() => []);
+  const validCandidates = (candidateInstances || []).filter(
+    (c) => c && c.slug && !LEGACY_INVALID_INSTANCES.has(c.slug)
+  );
+  const candidate = validCandidates[0] || {};
+  let effectiveInstance =
+    candidate.slug ||
+    (instanceName && !LEGACY_INVALID_INSTANCES.has(instanceName) ? instanceName : null) ||
+    (process.env.GD_ONBOARDING_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_ONBOARDING_EVOLUTION_INSTANCE) ? process.env.GD_ONBOARDING_EVOLUTION_INSTANCE : null) ||
+    (process.env.GD_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_EVOLUTION_INSTANCE) ? process.env.GD_EVOLUTION_INSTANCE : null) ||
     "geracao-digital-comercial-hostery";
+
+  if (LEGACY_INVALID_INSTANCES.has(effectiveInstance)) {
+    effectiveInstance = "geracao-digital-comercial-hostery";
+  }
+
+  const webhookToken = candidate.webhookToken || null;
+  const baseUrl = candidate.baseUrl || null;
 
   // Cria evento no Google Calendar com Google Meet
   const eventResult = await calendarEventCreator({
@@ -369,6 +408,8 @@ export async function processarRespostaBriefingNoWhatsApp({
     instanceName: effectiveInstance,
     number: groupJid,
     text: textoCliente,
+    ...(webhookToken ? { webhookToken } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
   });
 
   // 2. Notifica Caio no WhatsApp
@@ -385,6 +426,8 @@ export async function processarRespostaBriefingNoWhatsApp({
     instanceName: effectiveInstance,
     number: caioNumero,
     text: textoCaio,
+    ...(webhookToken ? { webhookToken } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
   });
 
   return {
