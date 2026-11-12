@@ -152,6 +152,10 @@ describe("Dashboard — baseline saudável", () => {
     expect(m.rankings.chips.length).toBe(1);
     expect(m.rankings.regions.length).toBe(1);
     expect(m.rankings.failureReasons.length).toBe(2);
+    // As abas de detalhe recebem as listas inteiras das mesmas consultas dos rankings.
+    expect(m.overview.campaigns.length).toBe(m.rankings.messages.length);
+    expect(m.overview.regions.length).toBe(m.rankings.regions.length);
+    expect(m.overview.chips[0]).toMatchObject({ chipState: expect.any(String), sent: expect.any(Number), replies: expect.any(Number) });
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
@@ -163,10 +167,10 @@ describe("Dashboard — cada bloco falhando individualmente mantém os outros", 
     { block: "summary.replied", path: "summary.replied", alsoMarks: [], alsoChanges: ["overview.funnel.received", "overview.funnel.replied"] },
     { block: "summary.proposals", path: "summary.proposals", alsoMarks: [], alsoChanges: [] },
     { block: "summary.contracts", path: "summary.contracts", alsoMarks: [], alsoChanges: [] },
-    { block: "rankings.messages", path: "rankings.messages", alsoMarks: [], alsoChanges: [] },
+    { block: "rankings.messages", path: "rankings.messages", alsoMarks: [], alsoChanges: ["overview.campaigns"] },
     { block: "rankings.chips", path: "rankings.chips", alsoMarks: [], alsoChanges: ["rankings.chipsUnattributedSent", "overview.chips"] },
     { block: "rankings.chips.replies", path: "rankings.chips", alsoMarks: [], alsoChanges: ["rankings.chipsUnattributedSent", "overview.chips"], marks: "rankings.chips" },
-    { block: "rankings.regions", path: "rankings.regions", alsoMarks: [], alsoChanges: [] },
+    { block: "rankings.regions", path: "rankings.regions", alsoMarks: [], alsoChanges: ["overview.regions"] },
     { block: "rankings.failureReasons", path: "rankings.failureReasons", alsoMarks: [], alsoChanges: ["rankings.failureTotals"] },
     { block: "summary.closings", path: "summary.closings", alsoMarks: [], alsoChanges: [] },
     // Visão geral: cada consulta nova cai sozinha. Sem a contagem de reuniões, a etapa do funil também sai null.

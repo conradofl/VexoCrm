@@ -282,6 +282,15 @@ export function buildFirstHumanResponseCoverageSql() {
         WHERE human_at IS NULL AND unknown_at IS NULL
           AND in_at < $4::timestamptz - make_interval(hours => ${SLOW_FIRST_RESPONSE_HOURS})
       )::int AS coverage_waiting_over_threshold,
+      -- Faixas de espera de quem FOI respondido por gente. As quatro somam coverage_answered.
+      COUNT(*) FILTER (WHERE human_at IS NOT NULL AND human_at - in_at <= interval '10 minutes')::int AS coverage_bucket_10m,
+      COUNT(*) FILTER (
+        WHERE human_at IS NOT NULL AND human_at - in_at > interval '10 minutes' AND human_at - in_at <= interval '30 minutes'
+      )::int AS coverage_bucket_30m,
+      COUNT(*) FILTER (
+        WHERE human_at IS NOT NULL AND human_at - in_at > interval '30 minutes' AND human_at - in_at <= interval '2 hours'
+      )::int AS coverage_bucket_2h,
+      COUNT(*) FILTER (WHERE human_at IS NOT NULL AND human_at - in_at > interval '2 hours')::int AS coverage_bucket_over_2h,
       (percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (human_at - in_at)) / 60.0)
         FILTER (WHERE human_at IS NOT NULL))::float AS coverage_median_min,
       (percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (human_at - in_at)) / 60.0)
@@ -316,6 +325,13 @@ export function buildFirstHumanResponseCoverageResult(row) {
     waitingOverThreshold: int(row?.coverage_waiting_over_threshold),
     answeredWithUnknownBefore: int(row?.coverage_answered_unknown_first),
     thresholdHours: SLOW_FIRST_RESPONSE_HOURS,
+    // Quanto as pessoas esperaram pela primeira resposta de gente. Soma = answered.
+    waitBuckets: {
+      upTo10m: int(row?.coverage_bucket_10m),
+      upTo30m: int(row?.coverage_bucket_30m),
+      upTo2h: int(row?.coverage_bucket_2h),
+      over2h: int(row?.coverage_bucket_over_2h),
+    },
     medianMinutes: answered > 0 ? num(row?.coverage_median_min) : null,
     p90Minutes: answered > 0 ? num(row?.coverage_p90_min) : null,
   };
@@ -365,5 +381,46 @@ export async function measureWaiting(pool, { clientId, now }, { loadSource = def
     waiting: result.waiting,
     waitingOverThreshold: isCount(result.waitingOverThreshold) ? result.waitingOverThreshold : null,
     thresholdHours: SLOW_FIRST_RESPONSE_HOURS,
+  };
+}
+
+// ── Aba Atendimento: a fila da tela Conversas, em detalhe ─────────────────
+// Não existe segunda conta. Os quatro estados e a lista de quem espera há mais tempo saem das MESMAS
+// funções que a tela Conversas usa (contadores da coluna e página da aba "Esperam você"), com o mesmo
+// teto de tempo. O Dashboard só escolhe quantas linhas mostrar.
+export const QUEUE_OLDEST_LIMIT = 5;
+
+export async function measureQueue(pool, { clientId, now }, { loadModule = () => import("./inboxWorkState.js"), deps = {} } = {}) {
+  const queue = await loadModule();
+  const { pauseExpiredSql, robotInfo } = await queue.loadWorkStateContext(pool, clientId, deps);
+  const options = { clientId, now, robotChips: robotInfo.robotChips, chipAliases: null, pauseExpiredSql };
+  const run = async (query) => {
+    const counts = await queue.fetchInboxCounts(query, options);
+    const oldest =
+      counts.work.esperam > 0
+        ? await queue.fetchWorkStatePage(query, { ...options, state: "esperam", limit: QUEUE_OLDEST_LIMIT, offset: 0 })
+        : [];
+    return { counts, oldest };
+  };
+  const { counts, oldest } =
+    typeof pool?.connect === "function"
+      ? await queue.withStatementTimeout(pool, queue.WORK_STATE_QUERY_TIMEOUT_MS, run)
+      : await run((sql, params) => pool.query(sql, params));
+  return {
+    states: {
+      waiting: int(counts.work.esperam),
+      withLead: int(counts.work.com_lead),
+      withRobot: int(counts.work.robo),
+      cooled: int(counts.work.esfriaram),
+    },
+    waitingOverThreshold: int(counts.waitingOverThreshold),
+    thresholdHours: queue.WAITING_THRESHOLD_HOURS,
+    // Quem espera há mais tempo, na ordem da própria aba. Nome do lead quando existe; senão o do contato.
+    oldest: oldest.map((row) => ({
+      phone: row.phone_number,
+      name: row.lead_name || row.contact_name || row.profile_name || null,
+      chip: row.lead_chip || null,
+      waitingSince: row.last_in_at ? iso(row.last_in_at instanceof Date ? row.last_in_at : new Date(row.last_in_at)) : null,
+    })),
   };
 }

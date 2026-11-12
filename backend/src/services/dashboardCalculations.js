@@ -32,6 +32,7 @@ import {
   measureMeetings,
   measureFunnelMeetings,
   measureFirstHumanResponseCoverage,
+  measureQueue,
   measureWaiting,
 } from "./dashboardOverview.js";
 
@@ -302,6 +303,9 @@ function createBlockRunner(clientId, period, unavailable, failures = []) {
 
 // Blocos que entram na regra "só devolve erro quando nada pôde ser calculado".
 // Propostas/contratos ficam de fora: um tenant sem Geração Digital não os calcula nunca.
+// Teto das listas das abas de detalhe (campanhas e regiões).
+const OVERVIEW_LIST_LIMIT = 50;
+
 const CORE_BLOCKS = [
   "summary.sent",
   "summary.replied",
@@ -785,6 +789,7 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const overviewWaitingBlock = await runBlock("overview.waiting", () =>
     measureWaiting(pool, analysisCtx, options.loadWaitingSource ? { loadSource: options.loadWaitingSource } : undefined)
   );
+  const overviewQueueBlock = await runBlock("overview.queue", () => measureQueue(pool, analysisCtx, options.queueOptions));
 
   // A cota de chip é do DIA: só vale quando o período escolhido inclui hoje.
   const periodIncludesToday = todayKey >= periodInfo.current.from && todayKey <= periodInfo.current.to;
@@ -872,6 +877,10 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
             .map((chip) => ({
               instanceId: chip.instanceId,
               name: chip.name,
+              chipState: chip.chipState,
+              // Envios e pessoas que responderam NO PERÍODO, pelo chip gravado no envio (aba Chips).
+              sent: chip.sent,
+              replies: chip.replies,
               sentToday: chip.sentToday,
               quotaLimit: chip.quotaLimit,
               quotaPercentage: chip.quotaPercentage,
@@ -880,6 +889,12 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       // A cota é do DIA: só faz sentido quando o período inclui hoje.
       chipsQuotaIsToday: periodIncludesToday,
       firstHumanResponse: overviewResponseTimeBlock.value,
+      // Abas de detalhe: as listas INTEIRAS que os rankings acima cortam em 3 (com teto, para o payload não crescer
+      // sem limite). Mesmas consultas, mesmos números; bloco que falhou sai null.
+      campaigns: messageEffectivenessRows ? messageEffectivenessRows.slice(0, OVERVIEW_LIST_LIMIT) : null,
+      regions: regionBlock.ok ? (regionBlock.value || []).slice(0, OVERVIEW_LIST_LIMIT) : null,
+      // Aba Atendimento: os quatro estados da fila de Conversas e quem espera há mais tempo (mesma fila, mesma conta).
+      queue: overviewQueueBlock.value,
     },
   };
 }

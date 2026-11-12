@@ -12,6 +12,7 @@ import {
   measureFirstHumanResponseCoverage,
   measureFunnelMeetings,
   measureMeetings,
+  measureQueue,
   measureWaiting,
 } from "../services/dashboardOverview.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
@@ -323,6 +324,129 @@ describe("'Pessoas esperam resposta' depende da tela Conversas", () => {
       const r = await measureWaiting(db, { clientId: T, now: NOW }, { loadSource: async () => async () => bad });
       expect(r).toEqual({ status: "pending_source" });
     }
+  });
+});
+
+describe("Aba Atendimento: faixas de espera", () => {
+  const TB = "tenant-faixas";
+  beforeAll(async () => {
+    const at = (min) => new Date(Date.parse("2026-11-01T10:00:00Z") + min * 60000).toISOString();
+    await db.exec(
+      [
+        // p1: 5 min · p2: exatamente 10 min (ainda "até 10") · p3: 20 min · p4: 1 hora · p5: 3 horas · p6: sem resposta
+        ...[["5534993330001", 5], ["5534993330002", 10], ["5534993330003", 20], ["5534993330004", 60], ["5534993330005", 180]].flatMap(([phone, wait]) => [
+          msg(TB, phone, "inbound", at(0), "lead"),
+          msg(TB, phone, "outbound", at(wait), "device"),
+        ]),
+        msg(TB, "5534993330006", "inbound", at(0), "lead"),
+      ].join("\n")
+    );
+  });
+
+  it("[TESTE OBRIGATÓRIO] as quatro faixas somam quem foi respondido por gente; o limite da faixa entra na faixa de baixo", async () => {
+    const r = await measureFirstHumanResponseCoverage(db, { clientId: TB, ...PERIOD });
+    expect(r.answered).toBe(5);
+    expect(r.waitBuckets).toEqual({ upTo10m: 2, upTo30m: 1, upTo2h: 1, over2h: 1 });
+    expect(Object.values(r.waitBuckets).reduce((a, b) => a + b, 0)).toBe(r.answered);
+    expect(r.waiting).toBe(1);
+  });
+
+  it("empresa sem conversa: faixas zeradas, sem inventar distribuição", async () => {
+    const r = await measureFirstHumanResponseCoverage(db, { clientId: "tenant-vazio", ...PERIOD });
+    expect(r.waitBuckets).toEqual({ upTo10m: 0, upTo30m: 0, upTo2h: 0, over2h: 0 });
+  });
+});
+
+describe("Aba Atendimento: a fila é a da tela Conversas", () => {
+  const TQ = "tenant-fila";
+  const deps = { settings: null, loadInstances: async () => [] };
+  let warnSpy;
+  beforeAll(async () => {
+    // O que a consulta da fila lê e esta base de teste do Dashboard não tinha.
+    await db.exec(`
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS instance_name text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS message_text text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS contact_name text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS meta jsonb;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS nome text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_origin text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS source_campaign_id uuid;
+      CREATE TABLE IF NOT EXISTS whatsapp_chat_states (
+        client_id text NOT NULL, phone text NOT NULL, state text NOT NULL DEFAULT 'ativa', reason text, source text, changed_by text,
+        attended_at timestamptz, attended_by text, agent_muted_at timestamptz, agent_muted_reason text, agent_muted_source text,
+        agent_mute_last_human_at timestamptz, PRIMARY KEY (client_id, phone)
+      );
+      CREATE TABLE IF NOT EXISTS whatsapp_lid_map (lid text, profile_pic text, contact_name text);
+    `);
+    const ago = (hours) => new Date(NOW.getTime() - hours * 3600000).toISOString();
+    const inbound = (phone, hours, chip, contact) =>
+      `INSERT INTO lead_messages (client_id, phone, direction, sender_type, message_timestamp, instance_name, message_text, contact_name) VALUES ('${TQ}', '${phone}', 'inbound', 'lead', '${ago(hours)}', '${chip}', 'oi', ${contact ? `'${contact}'` : "NULL"});`;
+    await db.exec(
+      [
+        `INSERT INTO leads (client_id, telefone, nome) VALUES ('${TQ}', '5534994440001', 'Jéssica Mendonça');`,
+        inbound("5534994440001", 5, "Comercial", "Jé"), // espera há 5 h: passou do limite; o nome do lead vence o do contato
+        inbound("5534994440002", 1, "Pessoal", "Marcos"), // espera há 1 h; sem lead, vale o nome do contato
+        inbound("5534994440003", 2, "Comercial", null), // respondida depois: está "com o lead", não espera
+        `INSERT INTO lead_messages (client_id, phone, direction, sender_type, message_timestamp, instance_name, message_text) VALUES ('${TQ}', '5534994440003', 'outbound', 'device', '${ago(1.5)}', 'Comercial', 'olá');`,
+      ].join("\n")
+    );
+  });
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("[TESTE OBRIGATÓRIO] os números são os dos contadores da tela Conversas, não uma segunda conta", async () => {
+    const queue = await import("../services/inboxWorkState.js");
+    const ctx = await queue.loadWorkStateContext(db, TQ, deps);
+    const direto = await queue.fetchInboxCounts((sql, params) => db.query(sql, params), {
+      clientId: TQ, now: NOW, robotChips: ctx.robotInfo.robotChips, chipAliases: null, pauseExpiredSql: ctx.pauseExpiredSql,
+    });
+    const viaContrato = await queue.countWaitingForDashboard(db, { clientId: TQ, now: NOW }, deps);
+
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps });
+
+    expect(r.states).toEqual({ waiting: direto.work.esperam, withLead: direto.work.com_lead, withRobot: direto.work.robo, cooled: direto.work.esfriaram });
+    expect(r.states.waiting).toBe(viaContrato.waiting);
+    expect(r.waitingOverThreshold).toBe(viaContrato.waitingOverThreshold);
+    expect(r.states).toMatchObject({ waiting: 2, withLead: 1 });
+    expect(r.waitingOverThreshold).toBe(1);
+    expect(r.thresholdHours).toBe(3);
+  });
+
+  it("[TESTE OBRIGATÓRIO] quem espera há mais tempo vem primeiro, com nome, chip e desde quando", async () => {
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps });
+
+    expect(r.oldest.map((o) => o.phone)).toEqual(["5534994440001", "5534994440002"]);
+    expect(r.oldest[0]).toMatchObject({ name: "Jéssica Mendonça", chip: "Comercial" });
+    expect(r.oldest[1]).toMatchObject({ name: "Marcos", chip: "Pessoal" });
+    expect(Date.parse(r.oldest[0].waitingSince)).toBe(NOW.getTime() - 5 * 3600000);
+    // Quem já foi respondido não aparece na lista.
+    expect(r.oldest.some((o) => o.phone === "5534994440003")).toBe(false);
+  });
+
+  it("empresa sem ninguém esperando: zero e lista vazia, sem consultar a página", async () => {
+    const r = await measureQueue(db, { clientId: "tenant-vazio", now: NOW }, { deps });
+    expect(r.states).toEqual({ waiting: 0, withLead: 0, withRobot: 0, cooled: 0 });
+    expect(r.oldest).toEqual([]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] fila que falha vira bloco indisponível no payload, nunca zero", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const metrics = await calculateDashboardMetrics(db, TQ, "30d", {
+      referenceDate: NOW,
+      queueOptions: { loadModule: async () => { throw new Error("fila fora do ar"); } },
+    });
+    expect(metrics.overview.queue).toBeNull();
+    expect(metrics.unavailableBlocks).toContain("overview.queue");
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("no payload, a fila da aba Atendimento e o bloco 1 dizem o mesmo número", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const metrics = await calculateDashboardMetrics(db, TQ, "30d", { referenceDate: NOW, queueOptions: { deps } });
+    expect(metrics.overview.queue.states.waiting).toBe(metrics.overview.waiting.waiting);
+    expect(metrics.overview.queue.oldest).toHaveLength(2);
   });
 });
 
