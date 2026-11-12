@@ -19,6 +19,10 @@ export const AUDIO_LIBRARY_MAX_BYTES = 5 * 1024 * 1024;
 export const AUDIO_LIBRARY_MAX_SECONDS = 180;
 export const AUDIO_LIBRARY_NAME_MAX = 80;
 export const AUDIO_LIBRARY_WHEN_TO_USE_MAX = 140;
+// Fase 3: quantos áudios um agente de atendimento pode ter ligados. O catálogo
+// desses áudios entra no prompt a cada turno; o teto protege a cota de tokens
+// por minuto do provedor de IA.
+export const AGENT_AUDIO_MAX_ITEMS = 10;
 
 const SELECT_COLUMNS = `id, client_id, name, when_to_use, storage_key, mime_type, size_bytes,
   duration_seconds, created_by_uid, created_at, updated_at, archived_at`;
@@ -143,7 +147,10 @@ export async function listAudios(db, clientId) {
             (SELECT count(*)::int
                FROM public.followup_templates ft
                JOIN public.followup_campaigns fc ON fc.id = ft.campaign_id
-              WHERE ft.audio_library_id = al.id AND fc.status <> 'archived') AS followup_steps
+              WHERE ft.audio_library_id = al.id AND fc.status <> 'archived') AS followup_steps,
+            (SELECT coalesce(array_agg(ala.company_id::text ORDER BY ala.created_at, ala.company_id), '{}')
+               FROM public.audio_library_agents ala
+              WHERE ala.audio_id = al.id AND ala.client_id = al.client_id) AS agent_ids
        FROM public.audio_library al
       WHERE al.client_id = $1 AND al.archived_at IS NULL
       ORDER BY al.created_at DESC`,
@@ -181,7 +188,17 @@ export async function updateAudio(db, { id, clientId, name, whenToUse }) {
     sets.push(`name = $${params.length}`);
   }
   if (whenToUse !== undefined) {
-    params.push(validateWhenToUse(whenToUse));
+    const finalWhenToUse = validateWhenToUse(whenToUse);
+    // Áudio ligado a agente precisa do "quando usar": é a única coisa que diz
+    // ao agente em que momento mandar. Sem o texto ele sairia do catálogo em
+    // silêncio, com a tela ainda mostrando a ligação.
+    if (finalWhenToUse === null && (await countAgentLinks(db, { id, clientId })) > 0) {
+      throw ruleError(
+        "WHEN_TO_USE_REQUIRED",
+        "Este áudio está ligado a um agente. Tire a ligação antes de apagar o \"quando usar\"."
+      );
+    }
+    params.push(finalWhenToUse);
     sets.push(`when_to_use = $${params.length}`);
   }
   if (!sets.length) throw ruleError("NOTHING_TO_UPDATE", "Nada para alterar.");
@@ -240,6 +257,10 @@ export async function archiveAudio(db, { id, clientId }) {
       RETURNING ${SELECT_COLUMNS}`,
     [id, clientId]
   );
+  // Áudio arquivado não fica ligado a agente nenhum.
+  if (rows[0]) {
+    await db.query(`DELETE FROM public.audio_library_agents WHERE audio_id = $1 AND client_id = $2`, [id, clientId]);
+  }
   return rows[0] || null;
 }
 
@@ -354,4 +375,113 @@ export async function getTemplateLibraryAudioId(db, templateId) {
     if (isSchemaAusente(err)) return null;
     throw err;
   }
+}
+
+// ─── Ligação áudio <-> agente de atendimento (Fase 3) ────────────────────────
+
+async function countAgentLinks(db, { id, clientId }) {
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS n FROM public.audio_library_agents WHERE audio_id = $1 AND client_id = $2`,
+    [id, clientId]
+  );
+  return rows[0]?.n || 0;
+}
+
+/** Agentes que podem receber áudio: do tenant, de atendimento, não arquivados. */
+export async function listAttendanceAgents(db, clientId) {
+  const { rows } = await db.query(
+    `SELECT fco.id, fco.name,
+            (SELECT count(*)::int
+               FROM public.audio_library_agents ala
+               JOIN public.audio_library al ON al.id = ala.audio_id
+              WHERE ala.company_id = fco.id AND ala.client_id = fco.tenant_id AND al.archived_at IS NULL) AS audio_count
+       FROM public.followup_companies fco
+      WHERE fco.tenant_id = $1 AND fco.agent_kind = 'atendimento' AND fco.archived_at IS NULL
+      ORDER BY fco.name, fco.id`,
+    [clientId]
+  );
+  return rows;
+}
+
+/**
+ * Define QUAIS agentes podem enviar este áudio na conversa (substitui a lista).
+ * Tudo conferido no banco pelo tenant: agente de outra empresa, de campanha ou
+ * arquivado é recusado, e nada é gravado.
+ */
+export async function setAudioAgents(db, { id, clientId, companyIds }) {
+  if (!Array.isArray(companyIds)) throw ruleError("INVALID_AGENTS", "Lista de agentes inválida.");
+  const wanted = Array.from(new Set(companyIds.map((v) => String(v || "").trim()).filter(Boolean)));
+  if (wanted.some((v) => !isUuid(v))) throw ruleError("INVALID_AGENTS", "Lista de agentes inválida.");
+
+  const audio = await getAudioForTenant(db, { id, clientId });
+  if (!audio) return null;
+
+  if (wanted.length > 0 && !audio.when_to_use) {
+    throw ruleError(
+      "WHEN_TO_USE_REQUIRED",
+      "Preencha o \"quando usar\" antes de ligar o áudio a um agente: é o que diz a ele em que momento mandar."
+    );
+  }
+
+  const agents = await listAttendanceAgents(db, clientId);
+  const byId = new Map(agents.map((a) => [a.id, a]));
+  if (wanted.some((v) => !byId.has(v))) {
+    throw ruleError("AGENT_NOT_AVAILABLE", "Só agentes de atendimento desta empresa podem receber áudios.");
+  }
+
+  const { rows: currentRows } = await db.query(
+    `SELECT company_id::text AS company_id FROM public.audio_library_agents WHERE audio_id = $1 AND client_id = $2`,
+    [id, clientId]
+  );
+  const current = new Set(currentRows.map((r) => r.company_id));
+
+  // Teto por agente: só conta para quem está GANHANDO este áudio agora.
+  for (const companyId of wanted) {
+    if (current.has(companyId)) continue;
+    const agent = byId.get(companyId);
+    if (agent.audio_count >= AGENT_AUDIO_MAX_ITEMS) {
+      throw ruleError(
+        "AGENT_AUDIO_LIMIT",
+        `O agente "${agent.name}" já tem ${AGENT_AUDIO_MAX_ITEMS} áudios, que é o máximo. Tire um áudio dele antes de ligar outro.`
+      );
+    }
+  }
+
+  for (const companyId of wanted) {
+    if (current.has(companyId)) continue;
+    await db.query(
+      `INSERT INTO public.audio_library_agents (audio_id, company_id, client_id)
+       VALUES ($1, $2, $3) ON CONFLICT (audio_id, company_id) DO NOTHING`,
+      [id, companyId, clientId]
+    );
+  }
+  const toRemove = [...current].filter((companyId) => !wanted.includes(companyId));
+  if (toRemove.length > 0) {
+    await db.query(
+      `DELETE FROM public.audio_library_agents
+        WHERE audio_id = $1 AND client_id = $2 AND company_id::text = ANY($3::text[])`,
+      [id, clientId, toRemove]
+    );
+  }
+  return wanted;
+}
+
+/**
+ * Quantas vezes cada áudio foi enviado pelo agente, contado nas MENSAGENS
+ * gravadas (meta.audioLibraryId) — não existe contador à parte. Janela de 90
+ * dias para a consulta andar pelo índice (client_id, created_at).
+ */
+export const AUDIO_USAGE_WINDOW_DAYS = 90;
+export async function countAudioSends(db, clientId) {
+  const { rows } = await db.query(
+    `SELECT meta->>'audioLibraryId' AS audio_id, count(*)::int AS sends
+       FROM public.lead_messages
+      WHERE client_id = $1
+        AND created_at > now() - make_interval(days => $2::int)
+        AND direction = 'outbound'
+        AND meta->>'audioLibraryId' IS NOT NULL
+      GROUP BY 1`,
+    [clientId, AUDIO_USAGE_WINDOW_DAYS]
+  );
+  return Object.fromEntries(rows.map((r) => [r.audio_id, r.sends]));
 }

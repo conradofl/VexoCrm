@@ -41,6 +41,7 @@ import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from ".
 import { registerFollowupReply } from "../../services/followupReplyHook.js";
 import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
 import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceService.js";
+import { sendAgentLibraryAudio } from "../../audioLibrary/agentAudio.js";
 
 import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH } from "../../services/inboxSqlMatchers.js";
 import {
@@ -3853,9 +3854,14 @@ export function registerChatbotRoutes(app, deps) {
           const voiceSpeed = Number(tenantSettings?.chatbot_voice_speed || 1.0);
 
           const leadSentAudio = Array.isArray(messages) && messages.some((m) => m?.type === "audio" || m?.media_type === "audio");
-          const shouldSendVoice = resolveVoiceDecision({ voiceMode, leadSentAudio });
+          // Biblioteca de Áudios: o agente escolheu um áudio gravado pela empresa
+          // neste turno. Áudio da biblioteca vence a voz sintética — o texto sai
+          // como texto e o áudio gravado vai logo depois.
+          const libraryAudio = aiResponse._audio || null;
+          const shouldSendVoice = !libraryAudio && resolveVoiceDecision({ voiceMode, leadSentAudio });
 
           let sentViaVoice = false;
+          let textDelivered = false;
           let outboundWaId = null;
 
           if (shouldSendVoice) {
@@ -3921,6 +3927,7 @@ export function registerChatbotRoutes(app, deps) {
             });
 
             if (evolutionResponse.ok) {
+              textDelivered = true;
               console.log("[chatbot-webhook] Sent to WhatsApp (texto)", {
                 phone: maskPhoneForLog(phone),
                 status: aiResponse.status_conversa,
@@ -3962,6 +3969,34 @@ export function registerChatbotRoutes(app, deps) {
             waMessageId: outboundWaId,
             messageTimestamp: new Date().toISOString(),
           });
+
+          // Áudio da biblioteca: só DEPOIS do texto entregue (texto antes do
+          // áudio; se o texto não saiu, áudio solto não faz sentido). Um envio
+          // só, sem nova tentativa, com tempo limite — e não conta na cota do
+          // chip (cota é da campanha). sendAgentLibraryAudio não lança.
+          if (libraryAudio && textDelivered) {
+            const evoBaseUrlForAudio =
+              normalizeHttpUrl(process.env.EVOLUTION_API_URL) || (evolutionUrl ? new URL(evolutionUrl).origin : null);
+            const audioResult = await sendAgentLibraryAudio({
+              db: pgDatabasePool,
+              clientId,
+              companyId: inboundConfig?.companyId || null,
+              phone,
+              instanceName: targetInstance,
+              apiKey: evolutionToken,
+              baseUrl: evoBaseUrlForAudio,
+              audioRef: libraryAudio,
+              appendLeadMessage,
+              model: chatbotModel,
+            });
+            console.log("[chatbot-webhook] áudio da biblioteca", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+              audio: libraryAudio.code,
+              enviado: audioResult.sent,
+              motivo: audioResult.reason,
+            });
+          }
 
           // PRECEDENCIA DO SDR, documentada porque ja gerou confusao:
           //

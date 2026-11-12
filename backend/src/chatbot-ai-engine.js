@@ -22,6 +22,8 @@ import { maskPhoneForLog } from "./services/tenant.js";
 import { resolveEvolutionInstanceOwner, fetchMediaBase64FromEvolution } from "./services/evolution.js";
 import { saveMediaBuffer } from "./services/storage.js";
 import { findRagContextForQuestion, buildRagContextBlock, DEFAULT_RAG_TRANSFER_MESSAGE } from "./rag/chatSearch.js";
+import { loadAgentAudioCatalog, normalizeAudioChoice, resolveAudioChoice } from "./audioLibrary/agentAudio.js";
+import { pgDatabasePool as audioLibraryDb } from "./services/database.js";
 import { toCanonicalPhoneFromJid } from "./services/canonicalPhone.js";
 import { gravarUsoLlm } from "./services/llmUsage.js";
 
@@ -1661,6 +1663,9 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
           : null,
       precisa_humano: raw.precisa_humano === true,
       objecao_detectada: normalizeObjecaoDetectada(raw.objecao_detectada),
+      // Código de áudio da biblioteca escolhido pelo modelo (A1, A2...) ou null.
+      // Só sai nos retornos com contrato íntegro: resposta quebrada não manda áudio.
+      audio: normalizeAudioChoice(raw.audio),
     };
   }
 
@@ -1711,6 +1716,7 @@ export function parseAIResponse(raw, fullSystemPrompt = null) {
             ? parsed.motivo_nao_comercial.trim().slice(0, 150)
             : null,
         objecao_detectada: normalizeObjecaoDetectada(parsed.objecao_detectada),
+        audio: normalizeAudioChoice(parsed.audio),
       };
     }
   } catch (_) {}
@@ -2411,6 +2417,24 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     systemPromptOverride = `${systemPromptOverride || effectiveSystemPrompt}${buildRagContextBlock(ragResult.chunks)}`;
   }
 
+  // ── Biblioteca de Áudios (Fase 3) ─────────────────────────────────────────
+  // Agente de atendimento com áudios ligados ganha um catálogo curto no prompt
+  // (código + "quando usar") e pode devolver "audio": "A1" no JSON. Sem agente
+  // (companyId nulo), agente de campanha ou nenhum áudio ligado: catálogo
+  // vazio, prompt idêntico ao de antes. Falha ao ler o catálogo não trava o
+  // atendimento — o turno segue sem áudio.
+  const audioCatalog = await loadAgentAudioCatalog(audioLibraryDb, { clientId, companyId }).catch((err) => {
+    console.error("[chatbot-ai] áudios: falha ao ler o catálogo — seguindo sem áudio neste turno", {
+      clientId,
+      phone: phone.slice(-4),
+      error: err?.message || String(err),
+    });
+    return { entries: [], block: "", reason: "erro_ao_ler" };
+  });
+  if (audioCatalog.block) {
+    systemPromptOverride = `${systemPromptOverride || effectiveSystemPrompt}${audioCatalog.block}`;
+  }
+
   let aiResponse;
   try {
     aiResponse = await runChatbotAI({
@@ -2569,6 +2593,9 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
     _history: newHistory,
     _dados: dadosToSave,
     _existingLead: existing,
+    // Áudio da biblioteca escolhido neste turno, já resolvido contra o catálogo
+    // DESTE agente ({ id, name, code }) — código que não está no catálogo vira null.
+    _audio: resolveAudioChoice(audioCatalog, aiResponse.audio),
     _persistErro: persistErro ? persistErro.message || String(persistErro) : null,
     _repetiuUltimaFala: repetiuUltimaFala,
   };

@@ -2368,6 +2368,10 @@ export async function sendMediaMessageViaEvolution({
   caption = "",
   webhookToken = null,
   baseUrl = null,
+  // Opcional e SEM padrão de propósito. Quem chama a partir de uma fila com
+  // nova tentativa (follow-up) não passa: um timeout ali abortaria um envio
+  // que a Evolution ainda vai concluir, e a nova tentativa mandaria de novo.
+  timeoutMs = null,
 }) {
   if (!instanceName || !number || !base64) {
     throw new Error("Parâmetros obrigatórios ausentes (instanceName, number, base64)");
@@ -2412,6 +2416,7 @@ export async function sendMediaMessageViaEvolution({
     method: "POST",
     headers,
     body: JSON.stringify(payload),
+    ...(Number(timeoutMs) > 0 ? { signal: AbortSignal.timeout(Number(timeoutMs)) } : {}),
   });
 
   const resText = await res.text();
