@@ -1279,6 +1279,11 @@ function applyPdfHeadersAndFooters(doc, docTitle) {
 
   for (let pIdx = range.start; pIdx < range.start + range.count; pIdx++) {
     doc.switchToPage(pIdx);
+    const savedBottom = doc.page.margins.bottom;
+    const savedTop = doc.page.margins.top;
+    doc.page.margins.bottom = 0;
+    doc.page.margins.top = 0;
+
     const pageNum = pIdx - range.start + 1;
 
     // Header superior
@@ -1286,11 +1291,13 @@ function applyPdfHeadersAndFooters(doc, docTitle) {
       .text("GERAÇÃO DIGITAL · MARKETING & VENDAS", PDF_METRICS.margin, PDF_METRICS.headerY, {
         width: PDF_METRICS.contentWidth / 2,
         align: "left",
+        lineBreak: false,
       });
     doc.fillColor(PDF_COLORS.textMuted).fontSize(8).font("Helvetica")
       .text(docTitle, PDF_METRICS.margin + PDF_METRICS.contentWidth / 2, PDF_METRICS.headerY, {
         width: PDF_METRICS.contentWidth / 2,
         align: "right",
+        lineBreak: false,
       });
     doc.moveTo(PDF_METRICS.margin, PDF_METRICS.headerY + 12)
       .lineTo(PDF_METRICS.pageWidth - PDF_METRICS.margin, PDF_METRICS.headerY + 12)
@@ -1304,12 +1311,17 @@ function applyPdfHeadersAndFooters(doc, docTitle) {
       .text("Documento Oficial · Vexo OS · Confidencial", PDF_METRICS.margin, PDF_METRICS.footerY, {
         width: PDF_METRICS.contentWidth / 2,
         align: "left",
+        lineBreak: false,
       });
     doc.fillColor(PDF_COLORS.textMuted).fontSize(8).font("Helvetica-Bold")
       .text(`Página ${pageNum} de ${totalPages}`, PDF_METRICS.margin + PDF_METRICS.contentWidth / 2, PDF_METRICS.footerY, {
         width: PDF_METRICS.contentWidth / 2,
         align: "right",
+        lineBreak: false,
       });
+
+    doc.page.margins.bottom = savedBottom;
+    doc.page.margins.top = savedTop;
   }
 }
 
