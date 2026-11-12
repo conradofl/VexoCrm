@@ -38,6 +38,7 @@ import {
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
 import { isDeviceTypedMessage, registerSystemSentFromResponse } from "../../services/systemSentMessages.js";
 import { isPhoneOptedOut } from "../../services/optOut.js";
+import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
 import { registerFollowupReply } from "../../services/followupReplyHook.js";
@@ -3171,6 +3172,20 @@ export function registerChatbotRoutes(app, deps) {
         waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
         instanceName,
         queryFn: pgDatabasePool.query.bind(pgDatabasePool),
+      });
+    }
+
+    // Captura do pedido de saída (services/optOutCapture.js): palavra sozinha, ou "não tenho interesse" em mensagem curta.
+    // Só mensagem DIGITADA pelo lead, com empresa explícita (o fallback "outlier" não grava nada). Áudio transcrito e
+    // imagem descrita ficam de fora: o texto é da máquina, não do lead. Roda ANTES do portão de opt-out, mais abaixo,
+    // para que a própria mensagem do pedido já não receba próximo passo nem resposta do agente. Nunca lança.
+    if (!fromMe && explicitClientId && pgDatabasePool && messageData?.text && messageData.transcribed !== true && messageData.described !== true) {
+      await captureOptOutFromInbound(pgDatabasePool, {
+        clientId: explicitClientId,
+        phone,
+        text: messageData.text,
+        waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
+        getTenantSettings: getLeadClientN8nSettings,
       });
     }
 
