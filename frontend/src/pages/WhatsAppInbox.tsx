@@ -1,5 +1,7 @@
 import { describeMessageLabel } from "@/lib/inbox/messageLabel";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useIsMobile, useKeyboardOpen, useVisibleArea } from "@/hooks/useMobileViewport";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Clock3,
@@ -423,8 +425,39 @@ export default function WhatsAppInbox({
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
-  // No celular a tela mostra a fila OU a conversa.
+  // No celular a tela mostra a fila OU a conversa, sempre em tela cheia.
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
+  const isMobile = useIsMobile();
+  // Área realmente visível (sem o teclado virtual): o campo de resposta fica sempre acima do teclado.
+  const visibleArea = useVisibleArea(isMobile);
+  // Com o teclado aberto sobra pouca tela: a faixa de contexto sai para a conversa aparecer.
+  const keyboardOpen = useKeyboardOpen(isMobile, visibleArea);
+  // Onde a fila começa no celular: logo abaixo da barra do sistema (medido, não chutado).
+  // O marcador entra na tela depois do primeiro desenho; por isso é estado, não ref.
+  const [layoutAnchor, setLayoutAnchor] = useState<HTMLDivElement | null>(null);
+  const [mobileListTop, setMobileListTop] = useState(0);
+  useLayoutEffect(() => {
+    if (!isMobile || !layoutAnchor) return;
+    const measure = () => {
+      const anchor = layoutAnchor;
+      const padding = anchor.parentElement ? parseFloat(getComputedStyle(anchor.parentElement).paddingTop) || 0 : 0;
+      setMobileListTop(Math.max(0, Math.round(anchor.getBoundingClientRect().top - padding)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [isMobile, layoutAnchor]);
+  // Posição da fila quando a conversa foi aberta, para "voltar" devolver a fila no mesmo lugar.
+  const listScrollTopRef = useRef(0);
+  const openChatOnMobile = () => {
+    listScrollTopRef.current = chatsContainerRef.current?.scrollTop ?? 0;
+    setMobileView("chat");
+  };
+  useLayoutEffect(() => {
+    if (!isMobile || mobileView !== "list") return;
+    const list = chatsContainerRef.current;
+    if (list) list.scrollTop = listScrollTopRef.current;
+  }, [isMobile, mobileView]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
@@ -1208,6 +1241,14 @@ export default function WhatsAppInbox({
     return () => cancelAnimationFrame(frame);
   }, [mobileView, selectedChatId]);
 
+  // Celular: quando o teclado abre, a área visível encolhe. Quem estava no fim da conversa
+  // continua vendo a última mensagem, em vez de ela ficar escondida atrás do campo.
+  useLayoutEffect(() => {
+    if (!isMobile || mobileView !== "chat") return;
+    const container = messagesContainerRef.current;
+    if (container && isNearBottomRef.current) container.scrollTop = container.scrollHeight;
+  }, [isMobile, mobileView, visibleArea.height]);
+
   const handleMessagesScroll = () => {
     const container = messagesContainerRef.current;
     if (!container) return;
@@ -1645,6 +1686,15 @@ export default function WhatsAppInbox({
     setShowDossier(false);
     if (dossierPinned) toggleDossierPinned();
   };
+  const mountInboxLayout = (node: ReactNode) =>
+    isMobile && typeof document !== "undefined" ? createPortal(node, document.body) : node;
+
+  const mobileLayoutStyle: CSSProperties | undefined = !isMobile
+    ? undefined
+    : mobileView === "chat"
+    ? { top: visibleArea.offsetTop, height: visibleArea.height }
+    : { top: mobileListTop + visibleArea.offsetTop, height: Math.max(0, visibleArea.height - mobileListTop) };
+
   const dossierVisible = (showDossier || (dossierPinned && isWideScreen)) && Boolean(selectedChat);
   const dossierAsColumn = dossierPinned && isWideScreen;
 
@@ -2255,9 +2305,22 @@ export default function WhatsAppInbox({
         />
       ) : (
         /* ── PAINEL DE PLANTÃO: fila à esquerda, conversa no resto, dossiê em gaveta ── */
+        <div ref={setLayoutAnchor} data-testid="inbox-layout-anchor">
+        {/* No celular a tela vai direto para o <body>: dentro da página há elementos com efeito
+            visual (transform/blur) que prendem o "position: fixed" e deslocavam a tela em 16 px. */}
+        {mountInboxLayout(
         <div
           data-testid="inbox-layout"
-          className="flex h-[calc(100dvh-100px)] min-h-[480px] overflow-hidden rounded-2xl border border-border/80 bg-card shadow-xs"
+          data-mobile-view={isMobile ? mobileView : undefined}
+          // Celular: tela cheia. A fila começa abaixo da barra do sistema; a conversa cobre a tela
+          // toda e acompanha a área visível, então o campo de resposta nunca fica atrás do teclado.
+          style={mobileLayoutStyle}
+          className={cn(
+            "inbox-touch flex overflow-hidden bg-card",
+            isMobile
+              ? "fixed inset-x-0 z-40"
+              : "h-[calc(100dvh-100px)] min-h-[480px] rounded-2xl border border-border/80 shadow-xs"
+          )}
         >
           {/* ═══════════ COLUNA 1 — A FILA ═══════════ */}
           <aside
@@ -2428,7 +2491,7 @@ export default function WhatsAppInbox({
                       checked={selectedChatIds.has(chat.id)}
                       onSelect={() => {
                         setSelectedChatId(chat.id);
-                        setMobileView("chat");
+                        openChatOnMobile();
                       }}
                       onToggleCheck={() => toggleSelectChat(chat.id)}
                       waitingSince={chat.waitingSince}
@@ -2690,7 +2753,7 @@ export default function WhatsAppInbox({
             </header>
 
             {/* Faixa de contexto: por que esse lead está aqui */}
-            {selectedChat && (
+            {selectedChat && !keyboardOpen && (
               <div
                 className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border/60 bg-muted/30 px-3 py-[9px] sm:px-5"
                 data-testid="chat-context"
@@ -3109,7 +3172,7 @@ export default function WhatsAppInbox({
             </div>
 
             {/* Rodapé: um campo só, com o modo dentro dele */}
-            <div className="border-t border-border/60 bg-card px-3 pb-4 pt-3 sm:px-5" data-testid="composer">
+            <div className="border-t border-border/60 bg-card px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5 md:pb-4 md:pt-3" data-testid="composer">
               <div
                 data-mode={isNoteMode ? "note" : "whatsapp"}
                 data-testid="composer-box"
@@ -3243,13 +3306,19 @@ export default function WhatsAppInbox({
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={handleKeyDown}
-                  rows={2}
+                  rows={isMobile ? 1 : 2}
                   disabled={!selectedChat} // NÃO desabilita no isPending para nunca perder o foco!
                   placeholder={
-                    isNoteMode ? "Anotação só para a equipe…  Enter salva" : "Escreva para o cliente…  Enter envia, Shift+Enter quebra linha"
+                    isMobile
+                      ? isNoteMode
+                        ? "Anotação só para a equipe…"
+                        : "Escreva para o cliente…"
+                      : isNoteMode
+                      ? "Anotação só para a equipe…  Enter salva"
+                      : "Escreva para o cliente…  Enter envia, Shift+Enter quebra linha"
                   }
                   className={cn(
-                    "block w-full resize-none border-0 bg-transparent px-3.5 pb-1 pt-2.5 font-sans text-sm leading-normal outline-none disabled:cursor-not-allowed disabled:opacity-60",
+                    "block w-full resize-none border-0 bg-transparent px-3.5 pb-1 pt-2.5 font-sans text-base leading-normal outline-none disabled:cursor-not-allowed disabled:opacity-60 md:text-sm",
                     isNoteMode
                       ? "text-amber-950 placeholder:text-amber-800/80 dark:text-amber-50 dark:placeholder:text-amber-200/70"
                       : "text-foreground placeholder:text-muted-foreground"
@@ -3323,7 +3392,7 @@ export default function WhatsAppInbox({
                 />
                 <div
                   data-testid="dossier-drawer"
-                  className="absolute inset-y-0 right-0 z-30 w-full max-w-[340px] border-l border-indigo-200 shadow-2xl animate-in slide-in-from-right-4 duration-150 dark:border-indigo-500/40"
+                  className="absolute inset-y-0 right-0 z-30 w-full border-indigo-200 shadow-2xl animate-in slide-in-from-right-4 duration-150 dark:border-indigo-500/40 md:max-w-[340px] md:border-l"
                 >
                   {dossierPanel}
                 </div>
@@ -3337,6 +3406,8 @@ export default function WhatsAppInbox({
               {dossierPanel}
             </aside>
           )}
+        </div>
+        )}
         </div>
       )}
 
