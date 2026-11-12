@@ -1,5 +1,5 @@
 import React from "react";
-import { Sparkles, Save, Rocket, CheckCircle2, Clock, AlertCircle, Building2 } from "lucide-react";
+import { Sparkles, Save, CheckCircle2, Clock, AlertCircle, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -11,7 +11,7 @@ interface BriefingHeaderProps {
   savingDraft: boolean;
   onOpenTranscriptModal: () => void;
   onSaveDraft: () => void;
-  onOpenDispatchModal: () => void;
+  onOpenDispatchModal?: () => void;
 }
 
 export function BriefingHeader({
@@ -22,7 +22,6 @@ export function BriefingHeader({
   savingDraft,
   onOpenTranscriptModal,
   onSaveDraft,
-  onOpenDispatchModal,
 }: BriefingHeaderProps) {
   const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
@@ -96,15 +95,6 @@ export function BriefingHeader({
           >
             <Save className="w-4 h-4 text-slate-500" />
             {savingDraft ? "Salvando..." : "💾 Salvar Rascunho"}
-          </Button>
-
-          <Button
-            type="button"
-            onClick={onOpenDispatchModal}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-10 px-4 rounded-xl shadow-sm gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <Rocket className="w-4 h-4 text-emerald-200" />
-            🚀 Disparar para a Esteira
           </Button>
         </div>
       </div>

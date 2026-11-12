@@ -13,7 +13,6 @@ import { BriefingBlockCommercial } from "./GeracaoDigitalPitch/BriefingBlockComm
 import { BriefingBlockMedia } from "./GeracaoDigitalPitch/BriefingBlockMedia";
 import { BriefingBlockTechnical } from "./GeracaoDigitalPitch/BriefingBlockTechnical";
 import { BriefingAiTranscriptModal } from "./GeracaoDigitalPitch/BriefingAiTranscriptModal";
-import { BriefingDispatchModal, DispatchConfig } from "./GeracaoDigitalPitch/BriefingDispatchModal";
 
 export default function GeracaoDigitalPitch() {
   const extractMutation = useExtractBriefing();
@@ -82,10 +81,6 @@ export default function GeracaoDigitalPitch() {
   const [transcriptText, setTranscriptText] = useState("");
   const [isProcessingAI, setIsProcessingAI] = useState(false);
   const [aiProgressText, setAiProgressText] = useState("");
-
-  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
-  const [dispatchSuccess, setDispatchSuccess] = useState(false);
-  const [dispatchResult, setDispatchResult] = useState<any>(null);
 
   // ─── HELPERS DE ATUALIZAÇÃO DE CAMPOS ──────────────────────────────────────
   const handleUpdateField = (fieldId: string, value: string) => {
@@ -289,50 +284,6 @@ export default function GeracaoDigitalPitch() {
     }
   };
 
-  // ─── CONFIRMAR DISPARO PARA A ESTEIRA ─────────────────────────────────────
-  const handleConfirmDispatch = async (config: DispatchConfig) => {
-    try {
-      const bData = briefingFields.reduce((acc, f) => ({ ...acc, [f.id]: f.value }), {
-        _cnpj: clientInfo.cnpj,
-        _responsavel: clientInfo.responsavel,
-        _endereco: clientInfo.endereco,
-      });
-
-      const responseData = await saveMutation.mutateAsync({
-        prospectName: clientInfo.razaoSocial || "Novo Cliente",
-        whatsappNumber: clientInfo.whatsapp || "",
-        agencyName: DEFAULT_THEME.agencyName,
-        themePreset: DEFAULT_THEME.themePreset,
-        briefingData: bData,
-        sendToProspectWhatsapp: config.sendToProspectWhatsapp,
-        sendToProspectEmail: config.sendToProspectEmail,
-        prospectEmail: config.prospectEmail,
-        sendToSectors: config.sendToSectors,
-        sectorsWhatsapp: config.sectorsWhatsapp,
-        sectorsEmail: config.sectorsEmail,
-        createWhatsappGroup: config.createWhatsappGroup,
-        whatsappGroupName: config.whatsappGroupName,
-        whatsappGroupMembers: config.whatsappGroupMembers,
-        slackChannelName: config.slackChannelName,
-      });
-
-      setDispatchResult(responseData);
-      setDispatchSuccess(true);
-      playChime();
-
-      toast({
-        title: "Esteira Ativada!",
-        description: `Dossiê gerado e enviado para a esteira operacional do cliente ${clientInfo.razaoSocial}.`,
-      });
-    } catch (error: any) {
-      toast({
-        title: "Erro no Disparo",
-        description: error.message || "Não foi possível disparar para a esteira.",
-        variant: "destructive",
-      });
-    }
-  };
-
   const totalBriefingRequirements = briefingFields.length;
   const completedBriefingRequirements = briefingFields.filter(
     (f) => f.value && f.value.trim().length > 0
@@ -351,7 +302,6 @@ export default function GeracaoDigitalPitch() {
         savingDraft={saveMutation.isPending}
         onOpenTranscriptModal={() => setIsTranscriptModalOpen(true)}
         onSaveDraft={handleSaveDraft}
-        onOpenDispatchModal={() => setIsDispatchModalOpen(true)}
       />
 
       {/* ─── 2. OS 4 BLOCOS OPERACIONAIS ELEGANTES ───────────────────────────── */}
@@ -390,18 +340,6 @@ export default function GeracaoDigitalPitch() {
         aiProgressText={aiProgressText}
         onProcessWithAI={handleProcessBriefingWithGemini}
         onSelectPreset={handleSelectTranscriptPreset}
-      />
-
-      <BriefingDispatchModal
-        isOpen={isDispatchModalOpen}
-        onClose={() => setIsDispatchModalOpen(false)}
-        clientInfo={clientInfo}
-        briefingFields={briefingFields}
-        isDispatching={saveMutation.isPending}
-        dispatchSuccess={dispatchSuccess}
-        dispatchResult={dispatchResult}
-        onConfirmDispatch={handleConfirmDispatch}
-        onResetSuccess={() => setDispatchSuccess(false)}
       />
     </div>
   );

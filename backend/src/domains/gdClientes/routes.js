@@ -855,7 +855,7 @@ export function registerGdClientesRoutes(app, {
 
       const suporte = {
         whatsapp: process.env.GD_SUPORTE_WHATSAPP || "5534997719779",
-        google_review_url: process.env.GD_GOOGLE_REVIEW_URL || "https://g.page/r/geracaodigital/review",
+        google_review_url: process.env.GD_GOOGLE_REVIEW_URL || "https://g.page/r/CQma70R-HfV7EBM/review",
         instagram_url: process.env.GD_INSTAGRAM_URL || "https://instagram.com/geracaodigital",
       };
 

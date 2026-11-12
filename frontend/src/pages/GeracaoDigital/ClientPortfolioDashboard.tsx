@@ -96,6 +96,8 @@ export default function ClientPortfolioDashboard({
         briefingMeetUrl: cliente.briefing_meet_url,
         briefingSlotsOferecidos: cliente.briefing_slots_oferecidos,
         briefingDocumentos: cliente.briefing_documentos || null,
+        briefingAprovacaoInternaStatus: cliente.briefing_aprovacao_interna_status || null,
+        briefingAprovacaoClienteStatus: cliente.briefing_aprovacao_cliente_status || null,
       };
     });
   }, [clientes]);

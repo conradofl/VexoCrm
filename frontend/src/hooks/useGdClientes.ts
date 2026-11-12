@@ -204,3 +204,29 @@ export function useSintetizarBriefing() {
     onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
   });
 }
+
+export function useEnviarAprovacaoInterna() {
+  const chamar = useChamar();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clienteId: string) =>
+      chamar<{ success: boolean; clienteId: string }>(
+        `/api/gd/clientes/${clienteId}/briefing/enviar-aprovacao-interna`,
+        { method: "POST" }
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
+  });
+}
+
+export function useEnviarAprovacaoCliente() {
+  const chamar = useChamar();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (clienteId: string) =>
+      chamar<{ success: boolean; clienteId: string }>(
+        `/api/gd/clientes/${clienteId}/briefing/enviar-aprovacao-cliente`,
+        { method: "POST" }
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CHAVE_CLIENTES }),
+  });
+}

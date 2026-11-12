@@ -43,6 +43,8 @@ export interface PortfolioClient {
   briefingMeetUrl?: string | null;
   briefingSlotsOferecidos?: Array<{ id: number; opcao: number; label: string; inicio: string }> | null;
   briefingDocumentos?: GdBriefingDocumentos | null;
+  briefingAprovacaoInternaStatus?: string | null;
+  briefingAprovacaoClienteStatus?: string | null;
 }
 
 function isValidDriveUrl(url?: string | null): boolean {

@@ -32,7 +32,7 @@ import {
   BorderStyle,
 } from "docx";
 import PDFDocument from "pdfkit";
-import { uploadFileToDrive } from "./googleDriveClientSetup.js";
+import { uploadFileToDrive, setupClientDriveFolders } from "./googleDriveClientSetup.js";
 import { GD_DONO } from "../domains/gdClientes/campos.js";
 
 export const GD_OFFICIAL_AGENCY_EMAIL = "mrkgeracaodigital@gmail.com";
@@ -1646,11 +1646,39 @@ export async function executarSinteseEGeracaoBriefing({
   const buffers = await gerarTodosDocumentosBriefing(sintese);
 
   // 3. Arquivamento Seguro no Google Drive com contingência resiliente
+  let driveFolderUrl = cliente.drive_url || null;
+  let targetFolderId = null;
+
+  if (driveFolderUrl) {
+    const match = driveFolderUrl.match(/folders\/([a-zA-Z0-9_-]+)/);
+    if (match) targetFolderId = match[1];
+  } else {
+    try {
+      console.info(`[gdBriefingSynthesizer] Provisionando pastas no Google Drive para "${cliente.nome}"...`);
+      const driveSetup = await setupClientDriveFolders({
+        clientName: cliente.nome,
+        makePublic: true,
+        allowMockFallback: true,
+      });
+      if (driveSetup?.driveLink) {
+        driveFolderUrl = driveSetup.driveLink;
+        targetFolderId = driveSetup.subfolders?.relatorios?.id || driveSetup.drive_folder_id;
+        await pool.query(
+          `UPDATE public.gd_clientes SET drive_url = $1 WHERE id = $2 AND (dono_client_id = $3 OR dono_client_id = '00000000-0000-0000-0000-000000000000' OR dono_client_id IS NULL)`,
+          [driveFolderUrl, clienteId, GD_DONO]
+        );
+      }
+    } catch (driveSetupErr) {
+      console.warn(`[gdBriefingSynthesizer] Aviso ao auto-provisionar pastas no Drive para ${cliente.nome}:`, driveSetupErr.message);
+    }
+  }
+
   let driveResult;
   try {
     driveResult = await arquivarDocumentosBriefingNoDrive({
       clienteNome: cliente.nome,
-      driveFolderUrl: cliente.drive_url,
+      driveFolderUrl,
+      driveFolderId: targetFolderId,
       documentosBuffers: buffers,
       driveUploader,
       allowMockFallback: true,
@@ -1672,7 +1700,7 @@ export async function executarSinteseEGeracaoBriefing({
     driveResult = {
       geradoEm: new Date().toISOString(),
       versao: `${ts}_vFinal`,
-      folderId: null,
+      folderId: targetFolderId || null,
       documentos: {
         briefing: {
           docx: buildFallback("briefing", "docx", `${cliente.nome}_01_Briefing_Consolidado_${ts}_vFinal.docx`),
@@ -1694,8 +1722,25 @@ export async function executarSinteseEGeracaoBriefing({
     };
   }
 
+  const docsFormatados = {};
+  for (const [k, v] of Object.entries(driveResult.documentos || {})) {
+    docsFormatados[k] = {
+      nome: k,
+      pdfUrl: v?.pdf?.fileLink || null,
+      docxUrl: v?.docx?.fileLink || null,
+      driveFileIdPdf: v?.pdf?.fileId || null,
+      driveFileIdDocx: v?.docx?.fileId || null,
+      versao: driveResult.versao,
+      sintetizadoEm: driveResult.geradoEm,
+      docx: v?.docx,
+      pdf: v?.pdf,
+    };
+  }
+
   const briefingDocsMetadata = {
     ...driveResult,
+    ...docsFormatados,
+    documentos: driveResult.documentos,
     sintese,
   };
 
