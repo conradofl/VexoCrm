@@ -12,6 +12,7 @@ import {
   measureFirstHumanResponseCoverage,
   measureFunnelMeetings,
   measureMeetings,
+  buildChipNameResolver,
   measureQueue,
   measureWaiting,
 } from "../services/dashboardOverview.js";
@@ -423,6 +424,35 @@ describe("Aba Atendimento: a fila é a da tela Conversas", () => {
     expect(Date.parse(r.oldest[0].waitingSince)).toBe(NOW.getTime() - 5 * 3600000);
     // Quem já foi respondido não aparece na lista.
     expect(r.oldest.some((o) => o.phone === "5534994440003")).toBe(false);
+  });
+
+  it("[TESTE OBRIGATÓRIO] o chip aparece pelo nome que o dono deu, não pelo nome técnico da instância", async () => {
+    const comNomes = {
+      settings: null,
+      loadInstances: async () => [
+        { id: "id-1", name: "Comercial - Gabriel", dispatch_webhook_url: "https://evolution.exemplo/message/sendText/Comercial" },
+        { id: "id-2", name: "Pessoal - Caio", dispatch_webhook_url: "https://evolution.exemplo/message/sendText/Pessoal" },
+      ],
+    };
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps: comNomes });
+    expect(r.oldest.map((o) => o.chip)).toEqual(["Comercial - Gabriel", "Pessoal - Caio"]);
+    // Nada do endereço de envio vai para o payload.
+    expect(JSON.stringify(r)).not.toContain("evolution.exemplo");
+    expect(JSON.stringify(r)).not.toContain("sendText");
+  });
+
+  it("chip desconhecido ou lista de chips indisponível: fica o nome técnico, o bloco não cai", async () => {
+    const resolve = buildChipNameResolver([{ id: "id-1", name: "Comercial - Gabriel", dispatch_webhook_url: "https://x/message/sendText/empresa-comercial-gabriel" }]);
+    expect(resolve("empresa-comercial-gabriel")).toBe("Comercial - Gabriel");
+    expect(resolve("id-1")).toBe("Comercial - Gabriel");
+    expect(resolve("outro-chip")).toBe("outro-chip");
+    expect(resolve(null)).toBeNull();
+    expect(buildChipNameResolver(null)("x")).toBe("x");
+
+    const semLista = { settings: null, loadInstances: async () => { throw new Error("sem chips"); } };
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps: semLista });
+    expect(r.oldest[0].chip).toBe("Comercial");
+    expect(r.states.waiting).toBe(2);
   });
 
   it("empresa sem ninguém esperando: zero e lista vazia, sem consultar a página", async () => {
