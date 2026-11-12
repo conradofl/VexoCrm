@@ -1,5 +1,10 @@
 // frontend/src/components/inbox/ScheduleMeetingModal.tsx
-// Modal para Agendamento de Reuniões com Google Meet e Envio com 1 Clique no WhatsApp (Bloco C)
+// Janela de reunião da aba Conversas: data, assunto e, se a pessoa quiser, o link da sala.
+//
+// O sistema NÃO cria sala de reunião. Antes esta janela montava um endereço do Google Meet com
+// letras sorteadas, que não abria sala nenhuma, e esse endereço ia no convite para o lead.
+// Agora o link é um campo opcional que a pessoa cola, de uma sala que ela mesma criou. Sem link,
+// o convite sai só com dia e hora. Nenhum link fabricado vai em mensagem para o lead.
 
 import { useState, useEffect, useMemo } from "react";
 import {
@@ -14,11 +19,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCreateLeadReminder, useUpdateLeadReminder, type LeadReminder } from "@/hooks/useLeadReminders";
-import { Video, Calendar, Clock, RefreshCw, MessageSquare, ExternalLink } from "lucide-react";
+import { Video, Calendar, Clock, MessageSquare, ExternalLink } from "lucide-react";
 
 interface ScheduleMeetingModalProps {
   open: boolean;
@@ -33,20 +37,22 @@ interface ScheduleMeetingModalProps {
   initialMeeting?: LeadReminder | null;
 }
 
-function generateRandomLetters(len: number): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz";
-  let result = "";
-  for (let i = 0; i < len; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+/**
+ * Confere o link colado. Vazio é válido (o link é opcional). Devolve o endereço limpo, null quando
+ * vazio, ou { error } quando o que foi colado não é um endereço de página (http ou https).
+ */
+export function parseMeetingLink(raw: string | null | undefined): { url: string | null } | { error: string } {
+  const text = (raw ?? "").trim();
+  if (!text) return { url: null };
+  const candidate = /^https?:\/\//i.test(text) ? text : `https://${text}`;
+  try {
+    const parsed = new URL(candidate);
+    const okProtocol = parsed.protocol === "https:" || parsed.protocol === "http:";
+    if (!okProtocol || !parsed.hostname.includes(".") || /\s/.test(text)) throw new Error("invalid");
+    return { url: parsed.toString() };
+  } catch {
+    return { error: "O link da reunião não parece um endereço válido. Cole o link completo da sala ou deixe o campo vazio." };
   }
-  return result;
-}
-
-export function generateGoogleMeetUrl(): string {
-  const p1 = generateRandomLetters(3);
-  const p2 = generateRandomLetters(4);
-  const p3 = generateRandomLetters(3);
-  return `https://meet.google.com/${p1}-${p2}-${p3}`;
 }
 
 function formatLocalDateTime(date: Date): string {
@@ -100,15 +106,19 @@ function getMeetingShortcuts(): Array<{ label: string; date: Date }> {
   ];
 }
 
-export function buildMeetingInviteMessage(leadName: string, meetingDate: Date, meetingUrl: string): string {
-  const name = leadName && leadName !== "Lead" ? leadName.trim().split(" ")[0] : "olá";
+/** Convite para o lead. O link só entra quando a pessoa colou um; sem link, vai só dia e hora. */
+export function buildMeetingInviteMessage(leadName: string, meetingDate: Date, meetingUrl?: string | null): string {
+  const name = leadName && leadName !== "Lead" ? leadName.trim().split(" ")[0] : "";
   const weekday = meetingDate.toLocaleDateString("pt-BR", { weekday: "long" });
   const dayMonth = meetingDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   const time = meetingDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
   const capitalizedWeekday = weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  const greeting = name ? `Olá ${name}` : "Olá";
+  const link = (meetingUrl ?? "").trim();
+  const linkLine = link ? `\n\nLink da reunião: ${link}` : "";
 
-  return `Olá ${name}, nossa reunião está agendada para ${capitalizedWeekday} (${dayMonth}) às ${time}.\n\nLink da nossa sala no Google Meet: ${meetingUrl}\n\nTe vejo lá!`;
+  return `${greeting}, nossa reunião está agendada para ${capitalizedWeekday} (${dayMonth}) às ${time}.${linkLine}\n\nTe vejo lá!`;
 }
 
 export function ScheduleMeetingModal({
@@ -131,36 +141,29 @@ export function ScheduleMeetingModal({
     const defaultDate = shortcuts[0].date;
     return formatLocalDateTime(defaultDate);
   });
-  const [autoGenerateMeet, setAutoGenerateMeet] = useState(true);
-  const [meetingUrl, setMeetingUrl] = useState(() => generateGoogleMeetUrl());
+  // Link da sala: começa vazio. Só o que a pessoa colar (ou o que já estava salvo na reunião) entra aqui.
+  const [meetingUrl, setMeetingUrl] = useState("");
+  // Erro do link aparece embaixo do campo, não em aviso que some.
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setLinkError(null);
     if (initialMeeting) {
       setTitle(initialMeeting.title || "Reunião de Apresentação");
       setNotes(initialMeeting.notes || "");
       if (initialMeeting.remindAt) {
         setDatetimeStr(formatLocalDateTime(new Date(initialMeeting.remindAt)));
       }
-      if (initialMeeting.meetingUrl) {
-        setMeetingUrl(initialMeeting.meetingUrl);
-        setAutoGenerateMeet(true);
-      }
+      setMeetingUrl(initialMeeting.meetingUrl || "");
     } else {
       setTitle("Reunião de Apresentação");
       setNotes("");
       const defaultDate = shortcuts[0].date;
       setDatetimeStr(formatLocalDateTime(defaultDate));
-      setMeetingUrl(generateGoogleMeetUrl());
-      setAutoGenerateMeet(true);
+      setMeetingUrl("");
     }
   }, [open, initialMeeting, shortcuts]);
-
-  const handleRegenerateMeet = () => {
-    const newUrl = generateGoogleMeetUrl();
-    setMeetingUrl(newUrl);
-    toast.success("Novo link do Google Meet gerado!");
-  };
 
   const handleSave = async (shouldSendInvite = false) => {
     if (!lead?.phone) {
@@ -174,7 +177,13 @@ export function ScheduleMeetingModal({
       return;
     }
 
-    const effectiveMeetingUrl = autoGenerateMeet ? meetingUrl.trim() : null;
+    const link = parseMeetingLink(meetingUrl);
+    if ("error" in link) {
+      setLinkError(link.error);
+      return;
+    }
+    setLinkError(null);
+    const effectiveMeetingUrl = link.url;
 
     try {
       if (initialMeeting?.id) {
@@ -204,14 +213,14 @@ export function ScheduleMeetingModal({
         toast.success("Reunião agendada no calendário!");
       }
 
-      if (shouldSendInvite && onSendWhatsappInvite && effectiveMeetingUrl) {
+      if (shouldSendInvite && onSendWhatsappInvite) {
         const inviteMessage = buildMeetingInviteMessage(
           lead.nome || "Lead",
           meetingDate,
           effectiveMeetingUrl
         );
         onSendWhatsappInvite(inviteMessage);
-        toast.success("Convite carregado na caixa de envio do WhatsApp!");
+        toast.success("Convite colocado no campo de resposta. Confira e envie.");
       }
 
       onOpenChange(false);
@@ -221,6 +230,8 @@ export function ScheduleMeetingModal({
   };
 
   const isSaving = createReminder.isPending || updateReminder.isPending;
+  const parsedLink = parseMeetingLink(meetingUrl);
+  const parsedLinkUrl = "url" in parsedLink ? parsedLink.url : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -232,10 +243,10 @@ export function ScheduleMeetingModal({
             </div>
             <div>
               <DialogTitle className="text-base font-bold">
-                {initialMeeting ? "Editar Reunião / Call" : "Agendar Call (Google Meet)"}
+                {initialMeeting ? "Editar reunião" : "Marcar reunião"}
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Gere uma sala no Google Meet e envie o convite formatado para {lead?.nome || "o lead"}.
+                Registre a reunião com {lead?.nome || "o lead"}. O convite com dia e hora vai para o campo de resposta, para você conferir antes de enviar.
               </DialogDescription>
             </div>
           </div>
@@ -249,7 +260,7 @@ export function ScheduleMeetingModal({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Ex: Apresentação da Proposta Comercial"
-              className="h-8 text-xs"
+              className="h-8 text-base md:text-xs"
             />
           </div>
 
@@ -285,60 +296,53 @@ export function ScheduleMeetingModal({
               type="datetime-local"
               value={datetimeStr}
               onChange={(e) => setDatetimeStr(e.target.value)}
-              className="h-8 text-xs font-mono"
+              className="h-8 font-mono text-base md:text-xs"
             />
           </div>
 
-          {/* Opção Google Meet */}
-          <div className="space-y-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-2.5">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="auto-meet"
-                checked={autoGenerateMeet}
-                onCheckedChange={(checked) => setAutoGenerateMeet(Boolean(checked))}
+          {/* Link da reunião: opcional, colado pela pessoa. O sistema não cria sala. */}
+          <div className="space-y-1">
+            <Label htmlFor="meeting-link" className="text-xs font-semibold">
+              Link da reunião (opcional)
+            </Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="meeting-link"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                value={meetingUrl}
+                onChange={(e) => {
+                  setMeetingUrl(e.target.value);
+                  setLinkError(null);
+                }}
+                aria-invalid={Boolean(linkError)}
+                placeholder="Cole o link da sala (Meet, Zoom, Teams...)"
+                data-testid="meeting-link"
+                className="h-8 bg-background text-base md:text-xs"
               />
-              <label
-                htmlFor="auto-meet"
-                className="text-xs font-semibold cursor-pointer text-foreground flex items-center gap-1"
-              >
-                Gerar sala do Google Meet automaticamente
-              </label>
+              {parsedLinkUrl && (
+                <a
+                  href={parsedLinkUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border/70 text-muted-foreground hover:bg-muted"
+                  title="Abrir o link para conferir a sala"
+                  aria-label="Abrir o link para conferir a sala"
+                  data-testid="meeting-link-open"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
             </div>
-
-            {autoGenerateMeet && (
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center gap-1.5">
-                  <Input
-                    value={meetingUrl}
-                    onChange={(e) => setMeetingUrl(e.target.value)}
-                    placeholder="https://meet.google.com/..."
-                    className="h-7 text-xs font-mono bg-background"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleRegenerateMeet}
-                    className="h-7 w-7 text-emerald-700 dark:text-emerald-300"
-                    title="Regerar link da sala"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  </Button>
-                  <a
-                    href={meetingUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-border/70 hover:bg-muted text-muted-foreground"
-                    title="Testar sala no Meet"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  Link direto da sala pronto para compartilhar com o cliente.
-                </p>
-              </div>
+            {linkError && (
+              <p role="alert" className="text-[11px] font-semibold text-rose-700 dark:text-rose-300" data-testid="meeting-link-error">
+                {linkError}
+              </p>
             )}
+            <p className="text-[10px] text-muted-foreground" data-testid="meeting-link-help">
+              O sistema não cria a sala. Crie a reunião no seu Meet, Zoom ou Teams e cole o link aqui. Sem link, o convite vai só com dia e hora.
+            </p>
           </div>
 
           {/* Anotações internas */}
@@ -349,7 +353,7 @@ export function ScheduleMeetingModal({
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Objetivo da call, dores do cliente, histórico relevante..."
               rows={2}
-              className="text-xs resize-none"
+              className="resize-none text-base md:text-xs"
             />
           </div>
         </div>
@@ -386,7 +390,7 @@ export function ScheduleMeetingModal({
             className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5 shadow-xs"
           >
             <MessageSquare className="h-3.5 w-3.5" />
-            💬 Enviar Convite no WhatsApp
+            Salvar e preparar convite
           </Button>
         </DialogFooter>
       </DialogContent>

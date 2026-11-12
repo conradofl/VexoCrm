@@ -2,6 +2,7 @@ import { describeMessageLabel } from "@/lib/inbox/messageLabel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile, useKeyboardOpen, useVisibleArea } from "@/hooks/useMobileViewport";
+import { useBackLayers } from "@/hooks/useBackLayers";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Clock3,
@@ -449,9 +450,20 @@ export default function WhatsAppInbox({
   }, [isMobile, layoutAnchor]);
   // Posição da fila quando a conversa foi aberta, para "voltar" devolver a fila no mesmo lugar.
   const listScrollTopRef = useRef(0);
+  // Botão voltar do aparelho, no celular: volta do dossiê para a conversa e da conversa para a
+  // fila, em vez de sair da página.
+  const backLayers = useBackLayers<"chat" | "dossier">(isMobile, (layer) => {
+    if (layer === "dossier") setShowDossier(false);
+    else setMobileView("list");
+  });
   const openChatOnMobile = () => {
     listScrollTopRef.current = chatsContainerRef.current?.scrollTop ?? 0;
     setMobileView("chat");
+    backLayers.push("chat");
+  };
+  const openDossier = () => {
+    setShowDossier(true);
+    backLayers.push("dossier");
   };
   useLayoutEffect(() => {
     if (!isMobile || mobileView !== "list") return;
@@ -1074,7 +1086,7 @@ export default function WhatsAppInbox({
       toast.success(res.message || "Lead cadastrado com sucesso!");
       refetchLeads();
       chatsQuery.refetch?.();
-      setShowDossier(true);
+      openDossier();
     } catch (err: any) {
       toast.error(err?.message || "Erro ao cadastrar lead.");
     }
@@ -1683,6 +1695,10 @@ export default function WhatsAppInbox({
 
   // Fechar a gaveta também desafixa: senão o X não fecharia nada em tela larga.
   const closeDossier = () => {
+    if (isMobile) {
+      backLayers.close("dossier");
+      return;
+    }
     setShowDossier(false);
     if (dossierPinned) toggleDossierPinned();
   };
@@ -2575,7 +2591,7 @@ export default function WhatsAppInbox({
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 px-3 py-3 sm:px-5" data-testid="chat-header">
               <button
                 type="button"
-                onClick={() => setMobileView("list")}
+                onClick={() => backLayers.close("chat")}
                 aria-label="Voltar para a lista de conversas"
                 data-testid="chat-back"
                 className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-[9px] border border-border bg-card text-foreground/70 md:hidden"
@@ -2919,7 +2935,7 @@ export default function WhatsAppInbox({
                 <span className="flex-1" />
                 <button
                   type="button"
-                  onClick={() => setShowDossier((v) => !v)}
+                  onClick={() => (showDossier ? (isMobile ? backLayers.close("dossier") : setShowDossier(false)) : openDossier())}
                   aria-expanded={dossierVisible}
                   data-testid="dossier-open"
                   className="inline-flex min-h-7 cursor-pointer items-center gap-1 text-xs font-bold text-indigo-600 hover:underline dark:text-indigo-300"
@@ -3223,9 +3239,13 @@ export default function WhatsAppInbox({
                     <span
                       className="pr-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
                       data-testid="composer-hint"
-                      title="O chip em que o lead escreveu não está conectado. Ao enviar, você escolhe por qual chip a resposta sai. Nada é enviado sem a sua confirmação."
+                      title={
+                        leadChipInstance
+                          ? "O chip em que o lead escreveu não está conectado. Ao enviar, você escolhe por qual chip a resposta sai. Nada é enviado sem a sua confirmação."
+                          : "O chip em que o lead escreveu não está mais no cadastro da empresa (nome antigo ou chip removido). Ao enviar, você escolhe por qual chip a resposta sai."
+                      }
                     >
-                      chip {leadChipName} desconectado · vai pedir confirmação
+                      chip {leadChipName} {leadChipInstance ? "desconectado" : "fora do cadastro"} · vai pedir confirmação
                     </span>
                   ) : leadChipAlias ? (
                     <span
