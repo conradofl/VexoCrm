@@ -104,6 +104,7 @@ export function normalizeDispatchPhone(phone, lead = null) {
 }
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
 import { isPhoneOptedOut } from "../../campaign/queueOptOut.js";
+import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
 import { resumeDeferredQueues } from "../../campaign/queueResume.js";
 import {
   QUOTA_PAUSE_MARKER,
@@ -6823,6 +6824,18 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       if (!(await validateN8nInboundBearer(req, res, clientId))) {
         return;
+      }
+
+      // Captura do pedido de saída ANTES de avançar a campanha: nesta variante o próximo passo sai daqui mesmo
+      // (continueCampaignLeadFromReply, que confere o opt-out), antes de a mensagem chegar ao webhook do chatbot.
+      if (pgDatabasePool && replyText) {
+        await captureOptOutFromInbound(pgDatabasePool, {
+          clientId,
+          phone,
+          text: replyText,
+          waMessageId: rawMessageId,
+          getTenantSettings: getLeadClientN8nSettings,
+        });
       }
 
       const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
