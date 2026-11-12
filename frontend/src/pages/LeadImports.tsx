@@ -130,6 +130,8 @@ type CampaignTemplateStrategy = "single" | "ai_variations";
 export interface BancoAudienceInfo {
   description: string;
   count: number;
+  /** Quantos do público pediram para sair e serão pulados no envio (aviso; o total não muda). */
+  optedOut?: number | null;
 }
 
 export function resolveEffectiveAudienceSource(params: {
@@ -985,6 +987,7 @@ export default function LeadImports({
               setBancoAudience({
                 description: desc,
                 count: actualCount,
+                optedOut: res.optedOut ?? null,
               });
 
               setBancoAudienceCriteria({
@@ -2182,6 +2185,7 @@ export default function LeadImports({
           setBancoAudience({
             description: desc,
             count: actualCount,
+            optedOut: res.optedOut ?? null,
           });
 
           setBancoAudienceCriteria({

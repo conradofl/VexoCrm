@@ -1204,6 +1204,8 @@ export interface DispatchRecipientsResponse {
   invalidCount?: number;
   skippedCount: number;
   pendingCount: number;
+  /** Dos não processados, quantos pediram para sair e serão pulados no envio. null = o servidor não soube contar. */
+  optedOutPendingCount?: number | null;
   items: DispatchRecipientItem[];
 }
 
