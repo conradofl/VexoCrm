@@ -1522,6 +1522,7 @@ export async function runChatbotAI({
   let lastError = null;
   const credenciaisQuebradas = new Set();
   let chamadasFeitas = 0;
+  const errosPorModelo = [];
 
   for (let i = 0; i < modelsToTry.length; i++) {
     const currentModel = modelsToTry[i];
@@ -1548,6 +1549,7 @@ export async function runChatbotAI({
             `(motivo: ${guard.reason}). ` +
             (i < modelsToTry.length - 1 ? `Tentando próximo modelo da escada: "${modelsToTry[i + 1]}"...` : "Fim da escada.")
         );
+        errosPorModelo.push({ modelo: currentModel, erro: `Resposta inválida: ${guard.reason}` });
         continue;
       }
 
@@ -1556,6 +1558,7 @@ export async function runChatbotAI({
       break;
     } catch (err) {
       console.warn(`[chatbot-ai] Modelo "${currentModel}" falhou na execução: ${err.message}.`);
+      errosPorModelo.push({ modelo: currentModel, erro: err?.message || String(err), code: err?.code });
       if (err?.code === "LLM_CREDENTIAL_INVALID") {
         for (const p of err.provedores || []) credenciaisQuebradas.add(p);
       }
@@ -1564,6 +1567,15 @@ export async function runChatbotAI({
   }
 
   if (!finalResposta || !String(finalResposta.mensagem || "").trim()) {
+    let motivoDetalhado = lastError?.message || null;
+    if (errosPorModelo.length > 1) {
+      const primeiro = errosPorModelo[0];
+      const ultimo = errosPorModelo[errosPorModelo.length - 1];
+      motivoDetalhado = `Modelo ${primeiro.modelo} falhou: ${primeiro.erro}. Contingência (${ultimo.modelo}) também falhou: ${ultimo.erro}.`;
+    } else if (errosPorModelo.length === 1) {
+      motivoDetalhado = errosPorModelo[0].erro;
+    }
+
     console.error("[chatbot-ai] TODOS OS MODELOS DA ESCADA FALHARAM EM PRODUZIR JSON VÁLIDO. Resposta silenciada para proteger o lead.", {
       modelosTentados: modelsToTry,
       // Chave quebrada e a causa que o dono resolve sozinho: nomeada aqui mesmo
@@ -1571,7 +1583,7 @@ export async function runChatbotAI({
       ...(credenciaisQuebradas.size > 0
         ? { credencialInvalida: `credencial invalida no provedor ${[...credenciaisQuebradas].join(", ")}` }
         : {}),
-      lastError: lastError?.message,
+      lastError: motivoDetalhado,
     });
     return {
       mensagem: "",
@@ -1583,7 +1595,7 @@ export async function runChatbotAI({
       finalizado: false,
       spin_fase: null,
       objecao_detectada: null,
-      _falhaDetalhe: lastError?.message || null,
+      _falhaDetalhe: motivoDetalhado,
       _credencialInvalida: credenciaisQuebradas.size > 0 ? [...credenciaisQuebradas] : null,
     };
   }

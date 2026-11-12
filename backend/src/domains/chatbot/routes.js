@@ -4276,7 +4276,8 @@ export function registerChatbotRoutes(app, deps) {
         (typeof body.llmModel === "string" && body.llmModel.trim()) ||
         (typeof body.model === "string" && body.model.trim()) ||
         inboundConfig?.model ||
-        null;
+        chatbotModel ||
+        defaultLlmModel();
 
       const requestedPrompt =
         (typeof body.inboundPrompt === "string" && body.inboundPrompt.trim()) ||
@@ -4306,7 +4307,7 @@ export function registerChatbotRoutes(app, deps) {
           return res.status(422).json({
             success: false,
             error: `Chave do provedor ${provider.toUpperCase()} não configurada`,
-            reason: `A variável de ambiente ${envVarNames[provider] || provider} não está configurada no servidor (EasyPanel). Configure a chave nas variáveis de ambiente para utilizar o modelo "${requestedLlmModel}".`,
+            reason: `O modelo "${requestedLlmModel}" está selecionado, mas a variável ${envVarNames[provider] || provider} não está configurada no servidor (EasyPanel). Como o prompt deste cliente possui mais de 7.000 tokens, os modelos da Groq recusam por limite de TPM (8.000 tokens por minuto). Adicione a variável GEMINI_API_KEY no EasyPanel para ativar o Gemini.`,
             code: "LLM_KEY_MISSING",
             provider,
           });

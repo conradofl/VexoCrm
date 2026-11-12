@@ -260,6 +260,10 @@ export default function InboundAgentConfig() {
   const [agentKind, setAgentKind] = useState<"atendimento" | "campanha">("atendimento");
   const [inboundEnabled, setInboundEnabled] = useState(false);
   const [inboundModel, setInboundModel] = useState("");
+  const isCustomInboundModel = Boolean(inboundModel && llmModels.some((m) => m.id === inboundModel));
+  const isDeadInboundModel = Boolean(inboundModel && llmModels.length > 0 && !llmModels.some((m) => m.id === inboundModel));
+  const effectiveInboundModel = isCustomInboundModel ? inboundModel : defaultLlmModel;
+  const defaultModelName = llmModels.find((m) => m.id === defaultLlmModel)?.name || defaultLlmModel;
   const [inboundPrompt, setInboundPrompt] = useState("");
   const [sdrPhone, setSdrPhone] = useState("");
   const [sdrTransferEnabled, setSdrTransferEnabled] = useState(false);
@@ -407,7 +411,7 @@ export default function InboundAgentConfig() {
     const enabledParaSalvar = numerosVinculados.length === 0 ? false : inboundEnabled;
     const payload = {
       inbound_enabled: enabledParaSalvar,
-      inbound_model: inboundModel,
+      inbound_model: effectiveInboundModel,
       inbound_prompt: inboundPrompt,
       inbound_spin_fields: spinFields,
       inbound_webhook_url: inboundWebhookUrl,
@@ -532,7 +536,7 @@ export default function InboundAgentConfig() {
           message: texto,
           agentId: activeCompany.id,
           simulacao: simMemoriaRef.current,
-          llmModel: inboundModel || undefined,
+          llmModel: effectiveInboundModel,
           inboundPrompt: inboundPrompt || undefined,
           spinFields: Array.isArray(spinFields)
             ? spinFields
@@ -1281,55 +1285,46 @@ export default function InboundAgentConfig() {
                   <CardDescription>Qual modelo este agente usa, e quais chaves existem no servidor.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {(() => {
-                    const isCustomInboundModel = Boolean(inboundModel && llmModels.some((m) => m.id === inboundModel));
-                    const isDeadInboundModel = Boolean(inboundModel && llmModels.length > 0 && !llmModels.some((m) => m.id === inboundModel));
-                    const effectiveInboundModel = isCustomInboundModel ? inboundModel : defaultLlmModel;
-                    const defaultModelName = llmModels.find((m) => m.id === defaultLlmModel)?.name || defaultLlmModel;
-
-                    return (
-                      <div className="space-y-2 max-w-md">
-                        <div className="flex items-center justify-between">
-                          <Label>Modelo de IA</Label>
-                          {!isCustomInboundModel && (
-                            <span className="text-[10px] text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800 font-normal">
-                              Padrão do Sistema ({defaultModelName})
-                            </span>
-                          )}
-                        </div>
-                        <Select value={effectiveInboundModel} onValueChange={setInboundModel}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecione o modelo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {providerOrder.map((provider) => {
-                              const group = llmModels.filter((m) => m.provider === provider);
-                              if (group.length === 0) return null;
-                              const configured = providerStatus?.[provider];
-                              return (
-                                <SelectGroup key={provider}>
-                                  <SelectLabel className="text-[10px] uppercase tracking-wide">
-                                    {group[0].providerName}
-                                    {configured === false && " — sem chave de API"}
-                                  </SelectLabel>
-                                  {group.map((m) => (
-                                    <SelectItem key={m.id} value={m.id} disabled={configured === false}>
-                                      {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              );
-                            })}
-                          </SelectContent>
-                        </Select>
-                        {isDeadInboundModel && (
-                          <p className="text-xs text-amber-600 dark:text-amber-500">
-                            O modelo salvo ("{inboundModel}") não está mais disponível. O agente está usando o padrão do sistema ({defaultModelName}). Escolha outro e salve.
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  <div className="space-y-2 max-w-md">
+                    <div className="flex items-center justify-between">
+                      <Label>Modelo de IA</Label>
+                      {!isCustomInboundModel && (
+                        <span className="text-[10px] text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800 font-normal">
+                          Padrão do Sistema ({defaultModelName})
+                        </span>
+                      )}
+                    </div>
+                    <Select value={effectiveInboundModel} onValueChange={setInboundModel}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o modelo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {providerOrder.map((provider) => {
+                          const group = llmModels.filter((m) => m.provider === provider);
+                          if (group.length === 0) return null;
+                          const configured = providerStatus?.[provider];
+                          return (
+                            <SelectGroup key={provider}>
+                              <SelectLabel className="text-[10px] uppercase tracking-wide">
+                                {group[0].providerName}
+                                {configured === false && " — sem chave de API"}
+                              </SelectLabel>
+                              {group.map((m) => (
+                                <SelectItem key={m.id} value={m.id} disabled={configured === false}>
+                                  {m.name}{m.id === defaultLlmModel ? " (Padrão)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                    {isDeadInboundModel && (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        O modelo salvo ("{inboundModel}") não está mais disponível. O agente está usando o padrão do sistema ({defaultModelName}). Escolha outro e salve.
+                      </p>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 
