@@ -219,6 +219,95 @@ describe("AudioLibraryTab", () => {
   });
 });
 
+// ─── Fase 3: ligar o áudio a agentes de atendimento ─────────────────────────
+
+describe("AudioLibraryTab — agentes que podem enviar o áudio na conversa", () => {
+  const AGENTES = [
+    { id: "ag-1", name: "Bia", audioCount: 3 },
+    { id: "ag-2", name: "Caio", audioCount: 10 },
+  ];
+
+  function api(audios: unknown[], extra: (c: Call) => Response | undefined = () => undefined) {
+    return installApi((c) => {
+      const custom = extra(c);
+      if (custom) return custom;
+      if (c.path.startsWith("/api/audio-library/access")) return accessOk();
+      if (c.path.startsWith("/api/audio-library/agents")) return json(200, { success: true, agents: AGENTES, maxAudiosPerAgent: 10 });
+      if (c.path.startsWith("/api/audio-library/usage")) return json(200, { success: true, windowDays: 90, sends: { "audio-1": 4 } });
+      if (c.method === "GET") return json(200, { success: true, audios });
+      if (c.method === "PATCH") return json(200, { success: true, audio: audio() });
+      if (c.method === "PUT") return json(200, { success: true, agentIds: [] });
+    });
+  }
+
+  it("a linha mostra os agentes ligados e quantas vezes o agente enviou", async () => {
+    api([audio({ agentIds: ["ag-1"] })]);
+    render(<AudioLibraryTab />, { wrapper });
+    const row = await screen.findByTestId("audio-library-row");
+    expect(await within(row).findByText("Na conversa: Bia")).toBeTruthy();
+    expect(await within(row).findByText(/enviado 4 vezes pelo agente em 90 dias/)).toBeTruthy();
+  });
+
+  it("marcar um agente salva o texto e DEPOIS liga; agente no teto fica travado", async () => {
+    const calls = api([audio()]);
+    render(<AudioLibraryTab />, { wrapper });
+    fireEvent.click(await screen.findByText("Editar"));
+
+    const bloco = await screen.findByTestId("audio-library-agents");
+    const bia = within(bloco).getByLabelText("Agente Bia") as HTMLButtonElement;
+    const caio = within(bloco).getByLabelText("Agente Caio") as HTMLButtonElement;
+    expect(caio.disabled).toBe(true);
+    expect(within(bloco).getByText(/já tem 10 áudios, o máximo/)).toBeTruthy();
+
+    fireEvent.click(bia);
+    fireEvent.click(screen.getByText("Salvar"));
+
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    const ordem = calls.filter((c) => c.method === "PATCH" || c.method === "PUT").map((c) => c.method);
+    expect(ordem).toEqual(["PATCH", "PUT"]);
+    const put = calls.find((c) => c.method === "PUT")!;
+    expect(put.path).toBe("/api/audio-library/audio-1/agents");
+    expect(JSON.parse(String(put.body))).toEqual({ companyIds: ["ag-1"] });
+  });
+
+  it("apagar o 'quando usar' trava os agentes e DESLIGA antes de salvar o texto", async () => {
+    const calls = api([audio({ agentIds: ["ag-1"] })]);
+    render(<AudioLibraryTab />, { wrapper });
+    fireEvent.click(await screen.findByText("Editar"));
+    const bloco = await screen.findByTestId("audio-library-agents");
+
+    fireEvent.change(screen.getByLabelText("Quando usar"), { target: { value: "" } });
+    expect((within(bloco).getByLabelText("Agente Bia") as HTMLButtonElement).disabled).toBe(true);
+    expect(within(bloco).getByText(/Preencha o “quando usar”/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Salvar"));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    const ordem = calls.filter((c) => c.method === "PATCH" || c.method === "PUT").map((c) => c.method);
+    expect(ordem).toEqual(["PUT", "PATCH"]);
+    expect(JSON.parse(String(calls.find((c) => c.method === "PUT")!.body))).toEqual({ companyIds: [] });
+    expect(JSON.parse(String(calls.find((c) => c.method === "PATCH")!.body)).whenToUse).toBeNull();
+  });
+
+  it("sem mudar os agentes, salvar não chama a rota de ligação; recusa do servidor aparece na tela", async () => {
+    const limite = 'O agente "Bia" já tem 10 áudios, que é o máximo. Tire um áudio dele antes de ligar outro.';
+    const calls = api([audio()], (c) =>
+      c.method === "PUT" ? json(409, { success: false, error: { code: "AGENT_AUDIO_LIMIT", message: limite } }) : undefined
+    );
+    render(<AudioLibraryTab />, { wrapper });
+    fireEvent.click(await screen.findByText("Editar"));
+    await screen.findByTestId("audio-library-agents");
+    fireEvent.click(screen.getByText("Salvar"));
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Áudio salvo."));
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+
+    fireEvent.click(await screen.findByText("Editar"));
+    fireEvent.click(within(await screen.findByTestId("audio-library-agents")).getByLabelText("Agente Bia"));
+    fireEvent.click(screen.getByText("Salvar"));
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastError.mock.calls[0][0]).toBe(limite);
+  });
+});
+
 // ─── Passo de follow-up ──────────────────────────────────────────────────────
 // Escolher no seletor (Radix) é provado em Chromium real; aqui fica o que é
 // regra: abrir um passo que já usa a biblioteca, e o que vai no salvar.
