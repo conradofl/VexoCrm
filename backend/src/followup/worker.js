@@ -39,6 +39,7 @@ import { getDateKey } from "../services/analytics.js";
 import { pgDatabasePool } from "../services/database.js";
 import { leadsTableName } from "../services/tenant.js";
 import { evaluateStepConditions } from "./service.js";
+import { isPhoneOptedOut } from "../services/optOut.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -268,6 +269,25 @@ export async function processJob(job) {
     await query("UPDATE followup_jobs SET status='skipped' WHERE id=$1", [jobId]);
     console.log(log, "skipped (archived/cancelled schedule)");
     return;
+  }
+
+  // 1b. Opt-out: quem pediu para sair não recebe passo de cadência, venha a inscrição de onde vier (tela, lembrete,
+  // sugestão aprovada, webhook). Fonte única em services/optOut.js. Erro de leitura = não envia (nunca libera).
+  if (row.tenant_id && row.phone) {
+    let optedOut = false;
+    let motivo = "Lead pediu para não receber mensagens (opt-out)";
+    try {
+      optedOut = await isPhoneOptedOut({ query }, { clientId: String(row.tenant_id), phone: row.phone });
+    } catch (optErr) {
+      optedOut = true;
+      motivo = `Falha ao checar opt-out; passo não enviado: ${optErr?.message || optErr}`;
+      console.error(log, motivo);
+    }
+    if (optedOut) {
+      await query("UPDATE followup_jobs SET status='skipped', error_log=$1 WHERE id=$2", [motivo, jobId]);
+      console.log(log, "skipped — opt-out");
+      return;
+    }
   }
 
   // 2. Condição de saída: Resposta do lead (trigger no_reply ou exit_on_reply).

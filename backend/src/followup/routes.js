@@ -1260,6 +1260,8 @@ function normalizeInstanceList(list, fallback) {
           if (result.reason === "missing_phone") {
             missingPhone++;
             errors.push({ lead: lead_name, code: "MISSING_PHONE", message: "Lead sem telefone válido." });
+          } else if (result.reason === "opt_out") {
+            errors.push({ lead: lead_name, code: "OPT_OUT", message: "Lead pediu para não receber mensagens e não foi inscrito." });
           } else {
             enrolled++;
             enqueued += result.enqueued || 0;

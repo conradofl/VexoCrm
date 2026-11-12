@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import { isFilterShape, normalizeFilters } from "./segmentation.js";
 import { applyMessagePlaceholders, findUnresolvedPlaceholders } from "./services/messagePlaceholders.js";
 import { validateOutboundMessage } from "./services/jsonExtractor.js";
+import { pgDatabasePool } from "./services/database.js";
+import { isPhoneOptedOut } from "./services/optOut.js";
 
 export { applyMessagePlaceholders, findUnresolvedPlaceholders, postEvolutionPayload };
 
@@ -972,6 +974,8 @@ export async function dispatchCampaignSequence({
   onLeadCheckOptout = null,
   quotaGate = null,
   transformStepText = null,
+  manualSingleSend = false,
+  optOutPool = pgDatabasePool,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -1013,17 +1017,32 @@ export async function dispatchCampaignSequence({
       continue;
     }
 
+    // Opt-out, no ponto comum de TODO envio de campanha (lote, fila, próximo passo por resposta, n8n-dispatches): a checagem
+    // é daqui, não de quem chama. Até 11/11/2026 dependia de cada chamador passar onLeadCheckOptout, e só o lote passava.
+    // onLeadCheckOptout continua existindo para o chamador REGISTRAR o lead pulado (o lote grava o run 'skipped'); ele soma,
+    // não substitui. Única exceção: manualSingleSend, o envio de teste de UM número digitado pelo operador.
+    // Erro de leitura = pula o lead nesta rodada (nunca libera).
+    let isOptedOut = false;
     if (typeof onLeadCheckOptout === "function") {
-      const isOptedOut = await onLeadCheckOptout({ lead, phone, leadIndex });
-      if (isOptedOut) {
-        summary.failures.push({
-          phone,
-          stepId: null,
-          stepType: null,
-          reason: "Lead está na lista de Opt-out.",
-        });
-        continue;
+      isOptedOut = (await onLeadCheckOptout({ lead, phone, leadIndex })) === true;
+    }
+    if (!isOptedOut && !manualSingleSend) {
+      const optOutClientId = normalizeString(context?.client?.id) || normalizeString(lead?.client_id);
+      try {
+        isOptedOut = await isPhoneOptedOut(optOutPool, { clientId: optOutClientId, phone });
+      } catch (err) {
+        isOptedOut = true;
+        console.error("[campaign-outbound] falha ao checar opt-out; lead pulado nesta rodada:", err?.message || err);
       }
+    }
+    if (isOptedOut) {
+      summary.failures.push({
+        phone,
+        stepId: null,
+        stepType: null,
+        reason: "Lead está na lista de Opt-out.",
+      });
+      continue;
     }
 
     // Validação atômica de todas as variáveis da sequência para este lead:

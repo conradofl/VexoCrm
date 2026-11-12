@@ -36,6 +36,7 @@ import {
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { isPhoneOptedOut } from "../../services/optOut.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
 import { registerFollowupReply } from "../../services/followupReplyHook.js";
@@ -3213,6 +3214,24 @@ export function registerChatbotRoutes(app, deps) {
       });
       responder({ saved: "outbound_from_me" });
       return;
+    }
+
+    // ── PORTÃO DE OPT-OUT ──
+    // Quem pediu para sair não recebe o próximo passo de campanha (CAMINHO 1) nem resposta do agente de IA (CAMINHO 2).
+    // A mensagem já foi gravada (ETAPA 3) e a cadência de follow-up já foi tratada: o operador continua vendo a conversa e
+    // pode responder à mão. Erro de leitura = robô calado nesta mensagem (nunca libera).
+    if (pgDatabasePool) {
+      let optedOut = false;
+      try {
+        optedOut = await isPhoneOptedOut(pgDatabasePool, { clientId, phone });
+      } catch (optErr) {
+        optedOut = true;
+        console.error("[chatbot-webhook] falha ao checar opt-out; robô não responde a esta mensagem:", optErr?.message || optErr);
+      }
+      if (optedOut) {
+        responder({ status: "skipped_opt_out" }, { clientId, phone: maskPhoneForLog(phone) });
+        return;
+      }
     }
 
     // ── ETAPA 4: CAMPAIGN ROUTING (AVANÇA PASSO DE CAMPANHA, SE HOUVER) ──
