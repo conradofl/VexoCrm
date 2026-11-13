@@ -15,7 +15,7 @@
 //
 // Uso: npx playwright test --config playwright.harness.config.ts
 import { expect, test } from "@playwright/test";
-import { CHAT_ON_DOWN_CHIP, COUNTS, NAMES, NOW_S, PAGE_URL, SHOTS, SPECIAL_BODIES, TOTAL, chat, chatsPage, firstCard, inViewport, leads, messagesFor, ok, serve, tenant } from "./conversas-servidor";
+import { CHAT_ON_DOWN_CHIP, CHAT_ON_REMOVED_CHIP, COUNTS, NAMES, NOW_S, PAGE_URL, SHOTS, SPECIAL_BODIES, TOTAL, chat, chatsPage, firstCard, inViewport, leads, messagesFor, ok, serve, tenant } from "./conversas-servidor";
 
 test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
@@ -166,6 +166,30 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(field).toHaveValue("");
   });
 
+  test("conversa em chip que saiu do cadastro: a tela avisa, pede confirmação a cada envio e não envia sozinha", async ({ page }) => {
+    // Retrato do comportamento de hoje nas conversas com nome antigo de chip (40 na GD em 12/11/2026).
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await page.getByTestId(`inbox-item-${CHAT_ON_REMOVED_CHIP}`).click();
+
+    await expect(page.getByTestId("chat-header-sub")).toContainText("chip geracao-digital-caio-pessoal");
+    await expect(page.getByTestId("composer-hint")).toHaveText("chip geracao-digital-caio-pessoal fora do cadastro · vai pedir confirmação");
+
+    const field = page.getByLabel("Mensagem para o cliente");
+    for (const text of ["Primeira resposta", "Segunda resposta"]) {
+      await field.fill(text);
+      await field.press("Enter");
+      const confirm = page.getByTestId("chip-confirm");
+      await expect(confirm).toContainText("não está mais cadastrado");
+      if (text === "Primeira resposta") await page.getByTestId("composer").screenshot({ path: `${SHOTS}/chip-fora-do-cadastro.png` });
+      await page.getByTestId("chip-confirm-option").filter({ hasText: "Caio" }).click();
+      await expect(confirm).toHaveCount(0);
+    }
+    // Hoje: a confirmação não fica guardada. Duas respostas, duas confirmações.
+    expect(served.refused).toHaveLength(2);
+    expect(served.sent.map((m) => m.confirmChipId)).toEqual(["caio", "caio"]);
+  });
+
   test("mensagem sem texto mostra o nome do tipo, na fila e na conversa, nunca [Mensagem]", async ({ page }) => {
     await serve(page);
     await page.goto(PAGE_URL);
@@ -217,6 +241,45 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect.poll(() => served.deletedReminders).toEqual(["rem-1"]);
     await expect(register).toHaveText("Reunião");
     await expect(page.getByTestId("meeting-cancel-area")).toHaveCount(0);
+  });
+
+  test("reunião: o sistema não fabrica link; sem link o convite vai só com dia e hora, com link colado vai o link colado", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await firstCard(page).click();
+    await page.getByTestId("dossier-open").click();
+    await page.getByTestId("register-meeting").click();
+
+    // O campo do link começa vazio e a janela diz que o sistema não cria sala.
+    const link = page.getByTestId("meeting-link");
+    await expect(link).toHaveValue("");
+    await expect(page.getByTestId("meeting-link-help")).toContainText("O sistema não cria a sala");
+    await expect(page.getByRole("dialog")).not.toContainText("Gerar sala");
+    await page.getByRole("dialog").screenshot({ path: `${SHOTS}/reuniao-link-opcional.png` });
+
+    // Texto que não é endereço é recusado e nada é gravado.
+    await link.fill("depois eu mando");
+    await page.getByRole("button", { name: "Apenas Salvar" }).click();
+    await expect(page.getByTestId("meeting-link-error")).toContainText("não parece um endereço válido");
+    expect(served.reminders).toHaveLength(0);
+
+    // Sem link: grava sem link, e o convite que vai para o campo de resposta não tem endereço nenhum.
+    await link.fill("");
+    await page.getByRole("button", { name: "Salvar e preparar convite" }).click();
+    await expect.poll(() => served.reminders.length).toBe(1);
+    expect(served.reminders[0].meetingUrl).toBeNull();
+    const field = page.getByLabel("Mensagem para o cliente");
+    await expect(field).toHaveValue(/nossa reunião está agendada para/);
+    expect(await field.inputValue()).not.toMatch(/https?:|meet\.google|Link/i);
+    expect(served.sent).toHaveLength(0); // o convite fica no campo; quem envia é a pessoa
+
+    // Remarcar colando um link de verdade: o convite leva exatamente o link colado.
+    await page.getByTestId("register-meeting").click();
+    await page.getByTestId("meeting-link").fill("https://zoom.us/j/123456789");
+    await expect(page.getByTestId("meeting-link-open")).toHaveAttribute("href", "https://zoom.us/j/123456789");
+    await page.getByRole("button", { name: "Salvar e preparar convite" }).click();
+    await expect(field).toHaveValue(/Link da reunião: https:\/\/zoom\.us\/j\/123456789/);
+    await page.getByTestId("composer").screenshot({ path: `${SHOTS}/reuniao-convite-com-link-colado.png` });
   });
 
   test("gaveta do dossiê: fechada por padrão, abre por cima da conversa, e fecha por X, clique fora e Esc", async ({ page }) => {

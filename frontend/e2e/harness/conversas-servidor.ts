@@ -69,7 +69,8 @@ export function chat(i: number, tab: string) {
     waitingSince: fromMe ? null : new Date(ts * 1000).toISOString(),
     leadNeverSpoke: false,
     // Conversa 3: o lead escreveu num chip que está desconectado.
-    leadChip: i === 1 ? "caio" : i === 3 ? "chip-caido" : "comercial-hostery",
+    // Conversa 8: o lead escreveu num chip que não existe mais no cadastro (nome antigo, medido na GD).
+    leadChip: i === 1 ? "caio" : i === 3 ? "chip-caido" : i === 8 ? "geracao-digital-caio-pessoal" : "comercial-hostery",
   };
 }
 
@@ -139,6 +140,7 @@ export interface Served {
 }
 
 export const CHAT_ON_DOWN_CHIP = "5534990000003";
+export const CHAT_ON_REMOVED_CHIP = "5534990000008";
 
 export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok(route, chatsPage(url.searchParams.get("tab") || "esperam"))) {
   const served: Served = { sent: [], refused: [], tabs: [], reminders: [], deletedReminders: [] };
@@ -165,6 +167,27 @@ export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok
               details: {
                 reason: "disconnected",
                 conversationChip: "Chip Caído",
+                alternatives: [
+                  { id: "comercial-hostery", name: "Comercial - Hostery", isDefault: true },
+                  { id: "caio", name: "Caio", isDefault: false },
+                ],
+              },
+            },
+          }),
+        });
+      }
+      if (body.chatId === CHAT_ON_REMOVED_CHIP && !body.confirmChipId) {
+        served.refused.push({ chatId: body.chatId, body: body.body });
+        return route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "REPLY_CHIP_UNAVAILABLE",
+              message: "O chip geracao-digital-caio-pessoal, em que o lead escreveu, não está mais cadastrado. Confirme por qual chip enviar.",
+              details: {
+                reason: "not_registered",
+                conversationChip: "geracao-digital-caio-pessoal",
                 alternatives: [
                   { id: "comercial-hostery", name: "Comercial - Hostery", isDefault: true },
                   { id: "caio", name: "Caio", isDefault: false },
@@ -203,6 +226,14 @@ export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok
       };
       served.reminders.push(reminder);
       return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ success: true, reminder }) });
+    }
+    if (url.pathname.startsWith("/api/reminders/") && req.method() === "PATCH") {
+      const id = decodeURIComponent(url.pathname.split("/").pop() || "");
+      const body = req.postDataJSON();
+      const reminder = served.reminders.find((r) => r.id === id);
+      if (!reminder) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "NOT_FOUND", message: "Lembrete não encontrado" } }) });
+      for (const key of ["title", "notes", "remindAt", "meetingUrl", "status"]) if (body[key] !== undefined) reminder[key] = body[key];
+      return json({ success: true, reminder });
     }
     if (url.pathname.startsWith("/api/reminders/") && req.method() === "DELETE") {
       const id = decodeURIComponent(url.pathname.split("/").pop() || "");
