@@ -22,6 +22,8 @@ import {
   calculateDashboardMetrics,
 } from "../../services/dashboardCalculations.js";
 import { parseDashboardPeriodRequest } from "../../services/dashboardPeriod.js";
+import { redactQueueListForViewer } from "../../services/dashboardOverview.js";
+import { canAccessAppView } from "../../accessGuards.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +41,10 @@ export const EVOLUTION_USAGE_REPORT_SQL = `
   GROUP BY u.date, u.instance_id, i.name
   ORDER BY u.date ASC, chip_label ASC
 `;
+
+// Mesma guarda das rotas da tela Conversas (requireAppViewAccess("whatsapp")): decide se a lista de quem espera,
+// com nome e telefone, vai junto no payload do Dashboard.
+const canSeeConversations = (req) => canAccessAppView(req?.authAccess, "whatsapp");
 
 export function registerInsightsRoutes(app, deps) {
   const {
@@ -275,7 +281,7 @@ export function registerInsightsRoutes(app, deps) {
 
       res.json({
         client,
-        ...metrics,
+        ...redactQueueListForViewer(metrics, { canSeeConversations: canSeeConversations(req) }),
       });
     } catch (error) {
       console.error("dashboard query error:", error);
@@ -315,7 +321,7 @@ export function registerInsightsRoutes(app, deps) {
       const metrics = await getOrComputeDashboardMetrics(pgDatabasePool, clientId, period, {
         forceRefresh: true,
       });
-      res.json({ ok: true, metrics });
+      res.json({ ok: true, metrics: redactQueueListForViewer(metrics, { canSeeConversations: canSeeConversations(req) }) });
     } catch (err) {
       sendError(res, 500, "DASHBOARD_REFRESH_FAILED", err instanceof Error ? err.message : String(err));
     }

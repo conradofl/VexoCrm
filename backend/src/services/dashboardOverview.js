@@ -163,8 +163,20 @@ export async function measureBaseSlices(pool, { clientId, currentEnd, asOf = cur
 // Link de agenda de consultor (crm_consultant_schedules) não é reunião e não entra.
 // hasRecords = a empresa tem alguma linha, em qualquer data. Sem linha nenhuma a tela diz "sem registro";
 // zero só quando há registro e nenhum caiu no período.
+// O que é reunião em followup_schedules (critério pelo dado, 12/11/2026).
+// A tabela guarda três coisas: cadência (lead inscrito numa régua), mensagem agendada avulsa e reunião.
+// Só a reunião tem as DUAS marcas juntas:
+//   - meeting_datetime: quando a reunião acontece;
+//   - calendly_event_uri: o evento que a originou. O webhook do Calendly grava o endereço do evento; a gaveta
+//     "Reunião" da tela Conversas grava 'lead-reminder:<id>' (services/meetingSchedule.js).
+// Cadência e mensagem avulsa nascem sem data. A cadência inscrita com "data-alvo" traz data mas não traz evento:
+// a data-alvo pode ser reunião, evento ou vencimento, então sozinha não prova reunião e não conta.
+export const MEETING_ROW_SQL = (alias = "fs") =>
+  `${alias}.meeting_datetime IS NOT NULL AND COALESCE(${alias}.calendly_event_uri, '') <> ''`;
+
+// Reunião que conta: é reunião, não foi cancelada (as duas grafias que o CHECK de status já teve) e tem telefone.
 const MEETING_VALID_SQL = (alias = "fs") =>
-  `COALESCE(${alias}.status, '') NOT IN ('canceled', 'cancelled', 'missing_phone') AND COALESCE(${alias}.phone, '') <> ''`;
+  `${MEETING_ROW_SQL(alias)} AND COALESCE(${alias}.status, '') NOT IN ('canceled', 'cancelled', 'missing_phone') AND COALESCE(${alias}.phone, '') <> ''`;
 
 export function buildMeetingsSql() {
   const person = SQL_CANONICAL_PHONE("fs.phone");
@@ -173,7 +185,7 @@ export function buildMeetingsSql() {
       EXISTS (
         SELECT 1 FROM public.followup_schedules x
         JOIN public.followup_companies xc ON xc.id = x.company_id
-        WHERE xc.tenant_id::text = $1
+        WHERE xc.tenant_id::text = $1 AND ${MEETING_ROW_SQL("x")}
       ) AS has_records,
       COUNT(DISTINCT ${person}) FILTER (WHERE fs.created_at >= $2 AND fs.created_at < $3)::int AS meetings_people_current,
       COUNT(DISTINCT ${person}) FILTER (WHERE fs.created_at >= $4 AND fs.created_at < $5)::int AS meetings_people_previous
@@ -320,6 +332,15 @@ export function buildFirstHumanResponseCoverageSql() {
         WHERE human_at IS NULL AND unknown_at IS NULL
           AND in_at < $4::timestamptz - make_interval(hours => ${SLOW_FIRST_RESPONSE_HOURS})
       )::int AS coverage_waiting_over_threshold,
+      -- Faixas de espera de quem FOI respondido por gente. As quatro somam coverage_answered.
+      COUNT(*) FILTER (WHERE human_at IS NOT NULL AND human_at - in_at <= interval '10 minutes')::int AS coverage_bucket_10m,
+      COUNT(*) FILTER (
+        WHERE human_at IS NOT NULL AND human_at - in_at > interval '10 minutes' AND human_at - in_at <= interval '30 minutes'
+      )::int AS coverage_bucket_30m,
+      COUNT(*) FILTER (
+        WHERE human_at IS NOT NULL AND human_at - in_at > interval '30 minutes' AND human_at - in_at <= interval '2 hours'
+      )::int AS coverage_bucket_2h,
+      COUNT(*) FILTER (WHERE human_at IS NOT NULL AND human_at - in_at > interval '2 hours')::int AS coverage_bucket_over_2h,
       (percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (human_at - in_at)) / 60.0)
         FILTER (WHERE human_at IS NOT NULL))::float AS coverage_median_min,
       (percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (human_at - in_at)) / 60.0)
@@ -354,6 +375,13 @@ export function buildFirstHumanResponseCoverageResult(row) {
     waitingOverThreshold: int(row?.coverage_waiting_over_threshold),
     answeredWithUnknownBefore: int(row?.coverage_answered_unknown_first),
     thresholdHours: SLOW_FIRST_RESPONSE_HOURS,
+    // Quanto as pessoas esperaram pela primeira resposta de gente. Soma = answered.
+    waitBuckets: {
+      upTo10m: int(row?.coverage_bucket_10m),
+      upTo30m: int(row?.coverage_bucket_30m),
+      upTo2h: int(row?.coverage_bucket_2h),
+      over2h: int(row?.coverage_bucket_over_2h),
+    },
     medianMinutes: answered > 0 ? num(row?.coverage_median_min) : null,
     p90Minutes: answered > 0 ? num(row?.coverage_p90_min) : null,
   };
@@ -404,4 +432,75 @@ export async function measureWaiting(pool, { clientId, now }, { loadSource = def
     waitingOverThreshold: isCount(result.waitingOverThreshold) ? result.waitingOverThreshold : null,
     thresholdHours: SLOW_FIRST_RESPONSE_HOURS,
   };
+}
+
+// ── Aba Atendimento: a fila da tela Conversas, em detalhe ─────────────────
+// Não existe segunda conta. Os quatro estados e a lista de quem espera há mais tempo saem das MESMAS
+// funções que a tela Conversas usa (contadores da coluna e página da aba "Esperam você"), com o mesmo
+// teto de tempo. O Dashboard só escolhe quantas linhas mostrar.
+export const QUEUE_OLDEST_LIMIT = 5;
+
+// A fila guarda o chip pelo nome técnico da instância (o fim do endereço de envio, ex.: "empresa-pessoal-caio").
+// Na tela vale o nome que o dono deu ao chip. Mesma regra de apelidos da tela Conversas: id, nome e o último
+// trecho do endereço. Daqui só sai o NOME; endereço e credencial nunca entram no payload.
+async function defaultLoadChipInstances(clientId) {
+  const { getLeadClientEvolutionInstances } = await import("./evolution.js");
+  return getLeadClientEvolutionInstances(clientId);
+}
+
+export function buildChipNameResolver(instances) {
+  const names = new Map();
+  for (const inst of Array.isArray(instances) ? instances : []) {
+    const name = String(inst?.name ?? "").trim();
+    if (!name) continue;
+    const suffix = String(inst?.dispatch_webhook_url ?? "").trim().split("/").filter(Boolean).pop() || "";
+    for (const alias of [String(inst?.id ?? "").trim(), name, suffix]) if (alias && !names.has(alias)) names.set(alias, name);
+  }
+  return (alias) => (alias ? names.get(alias) ?? alias : null);
+}
+
+export async function measureQueue(pool, { clientId, now }, { loadModule = () => import("./inboxWorkState.js"), deps = {} } = {}) {
+  const queue = await loadModule();
+  // Sem a lista de chips o cartão ainda funciona: mostra o nome técnico em vez de falhar.
+  const chipName = buildChipNameResolver(await (deps.loadInstances ?? defaultLoadChipInstances)(clientId).catch(() => []));
+  const { pauseExpiredSql, robotInfo } = await queue.loadWorkStateContext(pool, clientId, deps);
+  const options = { clientId, now, robotChips: robotInfo.robotChips, chipAliases: null, pauseExpiredSql };
+  const run = async (query) => {
+    const counts = await queue.fetchInboxCounts(query, options);
+    const oldest =
+      counts.work.esperam > 0
+        ? await queue.fetchWorkStatePage(query, { ...options, state: "esperam", limit: QUEUE_OLDEST_LIMIT, offset: 0 })
+        : [];
+    return { counts, oldest };
+  };
+  const { counts, oldest } =
+    typeof pool?.connect === "function"
+      ? await queue.withStatementTimeout(pool, queue.WORK_STATE_QUERY_TIMEOUT_MS, run)
+      : await run((sql, params) => pool.query(sql, params));
+  return {
+    states: {
+      waiting: int(counts.work.esperam),
+      withLead: int(counts.work.com_lead),
+      withRobot: int(counts.work.robo),
+      cooled: int(counts.work.esfriaram),
+    },
+    waitingOverThreshold: int(counts.waitingOverThreshold),
+    thresholdHours: queue.WAITING_THRESHOLD_HOURS,
+    // Quem espera há mais tempo, na ordem da própria aba. Nome do lead quando existe; senão o do contato.
+    oldest: oldest.map((row) => ({
+      phone: row.phone_number,
+      name: row.lead_name || row.contact_name || row.profile_name || null,
+      chip: chipName(row.lead_chip),
+      waitingSince: row.last_in_at ? iso(row.last_in_at instanceof Date ? row.last_in_at : new Date(row.last_in_at)) : null,
+    })),
+  };
+}
+
+// A lista de quem espera leva nome e telefone de lead. O cálculo é um só por empresa (cache compartilhado), então
+// o corte é na ENTREGA: quem não tem acesso à tela Conversas recebe os números da fila, sem a lista.
+// Devolve uma cópia; o objeto do cache nunca é alterado.
+export function redactQueueListForViewer(metrics, { canSeeConversations }) {
+  const queue = metrics?.overview?.queue;
+  if (canSeeConversations || !queue) return metrics;
+  return { ...metrics, overview: { ...metrics.overview, queue: { ...queue, oldest: [], listRestricted: true } } };
 }

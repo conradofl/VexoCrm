@@ -12,6 +12,8 @@ import {
   measureFirstHumanResponseCoverage,
   measureFunnelMeetings,
   measureMeetings,
+  buildChipNameResolver,
+  measureQueue,
   measureWaiting,
 } from "../services/dashboardOverview.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
@@ -22,6 +24,7 @@ const TF = "tenant-funil";
 const TR = "tenant-resposta";
 const SO_ANTIGA = "tenant-reuniao-antiga";
 const SEM_REUNIAO = "tenant-sem-reuniao";
+const SO_CADENCIA = "tenant-so-cadencia";
 const OUTRO = "tenant-outro";
 const C1 = "11111111-1111-4111-8111-111111111111";
 const CO = (n) => `aaaaaaaa-aaaa-4aaa-8aaa-00000000000${n}`;
@@ -73,9 +76,14 @@ const SCHEMA = `
   CREATE TABLE followup_companies (id uuid PRIMARY KEY, tenant_id text NOT NULL);
   CREATE TABLE followup_schedules (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id uuid,
     company_id uuid NOT NULL,
+    lead_name text,
     phone text,
+    meeting_datetime timestamptz,
+    calendly_event_uri text,
     status text,
+    origin text,
     created_at timestamptz NOT NULL DEFAULT now()
   );
 `;
@@ -91,8 +99,17 @@ const msg = (client, phone, direction, at, senderType = null) =>
 const run = (client, phone, sentAt) =>
   `INSERT INTO campaign_dispatch_runs (client_id, campaign_id, phone, status, sent_at) VALUES ('${client}', '${C1}', '${phone}', 'sent', '${sentAt}');`;
 const company = (id, tenant) => `INSERT INTO followup_companies (id, tenant_id) VALUES ('${id}', '${tenant}');`;
-const meeting = (companyId, phone, at, status = "scheduled") =>
-  `INSERT INTO followup_schedules (company_id, phone, status, created_at) VALUES ('${companyId}', ${phone === null ? "NULL" : `'${phone}'`}, '${status}', '${at}');`;
+// Reunião de verdade: tem data de reunião E o evento que a originou (Calendly ou a gaveta de Conversas).
+let meetingSeq = 0;
+const meeting = (companyId, phone, at, status = "completed") =>
+  `INSERT INTO followup_schedules (company_id, phone, status, created_at, meeting_datetime, calendly_event_uri, origin) VALUES ('${companyId}', ${
+    phone === null ? "NULL" : `'${phone}'`
+  }, '${status}', '${at}', '${at}'::timestamptz + interval '2 days', 'lead-reminder:${++meetingSeq}', 'reuniao_conversas');`;
+// O que NÃO é reunião na mesma tabela: lead inscrito em cadência, mensagem agendada avulsa e cadência com data-alvo.
+const cadence = (companyId, phone, at, { targetDate = null, campaign = true } = {}) =>
+  `INSERT INTO followup_schedules (campaign_id, company_id, phone, status, created_at, meeting_datetime, origin) VALUES (${
+    campaign ? `'${C1}'` : "NULL"
+  }, '${companyId}', '${phone}', 'active', '${at}', ${targetDate ? `'${targetDate}'` : "NULL"}, '${campaign ? "banco_dados" : "manual"}');`;
 
 const SEED = [
   // ── Base: um lead de cada tipo ──
@@ -128,7 +145,15 @@ const SEED = [
   meeting(CO(1), "5534991110007", "2026-09-20T10:00:00Z"), // período anterior
   company(CO(2), SO_ANTIGA),
   meeting(CO(2), "5534993330001", "2026-03-01T10:00:00Z"), // tem registro, nenhum no período
+  meeting(CO(1), "5534991110006", "2026-10-24T10:00:00Z", "cancelled"), // cancelada na grafia atual do banco: não conta
+  // Na mesma tabela, o que NÃO é reunião, tudo dentro do período:
+  cadence(CO(1), "5534991110101", "2026-10-21T10:00:00Z"), // lead inscrito em cadência, sem data de reunião
+  cadence(CO(1), "5534991110102", "2026-10-21T10:00:00Z", { campaign: false }), // mensagem agendada avulsa
+  cadence(CO(1), "5534991110103", "2026-10-21T10:00:00Z", { targetDate: "2026-11-01T10:00:00Z" }), // cadência com data-alvo, sem evento
   company(CO(3), SEM_REUNIAO), // empresa de follow-up sem nenhuma reunião
+  company(CO(5), SO_CADENCIA),
+  cadence(CO(5), "5534995550001", "2026-10-21T10:00:00Z"), // usa follow-up, mas nunca registrou reunião
+  cadence(CO(5), "5534995550002", "2026-10-21T10:00:00Z", { targetDate: "2026-11-01T10:00:00Z" }),
 
   // ── Funil de coorte ──
   company(CO(4), TF),
@@ -243,6 +268,48 @@ describe("Reunião: o Dashboard só lê followup_schedules", () => {
   });
 });
 
+describe("Reunião: só conta linha que é reunião de verdade", () => {
+  it("[TESTE OBRIGATÓRIO] cadência sem data de reunião, mensagem avulsa e cadência com data-alvo não contam", async () => {
+    // No período há 1 pessoa com reunião válida e 3 linhas que não são reunião (cadência, avulsa, data-alvo).
+    const r = await measureMeetings(db, { clientId: T, ...PERIOD });
+    expect(r).toEqual({ hasRecords: true, current: 1, previous: 1 });
+
+    const naoReuniao = await db.query(
+      `SELECT COUNT(*)::int AS n FROM followup_schedules fs JOIN followup_companies fc ON fc.id = fs.company_id
+       WHERE fc.tenant_id = $1 AND fs.created_at >= $2 AND fs.created_at < $3 AND fs.status = 'active'`,
+      [T, PERIOD.currentStart.toISOString(), PERIOD.currentEnd.toISOString()]
+    );
+    expect(naoReuniao.rows[0].n).toBe(3); // as três estão lá, ativas e com telefone: só não são reunião
+  });
+
+  it("[TESTE OBRIGATÓRIO] empresa que só tem cadência não 'registra reunião': sai 'sem registro', não zero", async () => {
+    const r = await measureMeetings(db, { clientId: SO_CADENCIA, ...PERIOD });
+    expect(r).toEqual({ hasRecords: false, current: null, previous: null });
+  });
+
+  it("reunião cancelada não conta, nas duas grafias que o banco já teve", async () => {
+    const canceladas = await db.query(
+      `SELECT COUNT(*)::int AS n FROM followup_schedules fs JOIN followup_companies fc ON fc.id = fs.company_id
+       WHERE fc.tenant_id = $1 AND fs.status IN ('canceled', 'cancelled') AND fs.meeting_datetime IS NOT NULL`,
+      [T]
+    );
+    expect(canceladas.rows[0].n).toBe(2);
+    expect((await measureMeetings(db, { clientId: T, ...PERIOD })).current).toBe(1);
+  });
+
+  it("o funil usa a mesma regra: quem respondeu e só entrou em cadência não 'marcou reunião'", async () => {
+    const antes = await measureFunnelMeetings(db, { clientId: TF, ...PERIOD });
+    // Todos os que responderam ganham uma linha de cadência com data-alvo depois do envio.
+    await db.exec(
+      ["5534994440001", "5534994440002", "5534994440003", "5534994440005", "5534994440006"]
+        .map((phone) => cadence(CO(4), phone, "2026-10-28T10:00:00Z", { targetDate: "2026-11-05T10:00:00Z" }))
+        .join("\n")
+    );
+    const depois = await measureFunnelMeetings(db, { clientId: TF, ...PERIOD });
+    expect(depois).toEqual(antes);
+  });
+});
+
 describe("Funil de coorte: 'marcaram reunião' é subconjunto de 'responderam'", () => {
   it("só entra quem respondeu a campanha e marcou DEPOIS do envio", async () => {
     const r = await measureFunnelMeetings(db, { clientId: TF, ...PERIOD });
@@ -323,6 +390,158 @@ describe("'Pessoas esperam resposta' depende da tela Conversas", () => {
       const r = await measureWaiting(db, { clientId: T, now: NOW }, { loadSource: async () => async () => bad });
       expect(r).toEqual({ status: "pending_source" });
     }
+  });
+});
+
+describe("Aba Atendimento: faixas de espera", () => {
+  const TB = "tenant-faixas";
+  beforeAll(async () => {
+    const at = (min) => new Date(Date.parse("2026-11-01T10:00:00Z") + min * 60000).toISOString();
+    await db.exec(
+      [
+        // p1: 5 min · p2: exatamente 10 min (ainda "até 10") · p3: 20 min · p4: 1 hora · p5: 3 horas · p6: sem resposta
+        ...[["5534993330001", 5], ["5534993330002", 10], ["5534993330003", 20], ["5534993330004", 60], ["5534993330005", 180]].flatMap(([phone, wait]) => [
+          msg(TB, phone, "inbound", at(0), "lead"),
+          msg(TB, phone, "outbound", at(wait), "device"),
+        ]),
+        msg(TB, "5534993330006", "inbound", at(0), "lead"),
+      ].join("\n")
+    );
+  });
+
+  it("[TESTE OBRIGATÓRIO] as quatro faixas somam quem foi respondido por gente; o limite da faixa entra na faixa de baixo", async () => {
+    const r = await measureFirstHumanResponseCoverage(db, { clientId: TB, ...PERIOD });
+    expect(r.answered).toBe(5);
+    expect(r.waitBuckets).toEqual({ upTo10m: 2, upTo30m: 1, upTo2h: 1, over2h: 1 });
+    expect(Object.values(r.waitBuckets).reduce((a, b) => a + b, 0)).toBe(r.answered);
+    expect(r.waiting).toBe(1);
+  });
+
+  it("empresa sem conversa: faixas zeradas, sem inventar distribuição", async () => {
+    const r = await measureFirstHumanResponseCoverage(db, { clientId: "tenant-vazio", ...PERIOD });
+    expect(r.waitBuckets).toEqual({ upTo10m: 0, upTo30m: 0, upTo2h: 0, over2h: 0 });
+  });
+});
+
+describe("Aba Atendimento: a fila é a da tela Conversas", () => {
+  const TQ = "tenant-fila";
+  const deps = { settings: null, loadInstances: async () => [] };
+  let warnSpy;
+  beforeAll(async () => {
+    // O que a consulta da fila lê e esta base de teste do Dashboard não tinha.
+    await db.exec(`
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS instance_name text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS message_text text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS contact_name text;
+      ALTER TABLE lead_messages ADD COLUMN IF NOT EXISTS meta jsonb;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS nome text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_origin text;
+      ALTER TABLE leads ADD COLUMN IF NOT EXISTS source_campaign_id uuid;
+      CREATE TABLE IF NOT EXISTS whatsapp_chat_states (
+        client_id text NOT NULL, phone text NOT NULL, state text NOT NULL DEFAULT 'ativa', reason text, source text, changed_by text,
+        attended_at timestamptz, attended_by text, agent_muted_at timestamptz, agent_muted_reason text, agent_muted_source text,
+        agent_mute_last_human_at timestamptz, PRIMARY KEY (client_id, phone)
+      );
+      CREATE TABLE IF NOT EXISTS whatsapp_lid_map (lid text, profile_pic text, contact_name text);
+    `);
+    const ago = (hours) => new Date(NOW.getTime() - hours * 3600000).toISOString();
+    const inbound = (phone, hours, chip, contact) =>
+      `INSERT INTO lead_messages (client_id, phone, direction, sender_type, message_timestamp, instance_name, message_text, contact_name) VALUES ('${TQ}', '${phone}', 'inbound', 'lead', '${ago(hours)}', '${chip}', 'oi', ${contact ? `'${contact}'` : "NULL"});`;
+    await db.exec(
+      [
+        `INSERT INTO leads (client_id, telefone, nome) VALUES ('${TQ}', '5534994440001', 'Jéssica Mendonça');`,
+        inbound("5534994440001", 5, "Comercial", "Jé"), // espera há 5 h: passou do limite; o nome do lead vence o do contato
+        inbound("5534994440002", 1, "Pessoal", "Marcos"), // espera há 1 h; sem lead, vale o nome do contato
+        inbound("5534994440003", 2, "Comercial", null), // respondida depois: está "com o lead", não espera
+        `INSERT INTO lead_messages (client_id, phone, direction, sender_type, message_timestamp, instance_name, message_text) VALUES ('${TQ}', '5534994440003', 'outbound', 'device', '${ago(1.5)}', 'Comercial', 'olá');`,
+      ].join("\n")
+    );
+  });
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("[TESTE OBRIGATÓRIO] os números são os dos contadores da tela Conversas, não uma segunda conta", async () => {
+    const queue = await import("../services/inboxWorkState.js");
+    const ctx = await queue.loadWorkStateContext(db, TQ, deps);
+    const direto = await queue.fetchInboxCounts((sql, params) => db.query(sql, params), {
+      clientId: TQ, now: NOW, robotChips: ctx.robotInfo.robotChips, chipAliases: null, pauseExpiredSql: ctx.pauseExpiredSql,
+    });
+    const viaContrato = await queue.countWaitingForDashboard(db, { clientId: TQ, now: NOW }, deps);
+
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps });
+
+    expect(r.states).toEqual({ waiting: direto.work.esperam, withLead: direto.work.com_lead, withRobot: direto.work.robo, cooled: direto.work.esfriaram });
+    expect(r.states.waiting).toBe(viaContrato.waiting);
+    expect(r.waitingOverThreshold).toBe(viaContrato.waitingOverThreshold);
+    expect(r.states).toMatchObject({ waiting: 2, withLead: 1 });
+    expect(r.waitingOverThreshold).toBe(1);
+    expect(r.thresholdHours).toBe(3);
+  });
+
+  it("[TESTE OBRIGATÓRIO] quem espera há mais tempo vem primeiro, com nome, chip e desde quando", async () => {
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps });
+
+    expect(r.oldest.map((o) => o.phone)).toEqual(["5534994440001", "5534994440002"]);
+    expect(r.oldest[0]).toMatchObject({ name: "Jéssica Mendonça", chip: "Comercial" });
+    expect(r.oldest[1]).toMatchObject({ name: "Marcos", chip: "Pessoal" });
+    expect(Date.parse(r.oldest[0].waitingSince)).toBe(NOW.getTime() - 5 * 3600000);
+    // Quem já foi respondido não aparece na lista.
+    expect(r.oldest.some((o) => o.phone === "5534994440003")).toBe(false);
+  });
+
+  it("[TESTE OBRIGATÓRIO] o chip aparece pelo nome que o dono deu, não pelo nome técnico da instância", async () => {
+    const comNomes = {
+      settings: null,
+      loadInstances: async () => [
+        { id: "id-1", name: "Comercial - Gabriel", dispatch_webhook_url: "https://evolution.exemplo/message/sendText/Comercial" },
+        { id: "id-2", name: "Pessoal - Caio", dispatch_webhook_url: "https://evolution.exemplo/message/sendText/Pessoal" },
+      ],
+    };
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps: comNomes });
+    expect(r.oldest.map((o) => o.chip)).toEqual(["Comercial - Gabriel", "Pessoal - Caio"]);
+    // Nada do endereço de envio vai para o payload.
+    expect(JSON.stringify(r)).not.toContain("evolution.exemplo");
+    expect(JSON.stringify(r)).not.toContain("sendText");
+  });
+
+  it("chip desconhecido ou lista de chips indisponível: fica o nome técnico, o bloco não cai", async () => {
+    const resolve = buildChipNameResolver([{ id: "id-1", name: "Comercial - Gabriel", dispatch_webhook_url: "https://x/message/sendText/empresa-comercial-gabriel" }]);
+    expect(resolve("empresa-comercial-gabriel")).toBe("Comercial - Gabriel");
+    expect(resolve("id-1")).toBe("Comercial - Gabriel");
+    expect(resolve("outro-chip")).toBe("outro-chip");
+    expect(resolve(null)).toBeNull();
+    expect(buildChipNameResolver(null)("x")).toBe("x");
+
+    const semLista = { settings: null, loadInstances: async () => { throw new Error("sem chips"); } };
+    const r = await measureQueue(db, { clientId: TQ, now: NOW }, { deps: semLista });
+    expect(r.oldest[0].chip).toBe("Comercial");
+    expect(r.states.waiting).toBe(2);
+  });
+
+  it("empresa sem ninguém esperando: zero e lista vazia, sem consultar a página", async () => {
+    const r = await measureQueue(db, { clientId: "tenant-vazio", now: NOW }, { deps });
+    expect(r.states).toEqual({ waiting: 0, withLead: 0, withRobot: 0, cooled: 0 });
+    expect(r.oldest).toEqual([]);
+  });
+
+  it("[TESTE OBRIGATÓRIO] fila que falha vira bloco indisponível no payload, nunca zero", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const metrics = await calculateDashboardMetrics(db, TQ, "30d", {
+      referenceDate: NOW,
+      queueOptions: { loadModule: async () => { throw new Error("fila fora do ar"); } },
+    });
+    expect(metrics.overview.queue).toBeNull();
+    expect(metrics.unavailableBlocks).toContain("overview.queue");
+    expect(errorSpy).toHaveBeenCalled();
+  });
+
+  it("no payload, a fila da aba Atendimento e o bloco 1 dizem o mesmo número", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const metrics = await calculateDashboardMetrics(db, TQ, "30d", { referenceDate: NOW, queueOptions: { deps } });
+    expect(metrics.overview.queue.states.waiting).toBe(metrics.overview.waiting.waiting);
+    expect(metrics.overview.queue.oldest).toHaveLength(2);
   });
 });
 
