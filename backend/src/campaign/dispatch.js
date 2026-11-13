@@ -1490,6 +1490,42 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
   );
   const importItems = importItemsResult.data || [];
 
+  // Passos do LOTE que enviou o passo 1. O lote envia pela cópia dos passos gravada nele (campaign_dispatches.steps) e o
+  // progresso do lead guarda o dispatchId. A decisão "ainda há passo a enviar?" tem de olhar essa cópia: a sequência da
+  // campanha pode ter sido editada depois do lote (menos passos, ou sem o passo "depois da resposta"), e contar por ela
+  // tirava a resposta do fluxo da campanha e a entregava ao agente (Container LED, 12/11/2026). Sem cópia no lote, vale a
+  // sequência da campanha, como antes. Falha de leitura: também vale a da campanha (nunca derruba o webhook).
+  const passosDoLote = new Map();
+  const dispatchIdsDoProgresso = new Set();
+  for (const item of importItems) {
+    const todos = extractCampaignProgress(item?.normalized_data || {});
+    for (const prog of Object.values(todos || {})) {
+      const id = normalizeString(prog?.dispatchId);
+      if (id) dispatchIdsDoProgresso.add(id);
+    }
+  }
+  if (dispatchIdsDoProgresso.size > 0) {
+    try {
+      const { data: lotes, error: lotesError } = await supabase
+        .from("campaign_dispatches")
+        .select("id, campaign_id, steps")
+        .eq("client_id", clientId)
+        .in("id", Array.from(dispatchIdsDoProgresso));
+      if (lotesError) throw lotesError;
+      for (const lote of lotes || []) {
+        if (Array.isArray(lote.steps) && lote.steps.length > 0) {
+          passosDoLote.set(String(lote.id), { campaignId: String(lote.campaign_id), steps: lote.steps });
+        }
+      }
+    } catch (err) {
+      logCampaignReplyFlow("warn", "reply_match_dispatch_steps_unavailable", {
+        clientId,
+        phone: maskPhoneForLog(phone),
+        error: err?.message || String(err),
+      });
+    }
+  }
+
   const matches = (campaignsResult.data || [])
     .map((campaign) => {
       const analyticsMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
@@ -1516,10 +1552,16 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
       const hasProgress = Boolean(progress && Object.keys(progress).length > 0);
 
-      const stepPlan = getCampaignStepPlan(analyticsMeta || {});
+      const lote = passosDoLote.get(normalizeString(progress?.dispatchId) || "");
+      const effectiveMeta =
+        lote && lote.campaignId === String(campaign.id)
+          ? normalizeCampaignAnalyticsMeta({ ...(campaign.analytics_meta || {}), sequence: lote.steps })
+          : analyticsMeta;
+
+      const stepPlan = getCampaignStepPlan(effectiveMeta || {});
       const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
       const isWaitForReply =
-        analyticsMeta.dispatchOptions?.waitForReply === true ||
+        effectiveMeta.dispatchOptions?.waitForReply === true ||
         hasAfterReplySteps ||
         progress?.waitForReply === true;
 
@@ -1563,7 +1605,9 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         lastTriggeredAt: campaign.last_triggered_at || null,
         waitForReply: isWaitForReply,
         hasPendingProgress,
-        analyticsMeta,
+        // Com progresso de um lote que guardou os passos, é a sequência DELE: quem lê o match (webhook de entrada,
+        // continueCampaignLeadFromReply) decide o próximo passo pela mesma régua do envio.
+        analyticsMeta: effectiveMeta,
         isInActivePeriod,
         mode: campaign.mode || null,
         // Roteiro do agente: o do DISPARO manda; sem ele, cai no da campanha.
