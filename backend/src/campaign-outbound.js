@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { isFilterShape, normalizeFilters } from "./segmentation.js";
 import { applyMessagePlaceholders, findUnresolvedPlaceholders } from "./services/messagePlaceholders.js";
 import { validateOutboundMessage } from "./services/jsonExtractor.js";
+import { registerSystemSentFromResponse } from "./services/systemSentMessages.js";
 
 export { applyMessagePlaceholders, findUnresolvedPlaceholders, postEvolutionPayload };
 
@@ -814,6 +815,7 @@ async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
       signal: controller.signal,
     });
     const responseText = await response.text();
+    if (response.ok) registerSystemSentFromResponse(responseText);
 
     if (!response.ok) {
       const isConnectionClosed =
