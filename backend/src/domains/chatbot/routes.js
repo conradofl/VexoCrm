@@ -36,6 +36,7 @@ import {
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { isDeviceTypedMessage, registerSystemSentFromResponse } from "../../services/systemSentMessages.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
 import { registerFollowupReply } from "../../services/followupReplyHook.js";
@@ -502,6 +503,7 @@ export function registerChatbotRoutes(app, deps) {
           const corpo = await resposta.text().catch(() => "");
           throw new Error(`HTTP ${resposta.status} ${corpo.slice(0, 120)}`);
         }
+        registerSystemSentFromResponse(await resposta.text().catch(() => ""));
         enviados += 1;
       } catch (err) {
         falhas.push({ numero: maskPhoneForLog(numero), erro: err?.message || String(err) });
@@ -1312,6 +1314,23 @@ export function registerChatbotRoutes(app, deps) {
   // D3: resposta de gente pela tela de Conversas pausa o agente naquela conversa, só no
   // tenant que ligou agent_pause_on_device_reply (nasce desligada). Falha aqui não pode
   // derrubar o envio, que já saiu: só loga.
+  // Pausa de GENTE (origem manual: botão, resposta pela tela ou pelo aparelho) e ainda no prazo. A pausa do classificador
+  // (conversa não comercial) não entra aqui: ela já tem o portão próprio e não segura passo de campanha.
+  async function conversaPausadaPorGente(clientId, phone) {
+    try {
+      const settings = await getLeadClientN8nSettings(clientId).catch(() => null);
+      const estado = await resolveChatMuteState(pgDatabasePool, {
+        clientId,
+        phone,
+        expiryDays: resolveAgentPauseExpiryDays(settings),
+      });
+      return estado?.source === MUTE_SOURCE_MANUAL && estado.expired !== true;
+    } catch (err) {
+      console.warn("[chatbot-webhook] falha ao conferir pausa de atendimento humano:", err?.message || err);
+      return false;
+    }
+  }
+
   async function pauseAgentOnHumanReply(clientId, phone) {
     try {
       // Já pausada à mão: a resposta só empurra o prazo, com ou sem o D3. Regravar a
@@ -2053,6 +2072,7 @@ export function registerChatbotRoutes(app, deps) {
       if (!response.ok) {
         throw new Error(responseText || `HTTP ${response.status}`);
       }
+      registerSystemSentFromResponse(responseText);
 
       // Log sent message in the database
       // instanceName must be the Evolution API name (last URL path segment) to match
@@ -3247,6 +3267,17 @@ export function registerChatbotRoutes(app, deps) {
         waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
       });
       responder({ saved: "outbound_from_me" });
+      // Resposta digitada no aparelho pausa o agente, igual à resposta pela tela (mesma pausa, mesmo prazo, mesmo
+      // "Reativar"), quando a empresa ligou "Pausar o agente quando a equipe responder". Eco de envio do próprio sistema
+      // (agente, campanha, follow-up, recontato, tela) não pausa: decide pelo id registrado no envio, nunca pelo prefixo.
+      // Roda depois da resposta à Evolution: a segunda conferência espera alguns segundos.
+      if (explicitClientId && pgDatabasePool) {
+        const pausaLigada = (await getLeadClientN8nSettings(clientId).catch(() => null))?.agent_pause_on_device_reply === true;
+        const waIdDoEco = messageData.waMessageId || resolveMessageId(body) || null;
+        if (pausaLigada && (await isDeviceTypedMessage(pgDatabasePool, { clientId, waMessageId: waIdDoEco }))) {
+          await pauseAgentOnHumanReply(clientId, phone);
+        }
+      }
       return;
     }
 
@@ -3426,6 +3457,11 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // ── CAMINHO 1: DISPARO DO PRÓXIMO PASSO DE CAMPANHA (EXCLUSÃO MÚTUA ESTREITA) ──
+    // Conversa pausada por gente (tela ou aparelho): nada automático responde, nem o próximo passo da campanha.
+    if (activeWaitCampaignToDispatch && (await conversaPausadaPorGente(clientId, phone))) {
+      responder({ status: "skipped_human_pause", motivo: "atendimento_humano" }, { clientId, phone: maskPhoneForLog(phone) });
+      return;
+    }
     if (activeWaitCampaignToDispatch) {
       // 1. Responde 200 IMEDIATAMENTE ao Evolution (evita timeout e retry)
       responder({ status: "campaign_step_dispatched" }, {
@@ -3855,6 +3891,16 @@ export function registerChatbotRoutes(app, deps) {
           const leadSentAudio = Array.isArray(messages) && messages.some((m) => m?.type === "audio" || m?.media_type === "audio");
           const shouldSendVoice = resolveVoiceDecision({ voiceMode, leadSentAudio });
 
+          // A IA leva segundos: a equipe pode ter respondido nesse meio tempo. Confere a pausa de gente de novo no
+          // instante de enviar (vale para a resposta do agente e para a mensagem de recontato).
+          if (await conversaPausadaPorGente(clientId, phone)) {
+            console.log("[chatbot-webhook] resposta da IA descartada: equipe assumiu a conversa enquanto a IA pensava", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+            });
+            return;
+          }
+
           let sentViaVoice = false;
           let outboundWaId = null;
 
@@ -3930,6 +3976,7 @@ export function registerChatbotRoutes(app, deps) {
               try {
                 const evoData = await evolutionResponse.json();
                 outboundWaId = evoData?.key?.id || evoData?.data?.key?.id || evoData?.messageId || null;
+                registerSystemSentFromResponse(evoData);
               } catch {
                 // Ignora erro de parsing de json caso resposta seja texto
               }
