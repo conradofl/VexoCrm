@@ -1241,7 +1241,10 @@ export async function updateLeadImportItemCampaignProgress({
     .maybeSingle();
 
   if (fetchError) throw fetchError;
-  if (!item) return null;
+  // Destinatário da base CRM (campanha com origem "__crm__"): o id é de public.leads, não de lead_import_items. Até
+  // 13/11/2026 a gravação parava aqui sem erro e sem gravar nada, e a resposta do lead nunca encontrava a espera: caía no
+  // agente em vez de receber o próximo passo (Container LED, Black Friday). O progresso desse lead mora em leads.dados.
+  if (!item) return updateCrmLeadCampaignProgress({ clientId, leadId: leadImportItemId, campaignId, progressPatch });
 
   const updatePayload = {
     normalized_data: mergeCampaignProgress(item.normalized_data || {}, campaignId, progressPatch),
@@ -1286,6 +1289,31 @@ export async function updateLeadImportItemCampaignProgress({
 
   if (updateError) throw updateError;
   return updated;
+}
+
+// Progresso de campanha de um lead da base CRM, em public.leads.dados.campaign_progress (mesmo formato do
+// normalized_data.campaign_progress da planilha). Devolve a linha no formato de item de planilha, ou null se o lead não existe.
+async function updateCrmLeadCampaignProgress({ clientId, leadId, campaignId, progressPatch }) {
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("id, dados")
+    .eq("client_id", clientId)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) {
+    // id que não é uuid ou tabela sem a coluna: não é lead do CRM, nada a gravar.
+    if (String(error.code) === "22P02" || isMissingSchemaError(error)) return null;
+    throw error;
+  }
+  if (!lead) return null;
+  const dados = mergeCampaignProgress(lead.dados || {}, campaignId, progressPatch);
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({ dados })
+    .eq("client_id", clientId)
+    .eq("id", leadId);
+  if (updateError) throw updateError;
+  return { id: lead.id, normalized_data: dados, status_conversa: null, ultima_interacao_bot: null, ultima_interacao_usuario: null };
 }
 
 export async function updateLeadConversationState({
@@ -1460,6 +1488,35 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
   if (importItemsResult.error) throw importItemsResult.error;
   if (campaignsResult.error) throw campaignsResult.error;
 
+  // Leads da base CRM com este telefone: campanha com origem "__crm__" guarda o progresso em leads.dados (ver
+  // updateCrmLeadCampaignProgress). Entram depois dos itens de planilha. Falha aqui não derruba o casamento por planilha.
+  let crmItems = [];
+  try {
+    const { data: crmLeads, error: crmError } = await supabase
+      .from("leads")
+      .select("id, nome, dados, created_at")
+      .eq("client_id", clientId)
+      .in("telefone", phoneVariants);
+    if (crmError) throw crmError;
+    crmItems = (crmLeads || [])
+      .filter((lead) => lead?.dados && typeof lead.dados === "object" && lead.dados.campaign_progress)
+      .map((lead) => ({
+        id: lead.id,
+        import_id: null,
+        normalized_data: { ...lead.dados, nome: lead.dados?.nome || lead.nome || null },
+        status_conversa: null,
+        ultima_interacao_bot: null,
+        ultima_interacao_usuario: null,
+        created_at: lead.created_at,
+      }));
+  } catch (err) {
+    logCampaignReplyFlow("warn", "reply_match_crm_leads_unavailable", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      error: err?.message || String(err),
+    });
+  }
+
   // Roteiro proprio do disparo mais recente de cada campanha. A copia isolada vive em
   // campaign_dispatches.campaign_prompt_id; quem responde deve ser atendido pelo roteiro
   // DAQUELE disparo, nao pelo da campanha (que pode ter sido editado depois).
@@ -1488,7 +1545,43 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         .filter(Boolean)
     )
   );
-  const importItems = importItemsResult.data || [];
+  const importItems = [...(importItemsResult.data || []), ...crmItems];
+
+  // Passos do LOTE que enviou o passo 1. O lote envia pela cópia dos passos gravada nele (campaign_dispatches.steps) e o
+  // progresso do lead guarda o dispatchId. A decisão "ainda há passo a enviar?" tem de olhar essa cópia: a sequência da
+  // campanha pode ter sido editada depois do lote (menos passos, ou sem o passo "depois da resposta"), e contar por ela
+  // tirava a resposta do fluxo da campanha e a entregava ao agente (Container LED, 12/11/2026). Sem cópia no lote, vale a
+  // sequência da campanha, como antes. Falha de leitura: também vale a da campanha (nunca derruba o webhook).
+  const passosDoLote = new Map();
+  const dispatchIdsDoProgresso = new Set();
+  for (const item of importItems) {
+    const todos = extractCampaignProgress(item?.normalized_data || {});
+    for (const prog of Object.values(todos || {})) {
+      const id = normalizeString(prog?.dispatchId);
+      if (id) dispatchIdsDoProgresso.add(id);
+    }
+  }
+  if (dispatchIdsDoProgresso.size > 0) {
+    try {
+      const { data: lotes, error: lotesError } = await supabase
+        .from("campaign_dispatches")
+        .select("id, campaign_id, steps")
+        .eq("client_id", clientId)
+        .in("id", Array.from(dispatchIdsDoProgresso));
+      if (lotesError) throw lotesError;
+      for (const lote of lotes || []) {
+        if (Array.isArray(lote.steps) && lote.steps.length > 0) {
+          passosDoLote.set(String(lote.id), { campaignId: String(lote.campaign_id), steps: lote.steps });
+        }
+      }
+    } catch (err) {
+      logCampaignReplyFlow("warn", "reply_match_dispatch_steps_unavailable", {
+        clientId,
+        phone: maskPhoneForLog(phone),
+        error: err?.message || String(err),
+      });
+    }
+  }
 
   const matches = (campaignsResult.data || [])
     .map((campaign) => {
@@ -1516,10 +1609,16 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const progress = extractCampaignProgress(matchedImportItem?.normalized_data || {}, campaign.id);
       const hasProgress = Boolean(progress && Object.keys(progress).length > 0);
 
-      const stepPlan = getCampaignStepPlan(analyticsMeta || {});
+      const lote = passosDoLote.get(normalizeString(progress?.dispatchId) || "");
+      const effectiveMeta =
+        lote && lote.campaignId === String(campaign.id)
+          ? normalizeCampaignAnalyticsMeta({ ...(campaign.analytics_meta || {}), sequence: lote.steps })
+          : analyticsMeta;
+
+      const stepPlan = getCampaignStepPlan(effectiveMeta || {});
       const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
       const isWaitForReply =
-        analyticsMeta.dispatchOptions?.waitForReply === true ||
+        effectiveMeta.dispatchOptions?.waitForReply === true ||
         hasAfterReplySteps ||
         progress?.waitForReply === true;
 
@@ -1563,7 +1662,9 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         lastTriggeredAt: campaign.last_triggered_at || null,
         waitForReply: isWaitForReply,
         hasPendingProgress,
-        analyticsMeta,
+        // Com progresso de um lote que guardou os passos, é a sequência DELE: quem lê o match (webhook de entrada,
+        // continueCampaignLeadFromReply) decide o próximo passo pela mesma régua do envio.
+        analyticsMeta: effectiveMeta,
         isInActivePeriod,
         mode: campaign.mode || null,
         // Roteiro do agente: o do DISPARO manda; sem ele, cai no da campanha.

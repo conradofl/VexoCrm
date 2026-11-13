@@ -1404,7 +1404,9 @@ export function getEvolutionAdminConfig() {
 export function buildEvolutionManagedInstanceName(clientId, inputName) {
   const source = normalizeString(inputName) || clientId || "vexo";
   const normalized = normalizeTenantKey(source) || normalizeTenantKey(clientId) || `vexo-${randomUUID().slice(0, 8)}`;
-  const withClientPrefix = normalized.startsWith(`${clientId}-`) ? normalized : `${clientId}-${normalized}`;
+  // Nome igual ao da empresa ("container-led") já é o nome com prefixo: sem esta guarda virava "container-led-container-led".
+  const jaTemPrefixo = normalized === clientId || normalized.startsWith(`${clientId}-`);
+  const withClientPrefix = jaTemPrefixo ? normalized : `${clientId}-${normalized}`;
   return withClientPrefix.slice(0, 64).replace(/-+$/g, "");
 }
 
