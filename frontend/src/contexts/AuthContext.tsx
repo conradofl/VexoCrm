@@ -58,6 +58,7 @@ export interface AuthAccessProfile {
   internalPages: InternalPage[];
   permissions: AccessPermission[];
   companyName: string | null;
+  allowedModules?: string[] | null;
   allow_user_management?: boolean;
   allowUserManagement?: boolean;
   granularPermissions?: string[];
@@ -75,6 +76,7 @@ interface AuthContextType {
   clientIds: string[];
   allowedViews: AccessView[];
   internalPages: InternalPage[];
+  allowedModules?: string[] | null;
   permissions: AccessPermission[];
   loading: boolean;
   // Tenant corrente (opcional — nem todo provider popula; consumidores tratam undefined)
@@ -185,6 +187,7 @@ function buildAccessProfile(user: User, claims: Record<string, unknown> = {}): A
     internalPages,
     permissions: isAdmin ? [...buildPresetDefaults("admin_vexo").permissions] : permissions,
     companyName,
+    allowedModules: Array.isArray(claims.allowedModules) ? claims.allowedModules : null,
     allow_user_management: Boolean(
       claims.allow_user_management ??
         claims.allowUserManagement ??
@@ -440,6 +443,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clientIds,
         allowedViews,
         internalPages,
+        allowedModules: accessProfile?.allowedModules || null,
         permissions,
         loading,
         isAuthenticated,

@@ -8,6 +8,11 @@ import { isPathAllowedForClient, getInheritedPlanPages } from "@/lib/access";
 import { resolveTenantPlan } from "@/lib/planTier";
 import { isModuleLocked } from "@/lib/moduleAccess";
 import { useChipLimits } from "@/hooks/useChipLimits";
+import {
+  isOperatorModuleAllowed,
+  getModuleIdFromSidebarItemKey,
+  getModuleIdFromPath,
+} from "@/lib/operatorPermissions";
 import { 
   OPERACAO_ITEMS, 
   INTELIGENCIA_ITEMS, 
@@ -137,10 +142,16 @@ export function AppSidebar() {
   const isSidebarItemModularlyLocked = (item: (typeof OPERACAO_ITEMS)[number]): boolean =>
     isModuleLocked(crmClient?.selectedClient, item.key || item.page, chipLimits);
 
+  const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+
   const filterItems = (items: typeof OPERACAO_ITEMS) => {
     return items
       .filter((f) => {
-        const hasAccess = isAdminUser || canAccessInternalPage(f.page) || inheritedPages.includes(f.page);
+        const modId = getModuleIdFromSidebarItemKey(f.key) || getModuleIdFromPath(f.url);
+        if (isOperator && modId) {
+          return isOperatorModuleAllowed(modId, accessProfile);
+        }
+        const hasAccess = isAdminUser || canAccessInternalPage(f.page) || (!isInternalUser && inheritedPages.includes(f.page));
         return hasAccess && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs));
       });
   };
@@ -153,9 +164,13 @@ export function AppSidebar() {
   const visibleGeracaoDigital = selectedClientId === "geracao-digital" ? filterItems(GERACAO_DIGITAL_ITEMS) : [];
   const visibleLivpub = (isAdminUser || selectedClientId === "livpub") ? filterItems(LIVPUB_ITEMS) : [];
 
-  const visibleAjuda = AJUDA_ITEMS.filter(
-    (f) => isInternalUser || isPathAllowedForClient(f.url, allowedTabs)
-  );
+  const visibleAjuda = AJUDA_ITEMS.filter((f) => {
+    const modId = getModuleIdFromSidebarItemKey(f.key) || getModuleIdFromPath(f.url);
+    if (isOperator && modId) {
+      return isOperatorModuleAllowed(modId, accessProfile);
+    }
+    return isInternalUser || isPathAllowedForClient(f.url, allowedTabs);
+  });
   const visibleAdmin = filterItems(ADMIN_ITEMS);
 
   const selectedPreset = COLOR_PRESETS[(color as keyof typeof COLOR_PRESETS) || "default"] || COLOR_PRESETS.default;
@@ -323,7 +338,7 @@ export function AppSidebar() {
               ))}
             </div>
           </>
-        ) : (isAdminUser || accessProfile?.allow_user_management === true || accessProfile?.allowUserManagement === true || accessProfile?.permissions?.includes("users.manage" as any) || accessProfile?.granularPermissions?.includes("users.manage") || accessProfile?.role === "manager" || accessProfile?.role === "admin") ? (
+        ) : (!isOperator && (isAdminUser || accessProfile?.allow_user_management === true || accessProfile?.allowUserManagement === true || accessProfile?.permissions?.includes("users.manage" as any) || accessProfile?.granularPermissions?.includes("users.manage") || accessProfile?.role === "manager" || accessProfile?.role === "admin")) || (isOperator && isOperatorModuleAllowed("admin", accessProfile)) ? (
           <>
             {!collapsed && (
               <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">

@@ -59,6 +59,14 @@ import { type AdminUserRecord, useAdminUsers } from "@/hooks/useAdminUsers";
 import { fetchApi, readApiErrorMessage, readApiJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  OPERATOR_MODULES,
+  ALL_OPERATOR_MODULE_IDS,
+  DEFAULT_OPERATOR_MODULE_IDS,
+  deriveOperatorModulesFromPages,
+  derivePagesAndPermissionsFromModules,
+  type OperatorModuleId,
+} from "@/lib/operatorPermissions";
+import {
   ACCESS_PRESET_ORDER,
   ACCESS_PERMISSION_DEFINITIONS,
   ACCESS_PERMISSION_ORDER,
@@ -95,6 +103,7 @@ interface UserDraft {
   clientIds: string[];
   allowedViews: AccessView[];
   internalPages: InternalPage[];
+  allowedModules?: OperatorModuleId[];
   permissions: AccessPermission[];
   // Matriz granular do PERMISSIONS_REGISTRY (objetivo 1b). Passa intocada pelo
   // applySimpleAccessModel (spread) e vira o `permissions` enviado ao backend.
@@ -114,6 +123,7 @@ interface CreateUserDraft {
   clientIds: string[];
   allowedViews: AccessView[];
   internalPages: InternalPage[];
+  allowedModules?: OperatorModuleId[];
   permissions: AccessPermission[];
   granularPermissions?: string[];
   sendPasswordReset: boolean;
@@ -512,6 +522,9 @@ function buildUserDraft(user: AdminUserRecord): UserDraft {
     internalPages: user.access.internalPages?.length
       ? user.access.internalPages
       : [...defaults.internalPages],
+    allowedModules: user.access.allowedModules?.length
+      ? (user.access.allowedModules as OperatorModuleId[])
+      : deriveOperatorModulesFromPages(user.access.internalPages || []),
     permissions: user.access.permissions?.length
       ? user.access.permissions
       : [...defaults.permissions],
@@ -534,6 +547,7 @@ function buildCreateDraft(): CreateUserDraft {
     clientIds: [],
     allowedViews: [],
     internalPages: [],
+    allowedModules: [...DEFAULT_OPERATOR_MODULE_IDS],
     permissions: [],
     sendPasswordReset: false,
     disabled: false,
@@ -549,6 +563,7 @@ interface AccessProfileDraft {
   approvalLevel: ApprovalLevel;
   allowedViews: AccessView[];
   internalPages: InternalPage[];
+  allowedModules?: OperatorModuleId[];
   permissions: AccessPermission[];
 }
 
@@ -806,6 +821,7 @@ function buildPayload(draft: AccessDraft, clientPlan?: string) {
     clientIds: normalized.clientIds,
     allowedViews: normalized.allowedViews,
     internalPages: normalized.internalPages,
+    allowedModules: normalized.role === "internal" ? (draft.allowedModules || []) : undefined,
     permissions,
     plan_tier: clientPlan === "modular" ? "modular" : undefined,
     planTier: clientPlan === "modular" ? "modular" : undefined,
@@ -832,6 +848,7 @@ function estimateClaimsPayloadSize(draft: AccessDraft): number {
     tenantIds: normalized.clientIds,
     allowedViews: normalized.role === "client" ? normalized.allowedViews : [],
     internalPages: normalized.role === "internal" ? normalized.internalPages : [],
+    allowedModules: normalized.role === "internal" ? (draft.allowedModules || []) : undefined,
     permissions: effectivePermissions,
     companyName: normalized.companyName ? normalized.companyName.trim() : null,
   };
@@ -1521,6 +1538,132 @@ function applyGranularToDraft(
     internalPages: Array.from(new Set([...internalPages, ...preservedPages])) as InternalPage[],
     allowedViews: Array.from(new Set([...allowedViews, ...preservedViews])) as AccessView[],
   };
+}
+
+function OperatorModulesGate({
+  allowedModules = [],
+  onChange,
+  disabled = false,
+}: {
+  allowedModules?: OperatorModuleId[];
+  onChange: (modules: OperatorModuleId[]) => void;
+  disabled?: boolean;
+}) {
+  const currentSet = new Set(allowedModules || []);
+
+  const toggleModule = (id: OperatorModuleId) => {
+    if (disabled) return;
+    const next = new Set(currentSet);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    onChange(Array.from(next));
+  };
+
+  const selectAll = () => {
+    if (disabled) return;
+    onChange([...ALL_OPERATOR_MODULE_IDS]);
+  };
+
+  const deselectAll = () => {
+    if (disabled) return;
+    onChange([]);
+  };
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-border/80 bg-muted/10 p-5 mt-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            <h4 className="font-bold text-sm text-foreground">
+              Trava de Acesso por Módulo (Operador)
+            </h4>
+            <Badge variant="outline" className="text-[10px] px-2 py-0 border-primary/30 text-primary font-semibold">
+              {currentSet.size} de {OPERATOR_MODULES.length} liberados
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Defina exatamente quais ferramentas e telas este operador pode visualizar e usar no CRM.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            onClick={selectAll}
+            className="h-8 text-xs font-semibold px-2.5 rounded-lg border-border/60 hover:bg-muted/30"
+          >
+            Marcar Todos
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            onClick={deselectAll}
+            className="h-8 text-xs font-semibold px-2.5 rounded-lg text-muted-foreground hover:text-foreground"
+          >
+            Desmarcar Todos
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+        {OPERATOR_MODULES.map((mod) => {
+          const Icon = mod.icon;
+          const isAllowed = currentSet.has(mod.id);
+
+          return (
+            <div
+              key={mod.id}
+              onClick={() => toggleModule(mod.id)}
+              className={cn(
+                "group flex items-start justify-between gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none",
+                isAllowed
+                  ? "border-primary/50 bg-primary/5 shadow-xs ring-1 ring-primary/20 dark:bg-primary/10"
+                  : "border-border/60 bg-background/50 hover:bg-muted/15 opacity-70 hover:opacity-100",
+                disabled && "pointer-events-none opacity-50"
+              )}
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <div
+                  className={cn(
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors mt-0.5",
+                    isAllowed
+                      ? "border-primary/30 bg-primary/15 text-primary"
+                      : "border-border/60 bg-muted/20 text-muted-foreground"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-xs text-foreground truncate">
+                    {mod.label}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground line-clamp-1 leading-snug mt-0.5">
+                    {mod.description}
+                  </p>
+                </div>
+              </div>
+
+              <Switch
+                checked={isAllowed}
+                disabled={disabled}
+                onCheckedChange={() => toggleModule(mod.id)}
+                className="scale-85 shrink-0 data-[state=checked]:bg-primary pointer-events-none mt-0.5"
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function UserPlanAndSecurityControls({
@@ -2827,11 +2970,15 @@ export default function UserAccessManagement() {
                         <button
                           type="button"
                           onClick={() => {
-                            const defaults = buildPresetDefaults("operador");
+                            const initialModules = createDraft.allowedModules?.length
+                              ? createDraft.allowedModules
+                              : [...DEFAULT_OPERATOR_MODULE_IDS];
+                            const { internalPages, permissions } = derivePagesAndPermissionsFromModules(initialModules);
                             updateCreateDraft({
                               accessPreset: "operador",
-                              internalPages: [...defaults.internalPages],
-                              permissions: [...defaults.permissions],
+                              allowedModules: initialModules,
+                              internalPages,
+                              permissions,
                               granularPermissions: [],
                             });
                           }}
@@ -2853,6 +3000,20 @@ export default function UserAccessManagement() {
                           </p>
                         </button>
                       </div>
+
+                      {createDraft.accessPreset === "operador" && (
+                        <OperatorModulesGate
+                          allowedModules={createDraft.allowedModules}
+                          onChange={(nextModules) => {
+                            const { internalPages, permissions } = derivePagesAndPermissionsFromModules(nextModules);
+                            updateCreateDraft({
+                              allowedModules: nextModules,
+                              internalPages,
+                              permissions,
+                            });
+                          }}
+                        />
+                      )}
                     </div>
                   ) : (() => {
                     const selectedCreateClient =
@@ -3493,11 +3654,15 @@ export default function UserAccessManagement() {
                                               type="button"
                                               disabled={!selectedEditable || isFixedAdminAccount(selectedUser.uid, selectedUser.email)}
                                               onClick={() => {
-                                                const defaults = buildPresetDefaults("operador");
+                                                const initialModules = selectedDraft.allowedModules?.length
+                                                  ? selectedDraft.allowedModules
+                                                  : [...DEFAULT_OPERATOR_MODULE_IDS];
+                                                const { internalPages, permissions } = derivePagesAndPermissionsFromModules(initialModules);
                                                 updateDraft(selectedUser.uid, {
                                                   accessPreset: "operador",
-                                                  internalPages: [...defaults.internalPages],
-                                                  permissions: [...defaults.permissions],
+                                                  allowedModules: initialModules,
+                                                  internalPages,
+                                                  permissions,
                                                   granularPermissions: [],
                                                 });
                                               }}
@@ -3515,10 +3680,25 @@ export default function UserAccessManagement() {
                                                 )}
                                               </div>
                                               <p className="text-xs text-muted-foreground leading-relaxed">
-                                                Operação comercial completa (inbox, chips, conexões, disparos e campanhas). Sem gestão de usuários ou inteligência comercial.
+                                                Operação comercial (inbox, chips, conexões, disparos e campanhas). Selecione os módulos permitidos abaixo.
                                               </p>
                                             </button>
                                           </div>
+
+                                          {selectedDraft.accessPreset === "operador" && (
+                                            <OperatorModulesGate
+                                              allowedModules={selectedDraft.allowedModules}
+                                              disabled={!selectedEditable || isFixedAdminAccount(selectedUser.uid, selectedUser.email)}
+                                              onChange={(nextModules) => {
+                                                const { internalPages, permissions } = derivePagesAndPermissionsFromModules(nextModules);
+                                                updateDraft(selectedUser.uid, {
+                                                  allowedModules: nextModules,
+                                                  internalPages,
+                                                  permissions,
+                                                });
+                                              }}
+                                            />
+                                          )}
                                         </div>
                                       )}
 

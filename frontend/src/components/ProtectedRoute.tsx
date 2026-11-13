@@ -3,6 +3,7 @@ import { type InternalPage, INTERNAL_PAGE_ORDER, isPathAllowedForClient, isInter
 import { resolveTenantPlan } from "@/lib/planTier";
 import { Navigate, useLocation } from "react-router-dom";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
+import { OPERATOR_MODULES, isOperatorModuleAllowed, getModuleIdFromPath } from "@/lib/operatorPermissions";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -28,6 +29,7 @@ export default function ProtectedRoute({
     isAdminUser,
     canAccessView,
     canAccessInternalPage,
+    accessProfile,
   } = useAuth();
   const location = useLocation();
   const isSetPasswordPage = location.pathname === "/set-password";
@@ -66,9 +68,19 @@ export default function ProtectedRoute({
   }
 
   const isInternalUser = accessRole === "internal";
+  const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+
+  // Trava rigorosa para operadores: se a rota atual corresponde a um módulo bloqueado, redireciona
+  if (isOperator) {
+    const operatorModId = getModuleIdFromPath(location.pathname);
+    if (operatorModId && !isOperatorModuleAllowed(operatorModId, accessProfile)) {
+      const firstAllowed = OPERATOR_MODULES.find((m) => isOperatorModuleAllowed(m.id, accessProfile));
+      return <Navigate to={firstAllowed ? firstAllowed.url : "/crm"} replace />;
+    }
+  }
 
   const hasPageAccess = requiredInternalPage
-    ? isAdminUser || canAccessInternalPage(requiredInternalPage) || inheritedPages.includes(requiredInternalPage)
+    ? isAdminUser || canAccessInternalPage(requiredInternalPage) || (!isInternalUser && inheritedPages.includes(requiredInternalPage))
     : true;
 
   if (requiredInternalPage && (!hasPageAccess || (!isInternalUser && !isInternalPageAllowedForClient(requiredInternalPage, allowedTabs)))) {

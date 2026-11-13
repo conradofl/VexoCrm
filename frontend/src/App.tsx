@@ -54,13 +54,22 @@ import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPr
 import GeracaoDigitalImplementationBriefing from "./pages/GeracaoDigitalImplementationBriefing";
 import ComercialVexo from "./pages/ComercialVexo";
 import GeracaoDigitalPortalCliente from "./pages/GeracaoDigitalPortalCliente";
+import { OPERATOR_MODULES, isOperatorModuleAllowed } from "./lib/operatorPermissions";
 
 const queryClient = new QueryClient();
 
 function InternalIndexRedirect() {
-  const { canAccessInternalPage } = useAuth();
+  const { canAccessInternalPage, isInternalUser, isAdminUser, accessProfile } = useAuth();
   const crmClient = useOptionalCrmClient();
   const allowedTabs = crmClient?.selectedClient?.n8n_settings?.allowed_tabs;
+
+  const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+  if (isOperator) {
+    const firstAllowed = OPERATOR_MODULES.find((m) => isOperatorModuleAllowed(m.id, accessProfile));
+    if (firstAllowed) {
+      return <Navigate to={firstAllowed.url} replace />;
+    }
+  }
 
   const target = INTERNAL_PAGE_ORDER.find(
     (page) => canAccessInternalPage(page) && isInternalPageAllowedForClient(page, allowedTabs)
@@ -205,7 +214,7 @@ const App = () => (
               <Route
                 path="leads-parados"
                 element={
-                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="banco-de-dados">
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="leads-parados">
                     <LeadsParados />
                   </ProtectedRoute>
                 }

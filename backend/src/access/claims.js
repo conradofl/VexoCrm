@@ -35,6 +35,7 @@ export const MANAGED_CLAIM_KEYS = [
   "allowedViews",
   "companyName",
   "internalPages",
+  "allowedModules",
   "must_change_password",
   "grant",
   "revoke",
@@ -855,6 +856,7 @@ export function extractManagedAccessClaims(rawClaims = {}, identity = {}) {
     tenantIds: preserveClientAssignments || scopeMode !== "no_client_access" ? clientIds : [],
     allowedViews: resolvedAllowedViews,
     internalPages: resolvedInternalPages,
+    allowedModules: Array.isArray(rawClaims.allowedModules) ? normalizeStringArray(rawClaims.allowedModules) : undefined,
     permissions: finalEffectivePermissions,
     companyName: normalizeString(rawClaims.companyName),
     mustChangePassword: rawClaims.must_change_password === true,
@@ -880,6 +882,7 @@ export function buildAccessProfile(decodedToken) {
     tenantIds: claims.tenantIds,
     allowedViews: claims.allowedViews,
     internalPages: claims.internalPages,
+    allowedModules: isFounderMaster ? null : (claims.allowedModules || null),
     permissions: claims.permissions,
     companyName: claims.companyName,
     mustChangePassword: claims.mustChangePassword === true,
@@ -912,6 +915,7 @@ export function buildManagedClaims({
   allowedViews = [],
   companyName = null,
   internalPages = [],
+  allowedModules = undefined,
 }) {
   const normalizedRole = normalizeRole(role);
   const normalizedPreset = normalizeAccessPreset(accessPreset, normalizedRole);
@@ -983,6 +987,9 @@ export function buildManagedClaims({
     : normalizeInternalPages(internalPages, normalizedRole, false, normalizedPreset);
   const effectiveClientIds =
     resolvedScopeMode === "no_client_access" ? [] : normalizedClientIds;
+  const normalizedAllowedModules = Array.isArray(allowedModules)
+    ? normalizeStringArray(allowedModules)
+    : undefined;
 
   return {
     role: "internal",
@@ -996,6 +1003,7 @@ export function buildManagedClaims({
     tenantIds: effectiveClientIds,
     allowedViews: [],
     internalPages: normalizedInternalPages,
+    ...(normalizedAllowedModules ? { allowedModules: normalizedAllowedModules } : {}),
     permissions: normalizedPermissions,
     companyName: normalizedCompanyName,
   };
