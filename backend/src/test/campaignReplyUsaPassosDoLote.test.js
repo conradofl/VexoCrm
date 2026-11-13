@@ -110,7 +110,7 @@ afterEach(async () => {
   while (abertos.length) await abertos.pop().close();
 });
 
-async function mundo({ sequenciaDaCampanhaDepois }) {
+async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha" } = {}) {
   const db = await createPgliteDb(SCHEMA);
   abertos.push(db);
   for (const f of ["20261008180000_add_recurrence_to_campaigns.sql", "20261012120000_campaign_recurrence_occurrences.sql"]) {
@@ -161,14 +161,19 @@ async function mundo({ sequenciaDaCampanhaDepois }) {
   );
 
   const IMP = "bbbbbbbb-0000-4000-8000-000000000002";
+  const crm = origem === "crm";
+  const meta = { sequence: [PASSO1, PASSO2], dispatchOptions: { waitForReply: true }, ...(crm ? { importSource: "__crm__" } : {}) };
   const { rows: [camp] } = await db.query(
     "INSERT INTO campaigns (client_id, name, import_id, analytics_meta, limit_per_run) VALUES ($1, 'Black Friday', $2, $3::jsonb, 50) RETURNING *",
-    [T, IMP, JSON.stringify({ sequence: [PASSO1, PASSO2], dispatchOptions: { waitForReply: true } })]
+    [T, crm ? null : IMP, JSON.stringify(meta)]
   );
-  const { rows: [lead] } = await db.query(
-    "INSERT INTO lead_import_items (client_id, import_id, telefone, normalized_data) VALUES ($1, $2, '5534988228667', '{\"nome\":\"Cliente\"}'::jsonb) RETURNING id, telefone",
-    [T, IMP]
-  );
+  // Base CRM: o destinatário só existe em public.leads (como os 5 telefones medidos em produção em 13/11/2026).
+  const { rows: [lead] } = crm
+    ? await db.query("INSERT INTO leads (client_id, telefone, nome) VALUES ($1, '5534988228667', 'Cliente') RETURNING id, telefone", [T])
+    : await db.query(
+      "INSERT INTO lead_import_items (client_id, import_id, telefone, normalized_data) VALUES ($1, $2, '5534988228667', '{\"nome\":\"Cliente\"}'::jsonb) RETURNING id, telefone",
+      [T, IMP]
+    );
   const { rows: [lote] } = await db.query(
     `INSERT INTO campaign_dispatches (campaign_id, client_id, name, steps, status, "offset", target_count, triggered_at)
      VALUES ($1, $2, 'Lote 1/83', $3::jsonb, 'running', 0, 1, now()) RETURNING *`,
@@ -235,6 +240,33 @@ async function mundo({ sequenciaDaCampanhaDepois }) {
   };
   return { db, camp, lead, lote, responder, continuar };
 }
+
+describe("campanha da base CRM: a resposta do lead encontra a espera gravada pelo lote", () => {
+  // Causa medida em produção (Container LED, 13/11/2026): os 5 telefones existem em public.leads e em nenhuma linha de
+  // lead_import_items. O lote gravava a espera procurando o lead em lead_import_items pelo id, não achava e voltava sem erro;
+  // a resposta procurava a espera só em lead_import_items, não achava e o "Sim" caía no agente.
+  it("[OBRIGATÓRIO] lote da base CRM grava a espera e o 'Sim' vai para o próximo passo, não para o agente", async () => {
+    const w = await mundo({ origem: "crm" });
+    expect(enviados.map((e) => e.texto)).toEqual(["Oi Cliente, posso te mandar a oferta?"]);
+
+    const { rows: [lead] } = await w.db.query("SELECT dados FROM leads WHERE id = $1", [w.lead.id]);
+    expect(lead.dados?.campaign_progress?.[w.camp.id]).toMatchObject({ status: "aguardando_usuario", waitForReply: true, nextStepIndex: 1, dispatchId: w.lote.id });
+
+    const matches = await findCampaignReplyMatches({ clientId: T, phone: w.lead.telefone });
+    expect(matches.processingWaitForReplyMatches.map((m) => m.id)).toEqual([w.camp.id]);
+
+    const out = await w.responder("Sim");
+    expect(out).toMatchObject({ status: "campaign_step_dispatched" });
+    await vi.waitFor(() => expect(w.continuar).toHaveBeenCalledTimes(1));
+    expect(w.continuar.mock.calls[0][0].campaignMatch.leadImportItem.id).toBe(w.lead.id);
+  }, SLOW);
+
+  it("a resposta chega com o telefone em outra grafia (sem o 9) e ainda encontra a espera", async () => {
+    const w = await mundo({ origem: "crm" });
+    const matches = await findCampaignReplyMatches({ clientId: T, phone: "553488228667" });
+    expect(matches.processingWaitForReplyMatches.map((m) => m.id)).toEqual([w.camp.id]);
+  }, SLOW);
+});
 
 describe("resposta do lead avança pelos passos do LOTE", () => {
   it("[OBRIGATÓRIO] campanha editada depois do lote (só com o passo 1): o 'Sim' vai para o próximo passo, não para o agente", async () => {

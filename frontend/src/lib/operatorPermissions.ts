@@ -331,8 +331,9 @@ export function getModuleIdFromSidebarItemKey(key: string): OperatorModuleId | n
 
 export function getModuleIdFromPath(pathname: string): OperatorModuleId | null {
   if (pathname.includes("/crm/dashboard")) return "dashboard";
-  if (pathname.includes("/crm/banco-de-dados") || pathname.includes("/crm/leads")) return "banco-de-dados";
+  // "/crm/leads-parados" também contém "/crm/leads": precisa ser conferido ANTES do Banco de Dados.
   if (pathname.includes("/crm/leads-parados")) return "leads-parados";
+  if (pathname.includes("/crm/banco-de-dados") || pathname.includes("/crm/leads")) return "banco-de-dados";
   if (pathname.includes("/crm/whatsapp")) return "conversas";
   if (pathname.includes("/crm/followup")) return "followup";
   if (pathname.includes("/crm/campanhas") || pathname.includes("/crm/planilhas")) return "campanhas";

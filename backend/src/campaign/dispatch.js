@@ -1241,7 +1241,10 @@ export async function updateLeadImportItemCampaignProgress({
     .maybeSingle();
 
   if (fetchError) throw fetchError;
-  if (!item) return null;
+  // Destinatário da base CRM (campanha com origem "__crm__"): o id é de public.leads, não de lead_import_items. Até
+  // 13/11/2026 a gravação parava aqui sem erro e sem gravar nada, e a resposta do lead nunca encontrava a espera: caía no
+  // agente em vez de receber o próximo passo (Container LED, Black Friday). O progresso desse lead mora em leads.dados.
+  if (!item) return updateCrmLeadCampaignProgress({ clientId, leadId: leadImportItemId, campaignId, progressPatch });
 
   const updatePayload = {
     normalized_data: mergeCampaignProgress(item.normalized_data || {}, campaignId, progressPatch),
@@ -1286,6 +1289,31 @@ export async function updateLeadImportItemCampaignProgress({
 
   if (updateError) throw updateError;
   return updated;
+}
+
+// Progresso de campanha de um lead da base CRM, em public.leads.dados.campaign_progress (mesmo formato do
+// normalized_data.campaign_progress da planilha). Devolve a linha no formato de item de planilha, ou null se o lead não existe.
+async function updateCrmLeadCampaignProgress({ clientId, leadId, campaignId, progressPatch }) {
+  const { data: lead, error } = await supabase
+    .from("leads")
+    .select("id, dados")
+    .eq("client_id", clientId)
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) {
+    // id que não é uuid ou tabela sem a coluna: não é lead do CRM, nada a gravar.
+    if (String(error.code) === "22P02" || isMissingSchemaError(error)) return null;
+    throw error;
+  }
+  if (!lead) return null;
+  const dados = mergeCampaignProgress(lead.dados || {}, campaignId, progressPatch);
+  const { error: updateError } = await supabase
+    .from("leads")
+    .update({ dados })
+    .eq("client_id", clientId)
+    .eq("id", leadId);
+  if (updateError) throw updateError;
+  return { id: lead.id, normalized_data: dados, status_conversa: null, ultima_interacao_bot: null, ultima_interacao_usuario: null };
 }
 
 export async function updateLeadConversationState({
@@ -1460,6 +1488,35 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
   if (importItemsResult.error) throw importItemsResult.error;
   if (campaignsResult.error) throw campaignsResult.error;
 
+  // Leads da base CRM com este telefone: campanha com origem "__crm__" guarda o progresso em leads.dados (ver
+  // updateCrmLeadCampaignProgress). Entram depois dos itens de planilha. Falha aqui não derruba o casamento por planilha.
+  let crmItems = [];
+  try {
+    const { data: crmLeads, error: crmError } = await supabase
+      .from("leads")
+      .select("id, nome, dados, created_at")
+      .eq("client_id", clientId)
+      .in("telefone", phoneVariants);
+    if (crmError) throw crmError;
+    crmItems = (crmLeads || [])
+      .filter((lead) => lead?.dados && typeof lead.dados === "object" && lead.dados.campaign_progress)
+      .map((lead) => ({
+        id: lead.id,
+        import_id: null,
+        normalized_data: { ...lead.dados, nome: lead.dados?.nome || lead.nome || null },
+        status_conversa: null,
+        ultima_interacao_bot: null,
+        ultima_interacao_usuario: null,
+        created_at: lead.created_at,
+      }));
+  } catch (err) {
+    logCampaignReplyFlow("warn", "reply_match_crm_leads_unavailable", {
+      clientId,
+      phone: maskPhoneForLog(phone),
+      error: err?.message || String(err),
+    });
+  }
+
   // Roteiro proprio do disparo mais recente de cada campanha. A copia isolada vive em
   // campaign_dispatches.campaign_prompt_id; quem responde deve ser atendido pelo roteiro
   // DAQUELE disparo, nao pelo da campanha (que pode ter sido editado depois).
@@ -1488,7 +1545,7 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         .filter(Boolean)
     )
   );
-  const importItems = importItemsResult.data || [];
+  const importItems = [...(importItemsResult.data || []), ...crmItems];
 
   // Passos do LOTE que enviou o passo 1. O lote envia pela cópia dos passos gravada nele (campaign_dispatches.steps) e o
   // progresso do lead guarda o dispatchId. A decisão "ainda há passo a enviar?" tem de olhar essa cópia: a sequência da
