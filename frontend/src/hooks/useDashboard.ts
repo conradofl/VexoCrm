@@ -119,6 +119,11 @@ export interface OverviewPair {
 export interface OverviewChip {
   instanceId: string;
   name: string;
+  // Estado do chip (cold, warming, warm...) e números do PERÍODO, pelo chip gravado no envio.
+  // Ausentes em payload gravado antes das abas de detalhe.
+  chipState?: string;
+  sent?: number;
+  replies?: number;
   sentToday: number;
   quotaLimit: number;
   quotaPercentage: number;
@@ -136,8 +141,27 @@ export interface OverviewFirstHumanResponse {
   waitingOverThreshold: number;
   answeredWithUnknownBefore: number;
   thresholdHours: number;
+  // Quanto esperou quem foi respondido por gente. Ausente em payload gravado antes da aba Atendimento.
+  waitBuckets?: { upTo10m: number; upTo30m: number; upTo2h: number; over2h: number };
   medianMinutes: number | null;
   p90Minutes: number | null;
+}
+
+// A fila da tela Conversas, como o Dashboard a recebe (mesma conta da tela, sem segunda definição).
+export interface OverviewQueueItem {
+  phone: string;
+  name: string | null;
+  chip: string | null;
+  waitingSince: string | null;
+}
+
+export interface OverviewQueue {
+  states: { waiting: number; withLead: number; withRobot: number; cooled: number };
+  waitingOverThreshold: number;
+  thresholdHours: number;
+  oldest: OverviewQueueItem[];
+  // true = o servidor cortou a lista porque quem pediu não tem acesso à tela Conversas. Os números continuam.
+  listRestricted?: boolean;
 }
 
 export interface DashboardOverview {
@@ -152,6 +176,10 @@ export interface DashboardOverview {
   chips: OverviewChip[] | null;
   chipsQuotaIsToday: boolean;
   firstHumanResponse: OverviewFirstHumanResponse | null;
+  // Abas de detalhe. Ausentes em payload gravado antes delas; null = bloco indisponível.
+  campaigns?: MessageRankingItem[] | null;
+  regions?: RegionRankingItem[] | null;
+  queue?: OverviewQueue | null;
 }
 
 export interface DashboardPayload {

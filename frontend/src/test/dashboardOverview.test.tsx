@@ -91,6 +91,18 @@ describe("Pede ação agora", () => {
     expect(within(card).getByRole("link", { name: /Abrir a fila de quem espera/ })).toHaveAttribute("href", "/crm/whatsapp");
   });
 
+  it("[bloco 1] sem acesso à tela Conversas: o número aparece, o atalho para a fila não", () => {
+    show(
+      payload({
+        waiting: { status: "ready", waiting: 12, waitingOverThreshold: 7, thresholdHours: 3 },
+        queue: { states: { waiting: 12, withLead: 0, withRobot: 0, cooled: 0 }, waitingOverThreshold: 7, thresholdHours: 3, oldest: [], listRestricted: true },
+      })
+    );
+    const card = screen.getByTestId("card-waiting");
+    expect(within(card).getByText("12")).toBeInTheDocument();
+    expect(within(card).queryByRole("link")).not.toBeInTheDocument();
+  });
+
   it("nunca abordados mostra o abordável e, havendo opt-out gravado, quantos saíram da conta", () => {
     show(payload());
     const card = screen.getByTestId("card-never-approached");

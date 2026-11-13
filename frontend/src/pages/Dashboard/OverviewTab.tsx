@@ -58,9 +58,11 @@ function ActionCardView({ card }: { card: ActionCard }) {
           <span className={`text-sm font-semibold ${strong}`}>{card.value === 1 ? "pessoa espera resposta" : "pessoas esperam resposta"}</span>
         </div>
         <p className={`text-[12.5px] ${card.attention ? "text-orange-900 dark:text-orange-200" : "text-muted-foreground"}`}>{card.detail}</p>
-        <Link to={card.href} className={`mt-1 inline-flex min-h-[28px] items-center text-[13px] font-bold underline-offset-2 hover:underline ${strong}`}>
-          {card.cta} →
-        </Link>
+        {card.href && card.cta && (
+          <Link to={card.href} className={`mt-1 inline-flex min-h-[28px] items-center text-[13px] font-bold underline-offset-2 hover:underline ${strong}`}>
+            {card.cta} →
+          </Link>
+        )}
       </div>
     );
   }
@@ -132,7 +134,7 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
 
   const overview = data.overview;
   const actionCards = useMemo(() => {
-    const cards: ActionCard[] = [buildWaitingCard(overview?.waiting), buildNeverApproachedCard(overview?.base, data.lastUpdatedAt)];
+    const cards: ActionCard[] = [buildWaitingCard(overview?.waiting, { canOpenConversations: !overview?.queue?.listRestricted }), buildNeverApproachedCard(overview?.base, data.lastUpdatedAt)];
     const chip = buildChipAlertCard(overview?.chips, overview?.chipsQuotaIsToday ?? false);
     if (chip) cards.push(chip);
     return cards;
