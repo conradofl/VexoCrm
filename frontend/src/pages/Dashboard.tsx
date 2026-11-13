@@ -8,15 +8,17 @@ import { formatDateRange } from "@/lib/dashboard/formatters";
 import { DashboardHeader } from "./Dashboard/DashboardHeader";
 import { OverviewTab } from "./Dashboard/OverviewTab";
 import { AttendanceTab, BaseTab, CampaignsTab, ChipsTab } from "./Dashboard/DetailTabs";
+import { PlanTab } from "./Dashboard/PlanTab";
 import { OnboardingProgressCard } from "@/components/dashboard/OnboardingProgressCard";
 
-type DashboardTab = "overview" | "campaigns" | "attendance" | "base" | "chips";
+type DashboardTab = "overview" | "campaigns" | "attendance" | "base" | "chips" | "plan";
 const DASHBOARD_TABS: ReadonlyArray<readonly [DashboardTab, string]> = [
   ["overview", "Visão geral"],
   ["campaigns", "Campanhas"],
   ["attendance", "Atendimento"],
   ["base", "Base de leads"],
   ["chips", "Chips"],
+  ["plan", "Plano de ação"],
 ];
 
 interface DashboardProps {
@@ -139,6 +141,7 @@ export default function Dashboard({
             {tab === "attendance" && <AttendanceTab data={data} periodLabel={periodLabel} />}
             {tab === "base" && <BaseTab data={data} periodLabel={periodLabel} />}
             {tab === "chips" && <ChipsTab data={data} periodLabel={periodLabel} />}
+            {tab === "plan" && <PlanTab data={data} clientId={effectiveClientId} companyName={resolvedClientName} />}
           </>
         ) : data ? (
           // Payload gravado antes da Visão geral existir: não há o que mostrar até o próximo recálculo.

@@ -24,6 +24,7 @@ vi.mock("@/components/dashboard/OnboardingProgressCard", () => ({
 }));
 vi.mock("../pages/Dashboard/DashboardHeader", () => ({ DashboardHeader: () => null }));
 vi.mock("../pages/Dashboard/OverviewTab", () => ({ OverviewTab: () => <div data-testid="visao-geral" /> }));
+vi.mock("../pages/Dashboard/PlanTab", () => ({ PlanTab: () => <div data-testid="aba-plano" /> }));
 vi.mock("../pages/Dashboard/DetailTabs", () => ({
   AttendanceTab: () => <div data-testid="aba-atendimento" />,
   CampaignsTab: () => <div data-testid="aba-campanhas" />,
@@ -54,7 +55,7 @@ describe("Página do Dashboard — só a Visão geral", () => {
 
     expect(screen.getByTestId("visao-geral")).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Seções do dashboard" });
-    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Visão geral", "Campanhas", "Atendimento", "Base de leads", "Chips"]);
+    expect(within(nav).getAllByRole("button").map((b) => b.textContent)).toEqual(["Visão geral", "Campanhas", "Atendimento", "Base de leads", "Chips", "Plano de ação"]);
     expect(within(nav).getByRole("button", { name: "Visão geral" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("button", { name: "Painel anterior" })).not.toBeInTheDocument();
     expect(screen.queryByText(/regra antiga/)).not.toBeInTheDocument();
@@ -66,7 +67,7 @@ describe("Página do Dashboard — só a Visão geral", () => {
     hookResult = { data: { ...base, overview: { base: { total: 1 } } }, isLoading: false, error: null };
     render(<Dashboard fixedClientId="c1" />);
 
-    for (const [label, testId] of [["Campanhas", "aba-campanhas"], ["Atendimento", "aba-atendimento"], ["Base de leads", "aba-base"], ["Chips", "aba-chips"], ["Visão geral", "visao-geral"]] as const) {
+    for (const [label, testId] of [["Campanhas", "aba-campanhas"], ["Atendimento", "aba-atendimento"], ["Base de leads", "aba-base"], ["Chips", "aba-chips"], ["Plano de ação", "aba-plano"], ["Visão geral", "visao-geral"]] as const) {
       fireEvent.click(screen.getByRole("button", { name: label }));
       expect(screen.getByTestId(testId)).toBeInTheDocument();
       expect(screen.getAllByTestId(/^(aba-|visao-geral)/)).toHaveLength(1);
