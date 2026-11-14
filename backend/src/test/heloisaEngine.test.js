@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("../services/evolution.js", () => ({
   sendTextMessageViaEvolution: vi.fn().mockResolvedValue({ success: true }),
@@ -7,14 +7,18 @@ vi.mock("../services/evolution.js", () => ({
 
 import {
   identificarDiretor,
+  identificarUsuarioAutorizado,
   isHeloisaAuthorizedSender,
+  isHeloisaAuthorizedSenderAsync,
   executarCadastrarCliente,
   executarCobrarColaborador,
   executarAgendarCompromisso,
   executarCriarFollowup,
   executarConsultarOperacao,
   DIRETORES_AUTORIZADOS,
+  chamarLlmHeloisa,
 } from "../domains/goclaw/heloisaEngine.js";
+import { GROQ_MODELOS_MORTOS, defaultGroqModel } from "../services/llmModels.js";
 
 describe("Heloísa Engine (heloisaEngine.js)", () => {
   it("identifica corretamente Conrado e Caio por telefone canônico ou alternativo", () => {
@@ -39,6 +43,43 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     // Desconhecido
     expect(identificarDiretor("5511999999999")).toBeNull();
     expect(isHeloisaAuthorizedSender("5511999999999")).toBe(false);
+  });
+
+  it("identificarUsuarioAutorizado consulta tabela heloisa_usuarios_autorizados com fallback", async () => {
+    const mockPoolComUsuario = {
+      query: vi.fn().mockResolvedValue({
+        rows: [
+          {
+            id: "user-gabriel",
+            client_id: "geracao-digital",
+            nome: "Gabriel Gestor",
+            telefone: "5534996916397",
+            papel: "Gestor de Operações",
+            ativo: true,
+          },
+        ],
+      }),
+    };
+
+    // Usuário cadastrado no banco ativo
+    const gabriel = await identificarUsuarioAutorizado("5534996916397", mockPoolComUsuario);
+    expect(gabriel).not.toBeNull();
+    expect(gabriel.nome).toBe("Gabriel Gestor");
+    expect(gabriel.papel).toBe("Gestor de Operações");
+
+    const authGabriel = await isHeloisaAuthorizedSenderAsync("5534996916397", mockPoolComUsuario);
+    expect(authGabriel).toBe(true);
+
+    // Fallback de segurança para Conrado caso banco não tenha a linha
+    const conrado = await identificarUsuarioAutorizado("5534997817660", mockPoolComUsuario);
+    expect(conrado).not.toBeNull();
+    expect(conrado.nome).toBe("Conrado Finzi");
+
+    // Desconhecido
+    const desconhecido = await identificarUsuarioAutorizado("5511999999999", mockPoolComUsuario);
+    expect(desconhecido).toBeNull();
+    const authDesconhecido = await isHeloisaAuthorizedSenderAsync("5511999999999", mockPoolComUsuario);
+    expect(authDesconhecido).toBe(false);
   });
 
   it("executa cadastrar_cliente inserindo no banco de dados", async () => {
@@ -138,5 +179,63 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     const resResumo = await executarConsultarOperacao({ tipo: "resumo_geral" }, mockPool);
     expect(resResumo.sucesso).toBe(true);
     expect(resResumo.tipo).toBe("resumo_geral");
+  });
+});
+
+// Degrau da Groq na chamada da Heloísa (Gemini -> Groq -> GoClaw). O modelo
+// estava chumbado num id que a Groq descontinuou: o degrau tomava 404 e, como
+// recusa não lança, ninguém via. Dublado só o fetch (sai do processo).
+describe("chamarLlmHeloisa — degrau da Groq", () => {
+  const ambiente = { ...process.env };
+  let chamadas;
+
+  function instalarFetch(responder) {
+    chamadas = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      chamadas.push({ url: String(url), body: JSON.parse(init.body) });
+      return responder(String(url));
+    }));
+  }
+  const ok = (texto) => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: texto } }] }), { status: 200 });
+
+  beforeEach(() => {
+    process.env = { ...ambiente, GROQ_API_KEY: "chave-de-teste" };
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.LLM_MODEL_LADDER;
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env = { ...ambiente };
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("chama a Groq com o modelo da escada, que não está na lista de descontinuados", async () => {
+    instalarFetch(() => ok("oi"));
+    const resposta = await chamarLlmHeloisa({ systemPrompt: "s", messages: [{ role: "user", content: "oi" }] });
+
+    expect(resposta.content).toBe("oi");
+    expect(chamadas).toHaveLength(1);
+    expect(chamadas[0].url).toBe("https://api.groq.com/openai/v1/chat/completions");
+    expect(chamadas[0].body.model).toBe(defaultGroqModel());
+    expect(GROQ_MODELOS_MORTOS.has(chamadas[0].body.model)).toBe(false);
+  });
+
+  it("segue a escada configurada por variável de ambiente, sem deploy", async () => {
+    process.env.LLM_MODEL_LADDER = "gemini-flash-latest,openai/gpt-oss-20b";
+    instalarFetch(() => ok("oi"));
+    await chamarLlmHeloisa({ systemPrompt: "s", messages: [] });
+    expect(chamadas[0].body.model).toBe("openai/gpt-oss-20b");
+  });
+
+  it("Groq recusa (404): avisa no log com o status e cai para o GoClaw", async () => {
+    instalarFetch((url) => (url.includes("api.groq.com") ? new Response("model not found", { status: 404 }) : ok("do goclaw")));
+    const resposta = await chamarLlmHeloisa({ systemPrompt: "s", messages: [] });
+
+    expect(resposta.content).toBe("do goclaw");
+    expect(chamadas.map((c) => c.url.includes("api.groq.com"))).toEqual([true, false]);
+    expect(console.warn).toHaveBeenCalledWith("[Heloísa] Groq recusou a chamada, tentando GoClaw runtime:", { status: 404 });
   });
 });

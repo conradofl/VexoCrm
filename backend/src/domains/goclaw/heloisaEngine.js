@@ -15,6 +15,7 @@ import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../..
 import fs from "node:fs";
 import path from "node:path";
 import { resolveGoclawDir } from "./routes.js";
+import { defaultGroqModel } from "../../services/llmModels.js";
 
 export const DIRETORES_AUTORIZADOS = {
   conrado: {
@@ -49,6 +50,51 @@ export function identificarDiretor(phone) {
 
 export function isHeloisaAuthorizedSender(phone) {
   return Boolean(identificarDiretor(phone));
+}
+
+export async function identificarUsuarioAutorizado(phone, pool = pgDatabasePool) {
+  const limpo = normalizarTelefoneHeloisa(phone);
+  if (!limpo) return null;
+
+  // 1. Consulta no banco na tabela heloisa_usuarios_autorizados
+  if (pool && typeof pool.query === "function") {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, client_id, nome, telefone, papel, ativo
+         FROM public.heloisa_usuarios_autorizados
+         WHERE ativo = true`
+      );
+
+      for (const u of rows) {
+        const uTel = normalizarTelefoneHeloisa(u.telefone);
+        if (
+          limpo === uTel ||
+          (uTel.length >= 8 && limpo.endsWith(uTel.slice(4))) ||
+          (limpo.length >= 8 && uTel.endsWith(limpo.slice(4)))
+        ) {
+          return {
+            id: u.id,
+            chave: u.nome.toLowerCase().replace(/\s+/g, "_"),
+            nome: u.nome,
+            telefone: u.telefone,
+            papel: u.papel,
+            client_id: u.client_id,
+            ativo: u.ativo,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[Heloísa] Aviso ao consultar heloisa_usuarios_autorizados, usando fallback:", err.message);
+    }
+  }
+
+  // 2. Fallback de segurança em memória: Conrado e Caio
+  return identificarDiretor(phone);
+}
+
+export async function isHeloisaAuthorizedSenderAsync(phone, pool = pgDatabasePool) {
+  const user = await identificarUsuarioAutorizado(phone, pool);
+  return Boolean(user);
 }
 
 // ─── Ferramentas de Execução da Heloísa ───────────────────────────────────────
@@ -375,7 +421,10 @@ export async function chamarLlmHeloisa({ systemPrompt, messages, tools = HELOISA
           Authorization: `Bearer ${groqKey}`,
         },
         body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
+          // Modelo da Groq vem da escada (services/llmModels.js), nunca fixo
+          // aqui: o id que estava chumbado foi descontinuado pela Groq e este
+          // degrau respondia 404 em silêncio, sobrando só o GoClaw de reserva.
+          model: defaultGroqModel(),
           messages: fullMessages,
           tools,
           tool_choice: "auto",
@@ -388,6 +437,9 @@ export async function chamarLlmHeloisa({ systemPrompt, messages, tools = HELOISA
         const data = await resp.json();
         return data.choices?.[0]?.message;
       }
+      // Recusa do provedor (404 de modelo, 429 de cota, 413 de tamanho) não
+      // lança: sem este aviso o degrau falhava sem deixar rastro no log.
+      console.warn("[Heloísa] Groq recusou a chamada, tentando GoClaw runtime:", { status: resp.status });
     } catch (e) {
       console.warn("[Heloísa] Falha ao chamar Groq, tentando GoClaw runtime:", e.message);
     }
@@ -432,7 +484,7 @@ export async function processarMensagemHeloisa({
   instanceName = "heloisa",
   pool = pgDatabasePool,
 }) {
-  const diretor = identificarDiretor(phone);
+  const diretor = await identificarUsuarioAutorizado(phone, pool);
   if (!diretor) {
     console.warn(`[Heloísa] Mensagem recebida de remetente não autorizado: ${phone}`);
     return {

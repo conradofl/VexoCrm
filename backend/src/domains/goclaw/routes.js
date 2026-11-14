@@ -11,7 +11,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { despacharVigia, gerarRelatorioVigia } from "../../scripts/vigia-gd.mjs";
+import { despacharVigia, gerarRelatorioVigia, normalizarNumerosWhatsApp } from "../../scripts/vigia-gd.mjs";
+import { pgDatabasePool } from "../../services/database.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +45,7 @@ const PROMPT_FILE_MAP = {
 export function registerGoclawRoutes(app, {
   requireAuth = (_req, _res, next) => next(),
   goclawDir = resolveGoclawDir(),
+  pool = pgDatabasePool,
 } = {}) {
   // ─── Status & Healthcheck ──────────────────────────────────────────────────
   app.get("/api/goclaw/status", requireAuth, async (_req, res) => {
@@ -175,6 +177,211 @@ export function registerGoclawRoutes(app, {
       console.error("[goclaw-routes] Erro no teste do Vigia:", err);
       return res.status(500).json({
         error: "Falha ao executar disparo de teste do Vigia.",
+        details: err.message,
+      });
+    }
+  });
+
+  // ─── Usuários Autorizados da Heloísa ────────────────────────────────────────
+
+  // GET /api/goclaw/heloisa/usuarios: Lista todos os números autorizados
+  app.get("/api/goclaw/heloisa/usuarios", requireAuth, async (_req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, client_id, nome, telefone, papel, ativo, created_at, updated_at
+         FROM public.heloisa_usuarios_autorizados
+         ORDER BY created_at ASC`
+      );
+      return res.json({ ok: true, data: rows });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao listar usuários da Heloísa:", err);
+      // Fallback gracioso se a migration ainda não foi executada no ambiente
+      if (err.code === "42P01" || err.message?.includes("does not exist")) {
+        const fallback = [
+          {
+            id: "fallback-conrado",
+            client_id: "geracao-digital",
+            nome: "Conrado Finzi",
+            telefone: "5534997817660",
+            papel: "Diretor Executivo / Sócio",
+            ativo: true,
+          },
+          {
+            id: "fallback-caio",
+            client_id: "geracao-digital",
+            nome: "Caio Almeida",
+            telefone: "5534997719779",
+            papel: "Diretor Comercial / Sócio",
+            ativo: true,
+          },
+        ];
+        return res.json({ ok: true, data: fallback });
+      }
+      return res.status(500).json({
+        error: "Falha ao listar usuários autorizados da Heloísa.",
+        details: err.message,
+      });
+    }
+  });
+
+  // POST /api/goclaw/heloisa/usuarios: Cadastra novo usuário autorizado
+  app.post("/api/goclaw/heloisa/usuarios", requireAuth, async (req, res) => {
+    try {
+      const {
+        nome,
+        telefone,
+        papel = "Diretor",
+        client_id = "geracao-digital",
+        ativo = true,
+      } = req.body || {};
+
+      if (!nome || typeof nome !== "string" || !nome.trim()) {
+        return res.status(422).json({ error: "O nome do usuário/diretor é obrigatório." });
+      }
+
+      if (!telefone) {
+        return res.status(422).json({ error: "O telefone de WhatsApp é obrigatório." });
+      }
+
+      const numerosValidos = normalizarNumerosWhatsApp(telefone);
+      if (numerosValidos.length === 0) {
+        return res.status(422).json({
+          error: "Telefone de WhatsApp inválido. Formato esperado com DDD (ex: 34997817660).",
+        });
+      }
+
+      const telCanonico = numerosValidos[0];
+
+      const { rows } = await pool.query(
+        `INSERT INTO public.heloisa_usuarios_autorizados (
+           client_id, nome, telefone, papel, ativo
+         ) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (telefone) DO UPDATE SET
+           client_id = EXCLUDED.client_id,
+           nome = EXCLUDED.nome,
+           papel = EXCLUDED.papel,
+           ativo = EXCLUDED.ativo,
+           updated_at = now()
+         RETURNING id, client_id, nome, telefone, papel, ativo, created_at, updated_at`,
+        [client_id?.trim() || "geracao-digital", nome.trim(), telCanonico, papel?.trim() || "Diretor", ativo !== false]
+      );
+
+      return res.status(201).json({
+        ok: true,
+        message: "Usuário autorizado da Heloísa cadastrado com sucesso.",
+        data: rows[0],
+      });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao cadastrar usuário da Heloísa:", err);
+      return res.status(500).json({
+        error: "Falha ao cadastrar usuário autorizado da Heloísa.",
+        details: err.message,
+      });
+    }
+  });
+
+  // PATCH /api/goclaw/heloisa/usuarios/:id: Atualiza status ativo ou dados
+  app.patch("/api/goclaw/heloisa/usuarios/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { nome, telefone, papel, client_id, ativo } = req.body || {};
+
+      const updates = [];
+      const values = [];
+      let idx = 1;
+
+      if (nome !== undefined) {
+        if (!nome || typeof nome !== "string" || !nome.trim()) {
+          return res.status(422).json({ error: "O nome não pode ser vazio." });
+        }
+        updates.push(`nome = $${idx++}`);
+        values.push(nome.trim());
+      }
+
+      if (papel !== undefined) {
+        updates.push(`papel = $${idx++}`);
+        values.push(String(papel).trim());
+      }
+
+      if (client_id !== undefined) {
+        updates.push(`client_id = $${idx++}`);
+        values.push(String(client_id).trim());
+      }
+
+      if (ativo !== undefined) {
+        updates.push(`ativo = $${idx++}`);
+        values.push(ativo === true || ativo === "true");
+      }
+
+      if (telefone !== undefined) {
+        const numerosValidos = normalizarNumerosWhatsApp(telefone);
+        if (numerosValidos.length === 0) {
+          return res.status(422).json({
+            error: "Telefone de WhatsApp inválido. Formato esperado com DDD (ex: 34997817660).",
+          });
+        }
+        updates.push(`telefone = $${idx++}`);
+        values.push(numerosValidos[0]);
+      }
+
+      if (updates.length === 0) {
+        return res.status(422).json({ error: "Nenhum campo fornecido para atualização." });
+      }
+
+      updates.push(`updated_at = now()`);
+      values.push(id);
+
+      const queryText = `
+        UPDATE public.heloisa_usuarios_autorizados
+        SET ${updates.join(", ")}
+        WHERE id = $${idx}
+        RETURNING id, client_id, nome, telefone, papel, ativo, created_at, updated_at
+      `;
+
+      const { rows } = await pool.query(queryText, values);
+
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "Usuário autorizado não encontrado." });
+      }
+
+      return res.json({
+        ok: true,
+        message: "Usuário autorizado atualizado com sucesso.",
+        data: rows[0],
+      });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao atualizar usuário da Heloísa:", err);
+      return res.status(500).json({
+        error: "Falha ao atualizar usuário autorizado da Heloísa.",
+        details: err.message,
+      });
+    }
+  });
+
+  // DELETE /api/goclaw/heloisa/usuarios/:id: Remove número autorizado
+  app.delete("/api/goclaw/heloisa/usuarios/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { rows } = await pool.query(
+        `DELETE FROM public.heloisa_usuarios_autorizados
+         WHERE id = $1
+         RETURNING id, nome, telefone`,
+        [id]
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "Usuário autorizado não encontrado." });
+      }
+
+      return res.json({
+        ok: true,
+        message: `Usuário "${rows[0].nome}" removido com sucesso.`,
+        data: rows[0],
+      });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao remover usuário da Heloísa:", err);
+      return res.status(500).json({
+        error: "Falha ao remover usuário autorizado da Heloísa.",
         details: err.message,
       });
     }

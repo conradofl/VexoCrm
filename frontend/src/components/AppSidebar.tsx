@@ -7,6 +7,7 @@ import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { isPathAllowedForClient, getInheritedPlanPages } from "@/lib/access";
 import { resolveTenantPlan } from "@/lib/planTier";
 import { isModuleLocked } from "@/lib/moduleAccess";
+import { podeVerClientesGd } from "@/lib/gdClientes";
 import { useChipLimits } from "@/hooks/useChipLimits";
 import {
   isOperatorModuleAllowed,
@@ -148,6 +149,9 @@ export function AppSidebar() {
   const filterItems = (items: typeof OPERACAO_ITEMS) => {
     return items
       .filter((f) => {
+        if (f.key === "goclaw-gd" || f.key === "colaboradores-gd") {
+          return isInternalUser && (isAdminUser || isManager || podeVerClientesGd(accessProfile));
+        }
         const modId = getModuleIdFromSidebarItemKey(f.key) || getModuleIdFromPath(f.url);
         if (isOperator && modId) {
           return isOperatorModuleAllowed(modId, accessProfile);
