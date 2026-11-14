@@ -181,6 +181,7 @@ import { toast } from "sonner";
 import { LeadCustomFieldsSection } from "@/components/leads/LeadCustomFieldsSection";
 import { ImportCountsSummary } from "@/components/leads/ImportCountsSummary";
 import { countImportRows, formatImportResultMessage, type ImportCounts } from "@/lib/leadImports/importCounts";
+import { OptOutSkipNotice } from "@/components/leads/OptOutSkipNotice";
 
 export function toggleStageFilter(current: string[], stageToToggle: string): string[] {
   if (stageToToggle === "all") {
@@ -1837,7 +1838,7 @@ export default function BancoDeDados() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCampaignWizardOpen, campaignImportId, clientId, isAuthenticated]);
-  const [campaignAudience, setCampaignAudience] = useState<{ key: string; items: AudienceLead[]; total: number; truncated: boolean } | null>(null);
+  const [campaignAudience, setCampaignAudience] = useState<{ key: string; items: AudienceLead[]; total: number; truncated: boolean; optedOut?: number | null } | null>(null);
   const [campaignAudienceLoading, setCampaignAudienceLoading] = useState(false);
   const [campaignAudienceError, setCampaignAudienceError] = useState<string | null>(null);
 
@@ -1857,7 +1858,7 @@ export default function BancoDeDados() {
           importScope: campaignImportScope,
         });
         if (cancelled) return;
-        setCampaignAudience({ key: campaignFiltersKey, items: res.items, total: res.total, truncated: res.truncated });
+        setCampaignAudience({ key: campaignFiltersKey, items: res.items, total: res.total, truncated: res.truncated, optedOut: res.optedOut ?? null });
         setCampaignAudienceError(null);
       } catch (err: any) {
         if (cancelled) return;
@@ -5541,6 +5542,7 @@ export default function BancoDeDados() {
                       O público passou do limite de {campaignFunnelFilteredLeads.length.toLocaleString("pt-BR")} leads: restrinja o filtro.
                     </div>
                   )}
+                  <OptOutSkipNotice count={campaignAudience?.optedOut} className="px-3 py-2 border-b border-border" />
                   <div className="max-h-48 overflow-y-auto">
                     <Table>
                       <TableBody>

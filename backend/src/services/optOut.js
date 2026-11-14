@@ -94,6 +94,28 @@ export async function isPhoneOptedOut(pool, { clientId, phone }) {
   return flag[0]?.hit === true;
 }
 
+/**
+ * Dos telefones dados, quantos estão em opt-out ativo na empresa? Serve só para AVISAR na prévia e na contagem de público
+ * ("N serão pulados"): a lista não muda e a trava continua sendo a do envio.
+ * Devolve null quando não dá para saber (schema velho ou erro de leitura): aviso que não se sabe não vira zero.
+ */
+export async function countOptedOutPhones(pool, { clientId, phones = [] }) {
+  if (!pool || !clientId) return null;
+  const canonicos = [...new Set((Array.isArray(phones) ? phones : []).map(canonicalOrEmpty).filter(Boolean))];
+  if (canonicos.length === 0) return 0;
+  try {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.lead_optouts o
+        WHERE o.client_id = $1 AND o.revoked_at IS NULL AND o.phone = ANY($2::text[])`,
+      [clientId, canonicos]
+    );
+    return Number(rows?.[0]?.n) || 0;
+  } catch (err) {
+    if (!isSchemaError(err)) console.error("[opt-out] falha ao contar opt-out do público (aviso omitido):", err?.code || "", err?.message || err);
+    return null;
+  }
+}
+
 // Espelho para a tela. Falha aqui não desfaz a decisão (que já está na tabela): só avisa.
 async function espelharNoLead(pool, { clientId, canonical, optedOut }) {
   try {

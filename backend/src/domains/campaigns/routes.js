@@ -105,6 +105,7 @@ export function normalizeDispatchPhone(phone, lead = null) {
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
 import { isPhoneOptedOut } from "../../campaign/queueOptOut.js";
 import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
+import { countOptedOutPhones } from "../../services/optOut.js";
 import { resumeDeferredQueues } from "../../campaign/queueResume.js";
 import {
   QUOTA_PAUSE_MARKER,
@@ -5204,6 +5205,11 @@ export function registerCampaignsRoutes(app, deps) {
       const invalidCount = recipients.filter((r) => r.status === "invalid_number").length;
       const skippedCount = recipients.filter((r) => r.status === "skipped").length;
       const pendingCount = recipients.filter((r) => r.status === "pending").length;
+      // Aviso: dos que ainda vão ser processados, quantos pediram para sair e serão pulados no envio. null = não deu para saber.
+      const optedOutPendingCount = await countOptedOutPhones(pgDatabasePool, {
+        clientId: dispatch.client_id,
+        phones: recipients.filter((r) => r.status === "pending").map((r) => r.telefone),
+      });
 
       res.json({
         dispatchId: dispatch.id,
@@ -5215,6 +5221,7 @@ export function registerCampaignsRoutes(app, deps) {
         invalidCount,
         skippedCount,
         pendingCount,
+        optedOutPendingCount,
         items: filteredRecipients,
       });
     } catch (err) {
