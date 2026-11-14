@@ -109,6 +109,18 @@ export const leads = [
     dados: {},
     created_at: "2026-11-03T12:00:00Z",
   },
+  // Lead do banco que ainda não tem conversa: alvo da "Nova conversa".
+  {
+    id: "lead-2",
+    client_id: "geracao-digital",
+    telefone: "5534988887777",
+    nome: "Marina Prado",
+    stage: "cold",
+    status: "cold",
+    assigned_to: null,
+    dados: {},
+    created_at: "2026-11-10T12:00:00Z",
+  },
 ];
 
 // Mensagens sem texto no meio da conversa: uma antiga (só "[Mensagem]"), uma figurinha e uma localização.
@@ -131,6 +143,10 @@ export const messagesFor = (chatId: string) =>
 export type ChatsHandler = (route: Route, url: URL) => Promise<void> | void;
 export interface Served {
   sent: { chatId: string; body: string; confirmChipId?: string }[];
+  /** Conversas iniciadas pela janela "Nova conversa" (o servidor de verdade grava em lead_messages). */
+  started: { chatId: string; body: string; chipId: string }[];
+  /** Pedidos de nova conversa recusados (número inválido, chip desconectado, opt-out). */
+  startRefused: { phone: string; code: string }[];
   /** Pedidos de envio que o servidor recusou com 409 (chip da conversa desconectado). */
   refused: { chatId: string; body: string }[];
   tabs: string[];
@@ -141,9 +157,10 @@ export interface Served {
 
 export const CHAT_ON_DOWN_CHIP = "5534990000003";
 export const CHAT_ON_REMOVED_CHIP = "5534990000008";
+export const OPTED_OUT_PHONE = "5534977770001";
 
 export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok(route, chatsPage(url.searchParams.get("tab") || "esperam"))) {
-  const served: Served = { sent: [], refused: [], tabs: [], reminders: [], deletedReminders: [] };
+  const served: Served = { sent: [], refused: [], started: [], startRefused: [], tabs: [], reminders: [], deletedReminders: [] };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -154,6 +171,30 @@ export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok
     }
     if (url.pathname === "/api/whatsapp/messages" && req.method() === "POST") {
       const body = req.postDataJSON();
+      if (body.newConversation === true) {
+        // Mesmas regras do servidor de verdade para "Nova conversa".
+        const digits = String(body.chatId || "").replace(/\D/g, "");
+        const local = digits.startsWith("55") && digits.length >= 12 ? digits.slice(2) : digits;
+        const refuse = (status: number, code: string, message: string) => {
+          served.startRefused.push({ phone: String(body.chatId), code });
+          return route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error: { code, message } }) });
+        };
+        if (/[a-z@]/i.test(String(body.chatId)) || (local.length !== 10 && local.length !== 11)) {
+          return refuse(422, "INVALID_PHONE", "Número inválido. Use DDD e número, por exemplo (34) 99999-0000.");
+        }
+        const canonical = `55${local.length === 10 && /^..[6-9]/.test(local) ? `${local.slice(0, 2)}9${local.slice(2)}` : local}`;
+        // As 40 conversas da fila de mentira são 5534990000001 a 5534990000040.
+        const alreadyThere = /^55349900000(0[1-9]|[1-3]\d|40)$/.test(canonical) || served.started.some((c) => c.chatId === canonical);
+        if (alreadyThere) return json({ existing: true, chatId: canonical });
+        if (canonical === OPTED_OUT_PHONE) return refuse(409, "CONTACT_OPTED_OUT", "Este número pediu para não receber mensagens. Nada foi enviado.");
+        if (body.chipId === "caio") return refuse(409, "CHIP_NOT_CONNECTED", "O chip Caio está desconectado. Escolha outro chip ou reconecte este em Integrações.");
+        served.started.push({ chatId: canonical, body: body.body, chipId: body.chipId });
+        return route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({ item: { id: "novo", body: body.body, fromMe: true, timestamp: NOW_S(), type: "chat", hasMedia: false }, chatId: canonical }),
+        });
+      }
       // Mesma regra do servidor: chip da conversa desconectado e sem confirmação = 409, nada enviado.
       if (body.chatId === CHAT_ON_DOWN_CHIP && !body.confirmChipId) {
         served.refused.push({ chatId: body.chatId, body: body.body });
@@ -242,7 +283,15 @@ export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok
       return json({ success: true, deletedId: id });
     }
     if (url.pathname === "/api/whatsapp/messages") {
-      return json({ items: messagesFor(url.searchParams.get("chatId") || ""), hasMore: false });
+      const chatId = url.searchParams.get("chatId") || "";
+      const startedHere = served.started.filter((c) => c.chatId === chatId);
+      if (startedHere.length) {
+        return json({
+          items: startedHere.map((c, i) => ({ id: `novo-${i}`, body: c.body, fromMe: true, senderType: "agent", timestamp: NOW_S(), type: "chat", hasMedia: false, from: null, to: null, author: null })),
+          hasMore: false,
+        });
+      }
+      return json({ items: messagesFor(chatId), hasMore: false });
     }
     if (url.pathname === "/api/lead-clients") return json({ items: [tenant] });
     if (url.pathname === "/api/leads") return json({ items: leads });

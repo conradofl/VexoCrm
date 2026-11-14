@@ -522,9 +522,12 @@ function buildUserDraft(user: AdminUserRecord): UserDraft {
     internalPages: user.access.internalPages?.length
       ? user.access.internalPages
       : [...defaults.internalPages],
-    allowedModules: user.access.allowedModules?.length
-      ? (user.access.allowedModules as OperatorModuleId[])
-      : deriveOperatorModulesFromPages(user.access.internalPages || []),
+    allowedModules:
+      accessPreset === "gestor" || accessPreset === "admin_vexo"
+        ? [...ALL_OPERATOR_MODULE_IDS]
+        : user.access.allowedModules?.length
+          ? (user.access.allowedModules as OperatorModuleId[])
+          : deriveOperatorModulesFromPages(user.access.internalPages || []),
     permissions: user.access.permissions?.length
       ? user.access.permissions
       : [...defaults.permissions],
@@ -2948,6 +2951,7 @@ export default function UserAccessManagement() {
                               internalPages: [...defaults.internalPages],
                               permissions: [...defaults.permissions],
                               granularPermissions: [],
+                              allowedModules: [...ALL_OPERATOR_MODULE_IDS],
                             });
                           }}
                           className={cn(
@@ -3625,6 +3629,7 @@ export default function UserAccessManagement() {
                                                   internalPages: [...defaults.internalPages],
                                                   permissions: [...defaults.permissions],
                                                   granularPermissions: [],
+                                                  allowedModules: [...ALL_OPERATOR_MODULE_IDS],
                                                 });
                                               }}
                                               className={cn(

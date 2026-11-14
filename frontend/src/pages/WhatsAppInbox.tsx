@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { createPortal } from "react-dom";
 import { useIsMobile, useKeyboardOpen, useVisibleArea } from "@/hooks/useMobileViewport";
 import { useBackLayers } from "@/hooks/useBackLayers";
+import { NewConversationDialog } from "@/components/inbox/NewConversationDialog";
+import type { NewConversationLead } from "@/lib/inbox/newConversation";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Clock3,
@@ -103,6 +105,7 @@ import { useLeads, type LeadRow } from "@/hooks/useLeads";
 import {
   useSendWhatsAppMessage,
   useSendWhatsAppMediaMessage,
+  useStartWhatsAppConversation,
   ReplyChipUnavailableError,
   type ReplyChipAlternative,
   type SendWhatsAppMediaParams,
@@ -471,6 +474,7 @@ export default function WhatsAppInbox({
     if (list) list.scrollTop = listScrollTopRef.current;
   }, [isMobile, mobileView]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [isApplyFollowupModalOpen, setIsApplyFollowupModalOpen] = useState(false);
@@ -543,6 +547,7 @@ export default function WhatsAppInbox({
   const messagesQuery = useWhatsAppMessages(clientId, instanceFilter, selectedChatId, canLoadInbox);
   const sendMessage = useSendWhatsAppMessage(clientId, selectedChatId);
   const sendMediaMessage = useSendWhatsAppMediaMessage(clientId, selectedChatId);
+  const startConversation = useStartWhatsAppConversation(clientId);
   const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const clearChats = useClearWhatsAppChats(clientId);
   const { data: reactivationSettings } = useLeadReactivationSettings(clientId || undefined);
@@ -1631,6 +1636,38 @@ export default function WhatsAppInbox({
     [inst.id, inst.name, String(inst.dispatch_webhook_url || "").split("/").filter(Boolean).pop()].filter(Boolean).map(String);
   // Chip padrão ativo da empresa: só é usado quando a conversa não tem chip gravado.
   const defaultChip = evolutionInstances.find((inst) => inst.active && inst.is_default) || evolutionInstances.find((inst) => inst.active) || null;
+  // Janela "Nova conversa": só chips conectados (pelo cadastro; o servidor confere ao vivo no envio).
+  const newConversationChips = evolutionInstances
+    .filter(
+      (inst) =>
+        inst.active && !["close", "closed", "connecting", "disconnected"].includes(String(inst.connection_state || "").toLowerCase())
+    )
+    .map((inst) => ({ id: String(inst.id), name: inst.name || String(inst.id), isDefault: inst.is_default === true }));
+  const newConversationLeads: NewConversationLead[] = newConversationOpen
+    ? leads
+        .map((lead) => ({
+          id: String(lead.id),
+          name: lead.nome || (lead as { name?: string }).name || "Lead sem nome",
+          phone: String(lead.telefone || (lead as { phone?: string }).phone || ""),
+        }))
+        .filter((lead) => lead.phone)
+    : [];
+  const handleConversationStarted = ({ chatId, existing, unsentBody }: { chatId: string; existing: boolean; unsentBody?: string }) => {
+    setSelectedChatId(chatId);
+    openChatOnMobile();
+    if (existing) {
+      // A conversa já existia: nada foi enviado. O texto vai para o campo de resposta, para não se perder.
+      if (unsentBody) setDraft(unsentBody);
+      setCompositionMode("whatsapp");
+      toast.info("Essa conversa já existe. Abri ela e deixei a mensagem no campo, sem enviar.");
+      return;
+    }
+    // Conversa nova: quem falou por último foi a empresa, então ela fica em "Com o lead".
+    setSearchQuery("");
+    setInboxTab("com_lead");
+    toast.success("Conversa iniciada.");
+  };
+
   const leadChipAlias = selectedChat?.leadChip || null;
   const leadChipInstance = leadChipAlias ? evolutionInstances.find((inst) => chipAliasesOf(inst).includes(leadChipAlias)) : null;
   const leadChipName = leadChipInstance?.name || leadChipAlias;
@@ -2358,6 +2395,7 @@ export default function WhatsAppInbox({
               otherLists={otherLists}
               activeTab={inboxTab}
               onTabChange={setInboxTab}
+              onNewConversation={() => setNewConversationOpen(true)}
               selectMode={selectMode}
               onToggleSelectMode={() => {
                 setSelectMode((v) => !v);
@@ -3482,6 +3520,15 @@ export default function WhatsAppInbox({
       />
 
       {/* Modal de Agendamento de Call / Google Meet */}
+      <NewConversationDialog
+        open={newConversationOpen}
+        onOpenChange={setNewConversationOpen}
+        leads={newConversationLeads}
+        chips={newConversationChips}
+        onSend={(input) => startConversation.mutateAsync(input)}
+        onStarted={handleConversationStarted}
+      />
+
       <ScheduleMeetingModal
         open={isScheduleMeetingModalOpen}
         onOpenChange={(open) => {
