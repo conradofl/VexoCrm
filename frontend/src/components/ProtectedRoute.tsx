@@ -79,8 +79,10 @@ export default function ProtectedRoute({
     }
   }
 
+  const isManager = isInternalUser && (accessProfile?.accessPreset === "gestor" || accessProfile?.approvalLevel === "manager" || accessProfile?.approvalLevel === "director");
+
   const hasPageAccess = requiredInternalPage
-    ? isAdminUser || canAccessInternalPage(requiredInternalPage) || (!isInternalUser && inheritedPages.includes(requiredInternalPage))
+    ? isAdminUser || isManager || canAccessInternalPage(requiredInternalPage) || (!isInternalUser && inheritedPages.includes(requiredInternalPage))
     : true;
 
   if (requiredInternalPage && (!hasPageAccess || (!isInternalUser && !isInternalPageAllowedForClient(requiredInternalPage, allowedTabs)))) {
