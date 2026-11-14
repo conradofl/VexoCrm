@@ -52,4 +52,3 @@ export function searchLeads(leads: NewConversationLead[], term: string, limit = 
   }
   return out;
 }
-
