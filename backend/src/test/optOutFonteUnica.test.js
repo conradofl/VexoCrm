@@ -21,7 +21,10 @@ import { registerLeadsRoutes } from "../domains/leads/routes.js";
 import { dispatchCampaignSequence } from "../campaign-outbound.js";
 import { isPhoneOptedOut, registerOptOut, revokeOptOut } from "../services/optOut.js";
 
-const MIGRATION = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "migrations", "20261112010000_lead_optouts_fonte_unica.sql");
+const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "migrations");
+const MIGRATION = join(MIGRATIONS_DIR, "20261112010000_lead_optouts_fonte_unica.sql");
+// As migrations de lead_optouts, na ordem em que o migrate.js aplica.
+const MIGRATIONS_OPTOUT = [MIGRATION, join(MIGRATIONS_DIR, "20261114120000_lead_optouts_sem_chave_unica_antiga.sql")];
 const T = "empresa-a";
 const OUTRA = "empresa-b";
 const FONE = "5534991093607"; // canônico
@@ -49,16 +52,22 @@ const SCHEMA_VELHO = `
   CREATE TABLE public.lead_optouts (id uuid, client_id text, phone text, optout_at timestamptz, reason text);
 `;
 
+// Produção tem, além disso, uma chave única antiga em (client_id, phone) que vale também para linha revogada
+// (lead_optouts_client_id_phone_key, medida em 14/11/2026). Com ela, revogar e pedir de novo não cabe numa linha nova.
+const CHAVE_ANTIGA_DE_PRODUCAO = "ALTER TABLE public.lead_optouts ADD CONSTRAINT lead_optouts_client_id_phone_key UNIQUE (client_id, phone);";
+
 const abertos = [];
 afterAll(async () => {
   for (const db of abertos) await db.close();
 });
 
-async function banco({ migrar = true } = {}) {
-  const db = await createPgliteDb(SCHEMA_VELHO);
+async function banco({ migrar = true, chaveAntiga = true } = {}) {
+  const db = await createPgliteDb(SCHEMA_VELHO + (chaveAntiga ? CHAVE_ANTIGA_DE_PRODUCAO : ""));
   abertos.push(db);
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'A'), ($2, 'B')", [T, OUTRA]);
-  const aplicar = async () => db.exec(await readFile(MIGRATION, "utf8"));
+  const aplicar = async () => {
+    for (const arquivo of MIGRATIONS_OPTOUT) await db.exec(await readFile(arquivo, "utf8"));
+  };
   if (migrar) await aplicar();
   const pool = { query: (sql, params) => db.query(sql, params) };
   const linhas = async () => (await db.query("SELECT client_id, phone, source, reason, created_by, wa_message_id, message_text, revoked_at, revoked_by FROM lead_optouts ORDER BY optout_at, phone")).rows;
@@ -95,7 +104,8 @@ describe("migration 20261112010000: lead_optouts vira a fonte única", () => {
   });
 
   it("linha que já existia na tabela passa para a grafia canônica; repetida do mesmo número fica com uma só ativa", async () => {
-    const w = await banco({ migrar: false });
+    // Sem a chave antiga: duas grafias do mesmo número que viram a mesma canônica só cabem num banco sem ela.
+    const w = await banco({ migrar: false, chaveAntiga: false });
     await w.db.query(
       "INSERT INTO lead_optouts (id, client_id, phone, optout_at, reason) VALUES (gen_random_uuid(), $1, '+55 34 9109-3607', '2026-10-01', 'antiga'), (gen_random_uuid(), $1, '5534991093607', '2026-10-05', 'repetida')",
       [T]
@@ -105,6 +115,33 @@ describe("migration 20261112010000: lead_optouts vira a fonte única", () => {
     expect(linhas.map((l) => l.phone)).toEqual([FONE, FONE]);
     expect(linhas.filter((l) => l.revoked_at === null).map((l) => l.reason)).toEqual(["antiga"]);
     expect(await isPhoneOptedOut(w.pool, { clientId: T, phone: FONE })).toBe(true);
+  });
+});
+
+describe("migration 20261114120000: sem a chave única antiga", () => {
+  const indicesUnicos = async (db) =>
+    (await db.query(
+      "SELECT ic.relname AS nome, i.indpred IS NOT NULL AS parcial FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_class t ON t.oid = i.indrelid WHERE t.relname = 'lead_optouts' AND i.indisunique ORDER BY 1"
+    )).rows;
+
+  it("[OBRIGATÓRIO] apaga a chave antiga de produção, mantém o índice parcial do pedido ativo e é idempotente", async () => {
+    const w = await banco({ migrar: false });
+    expect((await indicesUnicos(w.db)).map((i) => i.nome)).toContain("lead_optouts_client_id_phone_key");
+    await w.aplicar();
+    await w.aplicar();
+    expect(await indicesUnicos(w.db)).toEqual([{ nome: "uq_lead_optouts_ativo", parcial: true }]);
+  });
+
+  it("banco sem a chave antiga: não muda nada", async () => {
+    const w = await banco({ migrar: false, chaveAntiga: false });
+    await w.aplicar();
+    expect(await indicesUnicos(w.db)).toEqual([{ nome: "uq_lead_optouts_ativo", parcial: true }]);
+  });
+
+  it("o índice parcial segue barrando o segundo pedido ativo do mesmo número", async () => {
+    const w = await banco();
+    await w.db.query("INSERT INTO lead_optouts (client_id, phone, source) VALUES ($1, $2, 'manual')", [T, FONE]);
+    await expect(w.db.query("INSERT INTO lead_optouts (client_id, phone, source) VALUES ($1, $2, 'palavra')", [T, FONE])).rejects.toThrow();
   });
 });
 
@@ -344,6 +381,23 @@ describe("interruptor do dossiê (PATCH /api/leads/:id com opt_out) grava na fon
     expect(linhas[0]).toMatchObject({ source: "sem_interesse", revoked_by: "operador-1" });
     expect(linhas[0].revoked_at).not.toBeNull();
     expect(await w.lerLead(id)).toMatchObject({ opt_out: false, metadata: { opt_out: "false" } });
+  });
+
+  it("[OBRIGATÓRIO] ligar, desligar e ligar de novo: o número volta a ficar bloqueado, com uma linha nova (banco com a chave antiga de produção)", async () => {
+    await subir();
+    const id = await w.lead(T, FONE);
+    expect((await patch(id, { opt_out: true })).status).toBe(200);
+    expect((await patch(id, { opt_out: false })).status).toBe(200);
+    expect(await isPhoneOptedOut(w.pool, { clientId: T, phone: FONE })).toBe(false);
+
+    expect((await patch(id, { opt_out: true })).status).toBe(200);
+    // Antes da migration 20261114120000 a chave antiga descartava o pedido em silêncio: a tela via "bloqueado"
+    // (espelho no lead) e o envio liberava.
+    expect(await isPhoneOptedOut(w.pool, { clientId: T, phone: FONE })).toBe(true);
+    const linhas = await w.linhas();
+    expect(linhas).toHaveLength(2);
+    expect(linhas.filter((l) => l.revoked_at === null)).toHaveLength(1);
+    expect((await w.lerLead(id)).opt_out).toBe(true);
   });
 
   it("PATCH que não fala de opt-out não toca na tabela", async () => {
