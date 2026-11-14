@@ -286,6 +286,48 @@ test.describe("aba Conversas no celular (375x812, toque)", () => {
     expect(layer).toBeNull();
   });
 
+  test("Nova conversa no celular: botão no topo da fila, janela cabe na tela, envia e abre a conversa em tela cheia", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+
+    const button = page.getByTestId("new-conversation-button");
+    await expect(button).toBeInViewport({ ratio: 1 });
+    const b = await box(page, "new-conversation-button");
+    expect(b.width).toBeGreaterThanOrEqual(44);
+    expect(b.height).toBeGreaterThanOrEqual(44);
+    expect(b.y).toBeLessThan((await firstCard(page).boundingBox())!.y);
+    await noSideScroll(page);
+    await button.tap();
+
+    const dialog = page.getByTestId("new-conversation-dialog");
+    await expect(dialog).toBeVisible();
+    await expect.poll(async () => {
+      const d = (await dialog.boundingBox())!;
+      return d.x >= 0 && d.y >= 0 && d.x + d.width <= W && d.y + d.height <= H;
+    }).toBe(true);
+    for (const id of ["new-conversation-target", "new-conversation-chip", "new-conversation-body"]) {
+      expect(await page.getByTestId(id).evaluate((el) => parseFloat(getComputedStyle(el).fontSize)), id).toBeGreaterThanOrEqual(16);
+    }
+    await page.getByTestId("new-conversation-target").fill("34 98888-7777");
+    await page.getByTestId("new-conversation-suggestion").tap();
+    await page.getByTestId("new-conversation-body").fill("Oi Marina, tudo bem?");
+    await expectTouchTargets(page, "janela Nova conversa");
+    await page.screenshot({ path: `${SHOTS}/celular-9-nova-conversa.png` });
+    await page.getByTestId("new-conversation-send").tap();
+
+    await expect.poll(() => served.started.length).toBe(1);
+    expect(served.started[0]).toEqual({ chatId: "5534988887777", body: "Oi Marina, tudo bem?", chipId: "comercial-hostery" });
+    await expect(dialog).toHaveCount(0);
+    // Abre a conversa em tela cheia; o voltar do aparelho devolve a fila.
+    await expect(page.getByTestId("inbox-column")).toBeHidden();
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Marina Prado");
+    expect(await box(page, "inbox-layout")).toEqual({ x: 0, y: 0, width: W, height: H });
+    await page.screenshot({ path: `${SHOTS}/celular-10-nova-conversa-aberta.png` });
+    await page.goBack();
+    await expect(page.getByTestId("inbox-column")).toBeVisible();
+  });
+
   test("campos de texto têm letra de 16 px: o iPhone não dá zoom ao tocar", async ({ page }) => {
     await serve(page);
     await page.goto(PAGE_URL);

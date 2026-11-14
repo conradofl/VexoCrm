@@ -247,6 +247,7 @@ import {
 
 import { describeUnrecognizedMessage, rawMessageKind } from "../../services/messageKind.js";
 import { findConversationChip, replyChipUnavailableMessage, resolveReplyChip } from "../../services/inboxReplyChip.js";
+import { conversationExists, parseNewConversationPhone, resolveNewConversationChip } from "../../services/inboxNewConversation.js";
 
 export function registerChatbotRoutes(app, deps) {
   const {
@@ -413,6 +414,45 @@ export function registerChatbotRoutes(app, deps) {
       alternatives: decision.alternatives || [],
     });
     return null;
+  }
+
+  // Nova conversa: confere tudo ANTES de enviar. Devolve { cleanPhone, chipDecision } ou null depois
+  // de já ter respondido (erro, ou "essa conversa já existe": 200 com existing, nada enviado).
+  async function prepareNewConversation(req, res, clientId, rawPhone) {
+    const phone = parseNewConversationPhone(rawPhone);
+    if (!phone) {
+      sendError(res, 422, "INVALID_PHONE", "Número inválido. Use DDD e número, por exemplo (34) 99999-0000.");
+      return null;
+    }
+    const query = pgDatabasePool.query.bind(pgDatabasePool);
+    const { phoneVariants } = buildChatPhoneVariants(phone, false);
+    if (await conversationExists(query, { clientId, phoneVariants })) {
+      res.status(200).json({ existing: true, chatId: phone });
+      return null;
+    }
+    // Erro ao ler o opt-out NÃO libera o envio: sobe e a rota devolve erro.
+    // O opt-out compara dígito a dígito: confere todas as grafias do número (com e sem 55, com e sem o 9).
+    const spellings = [...new Set(phoneVariants.filter((v) => !v.includes("@")).map((v) => v.replace(/\D/g, "")).filter(Boolean))];
+    let optedOut = false;
+    for (const spelling of spellings) {
+      if (await isPhoneOptedOut(pgDatabasePool, { clientId, phone: spelling })) {
+        optedOut = true;
+        break;
+      }
+    }
+    if (optedOut) {
+      sendError(res, 409, "CONTACT_OPTED_OUT", "Este número pediu para não receber mensagens. Nada foi enviado.");
+      return null;
+    }
+    const chip = await resolveNewConversationChip({
+      instances: await getLeadClientEvolutionInstances(clientId),
+      chipId: normalizeString(req.body?.chipId) || null,
+    });
+    if (!chip.ok) {
+      sendError(res, chip.code === "NO_ACTIVE_WHATSAPP_CHIP" ? 400 : 409, chip.code, chip.message);
+      return null;
+    }
+    return { cleanPhone: phone, chipDecision: { instance: chip.instance, reason: "new_conversation", conversationChip: null } };
   }
 
   // Aceita um chip ou VÁRIOS separados por vírgula ("Chip A,Chip B") — o inbox
@@ -2007,11 +2047,21 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
 
-      const cleanPhone = sanitizePhone(chatId);
-
-      // Chip da resposta: o da conversa. Chip da conversa indisponível devolve 409 e nada é enviado.
-      const chipDecision = await pickReplyChip(req, res, clientId, chatId);
-      if (!chipDecision) return;
+      // "Nova conversa": a empresa escreve primeiro. Mesmo envio e mesmo registro da resposta manual;
+      // muda só o que é conferido antes (número, conversa já existente, opt-out, chip escolhido).
+      const isNewConversation = req.body?.newConversation === true;
+      let cleanPhone;
+      let chipDecision;
+      if (isNewConversation) {
+        const prepared = await prepareNewConversation(req, res, clientId, chatId);
+        if (!prepared) return;
+        ({ cleanPhone, chipDecision } = prepared);
+      } else {
+        cleanPhone = sanitizePhone(chatId);
+        // Chip da resposta: o da conversa. Chip da conversa indisponível devolve 409 e nada é enviado.
+        chipDecision = await pickReplyChip(req, res, clientId, chatId);
+        if (!chipDecision) return;
+      }
       const activeInstance = chipDecision.instance;
 
       const webhookUrl = activeInstance.dispatch_webhook_url;
@@ -2114,7 +2164,9 @@ export function registerChatbotRoutes(app, deps) {
           type: "chat",
           hasMedia: false,
           sentByChip: activeInstance.name || evoInstanceName,
-        }
+        },
+        // Nova conversa: o id canônico da conversa criada, para a tela abrir.
+        ...(isNewConversation ? { chatId: cleanPhone } : {}),
       });
     } catch (error) {
       console.error("whatsapp database send message error:", error);

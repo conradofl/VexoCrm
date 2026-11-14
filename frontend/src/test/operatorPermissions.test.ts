@@ -58,6 +58,19 @@ describe("Trava de Acesso por Módulo para Operadores (12 Módulos)", () => {
     }
   });
 
+  it("gestor possui acesso irrestrito a todos os 12 módulos", () => {
+    const gestorAccess = {
+      role: "internal",
+      isAdmin: false,
+      accessPreset: "gestor",
+      approvalLevel: "manager",
+    };
+
+    for (const modId of ALL_OPERATOR_MODULE_IDS) {
+      expect(isOperatorModuleAllowed(modId, gestorAccess)).toBe(true);
+    }
+  });
+
   it("operador respeita rigorosamente os módulos liberados em allowedModules", () => {
     const restrictedOperator = {
       role: "internal",
@@ -138,3 +151,4 @@ describe("Trava de Acesso por Módulo para Operadores (12 Módulos)", () => {
     expect(internalPages).not.toContain("campanhas");
   });
 });
+

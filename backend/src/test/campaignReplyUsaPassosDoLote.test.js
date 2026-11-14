@@ -20,7 +20,9 @@ import { fileURLToPath } from "node:url";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
-import { buildDispatchLeads, findCampaignReplyMatches } from "../campaign/dispatch.js";
+import { buildDispatchLeads, continueCampaignLeadFromReply, findCampaignReplyMatches } from "../campaign/dispatch.js";
+import { ensureLeadClientEvolutionInstancesTable, getLeadClientEvolutionInstances } from "../services/evolution.js";
+import { CREATE_USAGE_TABLE_SQL } from "../services/chipQuota.js";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 
 const SLOW = 120_000;
@@ -89,7 +91,7 @@ beforeEach(() => {
   globalThis.fetch = vi.fn(async (url, init) => {
     if (/sendText/.test(String(url))) {
       const body = JSON.parse(init?.body || "{}");
-      enviados.push({ numero: String(body.number || ""), texto: String(body.text || body.textMessage?.text || "") });
+      enviados.push({ numero: String(body.number || ""), texto: String(body.text || body.textMessage?.text || ""), url: String(url) });
       return { ok: true, status: 200, json: async () => ({ key: { id: "wa" } }), text: async () => '{"key":{"id":"wa"}}' };
     }
     return { ok: true, status: 200, json: async () => [], text: async () => "[]" };
@@ -110,7 +112,15 @@ afterEach(async () => {
   while (abertos.length) await abertos.pop().close();
 });
 
-async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", leadFinalizado = false, semEspera = false } = {}) {
+const CHIP_ID = "cccccccc-0000-4000-8000-00000000000c";
+async function mundo({
+  sequenciaDaCampanhaDepois = null,
+  origem = "planilha",
+  passos = [PASSO1, PASSO2],
+  continuacaoReal = false,
+  leadFinalizado = false,
+  semEspera = false,
+} = {}) {
   const db = await createPgliteDb(SCHEMA);
   abertos.push(db);
   for (const f of ["20261008180000_add_recurrence_to_campaigns.sql", "20261012120000_campaign_recurrence_occurrences.sql"]) {
@@ -146,7 +156,8 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
       CAMPAIGN_SCHEDULER_MAX_BATCH: 10, buildDispatchLeads, canCampaignBeDispatched: () => true,
       checkEvolutionInstanceHealth: async () => ({ state: "open" }), continueCampaignLeadFromReply: async () => {},
       ensureDb: () => true, executeCampaignDispatch: async () => {}, findCampaignReplyMatches: async () => [],
-      getClientName: async () => "Container", getLeadClientEvolutionInstances: async () => [],
+      getClientName: async () => "Container",
+      getLeadClientEvolutionInstances: continuacaoReal ? (cid) => getLeadClientEvolutionInstances(cid) : async () => [],
       getLeadClientN8nSettings: async () => ({ send_window_enabled: false }), getRequestId: () => "req",
       getSafeDispatchSettingsLog: () => ({}), internalErrorPayloadDetails: () => ({}), isMissingSchemaError: () => false,
       isProduction: false, logCampaignReplyFlow: noop, logDirectDispatch: noop, maskPhoneForLog: (p) => p,
@@ -155,7 +166,10 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
       requireAppViewAccess: () => (req, res, next) => next(), requireCampaignDispatchAccess: (req, res, next) => next(),
       requireFirebaseAuth: (req, res, next) => next(), requireInternalPageAccess: () => (req, res, next) => next(),
       resolveAuthorizedClientId: () => T,
-      resolveCampaignDispatchSettings: async () => ({ webhookUrl: "https://evo.teste/message/sendText/chip-disparo", webhookToken: "t" }),
+      resolveCampaignDispatchSettings: async () => ({
+        webhookUrl: continuacaoReal ? "https://evo.teste/message/sendText/container-led-chip-de-disparo-atendimento" : "https://evo.teste/message/sendText/chip-disparo",
+        webhookToken: "t",
+      }),
       resolveDispatchWebhookSettings: async () => ({}), runDueCampaignDispatches: async () => {}, sanitizePhone: (p) => p,
       sendError: (res, s, c, m) => res.status(s).json({ error: { code: c, message: m } }), supabase,
       validateN8nInboundBearer: () => true,
@@ -164,7 +178,7 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
 
   const IMP = "bbbbbbbb-0000-4000-8000-000000000002";
   const crm = origem === "crm";
-  const meta = { sequence: [PASSO1, PASSO2], dispatchOptions: { waitForReply: true }, ...(crm ? { importSource: "__crm__" } : {}) };
+  const meta = { sequence: passos, dispatchOptions: { waitForReply: true }, ...(crm ? { importSource: "__crm__" } : {}) };
   const { rows: [camp] } = await db.query(
     "INSERT INTO campaigns (client_id, name, import_id, analytics_meta, limit_per_run) VALUES ($1, 'Black Friday', $2, $3::jsonb, 50) RETURNING *",
     [T, crm ? null : IMP, JSON.stringify(meta)]
@@ -179,10 +193,21 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
       "INSERT INTO lead_import_items (client_id, import_id, telefone, normalized_data) VALUES ($1, $2, '5534988228667', '{\"nome\":\"Cliente\"}'::jsonb) RETURNING id, telefone",
       [T, IMP]
     );
+  if (continuacaoReal) {
+    // O chip de verdade, para a continuação resolver a instância como em produção (só o HTTP da Evolution é dublado).
+    // Banco novo a cada teste: cria a tabela de chips NESTE banco (o "já criei" do módulo vale para o banco anterior).
+    await ensureLeadClientEvolutionInstancesTable({ query: (sql, params) => db.query(sql, params) });
+    await db.exec(CREATE_USAGE_TABLE_SQL);
+    await db.query(
+      `INSERT INTO public.lead_client_evolution_instances (id, client_id, name, dispatch_webhook_url, dispatch_webhook_token, active, is_default, connection_state)
+       VALUES ($1, $2, 'Chip de Disparo - Atendimento', 'https://evo.teste/message/sendText/container-led-chip-de-disparo-atendimento', 'tok', true, true, 'open')`,
+      [CHIP_ID, T]
+    );
+  }
   const { rows: [lote] } = await db.query(
-    `INSERT INTO campaign_dispatches (campaign_id, client_id, name, steps, status, "offset", target_count, triggered_at)
-     VALUES ($1, $2, 'Lote 1/83', $3::jsonb, 'running', 0, 1, now()) RETURNING *`,
-    [camp.id, T, JSON.stringify([PASSO1, PASSO2])]
+    `INSERT INTO campaign_dispatches (campaign_id, client_id, name, steps, status, "offset", target_count, triggered_at, evolution_instance_id)
+     VALUES ($1, $2, 'Lote 1/83', $3::jsonb, 'running', 0, 1, now(), $4) RETURNING *`,
+    [camp.id, T, JSON.stringify(passos), continuacaoReal ? CHIP_ID : null]
   );
 
   // 1. o lote real envia o passo 1 e grava o progresso de espera
@@ -201,7 +226,7 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
     ]);
   }
 
-  const continuar = vi.fn(async () => ({ continued: true }));
+  const continuar = vi.fn(continuacaoReal ? continueCampaignLeadFromReply : async () => ({ continued: true }));
   const handlers = {};
   const guardar = (m) => (p, ...hs) => { handlers[`${m} ${p}`] = hs[hs.length - 1]; };
   const chatSupabase = createPgSupabaseClient(pool);
@@ -239,7 +264,7 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
     await handlers["POST /api/hardcoded-chat-webhook"](
       {
         body: {
-          event: "messages.upsert", clientId: T, instance: "chip-disparo",
+          event: "messages.upsert", clientId: T, instance: continuacaoReal ? "container-led-chip-de-disparo-atendimento" : "chip-disparo",
           data: { key: { remoteJid: `${lead.telefone}@s.whatsapp.net`, fromMe: false, id: `WA-${Math.random()}` }, message: { conversation: texto }, messageTimestamp: Math.floor(Date.now() / 1000) },
         },
         query: {},
@@ -248,7 +273,13 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", le
     );
     return out;
   };
-  return { db, camp, lead, lote, responder, continuar };
+  const progresso = async () => {
+    const { rows } = crm
+      ? await db.query("SELECT dados AS d FROM leads WHERE id = $1", [lead.id])
+      : await db.query("SELECT normalized_data AS d FROM lead_import_items WHERE id = $1", [lead.id]);
+    return rows[0]?.d?.campaign_progress?.[camp.id] || null;
+  };
+  return { db, camp, lead, lote, responder, continuar, progresso };
 }
 
 describe("campanha da base CRM: a resposta do lead encontra a espera gravada pelo lote", () => {
@@ -338,4 +369,33 @@ describe("resposta do lead avança pelos passos do LOTE", () => {
     expect(out?.status).not.toBe("campaign_step_dispatched");
     expect(w.continuar).not.toHaveBeenCalled();
   }, SLOW);
+});
+
+// Sequência exata da Black Friday (log de produção de 13/11): 4 passos, 2 depois da resposta, 1 neste envio, primeiro
+// passo após a resposta = 1. Na resposta o progresso lido era 'finalizado' com nextStepIndex null.
+const PASSOS_BF = [
+  { id: "p1", type: "text", text: "Oi {{nome}}, tenho uma novidade", order: 1, enabled: true, delayAfterSeconds: 0, triggerMode: "immediate" },
+  { id: "p2", type: "text", text: "Segue a oferta", order: 2, enabled: true, delayAfterSeconds: 0, triggerMode: "after_reply" },
+  { id: "p3", type: "text", text: "Posso reservar?", order: 3, enabled: true, delayAfterSeconds: 0, triggerMode: "after_reply" },
+  { id: "p4", type: "text", text: "Qualquer dúvida me chama", order: 4, enabled: true, delayAfterSeconds: 0, triggerMode: "with_previous" },
+];
+
+describe("4 passos, 2 depois da resposta: o lead responde e o passo 2 sai pela mesma instância", () => {
+  for (const origem of ["planilha", "crm"]) {
+    it(`[OBRIGATÓRIO] ${origem}: envia o passo 1, grava espera; o 'Sim' faz sair o passo 2 pelo mesmo chip e a espera segue para o passo 3`, async () => {
+      const w = await mundo({ origem, passos: PASSOS_BF, continuacaoReal: true });
+      expect(enviados.map((e) => e.texto)).toEqual(["Oi Cliente, tenho uma novidade"]);
+      expect(await w.progresso()).toMatchObject({ status: "aguardando_usuario", nextStepIndex: 1, waitForReply: true });
+
+      const out = await w.responder("Sim");
+      expect(out).toMatchObject({ status: "campaign_step_dispatched" });
+      await vi.waitFor(() => expect(enviados.length).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+
+      expect(enviados[1].texto).toBe("Segue a oferta");
+      expect(enviados[1].url).toContain("/message/sendText/container-led-chip-de-disparo-atendimento");
+      expect(enviados.map((e) => e.texto)).not.toContain("Posso reservar?"); // o passo 3 espera a próxima resposta
+
+      await vi.waitFor(async () => expect(await w.progresso()).toMatchObject({ status: "aguardando_usuario", nextStepIndex: 2 }), { timeout: 10_000 });
+    }, SLOW);
+  }
 });

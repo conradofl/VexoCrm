@@ -407,9 +407,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isVexo = clientId === "vexo" || isFixedAdminAccount(firebaseUser?.uid, firebaseUser?.email);
         if (!isVexo) return false;
       }
-      return isAdminUser || internalPages.includes(page);
+      const isManager = accessPreset === "gestor" || approvalLevel === "manager" || approvalLevel === "director";
+      return isAdminUser || isManager || internalPages.includes(page);
     },
-    [internalPages, isAdminUser, isInternalUser, clientId, firebaseUser]
+    [internalPages, isAdminUser, isInternalUser, accessPreset, approvalLevel, clientId, firebaseUser]
   );
   const hasPermission = useCallback(
     (permission: AccessPermission) => {
@@ -417,9 +418,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isVexo = clientId === "vexo" || isFixedAdminAccount(firebaseUser?.uid, firebaseUser?.email);
         if (!isVexo) return false;
       }
-      return isAdminUser || permissions.includes(permission);
+      const isManager = accessPreset === "gestor" || approvalLevel === "manager" || approvalLevel === "director";
+      return isAdminUser || isManager || permissions.includes(permission);
     },
-    [isAdminUser, permissions, clientId, firebaseUser]
+    [isAdminUser, permissions, accessPreset, approvalLevel, clientId, firebaseUser]
   );
   const defaultRoute = isPendingUser
     ? "/aguardando-aprovacao"

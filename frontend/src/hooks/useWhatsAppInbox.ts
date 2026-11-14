@@ -791,6 +791,34 @@ export function useSendWhatsAppMessage(clientId: string | null, chatId: string |
   });
 }
 
+// "Nova conversa": a empresa escreve primeiro. Mesma rota da resposta manual, com newConversation.
+// Devolve o id da conversa para a tela abrir. `existing` = a conversa já existia e nada foi enviado.
+export function useStartWhatsAppConversation(clientId: string | null) {
+  const { getIdToken } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { phone: string; chipId: string; body: string }): Promise<{ chatId: string; existing: boolean }> => {
+      const token = await getIdToken();
+      if (!token) {
+        throw new Error("Usuario nao autenticado.");
+      }
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, chatId: input.phone, body: input.body, chipId: input.chipId, newConversation: true }),
+      });
+      const payload = await parseApiResponse<{ chatId?: string; existing?: boolean }>(res);
+      if (!payload?.chatId) throw new Error("O servidor não devolveu a conversa. Confira na lista antes de enviar de novo.");
+      return { chatId: payload.chatId, existing: payload.existing === true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-chats", clientId] });
+      queryClient.invalidateQueries({ queryKey: ["whatsapp-messages", clientId] });
+    },
+  });
+}
+
 export interface SendWhatsAppMediaParams {
   mediaType: "audio" | "image" | "video" | "document";
   base64: string;

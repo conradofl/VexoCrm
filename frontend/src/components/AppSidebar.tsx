@@ -143,6 +143,7 @@ export function AppSidebar() {
     isModuleLocked(crmClient?.selectedClient, item.key || item.page, chipLimits);
 
   const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+  const isManager = isInternalUser && (accessProfile?.accessPreset === "gestor" || accessProfile?.approvalLevel === "manager" || accessProfile?.approvalLevel === "director");
 
   const filterItems = (items: typeof OPERACAO_ITEMS) => {
     return items
@@ -151,7 +152,7 @@ export function AppSidebar() {
         if (isOperator && modId) {
           return isOperatorModuleAllowed(modId, accessProfile);
         }
-        const hasAccess = isAdminUser || canAccessInternalPage(f.page) || (!isInternalUser && inheritedPages.includes(f.page));
+        const hasAccess = isAdminUser || isManager || canAccessInternalPage(f.page) || (!isInternalUser && inheritedPages.includes(f.page));
         return hasAccess && (isInternalUser || isPathAllowedForClient(f.url, allowedTabs));
       });
   };
