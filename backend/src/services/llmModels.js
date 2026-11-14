@@ -163,6 +163,14 @@ export function classifyLlmHttpError(status, corpo = "") {
   if (status === 413) {
     return { tipo: "PEDIDO_GRANDE_DEMAIS", tentarProximo: true, ...parseRateLimit(texto) };
   }
+  // HTTP 402 no Google AI Studio: saldo da carteira pré-paga (prepayment credits) zerou
+  if (status === 402 || /prepayment credits are depleted|RESOURCE_EXHAUSTED.*prepay/i.test(texto)) {
+    return {
+      tipo: "SALDO_ESGOTADO",
+      tentarProximo: false,
+      motivo: "Os créditos pré-pagos da conta do Gemini (Google AI Studio) acabaram (HTTP 402). Recarregue em https://ai.studio/projects ou utilize uma chave de um projeto com créditos/plano ativo.",
+    };
+  }
   if (status === 429 || /rate.?limit|Too Many Requests|tokens per minute|\bTPM\b/i.test(texto)) {
     return { tipo: "COTA_ESTOURADA", tentarProximo: true, ...parseRateLimit(texto) };
   }

@@ -58,9 +58,11 @@ function ActionCardView({ card }: { card: ActionCard }) {
           <span className={`text-sm font-semibold ${strong}`}>{card.value === 1 ? "pessoa espera resposta" : "pessoas esperam resposta"}</span>
         </div>
         <p className={`text-[12.5px] ${card.attention ? "text-orange-900 dark:text-orange-200" : "text-muted-foreground"}`}>{card.detail}</p>
-        <Link to={card.href} className={`mt-1 inline-flex min-h-[28px] items-center text-[13px] font-bold underline-offset-2 hover:underline ${strong}`}>
-          {card.cta} →
-        </Link>
+        {card.href && card.cta && (
+          <Link to={card.href} className={`mt-1 inline-flex min-h-[28px] items-center text-[13px] font-bold underline-offset-2 hover:underline ${strong}`}>
+            {card.cta} →
+          </Link>
+        )}
       </div>
     );
   }
@@ -132,7 +134,7 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
 
   const overview = data.overview;
   const actionCards = useMemo(() => {
-    const cards: ActionCard[] = [buildWaitingCard(overview?.waiting), buildNeverApproachedCard(overview?.base, data.lastUpdatedAt)];
+    const cards: ActionCard[] = [buildWaitingCard(overview?.waiting, { canOpenConversations: !overview?.queue?.listRestricted }), buildNeverApproachedCard(overview?.base, data.lastUpdatedAt)];
     const chip = buildChipAlertCard(overview?.chips, overview?.chipsQuotaIsToday ?? false);
     if (chip) cards.push(chip);
     return cards;
@@ -141,6 +143,7 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
   const selection = useMemo(() => buildFunnelSelection(data, funnel, selected), [data, funnel, selected]);
   const messages = useMemo(() => buildMessageRows(data.rankings.messages), [data.rankings.messages]);
   const chips = useMemo(() => buildChipUsage(overview?.chips), [overview?.chips]);
+  const unattributedSent = data.rankings.chipsUnattributedSent;
   const slices = useMemo(() => buildBaseSlices(overview?.base), [overview?.base]);
 
   return (
@@ -311,6 +314,12 @@ export function OverviewTab({ data, periodLabel }: OverviewTabProps) {
               ))}
               <p className="text-[11.5px] text-muted-foreground">Laranja = acima de 80% da cota.</p>
             </div>
+          )}
+          {/* Envio sem chip gravado não entra na conta de nenhum chip: aparece aqui, com a contagem, nunca escondido. */}
+          {typeof unattributedSent === "number" && unattributedSent > 0 && (
+            <p className="mt-3 text-[11.5px] text-muted-foreground" data-testid="chips-unattributed">
+              {formatMetricNumber(unattributedSent)} {unattributedSent === 1 ? "envio do período sem chip registrado." : "envios do período sem chip registrado."}
+            </p>
           )}
         </div>
 

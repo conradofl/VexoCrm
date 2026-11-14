@@ -231,6 +231,103 @@ test.describe("aba Conversas no celular (375x812, toque)", () => {
     await expect(page.getByTestId("chat-context")).toBeVisible();
   });
 
+  test("botão voltar do aparelho: do dossiê volta para a conversa, da conversa volta para a fila, sem sair da página", async ({ page }) => {
+    await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+    const url = page.url();
+    const stillHere = async () => {
+      expect(page.url()).toBe(url);
+      await expect(page.getByTestId("inbox-layout")).toBeVisible();
+    };
+
+    const list = page.getByTestId("inbox-list");
+    await list.evaluate((el) => { el.scrollTop = 900; });
+    const scrolledTo = await list.evaluate((el) => el.scrollTop);
+    const target = page.getByTestId("inbox-item-5534990000016");
+    await target.tap();
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Contato 16 da Silva Albuquerque");
+
+    await page.getByTestId("dossier-open").tap();
+    await expect(page.getByTestId("dossier-panel")).toBeVisible();
+
+    // 1º voltar do aparelho: fecha o dossiê, a conversa continua aberta.
+    await page.goBack();
+    await expect(page.getByTestId("dossier-panel")).toHaveCount(0);
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Contato 16 da Silva Albuquerque");
+    await expect(page.getByTestId("inbox-column")).toBeHidden();
+    await stillHere();
+
+    // 2º voltar: sai da conversa para a fila, na mesma posição.
+    await page.goBack();
+    await expect(page.getByTestId("inbox-column")).toBeVisible();
+    await expect(page.getByTestId("inbox-conversation")).toBeHidden();
+    expect(await list.evaluate((el) => el.scrollTop)).toBe(scrolledTo);
+    await stillHere();
+
+    // Fechar pela tela (X do dossiê, seta da conversa) e o voltar do aparelho não se atropelam:
+    // depois de fechar tudo pela tela, abrir de novo e voltar ainda cai na fila.
+    await target.tap();
+    await page.getByTestId("dossier-open").tap();
+    await expect(page.getByTestId("dossier-panel")).toBeVisible();
+    await page.getByTestId("dossier-close").tap();
+    await expect(page.getByTestId("dossier-panel")).toHaveCount(0);
+    await page.getByTestId("chat-back").tap();
+    await expect(page.getByTestId("inbox-column")).toBeVisible();
+
+    await target.tap();
+    await expect(page.getByTestId("inbox-column")).toBeHidden();
+    await page.goBack();
+    await expect(page.getByTestId("inbox-column")).toBeVisible();
+    await stillHere();
+
+    // Na fila não sobrou entrada da conversa no histórico: a tela continua a mesma.
+    const layer = await page.evaluate(() => (window.history.state as { inboxLayer?: string } | null)?.inboxLayer ?? null);
+    expect(layer).toBeNull();
+  });
+
+  test("Nova conversa no celular: botão no topo da fila, janela cabe na tela, envia e abre a conversa em tela cheia", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+
+    const button = page.getByTestId("new-conversation-button");
+    await expect(button).toBeInViewport({ ratio: 1 });
+    const b = await box(page, "new-conversation-button");
+    expect(b.width).toBeGreaterThanOrEqual(44);
+    expect(b.height).toBeGreaterThanOrEqual(44);
+    expect(b.y).toBeLessThan((await firstCard(page).boundingBox())!.y);
+    await noSideScroll(page);
+    await button.tap();
+
+    const dialog = page.getByTestId("new-conversation-dialog");
+    await expect(dialog).toBeVisible();
+    await expect.poll(async () => {
+      const d = (await dialog.boundingBox())!;
+      return d.x >= 0 && d.y >= 0 && d.x + d.width <= W && d.y + d.height <= H;
+    }).toBe(true);
+    for (const id of ["new-conversation-target", "new-conversation-chip", "new-conversation-body"]) {
+      expect(await page.getByTestId(id).evaluate((el) => parseFloat(getComputedStyle(el).fontSize)), id).toBeGreaterThanOrEqual(16);
+    }
+    await page.getByTestId("new-conversation-target").fill("34 98888-7777");
+    await page.getByTestId("new-conversation-suggestion").tap();
+    await page.getByTestId("new-conversation-body").fill("Oi Marina, tudo bem?");
+    await expectTouchTargets(page, "janela Nova conversa");
+    await page.screenshot({ path: `${SHOTS}/celular-9-nova-conversa.png` });
+    await page.getByTestId("new-conversation-send").tap();
+
+    await expect.poll(() => served.started.length).toBe(1);
+    expect(served.started[0]).toEqual({ chatId: "5534988887777", body: "Oi Marina, tudo bem?", chipId: "comercial-hostery" });
+    await expect(dialog).toHaveCount(0);
+    // Abre a conversa em tela cheia; o voltar do aparelho devolve a fila.
+    await expect(page.getByTestId("inbox-column")).toBeHidden();
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Marina Prado");
+    expect(await box(page, "inbox-layout")).toEqual({ x: 0, y: 0, width: W, height: H });
+    await page.screenshot({ path: `${SHOTS}/celular-10-nova-conversa-aberta.png` });
+    await page.goBack();
+    await expect(page.getByTestId("inbox-column")).toBeVisible();
+  });
+
   test("campos de texto têm letra de 16 px: o iPhone não dá zoom ao tocar", async ({ page }) => {
     await serve(page);
     await page.goto(PAGE_URL);

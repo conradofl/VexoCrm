@@ -3,10 +3,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import {
-  generateGoogleMeetUrl,
-  buildMeetingInviteMessage,
-} from "@/components/inbox/ScheduleMeetingModal";
+import * as meetingModal from "@/components/inbox/ScheduleMeetingModal";
+import { buildMeetingInviteMessage, parseMeetingLink } from "@/components/inbox/ScheduleMeetingModal";
 import { MeetingPostCallCheckinCard } from "@/components/inbox/MeetingPostCallCheckinCard";
 
 vi.mock("@/hooks/useLeadReminders", () => ({
@@ -17,38 +15,54 @@ vi.mock("@/hooks/useLeadReminders", () => ({
 }));
 
 describe("Bloco C - Frontend: Google Meet & Atividades Comerciais", () => {
-  describe("generateGoogleMeetUrl", () => {
-    it("gera um link no formato https://meet.google.com/xxx-yyyy-zzz", () => {
-      const url = generateGoogleMeetUrl();
-      expect(url).toMatch(/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/);
+  describe("o sistema não fabrica link de reunião", () => {
+    it("não existe mais gerador de link do Google Meet", () => {
+      expect("generateGoogleMeetUrl" in meetingModal).toBe(false);
+    });
+  });
+
+  describe("parseMeetingLink", () => {
+    it("vazio é válido: o link é opcional", () => {
+      expect(parseMeetingLink("")).toEqual({ url: null });
+      expect(parseMeetingLink("   ")).toEqual({ url: null });
+      expect(parseMeetingLink(null)).toEqual({ url: null });
     });
 
-    it("gera links únicos e aleatórios", () => {
-      const url1 = generateGoogleMeetUrl();
-      const url2 = generateGoogleMeetUrl();
-      expect(url1).not.toBe(url2);
+    it("aceita o link colado, com ou sem https://", () => {
+      expect(parseMeetingLink(" https://meet.google.com/abc-defg-hij ")).toEqual({ url: "https://meet.google.com/abc-defg-hij" });
+      expect(parseMeetingLink("zoom.us/j/123456")).toEqual({ url: "https://zoom.us/j/123456" });
+    });
+
+    it("recusa o que não é endereço de página", () => {
+      expect(parseMeetingLink("sala do meet")).toHaveProperty("error");
+      expect(parseMeetingLink("javascript:alert(1)")).toHaveProperty("error");
+      expect(parseMeetingLink("depois eu mando")).toHaveProperty("error");
     });
   });
 
   describe("buildMeetingInviteMessage", () => {
-    it("monta o convite com o nome do lead, dia da semana, hora e link do Google Meet", () => {
-      const meetingDate = new Date("2026-10-16T15:00:00.000Z");
-      const url = "https://meet.google.com/abc-defg-hij";
-      const message = buildMeetingInviteMessage("Bia Spazio", meetingDate, url);
+    const meetingDate = new Date("2026-10-16T15:00:00.000Z");
 
-      expect(message).toContain("Olá Bia");
+    it("com link colado: nome, dia, hora e o link", () => {
+      const message = buildMeetingInviteMessage("Bia Spazio", meetingDate, "https://meet.google.com/abc-defg-hij");
+      expect(message).toContain("Olá Bia,");
       expect(message).toContain("reunião está agendada para");
-      expect(message).toContain("Link da nossa sala no Google Meet: https://meet.google.com/abc-defg-hij");
+      expect(message).toContain("Link da reunião: https://meet.google.com/abc-defg-hij");
       expect(message).toContain("Te vejo lá!");
     });
 
-    it("lida graciosamente com lead sem sobrenome ou nome genérico", () => {
-      const meetingDate = new Date("2026-10-16T15:00:00.000Z");
-      const url = "https://meet.google.com/abc-defg-hij";
-      const message = buildMeetingInviteMessage("Lead", meetingDate, url);
+    it("sem link: só dia e hora, nenhum endereço na mensagem", () => {
+      for (const empty of [null, undefined, "", "   "]) {
+        const message = buildMeetingInviteMessage("Bia Spazio", meetingDate, empty);
+        expect(message).toContain("Olá Bia, nossa reunião está agendada para");
+        expect(message).not.toMatch(/https?:|meet\.google|Link/i);
+        expect(message).toContain("Te vejo lá!");
+      }
+    });
 
-      expect(message).toContain("Olá olá");
-      expect(message).toContain(url);
+    it("lead sem nome: cumprimento simples", () => {
+      const message = buildMeetingInviteMessage("Lead", meetingDate, null);
+      expect(message.startsWith("Olá, nossa reunião")).toBe(true);
     });
   });
 

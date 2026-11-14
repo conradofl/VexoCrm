@@ -36,6 +36,9 @@ import {
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { isDeviceTypedMessage, registerSystemSentFromResponse } from "../../services/systemSentMessages.js";
+import { isPhoneOptedOut } from "../../services/optOut.js";
+import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
 import { SQL_HOJE_CHAT_FILTER } from "../../services/remindersHelper.js";
 import { cancelFollowupCadenceOnTakeover, cancelFollowupCadenceOnReply } from "../../services/followupExitGuard.js";
 import { registerFollowupReply } from "../../services/followupReplyHook.js";
@@ -55,8 +58,9 @@ import {
 } from "../../services/inboxWorkState.js";
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
+import { isHeloisaAuthorizedSender, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
-import { defaultLlmModel } from "../../services/llmModels.js";
+import { defaultLlmModel, providerOfModelId } from "../../services/llmModels.js";
 import {
   bufferMessage,
   resolveMessageContent,
@@ -245,6 +249,7 @@ import {
 
 import { describeUnrecognizedMessage, rawMessageKind } from "../../services/messageKind.js";
 import { findConversationChip, replyChipUnavailableMessage, resolveReplyChip } from "../../services/inboxReplyChip.js";
+import { conversationExists, parseNewConversationPhone, resolveNewConversationChip } from "../../services/inboxNewConversation.js";
 
 export function registerChatbotRoutes(app, deps) {
   const {
@@ -413,6 +418,45 @@ export function registerChatbotRoutes(app, deps) {
     return null;
   }
 
+  // Nova conversa: confere tudo ANTES de enviar. Devolve { cleanPhone, chipDecision } ou null depois
+  // de já ter respondido (erro, ou "essa conversa já existe": 200 com existing, nada enviado).
+  async function prepareNewConversation(req, res, clientId, rawPhone) {
+    const phone = parseNewConversationPhone(rawPhone);
+    if (!phone) {
+      sendError(res, 422, "INVALID_PHONE", "Número inválido. Use DDD e número, por exemplo (34) 99999-0000.");
+      return null;
+    }
+    const query = pgDatabasePool.query.bind(pgDatabasePool);
+    const { phoneVariants } = buildChatPhoneVariants(phone, false);
+    if (await conversationExists(query, { clientId, phoneVariants })) {
+      res.status(200).json({ existing: true, chatId: phone });
+      return null;
+    }
+    // Erro ao ler o opt-out NÃO libera o envio: sobe e a rota devolve erro.
+    // O opt-out compara dígito a dígito: confere todas as grafias do número (com e sem 55, com e sem o 9).
+    const spellings = [...new Set(phoneVariants.filter((v) => !v.includes("@")).map((v) => v.replace(/\D/g, "")).filter(Boolean))];
+    let optedOut = false;
+    for (const spelling of spellings) {
+      if (await isPhoneOptedOut(pgDatabasePool, { clientId, phone: spelling })) {
+        optedOut = true;
+        break;
+      }
+    }
+    if (optedOut) {
+      sendError(res, 409, "CONTACT_OPTED_OUT", "Este número pediu para não receber mensagens. Nada foi enviado.");
+      return null;
+    }
+    const chip = await resolveNewConversationChip({
+      instances: await getLeadClientEvolutionInstances(clientId),
+      chipId: normalizeString(req.body?.chipId) || null,
+    });
+    if (!chip.ok) {
+      sendError(res, chip.code === "NO_ACTIVE_WHATSAPP_CHIP" ? 400 : 409, chip.code, chip.message);
+      return null;
+    }
+    return { cleanPhone: phone, chipDecision: { instance: chip.instance, reason: "new_conversation", conversationChip: null } };
+  }
+
   // Aceita um chip ou VÁRIOS separados por vírgula ("Chip A,Chip B") — o inbox
   // permite selecionar mais de um chip ao mesmo tempo. Devolve todos os aliases
   // (nome amigável, id e nome extraído da URL da Evolution) via helper único canônico.
@@ -503,6 +547,7 @@ export function registerChatbotRoutes(app, deps) {
           const corpo = await resposta.text().catch(() => "");
           throw new Error(`HTTP ${resposta.status} ${corpo.slice(0, 120)}`);
         }
+        registerSystemSentFromResponse(await resposta.text().catch(() => ""));
         enviados += 1;
       } catch (err) {
         falhas.push({ numero: maskPhoneForLog(numero), erro: err?.message || String(err) });
@@ -1313,6 +1358,23 @@ export function registerChatbotRoutes(app, deps) {
   // D3: resposta de gente pela tela de Conversas pausa o agente naquela conversa, só no
   // tenant que ligou agent_pause_on_device_reply (nasce desligada). Falha aqui não pode
   // derrubar o envio, que já saiu: só loga.
+  // Pausa de GENTE (origem manual: botão, resposta pela tela ou pelo aparelho) e ainda no prazo. A pausa do classificador
+  // (conversa não comercial) não entra aqui: ela já tem o portão próprio e não segura passo de campanha.
+  async function conversaPausadaPorGente(clientId, phone) {
+    try {
+      const settings = await getLeadClientN8nSettings(clientId).catch(() => null);
+      const estado = await resolveChatMuteState(pgDatabasePool, {
+        clientId,
+        phone,
+        expiryDays: resolveAgentPauseExpiryDays(settings),
+      });
+      return estado?.source === MUTE_SOURCE_MANUAL && estado.expired !== true;
+    } catch (err) {
+      console.warn("[chatbot-webhook] falha ao conferir pausa de atendimento humano:", err?.message || err);
+      return false;
+    }
+  }
+
   async function pauseAgentOnHumanReply(clientId, phone) {
     try {
       // Já pausada à mão: a resposta só empurra o prazo, com ou sem o D3. Regravar a
@@ -1987,11 +2049,21 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
 
-      const cleanPhone = sanitizePhone(chatId);
-
-      // Chip da resposta: o da conversa. Chip da conversa indisponível devolve 409 e nada é enviado.
-      const chipDecision = await pickReplyChip(req, res, clientId, chatId);
-      if (!chipDecision) return;
+      // "Nova conversa": a empresa escreve primeiro. Mesmo envio e mesmo registro da resposta manual;
+      // muda só o que é conferido antes (número, conversa já existente, opt-out, chip escolhido).
+      const isNewConversation = req.body?.newConversation === true;
+      let cleanPhone;
+      let chipDecision;
+      if (isNewConversation) {
+        const prepared = await prepareNewConversation(req, res, clientId, chatId);
+        if (!prepared) return;
+        ({ cleanPhone, chipDecision } = prepared);
+      } else {
+        cleanPhone = sanitizePhone(chatId);
+        // Chip da resposta: o da conversa. Chip da conversa indisponível devolve 409 e nada é enviado.
+        chipDecision = await pickReplyChip(req, res, clientId, chatId);
+        if (!chipDecision) return;
+      }
       const activeInstance = chipDecision.instance;
 
       const webhookUrl = activeInstance.dispatch_webhook_url;
@@ -2054,6 +2126,7 @@ export function registerChatbotRoutes(app, deps) {
       if (!response.ok) {
         throw new Error(responseText || `HTTP ${response.status}`);
       }
+      registerSystemSentFromResponse(responseText);
 
       // Log sent message in the database
       // instanceName must be the Evolution API name (last URL path segment) to match
@@ -2093,7 +2166,9 @@ export function registerChatbotRoutes(app, deps) {
           type: "chat",
           hasMedia: false,
           sentByChip: activeInstance.name || evoInstanceName,
-        }
+        },
+        // Nova conversa: o id canônico da conversa criada, para a tela abrir.
+        ...(isNewConversation ? { chatId: cleanPhone } : {}),
       });
     } catch (error) {
       console.error("whatsapp database send message error:", error);
@@ -3141,6 +3216,34 @@ export function registerChatbotRoutes(app, deps) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);
     }
 
+    // ── INTERCEPTADOR HELOÍSA (COPILOTO EXECUTIVO WHATSAPP) ──
+    const isHeloisaTarget =
+      (instanceName && instanceName.toLowerCase().includes("heloisa")) ||
+      req.query?.lane === "heloisa" ||
+      req.query?.agent === "heloisa";
+    const isDirector = isHeloisaAuthorizedSender(phone);
+    const hasHeloisaPrefix = /^(helo[ií]sa|[!\/]h)\b/i.test(messageData?.text || "");
+
+    if (!fromMe && (isHeloisaTarget || (isDirector && hasHeloisaPrefix))) {
+      const cleanText = hasHeloisaPrefix
+        ? (messageData.text || "").replace(/^(helo[ií]sa|[!\/]h)[:,]?\s*/i, "").trim()
+        : messageData.text;
+
+      responder({ handled: "heloisa", phone: maskPhoneForLog(phone) });
+
+      processarMensagemHeloisa({
+        phone,
+        texto: cleanText,
+        audioBase64: messageData.mediaBase64 || null,
+        audioMimetype: messageData.mimetype || "audio/ogg",
+        instanceName: instanceName || "heloisa",
+        pool: pgDatabasePool,
+      }).catch((err) => {
+        console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);
+      });
+      return;
+    }
+
     // Resposta do lead para a cadência de follow-up. Só mensagem do lead (não fromMe)
     // e só com tenant explícito: o fallback "outlier" acima não pode cancelar nada.
     if (!fromMe && explicitClientId && pgDatabasePool) {
@@ -3151,6 +3254,20 @@ export function registerChatbotRoutes(app, deps) {
         waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
         instanceName,
         queryFn: pgDatabasePool.query.bind(pgDatabasePool),
+      });
+    }
+
+    // Captura do pedido de saída (services/optOutCapture.js): palavra sozinha, ou "não tenho interesse" em mensagem curta.
+    // Só mensagem DIGITADA pelo lead, com empresa explícita (o fallback "outlier" não grava nada). Áudio transcrito e
+    // imagem descrita ficam de fora: o texto é da máquina, não do lead. Roda ANTES do portão de opt-out, mais abaixo,
+    // para que a própria mensagem do pedido já não receba próximo passo nem resposta do agente. Nunca lança.
+    if (!fromMe && explicitClientId && pgDatabasePool && messageData?.text && messageData.transcribed !== true && messageData.described !== true) {
+      await captureOptOutFromInbound(pgDatabasePool, {
+        clientId: explicitClientId,
+        phone,
+        text: messageData.text,
+        waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
+        getTenantSettings: getLeadClientN8nSettings,
       });
     }
 
@@ -3248,7 +3365,36 @@ export function registerChatbotRoutes(app, deps) {
         waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
       });
       responder({ saved: "outbound_from_me" });
+      // Resposta digitada no aparelho pausa o agente, igual à resposta pela tela (mesma pausa, mesmo prazo, mesmo
+      // "Reativar"), quando a empresa ligou "Pausar o agente quando a equipe responder". Eco de envio do próprio sistema
+      // (agente, campanha, follow-up, recontato, tela) não pausa: decide pelo id registrado no envio, nunca pelo prefixo.
+      // Roda depois da resposta à Evolution: a segunda conferência espera alguns segundos.
+      if (explicitClientId && pgDatabasePool) {
+        const pausaLigada = (await getLeadClientN8nSettings(clientId).catch(() => null))?.agent_pause_on_device_reply === true;
+        const waIdDoEco = messageData.waMessageId || resolveMessageId(body) || null;
+        if (pausaLigada && (await isDeviceTypedMessage(pgDatabasePool, { clientId, waMessageId: waIdDoEco }))) {
+          await pauseAgentOnHumanReply(clientId, phone);
+        }
+      }
       return;
+    }
+
+    // ── PORTÃO DE OPT-OUT ──
+    // Quem pediu para sair não recebe o próximo passo de campanha (CAMINHO 1) nem resposta do agente de IA (CAMINHO 2).
+    // A mensagem já foi gravada (ETAPA 3) e a cadência de follow-up já foi tratada: o operador continua vendo a conversa e
+    // pode responder à mão. Erro de leitura = robô calado nesta mensagem (nunca libera).
+    if (pgDatabasePool) {
+      let optedOut = false;
+      try {
+        optedOut = await isPhoneOptedOut(pgDatabasePool, { clientId, phone });
+      } catch (optErr) {
+        optedOut = true;
+        console.error("[chatbot-webhook] falha ao checar opt-out; robô não responde a esta mensagem:", optErr?.message || optErr);
+      }
+      if (optedOut) {
+        responder({ status: "skipped_opt_out" }, { clientId, phone: maskPhoneForLog(phone) });
+        return;
+      }
     }
 
     // ── ETAPA 4: CAMPAIGN ROUTING (AVANÇA PASSO DE CAMPANHA, SE HOUVER) ──
@@ -3427,6 +3573,11 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // ── CAMINHO 1: DISPARO DO PRÓXIMO PASSO DE CAMPANHA (EXCLUSÃO MÚTUA ESTREITA) ──
+    // Conversa pausada por gente (tela ou aparelho): nada automático responde, nem o próximo passo da campanha.
+    if (activeWaitCampaignToDispatch && (await conversaPausadaPorGente(clientId, phone))) {
+      responder({ status: "skipped_human_pause", motivo: "atendimento_humano" }, { clientId, phone: maskPhoneForLog(phone) });
+      return;
+    }
     if (activeWaitCampaignToDispatch) {
       // 1. Responde 200 IMEDIATAMENTE ao Evolution (evita timeout e retry)
       responder({ status: "campaign_step_dispatched" }, {
@@ -3860,6 +4011,16 @@ export function registerChatbotRoutes(app, deps) {
           const libraryAudio = aiResponse._audio || null;
           const shouldSendVoice = !libraryAudio && resolveVoiceDecision({ voiceMode, leadSentAudio });
 
+          // A IA leva segundos: a equipe pode ter respondido nesse meio tempo. Confere a pausa de gente de novo no
+          // instante de enviar (vale para a resposta do agente e para a mensagem de recontato).
+          if (await conversaPausadaPorGente(clientId, phone)) {
+            console.log("[chatbot-webhook] resposta da IA descartada: equipe assumiu a conversa enquanto a IA pensava", {
+              clientId,
+              phone: maskPhoneForLog(phone),
+            });
+            return;
+          }
+
           let sentViaVoice = false;
           let textDelivered = false;
           let outboundWaId = null;
@@ -3937,6 +4098,7 @@ export function registerChatbotRoutes(app, deps) {
               try {
                 const evoData = await evolutionResponse.json();
                 outboundWaId = evoData?.key?.id || evoData?.data?.key?.id || evoData?.messageId || null;
+                registerSystemSentFromResponse(evoData);
               } catch {
                 // Ignora erro de parsing de json caso resposta seja texto
               }
@@ -4306,6 +4468,49 @@ export function registerChatbotRoutes(app, deps) {
         inboundConfig = await resolveInboundAgentConfig({ supabase, clientId, instanceName }).catch(() => null);
       }
 
+      // Permite testar prompt, modelo e campos SPIN diretamente no simulador antes de salvar
+      const requestedLlmModel =
+        (typeof body.llmModel === "string" && body.llmModel.trim()) ||
+        (typeof body.model === "string" && body.model.trim()) ||
+        inboundConfig?.model ||
+        chatbotModel ||
+        defaultLlmModel();
+
+      const requestedPrompt =
+        (typeof body.inboundPrompt === "string" && body.inboundPrompt.trim()) ||
+        (typeof body.prompt === "string" && body.prompt.trim()) ||
+        inboundConfig?.prompt ||
+        null;
+
+      const requestedSpinFields =
+        Array.isArray(body.spinFields) && body.spinFields.length > 0
+          ? body.spinFields
+          : inboundConfig?.spinFields || null;
+      const spinInstruction = requestedSpinFields
+        ? buildSpinInstruction(requestedSpinFields)
+        : "";
+
+      // Se o usuário selecionou um modelo cujo provedor não possui chave no servidor, avisa claramente em vez de falhar silenciosamente
+      if (requestedLlmModel) {
+        const provider = providerOfModelId(requestedLlmModel);
+        const providerStatus = getLlmProviderStatus();
+        if (provider in providerStatus && !providerStatus[provider]) {
+          const envVarNames = {
+            gemini: "GEMINI_API_KEY (ou GOOGLE_API_KEY)",
+            openai: "OPENAI_API_KEY",
+            anthropic: "ANTHROPIC_API_KEY",
+            groq: "GROQ_API_KEY",
+          };
+          return res.status(422).json({
+            success: false,
+            error: `Chave do provedor ${provider.toUpperCase()} não configurada`,
+            reason: `O modelo "${requestedLlmModel}" está selecionado, mas a variável ${envVarNames[provider] || provider} não está configurada no servidor (EasyPanel). Como o prompt deste cliente possui mais de 7.000 tokens, os modelos da Groq recusam por limite de TPM (8.000 tokens por minuto). Adicione a variável GEMINI_API_KEY no EasyPanel para ativar o Gemini.`,
+            code: "LLM_KEY_MISSING",
+            provider,
+          });
+        }
+      }
+
       const aiResponse = await processBatch({
         clientId,
         phone,
@@ -4314,12 +4519,12 @@ export function registerChatbotRoutes(app, deps) {
         model: chatbotModel,
         promptType: "padrao",
         campaignPromptId: null,
-        llmModel: inboundConfig?.model || null,
-        inboundPrompt: inboundConfig?.prompt || null,
-        inboundSpinInstruction: inboundConfig ? buildSpinInstruction(inboundConfig.spinFields) : "",
+        llmModel: requestedLlmModel,
+        inboundPrompt: requestedPrompt,
+        inboundSpinInstruction: spinInstruction,
         instanceName,
         companyId: inboundConfig?.companyId || null,
-        instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
+        instructionsConsolidated: Boolean(inboundConfig?.instructionsConsolidated || requestedPrompt),
         isSimulation,
         noPersist: isSimulation,
         simulationState,
@@ -4329,14 +4534,23 @@ export function registerChatbotRoutes(app, deps) {
         // Dois motivos MUITO diferentes cabiam nesta mesma frase. Sem separar, o
         // dono lia "prompt nao configurado" quando o prompt estava certo e quem
         // falhou foi o modelo — e ia mexer no lugar errado.
-        const motivo = aiResponse?.mensagemAusente
+        let motivo = aiResponse?.mensagemAusente
           ? "O modelo respondeu, mas sem texto na chave \"mensagem\". O prompt está configurado; a resposta é que veio fora do contrato."
           : "Prompt não configurado ou chatbot silenciado para este cliente.";
-        return res.status(502).json({
+
+        if (aiResponse?._credencialInvalida?.length) {
+          motivo = `Credencial inválida ou ausente no(s) provedor(es): ${aiResponse._credencialInvalida.join(", ")}. Verifique as chaves no EasyPanel.`;
+        } else if (aiResponse?._falhaDetalhe) {
+          motivo = `Falha na execução do modelo: ${aiResponse._falhaDetalhe}`;
+        }
+
+        // NUNCA retornar 502: proxies (Vercel) convertem 502 em HTML, quebrando o parsing do front e disparando fallback CORS
+        return res.status(422).json({
           success: false,
           error: "Não foi possível gerar a resposta.",
           reason: motivo,
           code: aiResponse?.mensagemAusente ? "MODEL_EMPTY_MESSAGE" : "CHATBOT_NOT_CONFIGURED",
+          detalhe: aiResponse?._falhaDetalhe || null,
         });
       }
 
@@ -4399,7 +4613,8 @@ export function registerChatbotRoutes(app, deps) {
         });
       }
 
-      res.status(502).json({
+      // Retorna 422 em vez de 502 para evitar que Vercel intercepte e devolva HTML 502
+      res.status(422).json({
         success: false,
         error: `Falha ao processar resposta do modelo: ${detail}`,
         reason: detail,

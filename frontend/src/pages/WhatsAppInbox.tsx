@@ -2,6 +2,9 @@ import { describeMessageLabel } from "@/lib/inbox/messageLabel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile, useKeyboardOpen, useVisibleArea } from "@/hooks/useMobileViewport";
+import { useBackLayers } from "@/hooks/useBackLayers";
+import { NewConversationDialog } from "@/components/inbox/NewConversationDialog";
+import type { NewConversationLead } from "@/lib/inbox/newConversation";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Clock3,
@@ -102,6 +105,7 @@ import { useLeads, type LeadRow } from "@/hooks/useLeads";
 import {
   useSendWhatsAppMessage,
   useSendWhatsAppMediaMessage,
+  useStartWhatsAppConversation,
   ReplyChipUnavailableError,
   type ReplyChipAlternative,
   type SendWhatsAppMediaParams,
@@ -449,9 +453,20 @@ export default function WhatsAppInbox({
   }, [isMobile, layoutAnchor]);
   // Posição da fila quando a conversa foi aberta, para "voltar" devolver a fila no mesmo lugar.
   const listScrollTopRef = useRef(0);
+  // Botão voltar do aparelho, no celular: volta do dossiê para a conversa e da conversa para a
+  // fila, em vez de sair da página.
+  const backLayers = useBackLayers<"chat" | "dossier">(isMobile, (layer) => {
+    if (layer === "dossier") setShowDossier(false);
+    else setMobileView("list");
+  });
   const openChatOnMobile = () => {
     listScrollTopRef.current = chatsContainerRef.current?.scrollTop ?? 0;
     setMobileView("chat");
+    backLayers.push("chat");
+  };
+  const openDossier = () => {
+    setShowDossier(true);
+    backLayers.push("dossier");
   };
   useLayoutEffect(() => {
     if (!isMobile || mobileView !== "list") return;
@@ -459,6 +474,7 @@ export default function WhatsAppInbox({
     if (list) list.scrollTop = listScrollTopRef.current;
   }, [isMobile, mobileView]);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [isApplyFollowupModalOpen, setIsApplyFollowupModalOpen] = useState(false);
@@ -531,6 +547,7 @@ export default function WhatsAppInbox({
   const messagesQuery = useWhatsAppMessages(clientId, instanceFilter, selectedChatId, canLoadInbox);
   const sendMessage = useSendWhatsAppMessage(clientId, selectedChatId);
   const sendMediaMessage = useSendWhatsAppMediaMessage(clientId, selectedChatId);
+  const startConversation = useStartWhatsAppConversation(clientId);
   const [attachmentModalOpen, setAttachmentModalOpen] = useState(false);
   const clearChats = useClearWhatsAppChats(clientId);
   const { data: reactivationSettings } = useLeadReactivationSettings(clientId || undefined);
@@ -1074,7 +1091,7 @@ export default function WhatsAppInbox({
       toast.success(res.message || "Lead cadastrado com sucesso!");
       refetchLeads();
       chatsQuery.refetch?.();
-      setShowDossier(true);
+      openDossier();
     } catch (err: any) {
       toast.error(err?.message || "Erro ao cadastrar lead.");
     }
@@ -1619,6 +1636,38 @@ export default function WhatsAppInbox({
     [inst.id, inst.name, String(inst.dispatch_webhook_url || "").split("/").filter(Boolean).pop()].filter(Boolean).map(String);
   // Chip padrão ativo da empresa: só é usado quando a conversa não tem chip gravado.
   const defaultChip = evolutionInstances.find((inst) => inst.active && inst.is_default) || evolutionInstances.find((inst) => inst.active) || null;
+  // Janela "Nova conversa": só chips conectados (pelo cadastro; o servidor confere ao vivo no envio).
+  const newConversationChips = evolutionInstances
+    .filter(
+      (inst) =>
+        inst.active && !["close", "closed", "connecting", "disconnected"].includes(String(inst.connection_state || "").toLowerCase())
+    )
+    .map((inst) => ({ id: String(inst.id), name: inst.name || String(inst.id), isDefault: inst.is_default === true }));
+  const newConversationLeads: NewConversationLead[] = newConversationOpen
+    ? leads
+        .map((lead) => ({
+          id: String(lead.id),
+          name: lead.nome || (lead as { name?: string }).name || "Lead sem nome",
+          phone: String(lead.telefone || (lead as { phone?: string }).phone || ""),
+        }))
+        .filter((lead) => lead.phone)
+    : [];
+  const handleConversationStarted = ({ chatId, existing, unsentBody }: { chatId: string; existing: boolean; unsentBody?: string }) => {
+    setSelectedChatId(chatId);
+    openChatOnMobile();
+    if (existing) {
+      // A conversa já existia: nada foi enviado. O texto vai para o campo de resposta, para não se perder.
+      if (unsentBody) setDraft(unsentBody);
+      setCompositionMode("whatsapp");
+      toast.info("Essa conversa já existe. Abri ela e deixei a mensagem no campo, sem enviar.");
+      return;
+    }
+    // Conversa nova: quem falou por último foi a empresa, então ela fica em "Com o lead".
+    setSearchQuery("");
+    setInboxTab("com_lead");
+    toast.success("Conversa iniciada.");
+  };
+
   const leadChipAlias = selectedChat?.leadChip || null;
   const leadChipInstance = leadChipAlias ? evolutionInstances.find((inst) => chipAliasesOf(inst).includes(leadChipAlias)) : null;
   const leadChipName = leadChipInstance?.name || leadChipAlias;
@@ -1683,6 +1732,10 @@ export default function WhatsAppInbox({
 
   // Fechar a gaveta também desafixa: senão o X não fecharia nada em tela larga.
   const closeDossier = () => {
+    if (isMobile) {
+      backLayers.close("dossier");
+      return;
+    }
     setShowDossier(false);
     if (dossierPinned) toggleDossierPinned();
   };
@@ -2342,6 +2395,7 @@ export default function WhatsAppInbox({
               otherLists={otherLists}
               activeTab={inboxTab}
               onTabChange={setInboxTab}
+              onNewConversation={() => setNewConversationOpen(true)}
               selectMode={selectMode}
               onToggleSelectMode={() => {
                 setSelectMode((v) => !v);
@@ -2575,7 +2629,7 @@ export default function WhatsAppInbox({
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 px-3 py-3 sm:px-5" data-testid="chat-header">
               <button
                 type="button"
-                onClick={() => setMobileView("list")}
+                onClick={() => backLayers.close("chat")}
                 aria-label="Voltar para a lista de conversas"
                 data-testid="chat-back"
                 className="grid h-9 w-9 shrink-0 cursor-pointer place-items-center rounded-[9px] border border-border bg-card text-foreground/70 md:hidden"
@@ -2919,7 +2973,7 @@ export default function WhatsAppInbox({
                 <span className="flex-1" />
                 <button
                   type="button"
-                  onClick={() => setShowDossier((v) => !v)}
+                  onClick={() => (showDossier ? (isMobile ? backLayers.close("dossier") : setShowDossier(false)) : openDossier())}
                   aria-expanded={dossierVisible}
                   data-testid="dossier-open"
                   className="inline-flex min-h-7 cursor-pointer items-center gap-1 text-xs font-bold text-indigo-600 hover:underline dark:text-indigo-300"
@@ -3223,9 +3277,13 @@ export default function WhatsAppInbox({
                     <span
                       className="pr-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
                       data-testid="composer-hint"
-                      title="O chip em que o lead escreveu não está conectado. Ao enviar, você escolhe por qual chip a resposta sai. Nada é enviado sem a sua confirmação."
+                      title={
+                        leadChipInstance
+                          ? "O chip em que o lead escreveu não está conectado. Ao enviar, você escolhe por qual chip a resposta sai. Nada é enviado sem a sua confirmação."
+                          : "O chip em que o lead escreveu não está mais no cadastro da empresa (nome antigo ou chip removido). Ao enviar, você escolhe por qual chip a resposta sai."
+                      }
                     >
-                      chip {leadChipName} desconectado · vai pedir confirmação
+                      chip {leadChipName} {leadChipInstance ? "desconectado" : "fora do cadastro"} · vai pedir confirmação
                     </span>
                   ) : leadChipAlias ? (
                     <span
@@ -3462,6 +3520,15 @@ export default function WhatsAppInbox({
       />
 
       {/* Modal de Agendamento de Call / Google Meet */}
+      <NewConversationDialog
+        open={newConversationOpen}
+        onOpenChange={setNewConversationOpen}
+        leads={newConversationLeads}
+        chips={newConversationChips}
+        onSend={(input) => startConversation.mutateAsync(input)}
+        onStarted={handleConversationStarted}
+      />
+
       <ScheduleMeetingModal
         open={isScheduleMeetingModalOpen}
         onOpenChange={(open) => {

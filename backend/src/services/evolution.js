@@ -19,6 +19,7 @@
 // ciclo evolution.js <-> n8nSettings.js. Import de httpInfra.js (folha do grafo) evita isso.
 
 import { randomUUID } from "crypto";
+import { registerSystemSentMessageId } from "./systemSentMessages.js";
 import { pgDatabasePool } from "./database.js";
 import { normalizeString } from "../textNormalize.js";
 import { normalizeTenantKey, normalizeHttpUrl } from "./tenant.js";
@@ -1404,7 +1405,9 @@ export function getEvolutionAdminConfig() {
 export function buildEvolutionManagedInstanceName(clientId, inputName) {
   const source = normalizeString(inputName) || clientId || "vexo";
   const normalized = normalizeTenantKey(source) || normalizeTenantKey(clientId) || `vexo-${randomUUID().slice(0, 8)}`;
-  const withClientPrefix = normalized.startsWith(`${clientId}-`) ? normalized : `${clientId}-${normalized}`;
+  // Nome igual ao da empresa ("container-led") já é o nome com prefixo: sem esta guarda virava "container-led-container-led".
+  const jaTemPrefixo = normalized === clientId || normalized.startsWith(`${clientId}-`);
+  const withClientPrefix = jaTemPrefixo ? normalized : `${clientId}-${normalized}`;
   return withClientPrefix.slice(0, 64).replace(/-+$/g, "");
 }
 
@@ -2339,6 +2342,8 @@ export async function sendTextMessageViaEvolution({
   try {
     const data = JSON.parse(resText);
     const waMessageId = data?.key?.id || data?.id || null;
+    // Eco deste envio volta pelo webhook como fromMe: o id registrado diz que foi o sistema, não gente no aparelho.
+    if (typeof waMessageId === "string") registerSystemSentMessageId(waMessageId);
     return {
       success: true,
       waMessageId,
@@ -2427,6 +2432,8 @@ export async function sendMediaMessageViaEvolution({
   try {
     const data = JSON.parse(resText);
     const waMessageId = data?.key?.id || data?.id || null;
+    // Eco deste envio volta pelo webhook como fromMe: o id registrado diz que foi o sistema, não gente no aparelho.
+    if (typeof waMessageId === "string") registerSystemSentMessageId(waMessageId);
     return {
       success: true,
       waMessageId,

@@ -8,7 +8,6 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { calculateDashboardMetrics, calculateDelta } from "../services/dashboardCalculations.js";
-import { measureTopProfiles } from "../services/dashboardAnalysis.js";
 import { buildMessageEffectivenessSql, MESSAGE_EFFECTIVENESS_MIN_SENT } from "../services/messageEffectiveness.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
 
@@ -205,49 +204,6 @@ describe("Uma definição só: Dashboard e relatório de eficácia dizem o MESMO
     // Sem lead cadastrado para o telefone: a única pessoa cai em lead_nao_encontrado, uma vez só.
     expect(rel.quente + rel.morno + rel.frio + rel.sem_classificacao + rel.lead_nao_encontrado).toBe(rel.replied_count);
     expect(rel.respostas_de_grupo).toBe(0);
-  });
-});
-
-describe("Perfil que mais converteu — a terceira definição morreu", () => {
-  let db;
-
-  beforeAll(async () => {
-    db = await createPgliteDb(SCHEMA);
-    // 30 leads da mesma origem (volume mínimo do perfil), criados no período.
-    await db.exec(`
-      INSERT INTO leads (client_id, telefone, lead_origin, created_at)
-      SELECT '${T}', '55349922' || lpad(g::text, 5, '0'), 'meta_ads', '2026-10-05T10:00:00Z'
-      FROM generate_series(1, 30) g;
-    `);
-    await db.exec(
-      [
-        // 1 e 2: receberam envio e responderam em até 14 dias → responderam.
-        run("5534992200001", "2026-10-06T10:00:00Z"),
-        inbound("5534992200001", "2026-10-07T10:00:00Z"),
-        run("5534992200002", "2026-10-06T10:00:00Z"),
-        inbound("34992200002", "2026-10-08T10:00:00Z"),
-        // 3: escreveu sozinho, sem envio nenhum → "chamou", não "respondeu".
-        inbound("5534992200003", "2026-10-07T10:00:00Z"),
-        // 4: recebeu envio e respondeu 20 dias depois → fora da janela.
-        run("5534992200004", "2026-10-06T10:00:00Z"),
-        inbound("5534992200004", "2026-10-26T10:00:00Z"),
-      ].join("\n")
-    );
-  });
-
-  afterAll(async () => {
-    await db?.close();
-  });
-
-  it("[TESTE OBRIGATÓRIO] respondeu = resposta a envio em até 14 dias; quem só escreveu sozinho não entra", async () => {
-    const result = await measureTopProfiles(db, {
-      clientId: T,
-      currentStart: new Date("2026-10-01T03:00:00Z"),
-      currentEnd: new Date(REF),
-      conversionsAvailable: false,
-    });
-    expect(result.top).toHaveLength(1);
-    expect(result.top[0]).toMatchObject({ origin: "meta_ads", leads: 30, replied: 2 });
   });
 });
 

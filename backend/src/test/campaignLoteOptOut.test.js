@@ -18,6 +18,7 @@ import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { buildDispatchLeads } from "../campaign/dispatch.js";
 import { recoverOrphanDispatches } from "../campaign/orphanRecovery.js";
+import { registerOptOut } from "../services/optOut.js";
 
 const SLOW = 120_000;
 const T = "tenant-retomada";
@@ -114,7 +115,8 @@ const SQL_CONTAGEM = "COUNT(*) FILTER (WHERE status = 'invalid_number')";
 async function mundo({ falharContagem = false, falharOptOut = false, nLeads = 7 } = {}) {
   const db = await createPgliteDb(SCHEMA);
   abertos.push(db);
-  for (const f of ["20261008180000_add_recurrence_to_campaigns.sql", "20261012120000_campaign_recurrence_occurrences.sql"]) {
+  // A última é a da fonte única de opt-out: leva a lead_optouts do formato antigo (acima) para o formato novo.
+  for (const f of ["20261008180000_add_recurrence_to_campaigns.sql", "20261012120000_campaign_recurrence_occurrences.sql", "20261112010000_lead_optouts_fonte_unica.sql"]) {
     await db.exec(await readFile(join(MIGRATIONS, f), "utf8"));
   }
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'Spazio')", [T]);
@@ -192,7 +194,7 @@ async function mundo({ falharContagem = false, falharOptOut = false, nLeads = 7 
   const runsDoLote = async () =>
     (await db.query("SELECT phone, status, error_message FROM campaign_dispatch_runs WHERE dispatch_id = $1 ORDER BY created_at, phone", [lote.id])).rows;
   const estado = async () => (await db.query("SELECT status, sent_count FROM campaign_dispatches WHERE id = $1", [lote.id])).rows[0];
-  return { db, camp, leads, lote, rodar, runsDoLote, estado, gravarProgressoDaFila, routes };
+  return { db, camp, leads, lote, rodar, runsDoLote, estado, gravarProgressoDaFila, routes, handlers };
 }
 
 // Faz o envio do lead N disparar um gancho: simula a fila gravando o progresso de OUTRO lead no meio do lote.
@@ -209,7 +211,7 @@ describe("o lote respeita a lista de opt-out (lead_optouts)", () => {
   it("[OBRIGATÓRIO] lead em lead_optouts NÃO recebe do lote; vira 'skipped' e o lote fecha 'done'", async () => {
     const w = await mundo({ nLeads: 3 });
     const [l1, l2, l3] = w.leads;
-    await w.db.query("INSERT INTO lead_optouts (client_id, phone, reason) VALUES ($1, $2, 'Opt-out via WhatsApp: parar')", [T, `+${l2.telefone}`]);
+    await registerOptOut({ query: (s, p) => w.db.query(s, p) }, { clientId: T, phone: `+${l2.telefone}`, source: "palavra", reason: "parar" });
     await w.rodar();
     expect(enviados).toEqual([l1.telefone, l3.telefone]);
     const doLead2 = (await w.runsDoLote()).filter((r) => r.phone === l2.telefone);
@@ -217,6 +219,66 @@ describe("o lote respeita a lista de opt-out (lead_optouts)", () => {
     expect(doLead2[0].status).toBe("skipped");
     expect(doLead2[0].error_message).toMatch(/opt-out/i);
     expect((await w.estado()).status).toBe("done");
+  }, SLOW);
+
+  it("a lista do lote NÃO encolhe por causa do opt-out (janela limit/offset e alvo do lote dependem dela estável)", async () => {
+    const w = await mundo({ nLeads: 3 });
+    await registerOptOut({ query: (s, p) => w.db.query(s, p) }, { clientId: T, phone: w.leads[1].telefone, source: "palavra" });
+    const lista = await buildDispatchLeads({ clientId: T, importId: w.camp.import_id });
+    expect(lista.map((l) => l.telefone).sort()).toEqual(w.leads.map((l) => l.telefone).sort());
+  }, SLOW);
+
+  // A porta dos dois casos reais medidos em 12/11/2026 ("não tenho interesse" e campanha dias depois) é esta: o lote, único
+  // ponto que grava meta.source "campaign_dispatch". Aqui o pedido chega com o lote JÁ montado e rodando, então só a checagem
+  // do envio (dispatchCampaignSequence + checkOptout) pode segurar.
+  it("[OBRIGATÓRIO] pedido de saída que chega COM O LOTE RODANDO é pego no envio: o lead vira 'skipped' e não recebe", async () => {
+    const w = await mundo({ nLeads: 3 });
+    const [l1, l2, l3] = w.leads;
+    aoEnviar(async (numero) => {
+      if (numero === l1.telefone) {
+        await registerOptOut({ query: (s, p) => w.db.query(s, p) }, { clientId: T, phone: l2.telefone, source: "sem_interesse", reason: "não tenho interesse" });
+      }
+    });
+    await w.rodar();
+    expect(enviados).toEqual([l1.telefone, l3.telefone]);
+    const doLead2 = (await w.runsDoLote()).filter((r) => r.phone === l2.telefone);
+    expect(doLead2).toHaveLength(1);
+    expect(doLead2[0].status).toBe("skipped");
+    expect(doLead2[0].error_message).toMatch(/opt-out/i);
+    expect((await w.estado()).status).toBe("done");
+  }, SLOW);
+
+  it("[OBRIGATÓRIO] destinatários do lote avisam quantos NÃO PROCESSADOS serão pulados por opt-out, sem mudar total nem pendentes", async () => {
+    const w = await mundo({ nLeads: 3 });
+    const handler = w.handlers["GET /api/campaigns/dispatches/:dispatchId/recipients"];
+    const ler = async () => {
+      const res = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; }, setHeader() {}, send(b) { this.body = b; return this; } };
+      await handler({ params: { dispatchId: w.lote.id }, query: {}, headers: {}, authAccess: { isAdmin: true } }, res);
+      expect(res.statusCode).toBe(200);
+      return res.body;
+    };
+
+    const antes = await ler();
+    expect(antes).toMatchObject({ total: 3, pendingCount: 3, optedOutPendingCount: 0 });
+
+    await registerOptOut({ query: (s, p) => w.db.query(s, p) }, { clientId: T, phone: w.leads[1].telefone, source: "palavra" });
+    const depois = await ler();
+    expect(depois).toMatchObject({ total: 3, pendingCount: 3, optedOutPendingCount: 1 });
+
+    // depois do envio o lead em opt-out já foi processado ('skipped'): não há mais pendente a avisar
+    await w.rodar();
+    const fim = await ler();
+    expect(fim).toMatchObject({ total: 3, pendingCount: 0, skippedCount: 1, optedOutPendingCount: 0 });
+  }, SLOW);
+
+  it("pedido REVOGADO não bloqueia: o lead volta a receber do lote", async () => {
+    const w = await mundo({ nLeads: 3 });
+    const pool = { query: (s, p) => w.db.query(s, p) };
+    const { revokeOptOut } = await import("../services/optOut.js");
+    await registerOptOut(pool, { clientId: T, phone: w.leads[1].telefone, source: "sem_interesse" });
+    await revokeOptOut(pool, { clientId: T, phone: w.leads[1].telefone, revokedBy: "operador" });
+    await w.rodar();
+    expect(enviados).toEqual(w.leads.map((l) => l.telefone));
   }, SLOW);
 
   it("regressão: sem ninguém em opt-out, o lote envia aos 3 leads", async () => {

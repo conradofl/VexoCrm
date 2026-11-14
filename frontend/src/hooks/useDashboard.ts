@@ -30,7 +30,6 @@ export interface RepliedMetricComparison extends MetricComparison {
 export interface DashboardSummary {
   sent: MetricComparison | null;
   replied: RepliedMetricComparison | null;
-  meetings: MetricComparison | null;
   proposals: MetricComparison | null;
   contracts: MetricComparison | null;
   // Fechamentos (lead_conversions ganhas). Ausente em payload gravado antes de existir.
@@ -75,76 +74,6 @@ export interface FailureReasonItem {
   distinctNumbers?: number;
 }
 
-export type TemperatureKey = "QUENTE" | "MORNO" | "FRIO" | "SEM_CLASSIFICACAO";
-
-export interface LeadClassification {
-  total: number;
-  byTemperature: Record<TemperatureKey, number>;
-  byStage: { stage: string; count: number }[];
-}
-
-export interface FirstReplyOnly {
-  repliedFirst: number;
-  receivedFollowUp: number;
-  stoppedAfterFirst: number;
-  // null = ninguém recebeu o passo seguinte: não há o que medir (não é 0%)
-  stoppedRate: number | null;
-}
-
-export interface LeadProfile {
-  temperature: TemperatureKey;
-  origin: string;
-  leads: number;
-  replied: number;
-  scheduled: number;
-  // null quando o cliente não registra conversões (não é zero): ver TopProfiles.closingsAvailable
-  closed: number | null;
-  replyRate: number;
-  scheduleRate: number;
-  closeRate: number | null;
-}
-
-export interface TopProfiles {
-  minLeads: number;
-  eligibleGroups: number;
-  top: LeadProfile[];
-  // false = o cliente não tem a tabela de conversões: o ranking sai sem fechamentos, ordenado por
-  // agendou → respondeu. Ausente em payload antigo = trata como true.
-  closingsAvailable?: boolean;
-}
-
-export interface BaseHealth {
-  total: number;
-  validPhone: number;
-  invalidPhone: number;
-  neverApproached: number;
-  noReplyOverDays: number;
-  silenceDays: number;
-}
-
-export interface FirstHumanResponse {
-  conversations: number;
-  answered: number;
-  waiting: number;
-  waitingOverThreshold: number;
-  thresholdHours: number;
-  medianMinutes: number | null;
-  p90Minutes: number | null;
-}
-
-// Cada medida pode vir null (bloco indisponível). `analysis` ausente = payload antigo.
-export interface DashboardAnalysis {
-  leadClassification: LeadClassification | null;
-  firstReplyOnly: FirstReplyOnly | null;
-  topProfiles: TopProfiles | null;
-  baseHealth: BaseHealth | null;
-  firstHumanResponse: FirstHumanResponse | null;
-}
-
-// ── Visão geral (Fase 1 do redesenho) ────────────────────────────────────
-// `null` em qualquer bloco = não foi possível calcular agora. Nunca zero.
-
-// "pending_source": a consulta da tela Conversas ainda não está no ar; a tela mostra o lugar reservado.
 export type OverviewWaiting =
   | { status: "pending_source" }
   | { status: "ready"; waiting: number; waitingOverThreshold: number | null; thresholdHours: number };
@@ -190,6 +119,11 @@ export interface OverviewPair {
 export interface OverviewChip {
   instanceId: string;
   name: string;
+  // Estado do chip (cold, warming, warm...) e números do PERÍODO, pelo chip gravado no envio.
+  // Ausentes em payload gravado antes das abas de detalhe.
+  chipState?: string;
+  sent?: number;
+  replies?: number;
   sentToday: number;
   quotaLimit: number;
   quotaPercentage: number;
@@ -207,8 +141,27 @@ export interface OverviewFirstHumanResponse {
   waitingOverThreshold: number;
   answeredWithUnknownBefore: number;
   thresholdHours: number;
+  // Quanto esperou quem foi respondido por gente. Ausente em payload gravado antes da aba Atendimento.
+  waitBuckets?: { upTo10m: number; upTo30m: number; upTo2h: number; over2h: number };
   medianMinutes: number | null;
   p90Minutes: number | null;
+}
+
+// A fila da tela Conversas, como o Dashboard a recebe (mesma conta da tela, sem segunda definição).
+export interface OverviewQueueItem {
+  phone: string;
+  name: string | null;
+  chip: string | null;
+  waitingSince: string | null;
+}
+
+export interface OverviewQueue {
+  states: { waiting: number; withLead: number; withRobot: number; cooled: number };
+  waitingOverThreshold: number;
+  thresholdHours: number;
+  oldest: OverviewQueueItem[];
+  // true = o servidor cortou a lista porque quem pediu não tem acesso à tela Conversas. Os números continuam.
+  listRestricted?: boolean;
 }
 
 export interface DashboardOverview {
@@ -223,14 +176,10 @@ export interface DashboardOverview {
   chips: OverviewChip[] | null;
   chipsQuotaIsToday: boolean;
   firstHumanResponse: OverviewFirstHumanResponse | null;
-}
-
-export interface ActionAlert {
-  id: string;
-  text: string;
-  actionLabel: string;
-  actionUrl: string;
-  severity?: "warning" | "info" | "urgent";
+  // Abas de detalhe. Ausentes em payload gravado antes delas; null = bloco indisponível.
+  campaigns?: MessageRankingItem[] | null;
+  regions?: RegionRankingItem[] | null;
+  queue?: OverviewQueue | null;
 }
 
 export interface DashboardPayload {
@@ -246,7 +195,7 @@ export interface DashboardPayload {
   cacheStatus: "fresh" | "stale" | "error";
   lastError?: string | null;
   hasProposalsAndContracts: boolean;
-  // Blocos que não puderam ser calculados: "summary.sent", "rankings.chips", "alerts"...
+  // Blocos que não puderam ser calculados: "summary.sent", "rankings.chips", "overview.base"...
   // Ausente em payloads gravados antes desse campo existir.
   unavailableBlocks?: string[];
   summary: DashboardSummary;
@@ -260,9 +209,7 @@ export interface DashboardPayload {
     // Envios de disparo sem chip registrado (usaram o chip principal/rodízio)
     chipsUnattributedSent?: number | null;
   };
-  analysis?: DashboardAnalysis;
-  alerts: ActionAlert[];
-  // Ausente em payload gravado antes da Visão geral existir: a tela mostra o painel anterior até o recálculo.
+  // Ausente em payload gravado antes da Visão geral existir: a tela pede para atualizar.
   overview?: DashboardOverview;
 }
 

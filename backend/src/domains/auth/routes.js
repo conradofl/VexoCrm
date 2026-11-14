@@ -319,6 +319,7 @@ export function registerAuthRoutes(app, deps) {
             allowedViews: req.body?.allowedViews ?? selectedProfile?.allowedViews,
             companyName: req.body?.companyName,
             internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
+            allowedModules: req.body?.allowedModules,
           });
 
       if (!canAssignManagedAccess(req.authAccess, managedClaims)) {
@@ -457,6 +458,7 @@ export function registerAuthRoutes(app, deps) {
         allowedViews: req.body?.allowedViews ?? selectedProfile?.allowedViews,
         companyName: req.body?.companyName,
         internalPages: req.body?.internalPages ?? selectedProfile?.internalPages,
+        allowedModules: req.body?.allowedModules,
       });
 
       console.log("[DEBUG] /api/admin/users - Generated Managed Claims:", managedClaims);

@@ -22,6 +22,7 @@ import { registerSuperAdminRoutes } from "./superadmin/routes.js";
 import { registerAcademyRoutes } from "./academy/routes.js";
 import { registerSmartLinksRoutes } from "./smartLinks/routes.js";
 import { registerNotificationsRoutes } from "./notifications/routes.js";
+import { registerGoclawRoutes } from "./goclaw/routes.js";
 
 /**
  * Registers all HTTP routes (extracted from legacy server.js).
@@ -65,6 +66,7 @@ export function registerAllDomainRoutes(app) {
   registerContractRoutes(app);
   registerContractWebhookRoutes(app);
   registerGdClientesRoutes(app);
+  registerGoclawRoutes(app, { requireAuth: requireInternalAccess });
 
   // ─── Base de Conhecimento RAG (upload/indexação, fila própria) ────────────
   registerRagRoutes(app);

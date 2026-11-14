@@ -3,7 +3,8 @@
 // mentira: quem está logado (stubs/AuthContext, trocado por alias no vite.harness.config.ts) e
 // o servidor (o teste responde a /api/** pelo Playwright).
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+// BrowserRouter, como no sistema de verdade: o botão voltar do aparelho passa pelo mesmo roteador.
+import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/index.css";
 import { CrmClientContext, type CrmClientContextValue } from "@/contexts/crm-client-context";
@@ -21,10 +22,10 @@ const crm = {
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
-    <MemoryRouter>
+    <BrowserRouter>
       <CrmClientContext.Provider value={crm}>
         <WhatsAppInbox />
       </CrmClientContext.Provider>
-    </MemoryRouter>
+    </BrowserRouter>
   </QueryClientProvider>
 );

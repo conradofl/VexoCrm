@@ -100,9 +100,6 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
     expect(metrics.summary.replied.ruleDeclaration).toBe(RESPONSE_RATE_DECLARATION);
 
     // 3. Agendaram reunião bate com o banco
-    expect(metrics.summary.meetings.current).toBe(12);
-    expect(metrics.summary.meetings.previous).toBe(8);
-    expect(metrics.summary.meetings.delta).toBe(50);
 
     // 4. Propostas criadas bate com o banco
     expect(metrics.summary.proposals.current).toBe(10);
@@ -167,7 +164,6 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
     // As três métricas fundamentais continuam existindo
     expect(metrics.summary.sent.current).toBe(50);
     expect(metrics.summary.replied.current).toBe(10);
-    expect(metrics.summary.meetings.current).toBe(2);
   });
 
   // ── Regra 4: Os rankings respeitam o volume mínimo (não mostram campanha com 3 envios) ──
@@ -221,80 +217,6 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
       const totalPct = normalized.reduce((acc, it) => acc + it.percentage, 0);
       expect(totalPct).toBe(100);
     }
-  });
-
-  // ── Regra 6: Aviso só aparece quando a condição é verdadeira — desaparece quando falsa ──
-  it("Regra 6: aviso só aparece quando a condição é verdadeira — teste com dado que não a satisfaz e confirme que some", async () => {
-    // Caso 1: Condições satisfeitas -> Alertas aparecem
-    const poolComProblemas = makeMockPool({
-      "has_gd": { rows: [{ has_gd: false }] },
-      "current_sent": { rows: [{ current_sent: 50, previous_sent: 50 }] },
-      "current_replied": { rows: [{ current_replied: 5, previous_replied: 5, current_reached: 50, previous_reached: 50 }] },
-      "current_meetings": { rows: [{ current_meetings: 0, previous_meetings: 0 }] },
-      // Falhas com alto percentual de números inexistentes (>15% e >= 3)
-      "public.campaign_dispatch_runs": (sql) => {
-        if (sql.includes("status IN ('failed', 'invalid_number')")) {
-          return {
-            rows: [
-              { status: "invalid_number", error_message: "400 Bad Request" },
-              { status: "invalid_number", error_message: "Número inexistente" },
-              { status: "invalid_number", error_message: "sem whatsapp" },
-              { status: "failed", error_message: "instância desconectada" },
-            ],
-          };
-        }
-        return { rows: [] };
-      },
-      // Leads que responderam sem responsável atribuído (>0)
-      "public.leads l": { rows: [{ count: 7 }] },
-      // Chips com chip frio perto do limite (45 de 50 = 90% >= 80%)
-      "lead_client_evolution_instances": {
-        rows: [
-          {
-            id: "chip-frio-1",
-            name: "Chip Frio SP",
-            chip_state: "cold",
-            daily_limit_override: null,
-            sent_period: 45,
-            sent_today: 45,
-          },
-        ],
-      },
-    });
-
-    const metricsComAlertas = await calculateDashboardMetrics(poolComProblemas, "tenant-a", "30d");
-    expect(metricsComAlertas.alerts.length).toBeGreaterThanOrEqual(2);
-    expect(metricsComAlertas.alerts.some((a) => a.id === "alert_orphaned_replies")).toBe(true);
-    expect(metricsComAlertas.alerts.some((a) => a.id === "alert_cold_chip_limit")).toBe(true);
-
-    // Caso 2: Dados saudáveis -> Alertas somem completamente
-    const poolSaudavel = makeMockPool({
-      "has_gd": { rows: [{ has_gd: false }] },
-      "current_sent": { rows: [{ current_sent: 200, previous_sent: 200 }] },
-      "current_replied": { rows: [{ current_replied: 50, previous_replied: 50, current_reached: 200, previous_reached: 200 }] },
-      "current_meetings": { rows: [{ current_meetings: 10, previous_meetings: 10 }] },
-      // Sem falhas
-      "public.campaign_dispatch_runs": { rows: [] },
-      // Nenhum lead órfão
-      "public.leads l": { rows: [{ count: 0 }] },
-      // Chip frio usando pouco volume (10 de 50 = 20% < 80%)
-      "lead_client_evolution_instances": {
-        rows: [
-          {
-            id: "chip-frio-1",
-            name: "Chip Frio SP",
-            chip_state: "cold",
-            daily_limit_override: null,
-            sent_period: 10,
-            sent_today: 10,
-          },
-        ],
-      },
-    });
-
-    const metricsSaudavel = await calculateDashboardMetrics(poolSaudavel, "tenant-a", "30d");
-    // NENHUM alerta inventado aparece quando o dado não justifica
-    expect(metricsSaudavel.alerts).toEqual([]);
   });
 
   // ── Regra 7: A tela mostra a hora da última atualização ──

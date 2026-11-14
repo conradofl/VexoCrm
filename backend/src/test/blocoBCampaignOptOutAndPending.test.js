@@ -28,30 +28,6 @@ describe("BLOCO B: Testes Backend de Fila, Opt-out e Prompt", () => {
     });
   });
 
-  describe("ITEM B.4: Exclusão de Leads com Opt-out em buildDispatchLeads", () => {
-    it("exclui leads marcados com opt_out: true ou metadata.opt_out: 'true'", () => {
-      // Simula o filtro do buildDispatchLeads
-      const mockLeads = [
-        { id: "l1", nome: "Lead Ativo", telefone: "5511999990001", opt_out: false },
-        { id: "l2", nome: "Lead Bloqueado Flag", telefone: "5511999990002", opt_out: true },
-        { id: "l3", nome: "Lead Bloqueado Metadata", telefone: "5511999990003", metadata: { opt_out: "true" } },
-        { id: "l4", nome: "Lead Normal", telefone: "5511999990004" },
-      ];
-
-      const filtered = mockLeads.filter((item) => {
-        const isOptOut =
-          item.opt_out === true ||
-          item.metadata?.opt_out === "true" ||
-          item.metadata?.opt_out === true;
-        return !isOptOut;
-      });
-
-      expect(filtered.map((l) => l.id)).toEqual(["l1", "l4"]);
-      expect(filtered.find((l) => l.id === "l2")).toBeUndefined();
-      expect(filtered.find((l) => l.id === "l3")).toBeUndefined();
-    });
-  });
-
   describe("ITEM B.5: Calibração do Prompt da IA em chatInsight", () => {
     it("contém a instrução de não classificar campanhas políticas/comunitárias como conversa pessoal", () => {
       expect(DEFAULT_SUMMARY_PROMPT).toContain("Classificação de Intenção");

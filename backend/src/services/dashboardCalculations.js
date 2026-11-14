@@ -2,7 +2,7 @@
 //
 // Dashboard, Fase 1: Respostas diretas ao dono utilizando exclusivamente dados existentes:
 // campaign_dispatch_runs, lead_messages, leads, evolution_instance_daily_usage,
-// followup_schedules, crm_consultant_schedules, gd_proposals e gd_contracts.
+// followup_schedules, gd_proposals e gd_contracts.
 //
 // Regras obrigatórias:
 // 1. Zero cálculo pesado na requisição da tela (leitura de cache pré-calculado).
@@ -12,20 +12,11 @@
 // 5. Tenant sem propostas/contratos não vê esses dois números (hasProposalsAndContracts = false).
 // 6. Rankings respeitam volume mínimo (mínimo de 30 envios em mensagens).
 // 7. Motivos de falha agrupados somam exatamente 100%.
-// 8. Avisos de ação derivados estritamente dos números (máximo 3, só aparecem quando a condição for verdadeira).
-// 9. Cada bloco falha sozinho. Bloco que não pôde ser calculado vira `null` no payload e entra em
+// 8. Cada bloco falha sozinho. Bloco que não pôde ser calculado vira `null` no payload e entra em
 //    `unavailableBlocks` — indisponível NÃO é zero. Só vira erro quando nenhum bloco foi calculado.
 
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
-import {
-  checkConversionsAvailable,
-  measureLeadClassification,
-  measureFirstReplyOnly,
-  measureClosings,
-  measureTopProfiles,
-  measureBaseHealth,
-  measureFirstHumanResponse,
-} from "./dashboardAnalysis.js";
+import { checkConversionsAvailable, measureClosings } from "./dashboardAnalysis.js";
 import { MESSAGE_EFFECTIVENESS_MIN_SENT, sqlRunPerson, sqlRunRepliedWithinWindow } from "./messageEffectiveness.js";
 import { resolveChipDailyLimit } from "./chipQuota.js";
 import {
@@ -41,6 +32,7 @@ import {
   measureMeetings,
   measureFunnelMeetings,
   measureFirstHumanResponseCoverage,
+  measureQueue,
   measureWaiting,
 } from "./dashboardOverview.js";
 
@@ -311,10 +303,12 @@ function createBlockRunner(clientId, period, unavailable, failures = []) {
 
 // Blocos que entram na regra "só devolve erro quando nada pôde ser calculado".
 // Propostas/contratos ficam de fora: um tenant sem Geração Digital não os calcula nunca.
+// Teto das listas das abas de detalhe (campanhas e regiões).
+const OVERVIEW_LIST_LIMIT = 50;
+
 const CORE_BLOCKS = [
   "summary.sent",
   "summary.replied",
-  "summary.meetings",
   "rankings.messages",
   "rankings.chips",
   "rankings.regions",
@@ -422,53 +416,6 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
     : reachedPrevious > 0
     ? Number(((repliedPrevious / reachedPrevious) * 100).toFixed(1))
     : 0;
-
-  // 3. Agendaram Reunião (followup_schedules + crm_consultant_schedules)
-  const meetingsQuery = `
-    SELECT
-      (
-        COALESCE((
-          SELECT COUNT(*)::int
-          FROM public.followup_schedules fs
-          JOIN public.followup_companies fc ON fc.id = fs.company_id
-          WHERE fc.tenant_id = $1
-            AND fs.created_at >= $2 AND fs.created_at < $3
-        ), 0) +
-        COALESCE((
-          SELECT COUNT(*)::int
-          FROM public.crm_consultant_schedules cs
-          WHERE cs.client_id = $1
-            AND cs.created_at >= $2 AND cs.created_at < $3
-        ), 0)
-      )::int AS current_meetings,
-      (
-        COALESCE((
-          SELECT COUNT(*)::int
-          FROM public.followup_schedules fs
-          JOIN public.followup_companies fc ON fc.id = fs.company_id
-          WHERE fc.tenant_id = $1
-            AND fs.created_at >= $4 AND fs.created_at < $5
-        ), 0) +
-        COALESCE((
-          SELECT COUNT(*)::int
-          FROM public.crm_consultant_schedules cs
-          WHERE cs.client_id = $1
-            AND cs.created_at >= $4 AND cs.created_at < $5
-        ), 0)
-      )::int AS previous_meetings;
-  `;
-  // followup_schedules + crm_consultant_schedules numa consulta só: se uma das duas faltar o bloco
-  // inteiro fica indisponível — somar só uma das tabelas daria um número parcial que parece completo.
-  const meetingsBlock = await runBlock("summary.meetings", async () => {
-    const { rows } = await pool.query(meetingsQuery, [
-      clientId,
-      currentStart.toISOString(),
-      currentEnd.toISOString(),
-      previousStart.toISOString(),
-      previousEnd.toISOString(),
-    ]);
-    return { current: rows[0]?.current_meetings || 0, previous: rows[0]?.previous_meetings || 0 };
-  });
 
   // 4 & 5. Propostas Criadas e Contratos Fechados
   // Verifica se tenant usa esses módulos
@@ -822,25 +769,17 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const finalRankingMotivoFalha = failuresBlock.ok ? failuresBlock.value.ranking : null;
   const failureTotals = failuresBlock.ok ? failuresBlock.value.totals : null;
 
-  // ── Fase 1.5: medidas com dado que já existe (cada uma isolada) ─────────
-  // Fechamentos e Perfil que mais converteu leem lead_conversions. A pergunta "este cliente usa
-  // conversões?" é feita UMA vez, aqui, e os dois blocos recebem a resposta: tabela inexistente = não
-  // usa (Fechamentos não se aplica — null fora de unavailableBlocks — e o Perfil sai sem a coluna de
-  // fechamentos). Coluna faltando, queda de conexão e qualquer outro erro seguem sendo indisponível.
+  // Fechamentos lê lead_conversions. Tabela inexistente = o cliente não usa o recurso: o bloco não se aplica
+  // (null fora de unavailableBlocks). Coluna faltando, queda de conexão e qualquer outro erro seguem indisponível.
   const conversionsAvailable = await checkConversionsAvailable(pool);
   if (!conversionsAvailable) {
     console.warn(
       `[dashboard] tabela lead_conversions inexistente (client=${clientId}, period=${normalizedPeriod}): ` +
-        `bloco "summary.closings" não se aplica e "analysis.topProfiles" segue sem fechamentos`
+        `bloco "summary.closings" não se aplica`
     );
   }
   const analysisCtx = { clientId, currentStart, currentEnd, previousStart, previousEnd, asOf, now: refDate, conversionsAvailable };
   const closingsBlock = await runBlock("summary.closings", () => measureClosings(pool, analysisCtx));
-  const leadClassificationBlock = await runBlock("analysis.leadClassification", () => measureLeadClassification(pool, analysisCtx));
-  const firstReplyOnlyBlock = await runBlock("analysis.firstReplyOnly", () => measureFirstReplyOnly(pool, analysisCtx));
-  const topProfilesBlock = await runBlock("analysis.topProfiles", () => measureTopProfiles(pool, analysisCtx));
-  const baseHealthBlock = await runBlock("analysis.baseHealth", () => measureBaseHealth(pool, analysisCtx));
-  const firstHumanResponseBlock = await runBlock("analysis.firstHumanResponse", () => measureFirstHumanResponse(pool, analysisCtx));
 
   // ── Visão geral (Fase 1 do redesenho): consultas novas, cada uma isolada ─
   const overviewBaseBlock = await runBlock("overview.base", () => measureBaseSlices(pool, analysisCtx));
@@ -850,109 +789,10 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
   const overviewWaitingBlock = await runBlock("overview.waiting", () =>
     measureWaiting(pool, analysisCtx, options.loadWaitingSource ? { loadSource: options.loadWaitingSource } : undefined)
   );
+  const overviewQueueBlock = await runBlock("overview.queue", () => measureQueue(pool, analysisCtx, options.queueOptions));
 
-  // ── Bloco 3: O que fazer agora (No máximo 3 frases com ação) ────────────
-  // Cada aviso só é avaliado quando os números de que depende existem. Número indisponível
-  // não dispara nem "apaga" aviso por engano: o aviso fica não avaliado e o bloco `alerts`
-  // entra em unavailableBlocks, para a tela dizer que esta lista pode estar incompleta.
-  const actionAlerts = [];
-  let alertsNotEvaluated = false;
-
-  // Alerta 1: Chip com percentual de inválidos acima do normal
-  if (sentBlock.ok && failuresBlock.ok) {
-    const totalFailedCount = failedRows.length;
-    const invalidCount = (countsByCategory["Número inexistente"] || 0) + (countsByCategory["Sem WhatsApp"] || 0);
-    const totalRunsPeriod = sentCurrent + totalFailedCount;
-    const invalidPercentage = totalRunsPeriod > 0 ? (invalidCount / totalRunsPeriod) * 100 : 0;
-
-    if (invalidCount >= 3 && invalidPercentage > 15) {
-      actionAlerts.push({
-        id: "alert_invalid_numbers",
-        text: "Chip com percentual de inválidos acima do normal — limpe a lista antes do próximo disparo.",
-        actionLabel: "Limpar lista",
-        actionUrl: "/crm/campanhas",
-        severity: "warning",
-      });
-    }
-  } else {
-    alertsNotEvaluated = true;
-  }
-
-  // Alerta 2: Campanha com taxa de resposta muito abaixo das outras
-  if (messageRankingBlock.ok) {
-    if (messageEffectivenessRows.length >= 2) {
-      const avgReplyRate =
-        messageEffectivenessRows.reduce((s, r) => s + r.reply_rate, 0) / messageEffectivenessRows.length;
-      const worstCampaign = messageEffectivenessRows[messageEffectivenessRows.length - 1];
-      if (worstCampaign && worstCampaign.reply_rate < avgReplyRate * 0.5 && worstCampaign.reply_rate <= 10) {
-        actionAlerts.push({
-          id: "alert_underperforming_campaign",
-          text: `Campanha com taxa de resposta muito abaixo das outras — a mensagem não está funcionando.`,
-          actionLabel: "Revisar mensagens",
-          actionUrl: "/crm/campanhas",
-          severity: "warning",
-        });
-      }
-    }
-  } else {
-    alertsNotEvaluated = true;
-  }
-
-  // Alerta 3: Leads que responderam e ainda não têm responsável
-  const orphanedBlock = await runBlock("alerts", async () => {
-    const orphanedRepliesQuery = `
-      SELECT COUNT(*)::int AS count
-      FROM public.leads l
-      WHERE l.client_id = $1
-        AND l.assigned_to IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM public.lead_messages lm
-          WHERE lm.client_id = l.client_id
-            AND (${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("COALESCE(l.telefone, l.phone)")})
-            AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
-            AND ${lmTimestamp} >= $2 AND ${lmTimestamp} < $3
-        );
-    `;
-    const { rows } = await pool.query(orphanedRepliesQuery, [clientId, currentStart.toISOString(), currentEnd.toISOString()]);
-    return rows[0]?.count || 0;
-  });
-  if (orphanedBlock.ok && orphanedBlock.value > 0) {
-    actionAlerts.push({
-      id: "alert_orphaned_replies",
-      text: "Leads que responderam e ainda não têm responsável — tem gente esperando.",
-      actionLabel: "Distribuir leads",
-      actionUrl: "/crm/banco-de-dados",
-      severity: "urgent",
-    });
-  }
-
-  // Alerta 4: Chip frio com volume perto do teto. É sobre a cota de HOJE: só se aplica quando o
-  // período escolhido inclui hoje. Fora disso não é falha nem "não avaliado" — simplesmente não vale.
+  // A cota de chip é do DIA: só vale quando o período escolhido inclui hoje.
   const periodIncludesToday = todayKey >= periodInfo.current.from && todayKey <= periodInfo.current.to;
-  if (!periodIncludesToday) {
-    // não se aplica a este período
-  } else if (chipsBlock.ok) {
-    const nearLimitColdChip = chipList.find(
-      (chip) => chip.chipState === "cold" && chip.quotaPercentage >= 80
-    );
-    if (nearLimitColdChip && actionAlerts.length < 3) {
-      actionAlerts.push({
-        id: "alert_cold_chip_limit",
-        text: "Chip frio com volume perto do teto — risco de bloqueio.",
-        actionLabel: "Ver chips",
-        actionUrl: "/crm/chips-whatsapp",
-        severity: "urgent",
-      });
-    }
-  } else {
-    alertsNotEvaluated = true;
-  }
-
-  if (alertsNotEvaluated && !unavailableBlocks.includes("alerts")) unavailableBlocks.push("alerts");
-
-  // Limita estritamente a 3 alertas
-  const selectedAlerts = actionAlerts.slice(0, 3);
 
   // ── Só vira erro quando nenhum bloco pôde ser calculado ─────────────────
   const coreCalculated = CORE_BLOCKS.filter((name) => !unavailableBlocks.includes(name)).length;
@@ -996,7 +836,6 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
             ruleDeclaration: RESPONSE_RATE_DECLARATION,
           }
         : null,
-      meetings: withDelta(meetingsBlock),
       closings: withDelta(closingsBlock),
       proposals: proposalsData,
       contracts: contractsData,
@@ -1011,14 +850,6 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       // Envios de disparo sem chip registrado (usaram o chip principal/rodízio): não atribuíveis a um chip.
       chipsUnattributedSent: chipsBlock.ok ? chipsBlock.value.unattributedSent : null,
     },
-    analysis: {
-      leadClassification: leadClassificationBlock.value,
-      firstReplyOnly: firstReplyOnlyBlock.value,
-      topProfiles: topProfilesBlock.value,
-      baseHealth: baseHealthBlock.value,
-      firstHumanResponse: firstHumanResponseBlock.value,
-    },
-    alerts: selectedAlerts,
     // Visão geral: bloco que falhou sai `null` (e o nome vai em unavailableBlocks). Nunca zero.
     overview: {
       // "pending_source" enquanto a consulta da tela Conversas não estiver no main (ver dashboardOverview.js).
@@ -1046,6 +877,10 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
             .map((chip) => ({
               instanceId: chip.instanceId,
               name: chip.name,
+              chipState: chip.chipState,
+              // Envios e pessoas que responderam NO PERÍODO, pelo chip gravado no envio (aba Chips).
+              sent: chip.sent,
+              replies: chip.replies,
               sentToday: chip.sentToday,
               quotaLimit: chip.quotaLimit,
               quotaPercentage: chip.quotaPercentage,
@@ -1054,6 +889,12 @@ export async function calculateDashboardMetrics(pool, clientId, periodKey = "30d
       // A cota é do DIA: só faz sentido quando o período inclui hoje.
       chipsQuotaIsToday: periodIncludesToday,
       firstHumanResponse: overviewResponseTimeBlock.value,
+      // Abas de detalhe: as listas INTEIRAS que os rankings acima cortam em 3 (com teto, para o payload não crescer
+      // sem limite). Mesmas consultas, mesmos números; bloco que falhou sai null.
+      campaigns: messageEffectivenessRows ? messageEffectivenessRows.slice(0, OVERVIEW_LIST_LIMIT) : null,
+      regions: regionBlock.ok ? (regionBlock.value || []).slice(0, OVERVIEW_LIST_LIMIT) : null,
+      // Aba Atendimento: os quatro estados da fila de Conversas e quem espera há mais tempo (mesma fila, mesma conta).
+      queue: overviewQueueBlock.value,
     },
   };
 }

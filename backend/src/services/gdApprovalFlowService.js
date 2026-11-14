@@ -75,6 +75,8 @@ export async function enviarDocumentosParaAprovacaoInterna({
   clienteId,
   pool,
   instanceName = null,
+  webhookToken = null,
+  baseUrl = null,
   evolutionSender = sendTextMessageViaEvolution,
   actor = { id: "sistema", tipo: "sistema" },
 }) {
@@ -99,14 +101,22 @@ export async function enviarDocumentosParaAprovacaoInterna({
   }
 
   const docs = cliente.briefing_documentos?.documentos || cliente.briefing_documentos || {};
-  const linkB = docs.briefing?.pdf?.fileLink || docs.briefing?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkBDocx = docs.briefing?.docx?.fileLink || docs.briefing?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkI = docs.identidade?.pdf?.fileLink || docs.identidade?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkIDocx = docs.identidade?.docx?.fileLink || docs.identidade?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkR = docs.roteiros?.pdf?.fileLink || docs.roteiros?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkRDocx = docs.roteiros?.docx?.fileLink || docs.roteiros?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkP = docs.planejamento?.pdf?.fileLink || docs.planejamento?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkPDocx = docs.planejamento?.docx?.fileLink || docs.planejamento?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
+
+  const resolveDocUrl = (url, tipo, formato) => {
+    if (!url || url.includes("gd_safe_") || url.includes("mock_") || url.includes("gd_contingencia_")) {
+      return `https://crm.vexoia.com/api/gd/clientes/${clienteId}/briefing/documentos/${tipo}/download?formato=${formato}`;
+    }
+    return url;
+  };
+
+  const linkB = resolveDocUrl(docs.briefing?.pdf?.fileLink || docs.briefing?.pdfUrl, "briefing", "pdf");
+  const linkBDocx = resolveDocUrl(docs.briefing?.docx?.fileLink || docs.briefing?.docxUrl, "briefing", "docx");
+  const linkI = resolveDocUrl(docs.identidade?.pdf?.fileLink || docs.identidade?.pdfUrl, "identidade", "pdf");
+  const linkIDocx = resolveDocUrl(docs.identidade?.docx?.fileLink || docs.identidade?.docxUrl, "identidade", "docx");
+  const linkR = resolveDocUrl(docs.roteiros?.pdf?.fileLink || docs.roteiros?.pdfUrl, "roteiros", "pdf");
+  const linkRDocx = resolveDocUrl(docs.roteiros?.docx?.fileLink || docs.roteiros?.docxUrl, "roteiros", "docx");
+  const linkP = resolveDocUrl(docs.planejamento?.pdf?.fileLink || docs.planejamento?.pdfUrl, "planejamento", "pdf");
+  const linkPDocx = resolveDocUrl(docs.planejamento?.docx?.fileLink || docs.planejamento?.docxUrl, "planejamento", "docx");
 
   const instance =
     instanceName ||
@@ -135,11 +145,21 @@ export async function enviarDocumentosParaAprovacaoInterna({
     `👉 Se houver ajustes: responda *Com ressalvas: [seus apontamentos]*\n` +
     `👉 Após concluir edições: responda *Ressalva concluída*`;
 
-  await evolutionSender({
-    instanceName: instance,
-    number: jidInterno,
-    text: mensagemCaio,
-  });
+  let whatsappEnviado = false;
+  let whatsappErro = null;
+  try {
+    await evolutionSender({
+      instanceName: instance,
+      number: jidInterno,
+      text: mensagemCaio,
+      webhookToken,
+      baseUrl,
+    });
+    whatsappEnviado = true;
+  } catch (err) {
+    console.warn(`[gdApprovalFlow] Aviso ao disparar WhatsApp de aprovação interna (${jidInterno}):`, err.message);
+    whatsappErro = err.message;
+  }
 
   await pool.query(
     `UPDATE public.gd_clientes
@@ -162,6 +182,8 @@ export async function enviarDocumentosParaAprovacaoInterna({
           JSON.stringify({
             grupo_interno_jid: jidInterno,
             versao: cliente.briefing_documentos?.versao || null,
+            whatsapp_enviado: whatsappEnviado,
+            whatsapp_erro: whatsappErro,
           }),
         ]
       );
@@ -175,6 +197,8 @@ export async function enviarDocumentosParaAprovacaoInterna({
     clienteId,
     grupo_interno_jid: jidInterno,
     mensagem: mensagemCaio,
+    whatsapp_enviado: whatsappEnviado,
+    whatsapp_erro: whatsappErro,
   };
 }
 
@@ -185,6 +209,8 @@ export async function enviarDocumentosParaAprovacaoCliente({
   clienteId,
   pool,
   instanceName = null,
+  webhookToken = null,
+  baseUrl = null,
   evolutionSender = sendTextMessageViaEvolution,
   actor = { id: "sistema", tipo: "sistema" },
 }) {
@@ -209,10 +235,18 @@ export async function enviarDocumentosParaAprovacaoCliente({
   }
 
   const docs = cliente.briefing_documentos?.documentos || cliente.briefing_documentos || {};
-  const linkB = docs.briefing?.pdf?.fileLink || docs.briefing?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkBDocx = docs.briefing?.docx?.fileLink || docs.briefing?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkP = docs.planejamento?.pdf?.fileLink || docs.planejamento?.pdfUrl || cliente.drive_url || "Disponível no Google Drive";
-  const linkPDocx = docs.planejamento?.docx?.fileLink || docs.planejamento?.docxUrl || cliente.drive_url || "Disponível no Google Drive";
+
+  const resolveDocUrl = (url, tipo, formato) => {
+    if (!url || url.includes("gd_safe_") || url.includes("mock_") || url.includes("gd_contingencia_")) {
+      return `https://crm.vexoia.com/api/gd/clientes/${clienteId}/briefing/documentos/${tipo}/download?formato=${formato}`;
+    }
+    return url;
+  };
+
+  const linkB = resolveDocUrl(docs.briefing?.pdf?.fileLink || docs.briefing?.pdfUrl, "briefing", "pdf");
+  const linkBDocx = resolveDocUrl(docs.briefing?.docx?.fileLink || docs.briefing?.docxUrl, "briefing", "docx");
+  const linkP = resolveDocUrl(docs.planejamento?.pdf?.fileLink || docs.planejamento?.pdfUrl, "planejamento", "pdf");
+  const linkPDocx = resolveDocUrl(docs.planejamento?.docx?.fileLink || docs.planejamento?.docxUrl, "planejamento", "docx");
 
   const instance =
     instanceName ||
@@ -238,11 +272,21 @@ export async function enviarDocumentosParaAprovacaoCliente({
     `Por favor, acesse os materiais acima para conferir o plano. Estando de acordo, responda aqui neste grupo com *Aprovado* para darmos início imediato à produção! 🚀\n` +
     `Se tiver qualquer dúvida ou consideração, basta nos enviar aqui.`;
 
-  await evolutionSender({
-    instanceName: instance,
-    number: jidCliente,
-    text: mensagemCliente,
-  });
+  let whatsappEnviado = false;
+  let whatsappErro = null;
+  try {
+    await evolutionSender({
+      instanceName: instance,
+      number: jidCliente,
+      text: mensagemCliente,
+      webhookToken,
+      baseUrl,
+    });
+    whatsappEnviado = true;
+  } catch (err) {
+    console.warn(`[gdApprovalFlow] Aviso ao disparar WhatsApp de aprovação do cliente (${jidCliente}):`, err.message);
+    whatsappErro = err.message;
+  }
 
   await pool.query(
     `UPDATE public.gd_clientes
@@ -263,6 +307,8 @@ export async function enviarDocumentosParaAprovacaoCliente({
         JSON.stringify({
           grupo_cliente_jid: jidCliente,
           versao: cliente.briefing_documentos?.versao || null,
+          whatsapp_enviado: whatsappEnviado,
+          whatsapp_erro: whatsappErro,
         }),
       ]
     );
@@ -275,6 +321,8 @@ export async function enviarDocumentosParaAprovacaoCliente({
     clienteId,
     grupo_cliente_jid: jidCliente,
     mensagem: mensagemCliente,
+    whatsapp_enviado: whatsappEnviado,
+    whatsapp_erro: whatsappErro,
   };
 }
 

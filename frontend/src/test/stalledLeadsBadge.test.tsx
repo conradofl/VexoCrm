@@ -9,7 +9,6 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { StalledLeadBadge } from "@/components/leads/StalledLeadBadge";
-import { StalledLeadsAlertCard } from "@/components/dashboard/StalledLeadsAlertCard";
 import {
   computeLeadDaysIdle,
   isLeadStalled,
@@ -35,22 +34,6 @@ vi.mock("@/contexts/AuthContext", () => ({
   }),
 }));
 
-// Mock do hook useStalledLeads para o Card
-let mockStalledData: any = { count: 8, stalled_count: 8, never_approached_count: 5, minDays: 7, leads: [] };
-let mockIsLoading = false;
-let lastPassedMinDays: number | null | undefined = undefined;
-
-vi.mock("@/hooks/useStalledLeads", () => ({
-  useStalledLeads: (_clientId: string, minDays: number | null = null) => {
-    lastPassedMinDays = minDays;
-    return {
-      data: mockStalledData,
-      isLoading: mockIsLoading,
-      error: null,
-    };
-  },
-}));
-
 function renderWithProviders(ui: React.ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -65,9 +48,6 @@ function renderWithProviders(ui: React.ReactElement) {
 describe("Pilar 1: StalledLeadBadge & Funções Puras", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    lastPassedMinDays = undefined;
-    mockIsLoading = false;
-    mockStalledData = { count: 8, stalled_count: 8, never_approached_count: 5, minDays: 7, leads: [] };
   });
 
   describe("1. Funções puras de cálculo de inatividade (stalledLeads.ts)", () => {
@@ -180,66 +160,4 @@ describe("Pilar 1: StalledLeadBadge & Funções Puras", () => {
     });
   });
 
-  describe("3. Renderização do Card de Alerta no Dashboard (StalledLeadsAlertCard)", () => {
-    it("chama useStalledLeads com null para respeitar o limiar dinâmico do tenant e exibe limiar retornado pela API", () => {
-      mockStalledData = { count: 12, stalled_count: 12, never_approached_count: 77, minDays: 7, leads: [] };
-
-      // Chamada padrão do Dashboard (sem passar minDays fixo):
-      renderWithProviders(<StalledLeadsAlertCard clientId="tenant-teste" />);
-
-      // Garante que o hook foi chamado com null (fazendo o backend aplicar o reactivation_stalled_days do tenant)
-      expect(lastPassedMinDays).toBeNull();
-
-      const card = screen.getByTestId("stalled-leads-alert-card");
-      expect(card).toBeInTheDocument();
-
-      // Indicador visual com o limiar real do tenant (7 dias): ⚠️ 12 Leads Parados (> 7 dias)
-      expect(screen.getByText(/⚠️ 12 Leads Parados \(> 7 dias\)/)).toBeInTheDocument();
-
-      // Subtítulo operacional dinâmico (não exibe 'Nenhum lead esquecido' quando há alerta ativo!)
-      expect(screen.getByText(/Contatos em conversa sem resposta há mais de 7 dias/)).toBeInTheDocument();
-
-      // Exibe também a contagem separada de 'Nunca Abordados'
-      expect(screen.getByText(/77 nunca abordados/)).toBeInTheDocument();
-
-      // Botão de navegação para a tela de Leads Parados
-      const button = screen.getByTestId("view-stalled-leads-button");
-      expect(button).toBeInTheDocument();
-      fireEvent.click(button);
-      expect(mockNavigate).toHaveBeenCalledWith("/crm/leads-parados");
-    });
-
-    it("renderiza skeleton limpo sem dados fabricados enquanto está carregando", () => {
-      mockIsLoading = true;
-      mockStalledData = null;
-
-      renderWithProviders(<StalledLeadsAlertCard clientId="tenant-teste" />);
-
-      expect(screen.getByTestId("stalled-leads-alert-card-skeleton")).toBeInTheDocument();
-      expect(screen.queryByText(/Leads Parados/)).not.toBeInTheDocument();
-    });
-
-    it("renderiza estado positivo e 'Nenhum lead esquecido · SLA em dia' apenas quando count === 0", () => {
-      mockStalledData = { count: 0, stalled_count: 0, never_approached_count: 0, minDays: 7, leads: [] };
-
-      renderWithProviders(<StalledLeadsAlertCard clientId="tenant-teste" />);
-
-      expect(screen.getAllByText(/SLA 100% em dia/).length).toBeGreaterThanOrEqual(1);
-      expect(screen.getByText(/Nenhum lead esquecido · SLA em dia/)).toBeInTheDocument();
-      expect(screen.queryByText(/⚠️/)).not.toBeInTheDocument();
-    });
-
-    it("PROVA POR MUTAÇÃO: Garante que forçar minDays = 3 fixo quebra a paridade com o tenant (7 dias)", () => {
-      // Simula um tenant com regra de 7 dias
-      mockStalledData = { count: 5, stalled_count: 5, never_approached_count: 0, minDays: 7, leads: [] };
-
-      // Se um desenvolvedor passar minDays={3} forçado no Dashboard:
-      renderWithProviders(<StalledLeadsAlertCard clientId="tenant-teste" minDays={3} />);
-
-      // lastPassedMinDays seria 3 em vez de null
-      expect(lastPassedMinDays).toBe(3);
-      // Se forçado a 3, não respeitaria a chamada dinâmica do tenant
-      expect(lastPassedMinDays).not.toBeNull();
-    });
-  });
 });

@@ -9,6 +9,11 @@ import { PGlite } from "@electric-sql/pglite";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 import { countTenantMutedToday, recordAgentMute, resolveAgentPauseExpiryDays } from "../services/agentMuteGuard.js";
 import { _resetInboundGuard } from "../services/inboundGuard.js";
+import {
+  _resetSystemSentMessagesForTesting,
+  _setDeviceReplyRecheckMsForTesting,
+  registerSystemSentMessageId,
+} from "../services/systemSentMessages.js";
 
 const TENANT = "container-led";
 const LEAD = "5534999990001";
@@ -103,7 +108,7 @@ const AGENTE = {
   inbound_role: "atendimento",
 };
 
-function setup({ pauseOnDeviceReply = false, expiryDays = 3, settingsFail = false } = {}) {
+function setup({ pauseOnDeviceReply = false, expiryDays = 3, settingsFail = false, findCampaignReplyMatches = null, continueCampaignLeadFromReply = null } = {}) {
   const routes = {};
   const register = (method) => vi.fn((path, ...handlers) => {
     routes[`${method} ${path}`] = handlers[handlers.length - 1];
@@ -136,10 +141,10 @@ function setup({ pauseOnDeviceReply = false, expiryDays = 3, settingsFail = fals
     leadsTableName: () => "leads",
     maskPhoneForLog: (p) => p,
     MAX_LEADS_OUTLIER_BATCH: 100,
-    continueCampaignLeadFromReply: vi.fn(),
-    findCampaignReplyMatches: async () => ({
+    continueCampaignLeadFromReply: continueCampaignLeadFromReply || vi.fn(),
+    findCampaignReplyMatches: findCampaignReplyMatches || (async () => ({
       matches: [], waitForReplyMatches: [], processingWaitForReplyMatches: [], activePeriodCampaign: null,
-    }),
+    })),
     normalizeString: (s) => (s ? String(s).trim() : ""),
     normalizeTenantKey: (k) => k,
     pgDatabasePool: pool,
@@ -172,7 +177,7 @@ function setup({ pauseOnDeviceReply = false, expiryDays = 3, settingsFail = fals
 }
 
 let seq = 0;
-function mensagem({ fromMe = false, text = "Oi, quero um orçamento" } = {}) {
+function mensagem({ fromMe = false, text = "Oi, quero um orçamento", id = null } = {}) {
   seq += 1;
   return {
     event: "messages.upsert",
@@ -180,7 +185,7 @@ function mensagem({ fromMe = false, text = "Oi, quero um orçamento" } = {}) {
     phone: LEAD,
     instance: "Chip CL",
     data: {
-      key: { remoteJid: `${LEAD}@s.whatsapp.net`, fromMe, id: `WA_TAKEOVER_${seq}` },
+      key: { remoteJid: `${LEAD}@s.whatsapp.net`, fromMe, id: id || `WA_TAKEOVER_${seq}` },
       message: { conversation: text },
       messageTimestamp: Math.floor(Date.now() / 1000),
     },
@@ -627,5 +632,97 @@ describe("Resposta pela tela empurra o prazo e não reescreve agent_muted_at", (
     const estado = await estadoCompleto();
     expect(estado.agent_muted_source).toBe("manual");
     expect(estado.agent_mute_last_human_at).toBeNull();
+  });
+});
+
+// Resposta digitada no APARELHO (WhatsApp do celular ou Desktop) pausa o agente igual à resposta pela tela.
+// Fato (Container LED, 13/11/2026): pausa ligada, atendente respondeu pelo celular às 09:40, o lead escreveu às 09:40 e o
+// agente respondeu às 09:41. Só a resposta pela tela pausava. Eco de envio do próprio sistema não pausa: decide pelo id.
+describe("Resposta pelo aparelho pausa o agente (D3)", () => {
+  beforeEach(() => {
+    _resetSystemSentMessagesForTesting();
+    _setDeviceReplyRecheckMsForTesting(30);
+  });
+  afterEach(() => {
+    _setDeviceReplyRecheckMsForTesting(4000);
+  });
+
+  it("[OBRIGATÓRIO] fromMe com id que o sistema não enviou: conversa pausada e a mensagem seguinte do lead não recebe IA nem recontato", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    await t.webhook(mensagem({ fromMe: true, text: "Bom dia, aqui é a Ana, já te atendo", id: "3EB0DIGITADO_NO_CELULAR" }));
+
+    const estado = await estadoDaConversa();
+    expect(estado.agent_muted_source).toBe("manual");
+    expect(estado.agent_muted_reason).toBe("Atendimento humano");
+    expect(await t.webhook(mensagem({ text: "Oi Ana, obrigado" }))).toMatchObject({ ignored: "agente_pausado_atendimento_humano" });
+  });
+
+  it("[OBRIGATÓRIO] eco de envio do próprio robô (id registrado no envio) NÃO pausa, mesmo com prefixo 3EB0", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    registerSystemSentMessageId("3EB0ENVIADO_PELO_ROBO");
+    await t.webhook(mensagem({ fromMe: true, text: "Posso te mandar a oferta?", id: "3EB0ENVIADO_PELO_ROBO" }));
+
+    expect((await estadoDaConversa())?.agent_muted_at ?? null).toBeNull();
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+  });
+
+  it("eco de envio já gravado em lead_messages como saída do robô NÃO pausa (processo reiniciado, memória vazia)", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    await db.query(
+      "INSERT INTO public.lead_messages (client_id, phone, sender_type, direction, message_text, wa_message_id) VALUES ($1, $2, 'bot', 'outbound', 'Oi', 'WA_GRAVADO_PELO_ROBO')",
+      [TENANT, LEAD]
+    );
+    await t.webhook(mensagem({ fromMe: true, text: "Oi", id: "WA_GRAVADO_PELO_ROBO" }));
+    expect((await estadoDaConversa())?.agent_muted_at ?? null).toBeNull();
+  });
+
+  it("[OBRIGATÓRIO] eco que chega ANTES de o envio registrar o id NÃO pausa: a segunda conferência acha o id", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    _setDeviceReplyRecheckMsForTesting(150);
+    const eco = t.webhook(mensagem({ fromMe: true, text: "Segue o link", id: "WA_ECO_ADIANTADO" }));
+    setTimeout(() => registerSystemSentMessageId("WA_ECO_ADIANTADO"), 40);
+    await eco;
+    expect((await estadoDaConversa())?.agent_muted_at ?? null).toBeNull();
+  });
+
+  it("[OBRIGATÓRIO] pausa desligada: resposta pelo aparelho não muda nada", async () => {
+    const t = setup({ pauseOnDeviceReply: false });
+    await t.webhook(mensagem({ fromMe: true, text: "Oi, aqui é a Ana", id: "WA_DIGITADO_SEM_D3" }));
+    expect((await estadoDaConversa())?.agent_muted_at ?? null).toBeNull();
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+  });
+
+  it("fromMe sem id não pausa (não dá para saber quem mandou)", async () => {
+    const t = setup({ pauseOnDeviceReply: true });
+    const body = mensagem({ fromMe: true, text: "Oi" });
+    delete body.data.key.id;
+    await t.webhook(body);
+    expect((await estadoDaConversa())?.agent_muted_at ?? null).toBeNull();
+  });
+
+  it("[OBRIGATÓRIO] conversa pausada por gente não recebe o próximo passo da campanha por resposta", async () => {
+    const passos = [
+      { id: "s1", type: "text", text: "Oi", order: 1, enabled: true },
+      { id: "s2", type: "text", text: "Segue a oferta", order: 2, enabled: true, triggerMode: "after_reply" },
+    ];
+    const campanha = {
+      id: "camp-1", name: "Black Friday", status: "active", waitForReply: true, hasPendingProgress: true,
+      analyticsMeta: { sequence: passos, dispatchOptions: { waitForReply: true } },
+      leadImportItem: { id: "item-1", progress: { status: "aguardando_usuario", waitForReply: true, nextStepIndex: 1 } },
+    };
+    const contexto = async () => ({ matches: [campanha], waitForReplyMatches: [campanha], processingWaitForReplyMatches: [campanha], activePeriodCampaign: null });
+
+    const continuarPausado = vi.fn(async () => ({ continued: true }));
+    const pausado = setup({ pauseOnDeviceReply: true, findCampaignReplyMatches: contexto, continueCampaignLeadFromReply: continuarPausado });
+    await pausado.webhook(mensagem({ fromMe: true, text: "Oi, aqui é a Ana", id: "WA_ANA_NO_CELULAR" }));
+    expect(await pausado.webhook(mensagem({ text: "Sim" }))).toMatchObject({ status: "skipped_human_pause" });
+    expect(continuarPausado).not.toHaveBeenCalled();
+
+    // regressão: sem pausa, o passo da campanha segue
+    await db.exec("DELETE FROM public.whatsapp_chat_states;");
+    const continuar = vi.fn(async () => ({ continued: true }));
+    const livre = setup({ pauseOnDeviceReply: true, findCampaignReplyMatches: contexto, continueCampaignLeadFromReply: continuar });
+    expect(await livre.webhook(mensagem({ text: "Sim" }))).toMatchObject({ status: "campaign_step_dispatched" });
+    await vi.waitFor(() => expect(continuar).toHaveBeenCalledTimes(1));
   });
 });

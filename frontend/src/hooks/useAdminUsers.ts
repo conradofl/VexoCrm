@@ -22,6 +22,7 @@ export interface AdminUserAccess {
   clientIds: string[];
   allowedViews: AccessView[];
   internalPages: InternalPage[];
+  allowedModules?: string[] | null;
   permissions: AccessPermission[];
   companyName: string | null;
   isAdmin: boolean;

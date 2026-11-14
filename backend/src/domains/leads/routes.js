@@ -72,6 +72,7 @@ import {
   buildImportPreview as defaultBuildImportPreview,
 } from "../../services/leadImport.js";
 import { isManagerOrAdmin } from "../../access/claims.js";
+import { registerOptOut, revokeOptOut, countOptedOutPhones, OPTOUT_SOURCE_MANUAL } from "../../services/optOut.js";
 import {
   IMPORT_BATCH_SIZE,
   ImportError,
@@ -1483,7 +1484,13 @@ export function registerLeadsRoutes(app, deps) {
         sendError(res, 400, "IMPORT_SCOPE_UNAVAILABLE", result.reason);
         return;
       }
-      res.json(result);
+      // Aviso, não filtro: quantos deste público pediram para sair e serão pulados no envio. O total e a lista não mudam
+      // (a lista estável é o que mantém a janela e o fechamento dos lotes). null = não deu para saber.
+      const optedOut = await countOptedOutPhones(pgDatabasePool, {
+        clientId,
+        phones: (result.items || []).map((item) => item.telefone || item.phone),
+      });
+      res.json({ ...result, optedOut });
     } catch (error) {
       console.error("[leads-audience] falhou:", error?.message || error);
       sendError(res, 500, "LEADS_AUDIENCE_FAILED", "Falha ao montar o público da campanha.", { cause: errorCause(error) });
@@ -3049,12 +3056,58 @@ export function registerLeadsRoutes(app, deps) {
   });
 
   // Atualizar lead
+  // Empresa do lead, lida do banco, conferida contra o acesso de quem chama. PATCH e DELETE em /api/leads/:id recebem só o id:
+  // até 11/11/2026 filtravam só por ele, e um usuário de uma empresa alterava e apagava lead de outra. Responde 404 (lead não
+  // existe ou id malformado) ou 403 (pelo resolveAuthorizedClientId) e devolve null; quem chama só retorna.
+  async function authorizeLeadById(req, res, id) {
+    let leadClientId = null;
+    try {
+      if (pgDatabasePool) {
+        const { rows } = await pgDatabasePool.query(`SELECT client_id FROM public.leads WHERE id = $1 LIMIT 1`, [id]);
+        if (!rows.length) {
+          sendError(res, 404, "LEAD_NOT_FOUND", "Lead não encontrado");
+          return null;
+        }
+        leadClientId = rows[0].client_id;
+      } else {
+        const { data, error } = await supabase.from("leads").select("client_id").eq("id", id).maybeSingle();
+        if (error) throw error;
+        if (!data) {
+          sendError(res, 404, "LEAD_NOT_FOUND", "Lead não encontrado");
+          return null;
+        }
+        leadClientId = data.client_id;
+      }
+    } catch (err) {
+      // 22P02 = id que não é uuid: não existe lead com esse id.
+      if (String(err?.code) === "22P02") {
+        sendError(res, 404, "LEAD_NOT_FOUND", "Lead não encontrado");
+        return null;
+      }
+      throw err;
+    }
+    if (!leadClientId) {
+      sendError(res, 403, "FORBIDDEN_CLIENT_SCOPE", "You do not have access to this client");
+      return null;
+    }
+    const clientId = resolveAuthorizedClientId(req, res, leadClientId);
+    if (!clientId) return null;
+    if (clientId !== leadClientId) {
+      sendError(res, 403, "FORBIDDEN_CLIENT_SCOPE", "You do not have access to this client");
+      return null;
+    }
+    return clientId;
+  }
+
   app.patch("/api/leads/:id", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
     const { id } = req.params;
     if (!id) return sendError(res, 400, "MISSING_ID", "ID do lead ausente");
 
     try {
+      const leadClientId = await authorizeLeadById(req, res, id);
+      if (!leadClientId) return;
+
       let tagsArray = undefined;
       if (req.body.tags !== undefined) {
         tagsArray = Array.isArray(req.body.tags)
@@ -3085,25 +3138,37 @@ export function registerLeadsRoutes(app, deps) {
       if (req.body.temperature !== undefined) updates.temperature = req.body.temperature;
       if (req.body.nome !== undefined) updates.nome = req.body.nome;
       if (req.body.opt_out !== undefined) {
+        // Interruptor "Bloquear disparos em massa": a decisão é gravada na fonte única (lead_optouts, por empresa e telefone
+        // canônico; services/optOut.js). Ligar registra com origem "manual"; desligar REVOGA (não apaga), venha o pedido de
+        // onde vier (tela, palavra, sem interesse). leads.opt_out e metadata.opt_out ficam só como espelho para a tela.
+        // Erro aqui SOBE e vira 500: a tela não pode mostrar bloqueado sem ter gravado.
         const isOptOut = Boolean(req.body.opt_out);
         updates.opt_out = isOptOut;
         if (pgDatabasePool) {
-          try {
-            await pgDatabasePool.query(
-              `UPDATE public.leads 
-               SET opt_out = $1, 
-                   metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('opt_out', $2::text),
-                   updated_at = now() 
-               WHERE id = $3`,
-              [isOptOut, isOptOut ? "true" : "false", id]
-            );
-          } catch (e) {
-            console.warn("[leads/patch] erro ao persistir opt_out via pool:", e?.message || e);
+          const { rows: foneRows } = await pgDatabasePool.query(
+            `SELECT telefone FROM public.leads WHERE id = $1 AND client_id = $2 LIMIT 1`,
+            [id, leadClientId]
+          );
+          const leadPhone = foneRows[0]?.telefone || null;
+          if (isOptOut) {
+            await registerOptOut(pgDatabasePool, {
+              clientId: leadClientId,
+              phone: leadPhone,
+              source: OPTOUT_SOURCE_MANUAL,
+              reason: "Marcado na tela",
+              createdBy: req.authAccess?.uid || null,
+            });
+          } else {
+            await revokeOptOut(pgDatabasePool, { clientId: leadClientId, phone: leadPhone, revokedBy: req.authAccess?.uid || null });
           }
         }
       }
       if (req.body.metadata !== undefined && typeof req.body.metadata === "object") {
         updates.metadata = req.body.metadata;
+      }
+      if (req.body.opt_out !== undefined && updates.metadata) {
+        // O espelho no metadata acompanha o interruptor mesmo quando a tela manda o metadata inteiro.
+        updates.metadata = { ...updates.metadata, opt_out: updates.opt_out ? "true" : "false" };
       }
       if (req.body.assigned_to !== undefined || req.body.assignedTo !== undefined) {
         if (!isManagerOrAdmin(req.authAccess)) {
@@ -3118,8 +3183,8 @@ export function registerLeadsRoutes(app, deps) {
 
       if (req.body.campos !== undefined && typeof req.body.campos === "object" && pgDatabasePool) {
         const leadRow = await pgDatabasePool.query(
-          `SELECT id, dados, client_id FROM public.leads WHERE id = $1 LIMIT 1`,
-          [id]
+          `SELECT id, dados, client_id FROM public.leads WHERE id = $1 AND client_id = $2 LIMIT 1`,
+          [id, leadClientId]
         );
         const currentDados = (leadRow.rows[0]?.dados && typeof leadRow.rows[0].dados === "object")
           ? { ...leadRow.rows[0].dados }
@@ -3140,8 +3205,8 @@ export function registerLeadsRoutes(app, deps) {
         updates.dados = currentDados;
 
         await pgDatabasePool.query(
-          `UPDATE public.leads SET dados = $1, updated_at = now() WHERE id = $2`,
-          [JSON.stringify(currentDados), id]
+          `UPDATE public.leads SET dados = $1, updated_at = now() WHERE id = $2 AND client_id = $3`,
+          [JSON.stringify(currentDados), id, leadClientId]
         );
       } else if (req.body.dados !== undefined && typeof req.body.dados === "object") {
         updates.dados = req.body.dados;
@@ -3149,8 +3214,8 @@ export function registerLeadsRoutes(app, deps) {
 
       if (tagsArray !== undefined && pgDatabasePool) {
         await pgDatabasePool.query(
-          `UPDATE public.leads SET tags = $1, updated_at = now() WHERE id = $2`,
-          [tagsArray, id]
+          `UPDATE public.leads SET tags = $1, updated_at = now() WHERE id = $2 AND client_id = $3`,
+          [tagsArray, id, leadClientId]
         );
       }
 
@@ -3158,6 +3223,7 @@ export function registerLeadsRoutes(app, deps) {
         .from("leads")
         .update(updates)
         .eq("id", id)
+        .eq("client_id", leadClientId)
         .select("*")
         .single();
 
@@ -3187,7 +3253,10 @@ export function registerLeadsRoutes(app, deps) {
     if (!id) return sendError(res, 400, "MISSING_ID", "ID do lead ausente");
 
     try {
-      const { error } = await supabase.from("leads").delete().eq("id", id);
+      const leadClientId = await authorizeLeadById(req, res, id);
+      if (!leadClientId) return;
+
+      const { error } = await supabase.from("leads").delete().eq("id", id).eq("client_id", leadClientId);
       if (error) throw error;
       res.json({ success: true, deletedId: id });
     } catch (err) {

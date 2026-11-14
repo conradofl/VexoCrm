@@ -95,14 +95,30 @@ const DOCS_CONFIG = [
   },
 ];
 
-function extrairDocInfo(briefingDocumentos: any, key: string) {
+function extrairDocInfo(briefingDocumentos: any, key: string, clienteId?: string) {
   if (!briefingDocumentos) return null;
   const docsRoot = briefingDocumentos?.documentos || briefingDocumentos;
   const raw = docsRoot?.[key];
   if (!raw) return null;
-  const pdfUrl = raw.pdfUrl || raw.pdf?.fileLink || null;
-  const docxUrl = raw.docxUrl || raw.docx?.fileLink || null;
+  let pdfUrl = raw.pdfUrl || raw.pdf?.fileLink || null;
+  let docxUrl = raw.docxUrl || raw.docx?.fileLink || null;
   const versao = raw.versao || briefingDocumentos?.versao || null;
+
+  // Se o link do Google Drive for mock, seguro ou contingência (ex: restrição de cota da Service Account):
+  // Redireciona diretamente para o endpoint de download oficial da API Vexo!
+  const isMockOrSafe = (url?: string | null) =>
+    !url ||
+    url.includes("gd_safe_") ||
+    url.includes("mock_") ||
+    url.includes("gd_contingencia_");
+
+  if (clienteId && isMockOrSafe(pdfUrl)) {
+    pdfUrl = `/api/gd/clientes/${clienteId}/briefing/documentos/${key}/download?formato=pdf`;
+  }
+  if (clienteId && isMockOrSafe(docxUrl)) {
+    docxUrl = `/api/gd/clientes/${clienteId}/briefing/documentos/${key}/download?formato=docx`;
+  }
+
   return {
     ...raw,
     pdfUrl,
@@ -267,11 +283,18 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
     if (!client?.id) return;
     setEnviandoInterno(true);
     try {
-      await enviarAprovacaoInterna.mutateAsync(client.id);
-      toast({
-        title: "📤 Enviado para o Caio!",
-        description: "Documentos enviados no grupo interno para validação estratégica.",
-      });
+      const res: any = await enviarAprovacaoInterna.mutateAsync(client.id);
+      if (res?.whatsapp_enviado === false) {
+        toast({
+          title: "Etapa avançada para Revisão do Caio",
+          description: "Avançado no CRM. Aviso WhatsApp: " + (res.whatsapp_erro || "Instância de WhatsApp oscilou."),
+        });
+      } else {
+        toast({
+          title: "📤 Enviado para o Caio no WhatsApp!",
+          description: "Documentos enviados no grupo interno para validação estratégica.",
+        });
+      }
     } catch (err) {
       toast({
         title: "Erro ao enviar para Caio",
@@ -287,11 +310,18 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
     if (!client?.id) return;
     setEnviandoCliente(true);
     try {
-      await enviarAprovacaoCliente.mutateAsync(client.id);
-      toast({
-        title: "🚀 Enviado para o Cliente!",
-        description: "Briefing e Planejamento enviados no grupo do cliente para aceite formal.",
-      });
+      const res: any = await enviarAprovacaoCliente.mutateAsync(client.id);
+      if (res?.whatsapp_enviado === false) {
+        toast({
+          title: "Etapa avançada para Aprovação do Cliente",
+          description: "Avançado no CRM. Aviso WhatsApp: " + (res.whatsapp_erro || "Instância de WhatsApp oscilou."),
+        });
+      } else {
+        toast({
+          title: "🚀 Enviado para o Cliente no WhatsApp!",
+          description: "Briefing e Planejamento enviados no grupo do cliente para aceite formal.",
+        });
+      }
     } catch (err) {
       toast({
         title: "Erro ao enviar para o cliente",
@@ -530,7 +560,7 @@ export function ClientDrawer({ client, onClose }: ClientDrawerProps) {
               {temDocumentos ? (
                 <div className="space-y-2 pt-1">
                   {DOCS_CONFIG.map(({ key, titulo, descricao, icone: Icone, cor }) => {
-                    const doc = extrairDocInfo(client.briefingDocumentos, key);
+                    const doc = extrairDocInfo(client.briefingDocumentos, key, client.id);
                     const linkVisualizar = doc?.pdfUrl || doc?.docxUrl;
                     return (
                       <div

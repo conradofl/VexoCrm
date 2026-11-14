@@ -15,7 +15,7 @@
 //
 // Uso: npx playwright test --config playwright.harness.config.ts
 import { expect, test } from "@playwright/test";
-import { CHAT_ON_DOWN_CHIP, COUNTS, NAMES, NOW_S, PAGE_URL, SHOTS, SPECIAL_BODIES, TOTAL, chat, chatsPage, firstCard, inViewport, leads, messagesFor, ok, serve, tenant } from "./conversas-servidor";
+import { CHAT_ON_DOWN_CHIP, CHAT_ON_REMOVED_CHIP, COUNTS, NAMES, NOW_S, PAGE_URL, SHOTS, SPECIAL_BODIES, TOTAL, chat, chatsPage, firstCard, inViewport, leads, messagesFor, ok, serve, tenant } from "./conversas-servidor";
 
 test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
@@ -166,6 +166,124 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(field).toHaveValue("");
   });
 
+  test("Nova conversa: botão no topo da lista, lead achado pelo nome, chip padrão escolhido, envia e abre a conversa", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+
+    // O botão fica no topo da coluna, acima da primeira conversa.
+    const button = await inViewport(page, "new-conversation-button");
+    expect(button.y).toBeLessThan((await firstCard(page).boundingBox())!.y);
+    await page.getByTestId("new-conversation-button").click();
+
+    const dialog = page.getByTestId("new-conversation-dialog");
+    await expect(dialog).toBeVisible();
+    // Só chips conectados; o padrão já vem escolhido. O "Chip Caído" (desconectado) não aparece.
+    const chip = page.getByTestId("new-conversation-chip");
+    await expect(chip.locator("option")).toHaveText(["Comercial - Hostery (padrão)", "Caio"]);
+    await expect(chip).toHaveValue("comercial-hostery");
+    await expect(page.getByTestId("new-conversation-send")).toBeDisabled();
+
+    await page.getByTestId("new-conversation-target").fill("marina");
+    await expect(page.getByTestId("new-conversation-suggestion")).toHaveText(/Marina Prado.*\(34\) 98888-7777/);
+    await page.getByTestId("new-conversation-suggestion").click();
+    await expect(page.getByTestId("new-conversation-picked")).toContainText("Marina Prado");
+    await page.getByTestId("new-conversation-body").fill("Oi Marina, aqui é o Caio da Geração Digital.");
+    await dialog.screenshot({ path: `${SHOTS}/nova-conversa-janela.png` });
+    await page.getByTestId("new-conversation-send").click();
+
+    await expect.poll(() => served.started).toEqual([
+      { chatId: "5534988887777", body: "Oi Marina, aqui é o Caio da Geração Digital.", chipId: "comercial-hostery" },
+    ]);
+    // A janela fecha e a conversa abre, com a mensagem enviada, na aba "Com o lead".
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Marina Prado");
+    await expect(page.getByTestId("inbox-conversation").getByText("Oi Marina, aqui é o Caio da Geração Digital.")).toBeVisible();
+    await expect(page.getByTestId("inbox-tab-com_lead")).toHaveAttribute("aria-selected", "true");
+    expect(served.sent).toHaveLength(0); // foi pela nova conversa, não pela resposta comum
+    await page.screenshot({ path: `${SHOTS}/nova-conversa-aberta.png` });
+  });
+
+  test("Nova conversa: número inválido, chip desconectado e opt-out dão erro NA JANELA e nada é enviado", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+    await page.getByTestId("new-conversation-button").click();
+    const dialog = page.getByTestId("new-conversation-dialog");
+    const target = page.getByTestId("new-conversation-target");
+    const send = page.getByTestId("new-conversation-send");
+    const error = page.getByTestId("new-conversation-error");
+    await page.getByTestId("new-conversation-body").fill("Olá, tudo bem?");
+
+    // Número sem DDD: o botão nem habilita, e a janela explica.
+    await target.fill("99999-0000");
+    await expect(send).toBeDisabled();
+    await expect(page.getByTestId("new-conversation-target-hint")).toContainText("com DDD");
+
+    // Chip que caiu: o servidor recusa, o erro aparece na janela e ela continua aberta.
+    await target.fill("(34) 98888-1111");
+    await page.getByTestId("new-conversation-chip").selectOption("caio");
+    await send.click();
+    await expect(error).toContainText("Mensagem não enviada");
+    await expect(error).toContainText("O chip Caio está desconectado");
+    await expect(dialog).toBeVisible();
+    await dialog.screenshot({ path: `${SHOTS}/nova-conversa-erro-chip.png` });
+
+    // Trocar de chip limpa o erro. Número com opt-out: aviso, nada enviado.
+    await page.getByTestId("new-conversation-chip").selectOption("comercial-hostery");
+    await expect(error).toHaveCount(0);
+    await target.fill("34 97777-0001");
+    await send.click();
+    await expect(error).toContainText("pediu para não receber mensagens");
+    await expect(dialog).toBeVisible();
+
+    expect(served.started).toHaveLength(0);
+    expect(served.sent).toHaveLength(0);
+    expect(served.startRefused.map((r) => r.code)).toEqual(["CHIP_NOT_CONNECTED", "CONTACT_OPTED_OUT"]);
+    // O que a pessoa escreveu continua lá.
+    await expect(page.getByTestId("new-conversation-body")).toHaveValue("Olá, tudo bem?");
+  });
+
+  test("Nova conversa para número que já tem conversa: não envia, abre a conversa e deixa o texto no campo", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+    await page.getByTestId("new-conversation-button").click();
+    await page.getByTestId("new-conversation-target").fill("(34) 99000-0005");
+    await page.getByTestId("new-conversation-body").fill("Moacir, conseguiu ver a proposta?");
+    await page.getByTestId("new-conversation-send").click();
+
+    await expect(page.getByTestId("new-conversation-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Moacir Pires");
+    await expect(page.getByLabel("Mensagem para o cliente")).toHaveValue("Moacir, conseguiu ver a proposta?");
+    expect(served.started).toHaveLength(0);
+    expect(served.sent).toHaveLength(0);
+  });
+
+  test("conversa em chip que saiu do cadastro: a tela avisa, pede confirmação a cada envio e não envia sozinha", async ({ page }) => {
+    // Retrato do comportamento de hoje nas conversas com nome antigo de chip (40 na GD em 12/11/2026).
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await page.getByTestId(`inbox-item-${CHAT_ON_REMOVED_CHIP}`).click();
+
+    await expect(page.getByTestId("chat-header-sub")).toContainText("chip geracao-digital-caio-pessoal");
+    await expect(page.getByTestId("composer-hint")).toHaveText("chip geracao-digital-caio-pessoal fora do cadastro · vai pedir confirmação");
+
+    const field = page.getByLabel("Mensagem para o cliente");
+    for (const text of ["Primeira resposta", "Segunda resposta"]) {
+      await field.fill(text);
+      await field.press("Enter");
+      const confirm = page.getByTestId("chip-confirm");
+      await expect(confirm).toContainText("não está mais cadastrado");
+      if (text === "Primeira resposta") await page.getByTestId("composer").screenshot({ path: `${SHOTS}/chip-fora-do-cadastro.png` });
+      await page.getByTestId("chip-confirm-option").filter({ hasText: "Caio" }).click();
+      await expect(confirm).toHaveCount(0);
+    }
+    // Hoje: a confirmação não fica guardada. Duas respostas, duas confirmações.
+    expect(served.refused).toHaveLength(2);
+    expect(served.sent.map((m) => m.confirmChipId)).toEqual(["caio", "caio"]);
+  });
+
   test("mensagem sem texto mostra o nome do tipo, na fila e na conversa, nunca [Mensagem]", async ({ page }) => {
     await serve(page);
     await page.goto(PAGE_URL);
@@ -217,6 +335,45 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect.poll(() => served.deletedReminders).toEqual(["rem-1"]);
     await expect(register).toHaveText("Reunião");
     await expect(page.getByTestId("meeting-cancel-area")).toHaveCount(0);
+  });
+
+  test("reunião: o sistema não fabrica link; sem link o convite vai só com dia e hora, com link colado vai o link colado", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await firstCard(page).click();
+    await page.getByTestId("dossier-open").click();
+    await page.getByTestId("register-meeting").click();
+
+    // O campo do link começa vazio e a janela diz que o sistema não cria sala.
+    const link = page.getByTestId("meeting-link");
+    await expect(link).toHaveValue("");
+    await expect(page.getByTestId("meeting-link-help")).toContainText("O sistema não cria a sala");
+    await expect(page.getByRole("dialog")).not.toContainText("Gerar sala");
+    await page.getByRole("dialog").screenshot({ path: `${SHOTS}/reuniao-link-opcional.png` });
+
+    // Texto que não é endereço é recusado e nada é gravado.
+    await link.fill("depois eu mando");
+    await page.getByRole("button", { name: "Apenas Salvar" }).click();
+    await expect(page.getByTestId("meeting-link-error")).toContainText("não parece um endereço válido");
+    expect(served.reminders).toHaveLength(0);
+
+    // Sem link: grava sem link, e o convite que vai para o campo de resposta não tem endereço nenhum.
+    await link.fill("");
+    await page.getByRole("button", { name: "Salvar e preparar convite" }).click();
+    await expect.poll(() => served.reminders.length).toBe(1);
+    expect(served.reminders[0].meetingUrl).toBeNull();
+    const field = page.getByLabel("Mensagem para o cliente");
+    await expect(field).toHaveValue(/nossa reunião está agendada para/);
+    expect(await field.inputValue()).not.toMatch(/https?:|meet\.google|Link/i);
+    expect(served.sent).toHaveLength(0); // o convite fica no campo; quem envia é a pessoa
+
+    // Remarcar colando um link de verdade: o convite leva exatamente o link colado.
+    await page.getByTestId("register-meeting").click();
+    await page.getByTestId("meeting-link").fill("https://zoom.us/j/123456789");
+    await expect(page.getByTestId("meeting-link-open")).toHaveAttribute("href", "https://zoom.us/j/123456789");
+    await page.getByRole("button", { name: "Salvar e preparar convite" }).click();
+    await expect(field).toHaveValue(/Link da reunião: https:\/\/zoom\.us\/j\/123456789/);
+    await page.getByTestId("composer").screenshot({ path: `${SHOTS}/reuniao-convite-com-link-colado.png` });
   });
 
   test("gaveta do dossiê: fechada por padrão, abre por cima da conversa, e fecha por X, clique fora e Esc", async ({ page }) => {
