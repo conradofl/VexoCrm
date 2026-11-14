@@ -166,6 +166,100 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(field).toHaveValue("");
   });
 
+  test("Nova conversa: botão no topo da lista, lead achado pelo nome, chip padrão escolhido, envia e abre a conversa", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+
+    // O botão fica no topo da coluna, acima da primeira conversa.
+    const button = await inViewport(page, "new-conversation-button");
+    expect(button.y).toBeLessThan((await firstCard(page).boundingBox())!.y);
+    await page.getByTestId("new-conversation-button").click();
+
+    const dialog = page.getByTestId("new-conversation-dialog");
+    await expect(dialog).toBeVisible();
+    // Só chips conectados; o padrão já vem escolhido. O "Chip Caído" (desconectado) não aparece.
+    const chip = page.getByTestId("new-conversation-chip");
+    await expect(chip.locator("option")).toHaveText(["Comercial - Hostery (padrão)", "Caio"]);
+    await expect(chip).toHaveValue("comercial-hostery");
+    await expect(page.getByTestId("new-conversation-send")).toBeDisabled();
+
+    await page.getByTestId("new-conversation-target").fill("marina");
+    await expect(page.getByTestId("new-conversation-suggestion")).toHaveText(/Marina Prado.*\(34\) 98888-7777/);
+    await page.getByTestId("new-conversation-suggestion").click();
+    await expect(page.getByTestId("new-conversation-picked")).toContainText("Marina Prado");
+    await page.getByTestId("new-conversation-body").fill("Oi Marina, aqui é o Caio da Geração Digital.");
+    await dialog.screenshot({ path: `${SHOTS}/nova-conversa-janela.png` });
+    await page.getByTestId("new-conversation-send").click();
+
+    await expect.poll(() => served.started).toEqual([
+      { chatId: "5534988887777", body: "Oi Marina, aqui é o Caio da Geração Digital.", chipId: "comercial-hostery" },
+    ]);
+    // A janela fecha e a conversa abre, com a mensagem enviada, na aba "Com o lead".
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Marina Prado");
+    await expect(page.getByTestId("inbox-conversation").getByText("Oi Marina, aqui é o Caio da Geração Digital.")).toBeVisible();
+    await expect(page.getByTestId("inbox-tab-com_lead")).toHaveAttribute("aria-selected", "true");
+    expect(served.sent).toHaveLength(0); // foi pela nova conversa, não pela resposta comum
+    await page.screenshot({ path: `${SHOTS}/nova-conversa-aberta.png` });
+  });
+
+  test("Nova conversa: número inválido, chip desconectado e opt-out dão erro NA JANELA e nada é enviado", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+    await page.getByTestId("new-conversation-button").click();
+    const dialog = page.getByTestId("new-conversation-dialog");
+    const target = page.getByTestId("new-conversation-target");
+    const send = page.getByTestId("new-conversation-send");
+    const error = page.getByTestId("new-conversation-error");
+    await page.getByTestId("new-conversation-body").fill("Olá, tudo bem?");
+
+    // Número sem DDD: o botão nem habilita, e a janela explica.
+    await target.fill("99999-0000");
+    await expect(send).toBeDisabled();
+    await expect(page.getByTestId("new-conversation-target-hint")).toContainText("com DDD");
+
+    // Chip que caiu: o servidor recusa, o erro aparece na janela e ela continua aberta.
+    await target.fill("(34) 98888-1111");
+    await page.getByTestId("new-conversation-chip").selectOption("caio");
+    await send.click();
+    await expect(error).toContainText("Mensagem não enviada");
+    await expect(error).toContainText("O chip Caio está desconectado");
+    await expect(dialog).toBeVisible();
+    await dialog.screenshot({ path: `${SHOTS}/nova-conversa-erro-chip.png` });
+
+    // Trocar de chip limpa o erro. Número com opt-out: aviso, nada enviado.
+    await page.getByTestId("new-conversation-chip").selectOption("comercial-hostery");
+    await expect(error).toHaveCount(0);
+    await target.fill("34 97777-0001");
+    await send.click();
+    await expect(error).toContainText("pediu para não receber mensagens");
+    await expect(dialog).toBeVisible();
+
+    expect(served.started).toHaveLength(0);
+    expect(served.sent).toHaveLength(0);
+    expect(served.startRefused.map((r) => r.code)).toEqual(["CHIP_NOT_CONNECTED", "CONTACT_OPTED_OUT"]);
+    // O que a pessoa escreveu continua lá.
+    await expect(page.getByTestId("new-conversation-body")).toHaveValue("Olá, tudo bem?");
+  });
+
+  test("Nova conversa para número que já tem conversa: não envia, abre a conversa e deixa o texto no campo", async ({ page }) => {
+    const served = await serve(page);
+    await page.goto(PAGE_URL);
+    await expect(firstCard(page)).toBeVisible();
+    await page.getByTestId("new-conversation-button").click();
+    await page.getByTestId("new-conversation-target").fill("(34) 99000-0005");
+    await page.getByTestId("new-conversation-body").fill("Moacir, conseguiu ver a proposta?");
+    await page.getByTestId("new-conversation-send").click();
+
+    await expect(page.getByTestId("new-conversation-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("chat-header-name")).toHaveText("Moacir Pires");
+    await expect(page.getByLabel("Mensagem para o cliente")).toHaveValue("Moacir, conseguiu ver a proposta?");
+    expect(served.started).toHaveLength(0);
+    expect(served.sent).toHaveLength(0);
+  });
+
   test("conversa em chip que saiu do cadastro: a tela avisa, pede confirmação a cada envio e não envia sozinha", async ({ page }) => {
     // Retrato do comportamento de hoje nas conversas com nome antigo de chip (40 na GD em 12/11/2026).
     const served = await serve(page);

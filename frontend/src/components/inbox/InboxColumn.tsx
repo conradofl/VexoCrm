@@ -16,8 +16,7 @@ import {
   Send,
   ShieldAlert,
   SlidersHorizontal,
-  Users,
-} from "lucide-react";
+  Users, MessageSquarePlus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -161,6 +160,7 @@ export function InboxSearchRow({
   onTabChange,
   selectMode,
   onToggleSelectMode,
+  onNewConversation,
 }: {
   search: string;
   onSearchChange: (value: string) => void;
@@ -175,6 +175,8 @@ export function InboxSearchRow({
   onTabChange: (tab: InboxTab) => void;
   selectMode: boolean;
   onToggleSelectMode: () => void;
+  /** Abre a janela "Nova conversa". Sem a função, o botão não aparece. */
+  onNewConversation?: () => void;
 }) {
   const agentText = chipValue ? describeChipAgent(chipAgents[chipValue.toLowerCase()] ?? chipAgents[chipValue]) : "";
   const hasFilter = Boolean(chipValue) || otherLists.some((f) => f.key === activeTab) || selectMode;
@@ -194,6 +196,19 @@ export function InboxSearchRow({
           className="h-full min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground md:text-[13.5px]"
         />
       </label>
+
+      {onNewConversation && (
+        <button
+          type="button"
+          onClick={onNewConversation}
+          aria-label="Nova conversa"
+          title="Nova conversa: escrever primeiro para um número"
+          data-testid="new-conversation-button"
+          className="grid h-[38px] w-[38px] shrink-0 cursor-pointer place-items-center rounded-[10px] border border-green-600 bg-green-600 text-white transition-colors hover:bg-green-700"
+        >
+          <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
 
       <Popover open={filtersOpen} onOpenChange={onFiltersOpenChange}>
         <PopoverTrigger asChild>
