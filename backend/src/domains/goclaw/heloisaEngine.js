@@ -15,6 +15,7 @@ import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../..
 import fs from "node:fs";
 import path from "node:path";
 import { resolveGoclawDir } from "./routes.js";
+import { defaultGroqModel } from "../../services/llmModels.js";
 
 export const DIRETORES_AUTORIZADOS = {
   conrado: {
@@ -420,7 +421,10 @@ export async function chamarLlmHeloisa({ systemPrompt, messages, tools = HELOISA
           Authorization: `Bearer ${groqKey}`,
         },
         body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
+          // Modelo da Groq vem da escada (services/llmModels.js), nunca fixo
+          // aqui: o id que estava chumbado foi descontinuado pela Groq e este
+          // degrau respondia 404 em silêncio, sobrando só o GoClaw de reserva.
+          model: defaultGroqModel(),
           messages: fullMessages,
           tools,
           tool_choice: "auto",
@@ -433,6 +437,9 @@ export async function chamarLlmHeloisa({ systemPrompt, messages, tools = HELOISA
         const data = await resp.json();
         return data.choices?.[0]?.message;
       }
+      // Recusa do provedor (404 de modelo, 429 de cota, 413 de tamanho) não
+      // lança: sem este aviso o degrau falhava sem deixar rastro no log.
+      console.warn("[Heloísa] Groq recusou a chamada, tentando GoClaw runtime:", { status: resp.status });
     } catch (e) {
       console.warn("[Heloísa] Falha ao chamar Groq, tentando GoClaw runtime:", e.message);
     }
