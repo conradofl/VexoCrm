@@ -113,7 +113,14 @@ afterEach(async () => {
 });
 
 const CHIP_ID = "cccccccc-0000-4000-8000-00000000000c";
-async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", passos = [PASSO1, PASSO2], continuacaoReal = false } = {}) {
+async function mundo({
+  sequenciaDaCampanhaDepois = null,
+  origem = "planilha",
+  passos = [PASSO1, PASSO2],
+  continuacaoReal = false,
+  leadFinalizado = false,
+  semEspera = false,
+} = {}) {
   const db = await createPgliteDb(SCHEMA);
   abertos.push(db);
   for (const f of ["20261008180000_add_recurrence_to_campaigns.sql", "20261012120000_campaign_recurrence_occurrences.sql"]) {
@@ -122,6 +129,8 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", pa
   // Colunas que findCampaignReplyMatches lê em produção e que o esquema enxuto do teste do lote não tem.
   await db.exec(`ALTER TABLE public.campaigns ADD COLUMN phones TEXT[], ADD COLUMN starts_at TIMESTAMPTZ, ADD COLUMN ends_at TIMESTAMPTZ,
                  ADD COLUMN chatbot_prompt_type TEXT`);
+  // Lead já atendido antes (finalizado = true) é o que dispara a "mensagem de recontato" no motor da IA.
+  await db.exec("ALTER TABLE public.leads ADD COLUMN finalizado BOOLEAN DEFAULT false, ADD COLUMN status_conversa TEXT");
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'Container')", [T]);
   // Tabelas que o webhook lê e que este teste não monta respondem vazio; nenhuma das do fluxo de campanha é perdoada.
   const DO_FLUXO = /campaigns|campaign_dispatch|lead_import_items/;
@@ -176,7 +185,10 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", pa
   );
   // Base CRM: o destinatário só existe em public.leads (como os 5 telefones medidos em produção em 13/11/2026).
   const { rows: [lead] } = crm
-    ? await db.query("INSERT INTO leads (client_id, telefone, nome) VALUES ($1, '5534988228667', 'Cliente') RETURNING id, telefone", [T])
+    ? await db.query(
+      "INSERT INTO leads (client_id, telefone, nome, finalizado, status_conversa) VALUES ($1, '5534988228667', 'Cliente', $2, $3) RETURNING id, telefone",
+      [T, leadFinalizado, leadFinalizado ? "finalizado" : null]
+    )
     : await db.query(
       "INSERT INTO lead_import_items (client_id, import_id, telefone, normalized_data) VALUES ($1, $2, '5534988228667', '{\"nome\":\"Cliente\"}'::jsonb) RETURNING id, telefone",
       [T, IMP]
@@ -200,6 +212,11 @@ async function mundo({ sequenciaDaCampanhaDepois = null, origem = "planilha", pa
 
   // 1. o lote real envia o passo 1 e grava o progresso de espera
   await routes.runCampaignDispatch({ dispatch: lote, campaign: camp, supabase });
+
+  if (semEspera) {
+    // Como em produção ANTES do #242: a espera do lead da base CRM nunca foi gravada.
+    await db.query("UPDATE leads SET dados = '{}'::jsonb WHERE id = $1", [lead.id]).catch(() => {});
+  }
 
   // 2. a campanha é editada DEPOIS do lote: a sequência dela muda, a do lote fica congelada
   if (sequenciaDaCampanhaDepois) {
@@ -289,6 +306,27 @@ describe("campanha da base CRM: a resposta do lead encontra a espera gravada pel
     const w = await mundo({ origem: "crm" });
     const matches = await findCampaignReplyMatches({ clientId: T, phone: "553488228667" });
     expect(matches.processingWaitForReplyMatches.map((m) => m.id)).toEqual([w.camp.id]);
+  }, SLOW);
+});
+
+// A "mensagem de recontato" ("Nosso consultor irá entrar em contato em breve...") sai do motor da IA para lead já
+// finalizado que volta a escrever. Ela mora no CAMINHO 2 do webhook, que só roda quando o CAMINHO 1 (próximo passo da
+// campanha) não foi acionado. Na Black Friday da Container LED (12/11/2026) o lead finalizado respondeu "Sim" e recebeu o
+// recontato porque a espera da campanha não tinha sido gravada (lead da base CRM, corrigido no #242), não porque o
+// recontato rode antes do passo. Estes testes amarram a ordem.
+describe("lead já finalizado responde a campanha: avança a campanha, recontato não responde por cima", () => {
+  it("[OBRIGATÓRIO] lead finalizado da base CRM responde 'Sim' com passo pendente: vai para o próximo passo, não para o agente/recontato", async () => {
+    const w = await mundo({ origem: "crm", leadFinalizado: true });
+    const out = await w.responder("Sim");
+    expect(out).toMatchObject({ status: "campaign_step_dispatched" });
+    await vi.waitFor(() => expect(w.continuar).toHaveBeenCalledTimes(1));
+  }, SLOW);
+
+  it("sem espera gravada (como antes do #242), o mesmo 'Sim' sai do fluxo da campanha e cai no agente, onde o recontato responde", async () => {
+    const w = await mundo({ origem: "crm", leadFinalizado: true, semEspera: true });
+    const out = await w.responder("Sim");
+    expect(out?.status).not.toBe("campaign_step_dispatched");
+    expect(w.continuar).not.toHaveBeenCalled();
   }, SLOW);
 });
 

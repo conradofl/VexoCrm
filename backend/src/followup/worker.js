@@ -29,6 +29,7 @@ import {
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
 import { isWonStage, isLostStage, hasFollowupReplySince } from "../services/followupExitGuard.js";
+import { registerSystemSentFromResponse } from "../services/systemSentMessages.js";
 import {
   resolveChipDailyLimit,
   reserveChipDailyQuota,
@@ -173,6 +174,7 @@ export async function sendViaEvolution({ baseUrl, apiKey, instanceSlug, phone, t
     const body = await res.text().catch(() => "");
     throw new Error(`Evolution API ${res.status} (${instanceSlug}): ${body.slice(0, 200)}`);
   }
+  registerSystemSentFromResponse(await res.text().catch(() => ""));
 }
 
 export async function processJob(job) {
