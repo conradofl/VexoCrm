@@ -70,6 +70,11 @@
       "name": "Auditor de Demandas & Prazos",
       "model": "gemini/gemini-3-flash-preview",
       "promptFile": "prompts/gestor_demandas_auditor.md"
+    },
+    "heloisa": {
+      "name": "Heloísa Secretária Executiva",
+      "model": "gemini/gemini-3-flash-preview",
+      "promptFile": "prompts/heloisa_executiva.md"
     }
   },
   "roles": {

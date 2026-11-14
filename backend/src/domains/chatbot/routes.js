@@ -57,6 +57,7 @@ import {
 } from "../../services/inboxWorkState.js";
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
+import { isHeloisaAuthorizedSender, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
 import { defaultLlmModel, providerOfModelId } from "../../services/llmModels.js";
 import {
@@ -3212,6 +3213,34 @@ export function registerChatbotRoutes(app, deps) {
       });
     } catch (msgErr) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);
+    }
+
+    // ── INTERCEPTADOR HELOÍSA (COPILOTO EXECUTIVO WHATSAPP) ──
+    const isHeloisaTarget =
+      (instanceName && instanceName.toLowerCase().includes("heloisa")) ||
+      req.query?.lane === "heloisa" ||
+      req.query?.agent === "heloisa";
+    const isDirector = isHeloisaAuthorizedSender(phone);
+    const hasHeloisaPrefix = /^(helo[ií]sa|[!\/]h)\b/i.test(messageData?.text || "");
+
+    if (!fromMe && (isHeloisaTarget || (isDirector && hasHeloisaPrefix))) {
+      const cleanText = hasHeloisaPrefix
+        ? (messageData.text || "").replace(/^(helo[ií]sa|[!\/]h)[:,]?\s*/i, "").trim()
+        : messageData.text;
+
+      responder({ handled: "heloisa", phone: maskPhoneForLog(phone) });
+
+      processarMensagemHeloisa({
+        phone,
+        texto: cleanText,
+        audioBase64: messageData.mediaBase64 || null,
+        audioMimetype: messageData.mimetype || "audio/ogg",
+        instanceName: instanceName || "heloisa",
+        pool: pgDatabasePool,
+      }).catch((err) => {
+        console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);
+      });
+      return;
     }
 
     // Resposta do lead para a cadência de follow-up. Só mensagem do lead (não fromMe)

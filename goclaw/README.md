@@ -4,25 +4,31 @@ Arquitetura de agentes autônomos construída sobre o runtime **GoClaw** (Golang
 
 ---
 
-## 🏗️ As 3 Lanes Operacionais
+## 🏗️ As 4 Lanes Operacionais (100% WhatsApp · Zero Slack)
 
 1. **Lane Maestro (COO de IA)**:
-   - **Modelo**: `anthropic/claude-3-5-sonnet-20241022`
-   - **Canal**: Telegram Bot & WhatsApp
+   - **Modelo**: `gemini/gemini-3-flash-preview` (fallback Groq)
+   - **Canal**: WhatsApp & HTTP Gateway
    - **Função**: General da operação. Check-in matinal (09h00) e check-out vespertino (18h00) com os sócios (Conrado e Caio). Cobrador implacável de prazos e gargalos.
    - **Prompt**: `prompts/maestro_coo.md`
 
 2. **Lane Onboarding (Gestor Digital)**:
-   - **Modelo**: `openai/gpt-4o`
+   - **Modelo**: `gemini/gemini-3-flash-preview`
    - **Canal**: WhatsApp & HTTP Webhook
    - **Função**: Acolhimento e onboarding de novos clientes nas primeiras 48h. Coleta de briefing guiado, solicitação de acessos (Meta Ads, Google, Drive) e geração de dossiês estruturados.
    - **Prompt**: `prompts/gestor_digital_onboarding.md`
 
 3. **Lane Gestão de Tarefas (Cron & Auditoria)**:
-   - **Modelo**: `openai/gpt-4o`
+   - **Modelo**: `gemini/gemini-3-flash-preview`
    - **Agendamento**: Cron 09h00 e 18h00 (Segunda a Sexta)
-   - **Função**: Auditoria automática de quadros do Trello e publicação do Daily Report no canal `#01-ops-geral` do Slack.
+   - **Função**: Auditoria automática de quadros do Trello e envio do Daily Report para o WhatsApp dos sócios e colaboradores.
    - **Prompt**: `prompts/gestor_demandas_auditor.md`
+
+4. **Lane Heloísa (Secretária Executiva & Copiloto dos Sócios)**:
+   - **Modelo**: `gemini/gemini-3-flash-preview`
+   - **Canal**: WhatsApp Exclusivo (Evolution API)
+   - **Função**: Assistente pessoal executiva para Conrado e Caio. Entende áudio e texto no trânsito, cadastra clientes no CRM, agenda compromissos, cria follow-ups e cobra colaboradores no WhatsApp com confirmação imediata.
+   - **Prompt**: `prompts/heloisa_executiva.md`
 
 ---
 

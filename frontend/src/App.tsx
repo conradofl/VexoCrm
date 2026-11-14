@@ -50,6 +50,8 @@ import PresentationPreview from "./pages/PresentationPreview";
 import GeracaoDigitalPackages from "./pages/GeracaoDigitalPackages";
 import GeracaoDigitalContracts from "./pages/GeracaoDigitalContracts/GeracaoDigitalContracts";
 import GeracaoDigitalClientes from "./pages/GeracaoDigitalClientes";
+import GeracaoDigitalColaboradores from "./pages/GeracaoDigitalColaboradores";
+import GeracaoDigitalGoclawConfig from "./pages/GeracaoDigitalGoclawConfig";
 import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPresentation";
 import GeracaoDigitalImplementationBriefing from "./pages/GeracaoDigitalImplementationBriefing";
 import ComercialVexo from "./pages/ComercialVexo";
@@ -414,6 +416,22 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]}>
                     <GeracaoDigitalClientes />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="colaboradores-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalColaboradores />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="goclaw-gd"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <GeracaoDigitalGoclawConfig />
                   </ProtectedRoute>
                 }
               />

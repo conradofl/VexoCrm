@@ -58,6 +58,7 @@ import {
   processarIngestaoLogosNovas,
 } from "../../services/gdCommercialPresentationWorkflowService.js";
 import { minerarConversasWhatsApp } from "../../services/gdWhatsAppChatMinerService.js";
+import { registerGdColaboradoresRoutes } from "./colaboradoresRoutes.js";
 import { construirEAtivarAgenteInbound } from "../../services/gdAgentBuilderService.js";
 import { processarReguaCustomerSuccess } from "../../services/gdCustomerSuccessSchedulerService.js";
 import { CAMPOS_OPCIONAIS, CampoInvalido, GD_DONO, lerNome, lerDriveUrl } from "./campos.js";
@@ -2145,4 +2146,6 @@ export function registerGdClientesRoutes(app, {
 
   app.get("/api/gd/clientes/:id/vexto-briefing", requireGdOrGoclawAuth(requireFirebaseAuth), lidarConsultaBriefingVexo);
   app.get("/api/gd/clientes/:id/vexo-briefing", requireGdOrGoclawAuth(requireFirebaseAuth), lidarConsultaBriefingVexo);
+
+  registerGdColaboradoresRoutes(app, pool(), requireGdOrGoclawAuth(requireFirebaseAuth));
 }

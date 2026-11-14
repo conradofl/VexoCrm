@@ -72,12 +72,12 @@ lanes:
     concurrency: 8
     tools:
       - "google_drive"
-      - "slack"
+      - "whatsapp_evolution"
 
   # Lane 3: Gestor de Demandas (Cron & Auditoria)
   demandas_cron:
     name: "Auditor de Demandas & Prazos"
-    description: "Auditoria automática diária de cartões no Trello e relatórios no Slack"
+    description: "Auditoria automática diária de cartões no Trello e relatórios no WhatsApp"
     driver: "openai"
     model: "gemini/gemini-3-flash-preview"
     systemPromptFile: "prompts/gestor_demandas_auditor.md"
@@ -85,11 +85,27 @@ lanes:
       - name: "checkin_matinal"
         cron: "0 9 * * 1-5" # 09h00 Seg a Sex
         action: "run_morning_checkin"
-        targetChannel: "slack:#01-ops-geral"
+        targetChannel: "whatsapp:donos"
       - name: "checkout_vespertino"
         cron: "0 18 * * 1-5" # 18h00 Seg a Sex
         action: "run_evening_checkout"
-        targetChannel: "slack:#01-ops-geral"
+        targetChannel: "whatsapp:donos"
+
+  # Lane 4: Heloísa (Secretária Executiva & Copiloto dos Sócios)
+  heloisa:
+    name: "Heloísa Secretária Executiva"
+    description: "Copiloto dos sócios Conrado e Caio no WhatsApp com comandos de voz e texto"
+    driver: "openai"
+    model: "gemini/gemini-3-flash-preview"
+    systemPromptFile: "prompts/heloisa_executiva.md"
+    channels:
+      - "http"
+    concurrency: 4
+    tools:
+      - "whatsapp_evolution"
+      - "trello"
+      - "google_calendar"
+      - "vexo_crm"
 
 session:
   store: "sqlite"
