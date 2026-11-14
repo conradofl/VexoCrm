@@ -345,3 +345,4 @@ export function getModuleIdFromPath(pathname: string): OperatorModuleId | null {
   if (pathname.includes("/crm/admin") || pathname.includes("/crm/usuarios") || pathname.includes("/crm/empresas")) return "admin";
   return null;
 }
+
