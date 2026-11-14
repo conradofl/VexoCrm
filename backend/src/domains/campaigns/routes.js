@@ -1028,6 +1028,8 @@ export function registerCampaignsRoutes(app, deps) {
         webhookToken,
         quotaGate,
         leads: [{ telefone: phone }],
+        // Envio de teste de UM número digitado pelo operador: ação manual, não passa pela trava de opt-out.
+        manualSingleSend: true,
         analyticsMeta: {
           sequence,
           dispatchOptions: {

@@ -13,6 +13,7 @@ import {
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
 import { leadsTableName } from "../services/tenant.js";
+import { isPhoneOptedOut } from "../services/optOut.js";
 
 // Whitelist de âncoras suportadas no follow-up
 export const ANCHOR_FIELDS = {
@@ -654,6 +655,22 @@ export async function enrollLead(
   }
 ) {
   const phone = normalizePhone(rawPhone);
+
+  // Opt-out: quem pediu para sair não é inscrito em cadência (nenhuma linha é criada). O worker confere de novo no envio.
+  // Erro de leitura SOBE: a inscrição falha em vez de entrar sem checagem.
+  if (phone && campaign.company_id) {
+    const { rows: optCompRows } = await query(`SELECT tenant_id FROM followup_companies WHERE id = $1 LIMIT 1`, [campaign.company_id]);
+    const optTenantId = optCompRows[0]?.tenant_id ? String(optCompRows[0].tenant_id) : null;
+    if (optTenantId && (await isPhoneOptedOut({ query }, { clientId: optTenantId, phone }))) {
+      return {
+        scheduleId: null,
+        enqueued: 0,
+        reason: "opt_out",
+        message: "Lead pediu para não receber mensagens.",
+        skippedSteps: [],
+      };
+    }
+  }
 
   const utmPresent = hasUtms(utms);
   const origin_type = originOverride ? "manual" : utmPresent ? "utm" : "default";
