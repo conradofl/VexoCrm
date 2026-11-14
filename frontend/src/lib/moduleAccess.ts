@@ -25,6 +25,8 @@ export const UNIVERSAL_SIDEBAR_KEYS = new Set([
   "admin",
   "onboarding",
   "equipe-usuarios",
+  "goclaw-gd",
+  "colaboradores-gd",
 ]);
 
 // Chaves da sidebar que falam de chip de WhatsApp. Para elas a pergunta não é

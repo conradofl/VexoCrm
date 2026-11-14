@@ -4,10 +4,12 @@ import { PageShell } from "@/components/PageShell";
 import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/use-toast";
 import {
   Bot,
@@ -16,6 +18,7 @@ import {
   CheckCircle2,
   XCircle,
   Play,
+  Pause,
   Save,
   MessageSquare,
   ShieldCheck,
@@ -23,10 +26,49 @@ import {
   Activity,
   Users,
   Terminal,
+  Plus,
+  Trash2,
+  UserPlus,
+  Phone,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { fetchApi } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { podeVerClientesGd } from "@/lib/gdClientes";
+
+export interface HeloisaUsuario {
+  id: string;
+  client_id: string;
+  nome: string;
+  telefone: string;
+  papel: string;
+  ativo: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export function formatarTelefoneExibicao(tel: string) {
+  const digits = String(tel || "").replace(/\D/g, "");
+  if (!digits) return "—";
+  if (digits.startsWith("55") && digits.length >= 12) {
+    const ddd = digits.slice(2, 4);
+    const rest = digits.slice(4);
+    if (rest.length === 9) {
+      return `+55 (${ddd}) ${rest.slice(0, 5)}-${rest.slice(5)}`;
+    }
+    if (rest.length === 8) {
+      return `+55 (${ddd}) ${rest.slice(0, 4)}-${rest.slice(4)}`;
+    }
+    return `+55 (${ddd}) ${rest}`;
+  }
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return tel;
+}
 
 interface GoclawRuntimeStatus {
   online: boolean;
@@ -76,6 +118,7 @@ const LANES_METADATA = [
 
 export function GeracaoDigitalGoclawConfig() {
   const { accessProfile, getIdToken } = useAuth();
+  const queryClient = useQueryClient();
   const temAcesso = podeVerClientesGd(accessProfile);
 
   const [activeLane, setActiveLane] = useState("heloisa");
@@ -181,6 +224,149 @@ export function GeracaoDigitalGoclawConfig() {
     },
   });
 
+  // ─── Query Usuários Autorizados Heloísa ────────────────────────────────────
+  const {
+    data: heloisaUsuarios = [],
+    isLoading: carregandoUsuarios,
+  } = useQuery<HeloisaUsuario[]>({
+    queryKey: ["heloisaUsuarios"],
+    queryFn: async () => {
+      const token = await getIdToken();
+      const res = await fetchApi("/api/goclaw/heloisa/usuarios", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Falha ao carregar usuários da Heloísa");
+      const json = await res.json();
+      return json.data || [];
+    },
+    enabled: temAcesso,
+  });
+
+  // Modal State
+  const [modalUsuarioAberto, setModalUsuarioAberto] = useState(false);
+  const [formNome, setFormNome] = useState("");
+  const [formTelefone, setFormTelefone] = useState("");
+  const [formPapel, setFormPapel] = useState("Diretor");
+  const [formClientId, setFormClientId] = useState("geracao-digital");
+
+  const abrirModalCriarUsuario = () => {
+    setFormNome("");
+    setFormTelefone("");
+    setFormPapel("Diretor");
+    setFormClientId("geracao-digital");
+    setModalUsuarioAberto(true);
+  };
+
+  // ─── Mutation Salvar Usuário ───────────────────────────────────────────────
+  const salvarUsuarioMutation = useMutation({
+    mutationFn: async () => {
+      const token = await getIdToken();
+      const res = await fetchApi("/api/goclaw/heloisa/usuarios", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          nome: formNome,
+          telefone: formTelefone,
+          papel: formPapel,
+          client_id: formClientId,
+          ativo: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Falha ao salvar número autorizado.");
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Número Autorizado!",
+        description: data.message || `O número de ${formNome} foi autorizado na Heloísa com sucesso.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["heloisaUsuarios"] });
+      setModalUsuarioAberto(false);
+      setFormNome("");
+      setFormTelefone("");
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Erro ao cadastrar",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // ─── Mutation Alternar Ativo/Pausar ────────────────────────────────────────
+  const toggleAtivoMutation = useMutation({
+    mutationFn: async ({ id, ativoAtual }: { id: string; ativoAtual: boolean }) => {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/goclaw/heloisa/usuarios/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ ativo: !ativoAtual }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Falha ao atualizar status.");
+      }
+      return res.json();
+    },
+    onSuccess: (_, vars) => {
+      toast({
+        title: vars.ativoAtual ? "Acesso Pausado" : "Acesso Ativado",
+        description: vars.ativoAtual
+          ? "O número foi pausado e não executará comandos temporariamente."
+          : "O número agora está ativo e autorizado a enviar comandos para a Heloísa.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["heloisaUsuarios"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Erro",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // ─── Mutation Excluir Usuário ──────────────────────────────────────────────
+  const excluirUsuarioMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getIdToken();
+      const res = await fetchApi(`/api/goclaw/heloisa/usuarios/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Falha ao excluir número.");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Número Removido",
+        description: "O número foi desautorizado da Heloísa com sucesso.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["heloisaUsuarios"] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Erro ao remover",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   if (!temAcesso) {
     return (
       <PageShell title="GoClaw Engine">
@@ -247,46 +433,118 @@ export function GeracaoDigitalGoclawConfig() {
           {/* Card Heloísa */}
           <Card className="rounded-2xl border-purple-200 dark:border-purple-900/50 bg-gradient-to-br from-purple-50/50 to-white dark:from-purple-950/20 dark:to-slate-900 md:col-span-2 shadow-sm">
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-xl bg-purple-600 text-white">
+                  <div className="p-2 rounded-xl bg-purple-600 text-white shrink-0">
                     <Sparkles className="h-5 w-5" />
                   </div>
                   <div>
-                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white">
+                    <CardTitle className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                       Heloísa · Secretária Executiva dos Sócios
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      Canal exclusivo para Conrado Finzi e Caio Almeida no WhatsApp
+                      Controle dinâmico de diretores autorizados a acionar a secretária no WhatsApp
                     </CardDescription>
                   </div>
                 </div>
-                <Badge className="bg-purple-600 text-white text-xs">WhatsApp Ativo</Badge>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={abrirModalCriarUsuario}
+                    className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-8 gap-1.5 shadow-sm"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    + Adicionar Número / Diretor
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-white/10">
-                  <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Users className="h-3.5 w-3.5 text-purple-600" />
-                    Conrado Finzi
+              {/* Listagem Dinâmica dos Usuários Autorizados */}
+              <div className="space-y-2 pt-1">
+                {carregandoUsuarios ? (
+                  <div className="p-6 text-center text-slate-400">Carregando diretores autorizados...</div>
+                ) : heloisaUsuarios.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 border border-dashed rounded-xl">
+                    Nenhum número cadastrado. Clique no botão acima para adicionar.
                   </div>
-                  <div className="text-slate-500 font-mono mt-0.5">+55 (34) 99781-7660</div>
-                  <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ Autorizado para áudio e comandos
-                  </div>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {heloisaUsuarios.map((u) => (
+                      <div
+                        key={u.id}
+                        className={cn(
+                          "p-3 rounded-xl bg-white dark:bg-slate-800/80 border transition-all flex flex-col justify-between gap-2.5",
+                          u.ativo
+                            ? "border-purple-200 dark:border-purple-900/40 shadow-xs"
+                            : "border-slate-200 dark:border-white/10 opacity-70"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <Users className="h-3.5 w-3.5 text-purple-600 shrink-0" />
+                              <span>{u.nome}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-medium">
+                              {u.papel} {u.client_id ? `· ${u.client_id}` : ""}
+                            </div>
+                          </div>
+                          <Badge
+                            variant={u.ativo ? "default" : "secondary"}
+                            className={cn(
+                              "text-[10px] px-1.5 py-0 font-medium",
+                              u.ativo
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                                : "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400"
+                            )}
+                          >
+                            {u.ativo ? "Ativo" : "Pausado"}
+                          </Badge>
+                        </div>
 
-                <div className="p-3 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-white/10">
-                  <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Users className="h-3.5 w-3.5 text-purple-600" />
-                    Caio Almeida
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-white/5">
+                          <a
+                            href={`https://wa.me/${u.telefone}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-slate-600 dark:text-slate-300 font-mono text-xs hover:text-purple-600 transition-colors flex items-center gap-1"
+                          >
+                            <MessageSquare className="h-3 w-3 text-emerald-500" />
+                            {formatarTelefoneExibicao(u.telefone)}
+                          </a>
+
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-slate-500 hover:text-slate-800 dark:hover:text-white"
+                              title={u.ativo ? "Pausar autorização" : "Ativar autorização"}
+                              onClick={() => toggleAtivoMutation.mutate({ id: u.id, ativoAtual: u.ativo })}
+                              disabled={toggleAtivoMutation.isPending}
+                            >
+                              {u.ativo ? <Pause className="h-3.5 w-3.5 text-amber-500" /> : <Play className="h-3.5 w-3.5 text-emerald-500" />}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-slate-400 hover:text-red-600 dark:hover:text-red-400"
+                              title="Remover autorização"
+                              onClick={() => {
+                                if (confirm(`Deseja desautorizar "${u.nome}" da Heloísa?`)) {
+                                  excluirUsuarioMutation.mutate(u.id);
+                                }
+                              }}
+                              disabled={excluirUsuarioMutation.isPending}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="text-slate-500 font-mono mt-0.5">+55 (34) 99771-7779</div>
-                  <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">
-                    ✓ Autorizado para áudio e comandos
-                  </div>
-                </div>
+                )}
               </div>
 
               <div className="p-3 rounded-xl bg-slate-100/70 dark:bg-slate-800/40 border border-slate-200 dark:border-white/10 space-y-1.5">
@@ -441,6 +699,96 @@ export function GeracaoDigitalGoclawConfig() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Modal Adicionar / Editar Número Heloísa */}
+      <Dialog open={modalUsuarioAberto} onOpenChange={setModalUsuarioAberto}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-600" />
+              + Adicionar Número / Diretor
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Cadastre o número de WhatsApp do diretor ou gestor para autorizar comandos e áudios com a Heloísa.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-2 text-xs">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Nome Completo *
+              </Label>
+              <Input
+                placeholder="Ex: Conrado Finzi"
+                value={formNome}
+                onChange={(e) => setFormNome(e.target.value)}
+                className="h-9 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                WhatsApp com DDD *
+              </Label>
+              <Input
+                placeholder="Ex: (34) 99781-7660 ou 34997817660"
+                value={formTelefone}
+                onChange={(e) => setFormTelefone(e.target.value)}
+                className="h-9 text-xs font-mono"
+              />
+              <span className="text-[10px] text-slate-400">
+                O número será normalizado e validado automaticamente com código do país 55.
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Cargo / Papel
+                </Label>
+                <Input
+                  placeholder="Ex: Diretor Executivo"
+                  value={formPapel}
+                  onChange={(e) => setFormPapel(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Empresa / Tenant
+                </Label>
+                <Input
+                  placeholder="Ex: geracao-digital"
+                  value={formClientId}
+                  onChange={(e) => setFormClientId(e.target.value)}
+                  className="h-9 text-xs"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setModalUsuarioAberto(false)}
+              className="text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => salvarUsuarioMutation.mutate()}
+              disabled={salvarUsuarioMutation.isPending || !formNome.trim() || !formTelefone.trim()}
+              className="bg-purple-600 hover:bg-purple-700 text-white text-xs gap-1.5"
+            >
+              <Save className="h-3.5 w-3.5" />
+              {salvarUsuarioMutation.isPending ? "Salvando..." : "Salvar Número"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

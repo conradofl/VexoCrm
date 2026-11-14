@@ -7,7 +7,9 @@ vi.mock("../services/evolution.js", () => ({
 
 import {
   identificarDiretor,
+  identificarUsuarioAutorizado,
   isHeloisaAuthorizedSender,
+  isHeloisaAuthorizedSenderAsync,
   executarCadastrarCliente,
   executarCobrarColaborador,
   executarAgendarCompromisso,
@@ -39,6 +41,43 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     // Desconhecido
     expect(identificarDiretor("5511999999999")).toBeNull();
     expect(isHeloisaAuthorizedSender("5511999999999")).toBe(false);
+  });
+
+  it("identificarUsuarioAutorizado consulta tabela heloisa_usuarios_autorizados com fallback", async () => {
+    const mockPoolComUsuario = {
+      query: vi.fn().mockResolvedValue({
+        rows: [
+          {
+            id: "user-gabriel",
+            client_id: "geracao-digital",
+            nome: "Gabriel Gestor",
+            telefone: "5534996916397",
+            papel: "Gestor de Operações",
+            ativo: true,
+          },
+        ],
+      }),
+    };
+
+    // Usuário cadastrado no banco ativo
+    const gabriel = await identificarUsuarioAutorizado("5534996916397", mockPoolComUsuario);
+    expect(gabriel).not.toBeNull();
+    expect(gabriel.nome).toBe("Gabriel Gestor");
+    expect(gabriel.papel).toBe("Gestor de Operações");
+
+    const authGabriel = await isHeloisaAuthorizedSenderAsync("5534996916397", mockPoolComUsuario);
+    expect(authGabriel).toBe(true);
+
+    // Fallback de segurança para Conrado caso banco não tenha a linha
+    const conrado = await identificarUsuarioAutorizado("5534997817660", mockPoolComUsuario);
+    expect(conrado).not.toBeNull();
+    expect(conrado.nome).toBe("Conrado Finzi");
+
+    // Desconhecido
+    const desconhecido = await identificarUsuarioAutorizado("5511999999999", mockPoolComUsuario);
+    expect(desconhecido).toBeNull();
+    const authDesconhecido = await isHeloisaAuthorizedSenderAsync("5511999999999", mockPoolComUsuario);
+    expect(authDesconhecido).toBe(false);
   });
 
   it("executa cadastrar_cliente inserindo no banco de dados", async () => {

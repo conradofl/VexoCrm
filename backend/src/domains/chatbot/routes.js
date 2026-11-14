@@ -57,7 +57,7 @@ import {
 } from "../../services/inboxWorkState.js";
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
-import { isHeloisaAuthorizedSender, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
+import { isHeloisaAuthorizedSender, isHeloisaAuthorizedSenderAsync, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
 import { defaultLlmModel, providerOfModelId } from "../../services/llmModels.js";
 import {
@@ -3220,7 +3220,7 @@ export function registerChatbotRoutes(app, deps) {
       (instanceName && instanceName.toLowerCase().includes("heloisa")) ||
       req.query?.lane === "heloisa" ||
       req.query?.agent === "heloisa";
-    const isDirector = isHeloisaAuthorizedSender(phone);
+    const isDirector = (await isHeloisaAuthorizedSenderAsync(phone, pgDatabasePool)) || isHeloisaAuthorizedSender(phone);
     const hasHeloisaPrefix = /^(helo[ií]sa|[!\/]h)\b/i.test(messageData?.text || "");
 
     if (!fromMe && (isHeloisaTarget || (isDirector && hasHeloisaPrefix))) {

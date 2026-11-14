@@ -51,6 +51,51 @@ export function isHeloisaAuthorizedSender(phone) {
   return Boolean(identificarDiretor(phone));
 }
 
+export async function identificarUsuarioAutorizado(phone, pool = pgDatabasePool) {
+  const limpo = normalizarTelefoneHeloisa(phone);
+  if (!limpo) return null;
+
+  // 1. Consulta no banco na tabela heloisa_usuarios_autorizados
+  if (pool && typeof pool.query === "function") {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, client_id, nome, telefone, papel, ativo
+         FROM public.heloisa_usuarios_autorizados
+         WHERE ativo = true`
+      );
+
+      for (const u of rows) {
+        const uTel = normalizarTelefoneHeloisa(u.telefone);
+        if (
+          limpo === uTel ||
+          (uTel.length >= 8 && limpo.endsWith(uTel.slice(4))) ||
+          (limpo.length >= 8 && uTel.endsWith(limpo.slice(4)))
+        ) {
+          return {
+            id: u.id,
+            chave: u.nome.toLowerCase().replace(/\s+/g, "_"),
+            nome: u.nome,
+            telefone: u.telefone,
+            papel: u.papel,
+            client_id: u.client_id,
+            ativo: u.ativo,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[Heloísa] Aviso ao consultar heloisa_usuarios_autorizados, usando fallback:", err.message);
+    }
+  }
+
+  // 2. Fallback de segurança em memória: Conrado e Caio
+  return identificarDiretor(phone);
+}
+
+export async function isHeloisaAuthorizedSenderAsync(phone, pool = pgDatabasePool) {
+  const user = await identificarUsuarioAutorizado(phone, pool);
+  return Boolean(user);
+}
+
 // ─── Ferramentas de Execução da Heloísa ───────────────────────────────────────
 
 export async function executarCadastrarCliente({ nome, telefone, empresa, valor, escopo }, pool = pgDatabasePool) {
@@ -432,7 +477,7 @@ export async function processarMensagemHeloisa({
   instanceName = "heloisa",
   pool = pgDatabasePool,
 }) {
-  const diretor = identificarDiretor(phone);
+  const diretor = await identificarUsuarioAutorizado(phone, pool);
   if (!diretor) {
     console.warn(`[Heloísa] Mensagem recebida de remetente não autorizado: ${phone}`);
     return {
