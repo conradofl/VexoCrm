@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageShell } from "@/components/PageShell";
-import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -383,8 +382,6 @@ export function GeracaoDigitalGoclawConfig() {
 
   return (
     <PageShell title="GoClaw Engine - Agente Autônomo & Heloísa">
-      <GeracaoDigitalTabs />
-
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header com Status do Runtime */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -659,18 +656,16 @@ export function GeracaoDigitalGoclawConfig() {
                 <button
                   key={l.key}
                   onClick={() => setActiveLane(l.key)}
-                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 border whitespace-nowrap ${
-                    activeLane === l.key
-                      ? "bg-purple-600 text-white border-purple-600 shadow-sm"
-                      : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100"
-                  }`}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 border whitespace-nowrap ${activeLane === l.key
+                    ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                    : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-100"
+                    }`}
                 >
                   <span>{l.nome}</span>
                   <Badge
                     variant="outline"
-                    className={`text-[10px] px-1.5 py-0 ${
-                      activeLane === l.key ? "bg-white/20 text-white border-white/30" : ""
-                    }`}
+                    className={`text-[10px] px-1.5 py-0 ${activeLane === l.key ? "bg-white/20 text-white border-white/30" : ""
+                      }`}
                   >
                     {l.tag}
                   </Badge>

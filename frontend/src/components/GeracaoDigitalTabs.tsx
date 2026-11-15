@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Briefcase, ListChecks, FileText, Layers, LayoutDashboard, Users, UserCheck, Bot } from "lucide-react";
+import { Briefcase, ListChecks, FileText, Layers, LayoutDashboard, Users } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { podeVerClientesGd } from "@/lib/gdClientes";
 
@@ -18,14 +18,10 @@ export function GeracaoDigitalTabs() {
   const hasContratos = isInternalUser;
   const hasImplantacao = false;
   const hasClientes = podeVerClientesGd(accessProfile);
-  const hasEquipe = podeVerClientesGd(accessProfile);
-  const hasGoclaw = podeVerClientesGd(accessProfile);
 
   // Determine active tab based on path name
   let activeTab = "";
-  if (location.pathname.includes("colaboradores-gd")) activeTab = "equipe";
-  else if (location.pathname.includes("goclaw-gd")) activeTab = "goclaw";
-  else if (location.pathname.includes("clientes-gd")) activeTab = "clientes";
+  if (location.pathname.includes("clientes-gd")) activeTab = "clientes";
   else if (location.pathname.includes("dashboard-gd")) activeTab = "dashboard";
   else if (location.pathname.includes("apresentacao-gd")) activeTab = "apresentacao";
   else if (location.pathname.includes("implantacao-gd")) activeTab = "implantacao";
@@ -35,9 +31,7 @@ export function GeracaoDigitalTabs() {
   else if (location.pathname.includes("contratos-gd")) activeTab = "contratos";
 
   const handleTabChange = (val: string) => {
-    if (val === "equipe") navigate("/crm/colaboradores-gd");
-    else if (val === "goclaw") navigate("/crm/goclaw-gd");
-    else if (val === "clientes") navigate("/crm/clientes-gd");
+    if (val === "clientes") navigate("/crm/clientes-gd");
     else if (val === "dashboard") navigate("/crm/dashboard-gd");
     else if (val === "apresentacao") navigate("/crm/apresentacao-gd");
     else if (val === "implantacao") navigate("/crm/implantacao-gd");
@@ -97,18 +91,6 @@ export function GeracaoDigitalTabs() {
             <TabsTrigger value="clientes" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
               <Users className="h-3.5 w-3.5 mr-1.5" />
               Clientes
-            </TabsTrigger>
-          )}
-          {hasEquipe && (
-            <TabsTrigger value="equipe" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
-              <UserCheck className="h-3.5 w-3.5 mr-1.5" />
-              Equipe GD
-            </TabsTrigger>
-          )}
-          {hasGoclaw && (
-            <TabsTrigger value="goclaw" className="flex-1 flex-shrink-0 px-3 md:px-4 text-xs font-bold data-[state=active]:bg-white dark:data-[state=active]:bg-slate-800 data-[state=active]:text-purple-650 data-[state=active]:shadow-sm">
-              <Bot className="h-3.5 w-3.5 mr-1.5 text-purple-600" />
-              GoClaw (Agente)
             </TabsTrigger>
           )}
         </TabsList>

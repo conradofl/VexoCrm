@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PageShell } from "@/components/PageShell";
-import { GeracaoDigitalTabs } from "@/components/GeracaoDigitalTabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -196,8 +195,6 @@ export function GeracaoDigitalColaboradores() {
 
   return (
     <PageShell title="Colaboradores GD - Equipe & Cobranças">
-      <GeracaoDigitalTabs />
-
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm">
           <div>
