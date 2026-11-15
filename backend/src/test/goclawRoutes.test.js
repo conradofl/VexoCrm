@@ -580,5 +580,88 @@ describe("Rotas de Gestão do GoClaw (goclaw/routes.js)", () => {
       expect(json.executedTools[0].name).toBe("auditar_geral_vexo");
       expect(capturedBody).toContain("Oi Heloísa");
     });
+
+    it("executa a ferramenta enviar_mensagem_whatsapp para enviar WhatsApp ao Conrado", async () => {
+      let whatsappDisparado = false;
+      const spyFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
+        const urlStr = String(url);
+        if (urlStr.includes("message/sendText")) {
+          whatsappDisparado = true;
+          return {
+            ok: true,
+            text: async () => JSON.stringify({ key: { id: "wa_msg_mock_123" } }),
+          };
+        }
+        if (urlStr.includes("audio/speech")) {
+          return {
+            ok: true,
+            arrayBuffer: async () => Buffer.from("mock-audio-mp3-bytes"),
+          };
+        }
+        if (urlStr.includes("generativelanguage") || urlStr.includes("groq") || urlStr.includes("1337") || urlStr.includes("openai")) {
+          const bodyStr = opts?.body ? String(opts.body) : "";
+          if (bodyStr.includes('"role":"tool"')) {
+            return {
+              ok: true,
+              json: async () => ({
+                choices: [
+                  {
+                    message: {
+                      role: "assistant",
+                      content: "Mensagem de follow-up enviada com sucesso no WhatsApp do Conrado Finzi.",
+                    },
+                  },
+                ],
+              }),
+            };
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        id: "call_send_wa_1",
+                        function: {
+                          name: "enviar_mensagem_whatsapp",
+                          arguments: JSON.stringify({
+                            destinatario: "Conrado",
+                            mensagem: "Olá Conrado, segue o resumo do follow-up.",
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          };
+        }
+        return originalFetch(url, opts);
+      });
+
+      const res = await originalFetch(`${base}/api/goclaw/heloisa/voice-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Heloísa, envie uma mensagem de follow-up para o Conrado no WhatsApp",
+          currentPage: "/crm/dashboard",
+        }),
+      });
+
+      spyFetch.mockRestore();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.executedTools.length).toBe(1);
+      expect(json.executedTools[0].name).toBe("enviar_mensagem_whatsapp");
+      expect(json.executedTools[0].resultado.sucesso).toBe(true);
+      expect(json.executedTools[0].resultado.destinatario).toBe("Conrado Finzi");
+      expect(whatsappDisparado).toBe(true);
+    });
   });
 });

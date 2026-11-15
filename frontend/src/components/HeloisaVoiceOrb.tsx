@@ -52,11 +52,29 @@ function formatToolBadge(tool: ExecutedTool) {
         variant: "border-emerald-500/40 bg-emerald-950/40 text-emerald-300",
       };
     case "cobrar_colaborador":
+    case "enviar_mensagem_whatsapp": {
+      const falhou = tool.resultado && tool.resultado.sucesso === false;
+      const dest =
+        tool.args?.destinatario ||
+        tool.args?.colaborador ||
+        tool.resultado?.destinatario ||
+        tool.resultado?.colaborador ||
+        "Destinatário";
+
       return {
-        icon: <MessageSquare className="h-3 w-3 mr-1 text-sky-400" />,
-        label: `${tool.args?.colaborador || "Colaborador"} cobrado no WhatsApp`,
-        variant: "border-sky-500/40 bg-sky-950/40 text-sky-300",
+        icon: falhou ? (
+          <AlertCircle className="h-3 w-3 mr-1 text-rose-400" />
+        ) : (
+          <MessageSquare className="h-3 w-3 mr-1 text-emerald-400" />
+        ),
+        label: falhou
+          ? `Falha no envio para ${dest}: ${tool.resultado?.erro || "Chip desconectado"}`
+          : `WhatsApp enviado para ${dest}`,
+        variant: falhou
+          ? "border-rose-500/40 bg-rose-950/40 text-rose-300"
+          : "border-emerald-500/40 bg-emerald-950/40 text-emerald-300",
       };
+    }
     case "agendar_compromisso":
       return {
         icon: <Calendar className="h-3 w-3 mr-1 text-purple-400" />,

@@ -138,45 +138,220 @@ export async function executarCadastrarCliente({ nome, telefone, empresa, valor,
   }
 }
 
-export async function executarCobrarColaborador({ colaborador, mensagem }, pool = pgDatabasePool, instanceName = process.env.GD_EVOLUTION_INSTANCE || "heloisa") {
+export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantId = "geracao-digital") {
+  try {
+    if (process.env.GD_EVOLUTION_INSTANCE && process.env.GD_EVOLUTION_INSTANCE !== "heloisa") {
+      return process.env.GD_EVOLUTION_INSTANCE;
+    }
+
+    if (pool && typeof pool.query === "function") {
+      const { rows } = await pool.query(
+        `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url
+         FROM public.lead_client_evolution_instances
+         WHERE active = true
+         ORDER BY (connection_state = 'open') DESC, is_default DESC, id DESC
+         LIMIT 20`
+      ).catch(() => ({ rows: [] }));
+
+      if (rows && rows.length > 0) {
+        const doTenant = rows.find(
+          (r) => r.client_id === tenantId && (r.connection_state === "open" || !r.connection_state)
+        );
+        if (doTenant?.name) return doTenant.name;
+
+        const aberta = rows.find((r) => r.connection_state === "open");
+        if (aberta?.name) return aberta.name;
+
+        if (rows[0]?.name) return rows[0].name;
+      }
+    }
+  } catch (err) {
+    console.warn("[Heloísa] Falha ao consultar instâncias ativas do banco:", err.message);
+  }
+
+  // Fallbacks verificados diretamente na Evolution API
+  return "geracao-digital-teste-vexo";
+}
+
+export async function executarEnviarMensagemWhatsApp(
+  { destinatario, mensagem, telefone = null, tenant_id = null },
+  pool = pgDatabasePool,
+  instanceName = null
+) {
+  try {
+    const dest = String(destinatario || "").trim();
+    const msg = String(mensagem || "").trim();
+    if (!msg) return { sucesso: false, erro: "O texto da mensagem é obrigatório." };
+
+    let numeroNormalizado = null;
+    let nomeFinal = dest || "Destinatário";
+
+    // 1. Telefone explícito ou se destinatário já for número
+    const rawNumber = String(telefone || dest).replace(/\D/g, "");
+    if (rawNumber.length >= 10 && rawNumber.length <= 13) {
+      numeroNormalizado = rawNumber.startsWith("55") ? rawNumber : `55${rawNumber}`;
+    }
+
+    // 2. Busca por nome conhecido
+    if (!numeroNormalizado) {
+      const destLower = dest.toLowerCase();
+
+      if (destLower.includes("conrado")) {
+        numeroNormalizado = "5534997817660";
+        nomeFinal = "Conrado Finzi";
+      } else if (destLower.includes("caio")) {
+        numeroNormalizado = "5534997719779";
+        nomeFinal = "Caio Almeida";
+      }
+
+      // Busca em heloisa_usuarios_autorizados
+      if (!numeroNormalizado && pool && typeof pool.query === "function") {
+        const { rows: diretores } = await pool.query(
+          `SELECT nome, telefone FROM public.heloisa_usuarios_autorizados WHERE ativo = true AND LOWER(nome) LIKE $1 LIMIT 1`,
+          [`%${destLower}%`]
+        ).catch(() => ({ rows: [] }));
+        if (diretores.length > 0) {
+          numeroNormalizado = String(diretores[0].telefone).replace(/\D/g, "");
+          nomeFinal = diretores[0].nome;
+        }
+      }
+
+      // Busca em gd_colaboradores
+      if (!numeroNormalizado && pool && typeof pool.query === "function") {
+        const { rows: colabs } = await pool.query(
+          `SELECT nome, telefone FROM public.gd_colaboradores WHERE ativo = true AND (LOWER(nome) LIKE $1 OR LOWER(funcao) LIKE $1) LIMIT 1`,
+          [`%${destLower}%`]
+        ).catch(() => ({ rows: [] }));
+        if (colabs.length > 0) {
+          numeroNormalizado = String(colabs[0].telefone).replace(/\D/g, "");
+          nomeFinal = colabs[0].nome;
+        }
+      }
+
+      // Busca em gd_clientes ou leads
+      if (!numeroNormalizado && pool && typeof pool.query === "function") {
+        const { rows: clientes } = await pool.query(
+          `SELECT nome, telefone FROM public.gd_clientes WHERE LOWER(nome) LIKE $1 OR LOWER(empresa) LIKE $1 LIMIT 1`,
+          [`%${destLower}%`]
+        ).catch(() => ({ rows: [] }));
+        if (clientes.length > 0 && clientes[0].telefone) {
+          numeroNormalizado = String(clientes[0].telefone).replace(/\D/g, "");
+          nomeFinal = clientes[0].nome;
+        }
+      }
+    }
+
+    if (!numeroNormalizado) {
+      return {
+        sucesso: false,
+        erro: `Não encontrei o telefone de "${dest}". Por favor, especifique o número com DDD.`,
+      };
+    }
+
+    if (!numeroNormalizado.startsWith("55") && (numeroNormalizado.length === 10 || numeroNormalizado.length === 11)) {
+      numeroNormalizado = `55${numeroNormalizado}`;
+    }
+
+    const effectiveInstance =
+      instanceName ||
+      (await obterInstanciaWhatsAppAtiva(pool, tenant_id || "geracao-digital"));
+
+    const baseUrl =
+      process.env.GD_EVOLUTION_URL ||
+      process.env.EVOLUTION_API_URL ||
+      "https://vexo-evolution-api.xdvm8y.easypanel.host";
+
+    console.log(`[Heloísa] Disparando WhatsApp para ${nomeFinal} (${numeroNormalizado}) via instância "${effectiveInstance}"`);
+
+    const envio = await sendTextMessageViaEvolution({
+      instanceName: effectiveInstance,
+      number: numeroNormalizado,
+      text: msg,
+      baseUrl,
+    });
+
+    return {
+      sucesso: true,
+      destinatario: nomeFinal,
+      telefone: numeroNormalizado,
+      instanceName: effectiveInstance,
+      mensagem: msg,
+      waMessageId: envio?.waMessageId || null,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao enviar mensagem WhatsApp:", err);
+    return {
+      sucesso: false,
+      erro: err.message || "Falha ao enviar mensagem pelo WhatsApp.",
+    };
+  }
+}
+
+export async function executarCobrarColaborador({ colaborador, mensagem }, pool = pgDatabasePool, instanceName = null) {
   try {
     const termo = String(colaborador || "").trim().toLowerCase();
     if (!termo) return { sucesso: false, erro: "Nome ou função do colaborador não informada." };
 
-    // Busca o colaborador no banco
-    const { rows } = await pool.query(
-      `SELECT id, nome, funcao, telefone, recebe_cobranca_whatsapp, ativo
-       FROM public.gd_colaboradores
-       WHERE ativo = true AND (LOWER(nome) LIKE $1 OR LOWER(funcao) LIKE $1)
-       LIMIT 1`,
-      [`%${termo}%`]
-    );
+    let colab = null;
 
-    if (rows.length === 0) {
-      return {
-        sucesso: false,
-        erro: `Não encontrei nenhum colaborador ativo na equipe com o termo "${colaborador}".`,
-      };
+    if (termo.includes("conrado")) {
+      colab = { nome: "Conrado Finzi", funcao: "Diretor / Sócio", telefone: "5534997817660" };
+    } else if (termo.includes("caio")) {
+      colab = { nome: "Caio Almeida", funcao: "Diretor / Sócio", telefone: "5534997719779" };
+    } else {
+      // Busca o colaborador no banco
+      const { rows } = await pool.query(
+        `SELECT id, nome, funcao, telefone, recebe_cobranca_whatsapp, ativo
+         FROM public.gd_colaboradores
+         WHERE ativo = true AND (LOWER(nome) LIKE $1 OR LOWER(funcao) LIKE $1)
+         LIMIT 1`,
+        [`%${termo}%`]
+      );
+
+      if (rows.length === 0) {
+        return {
+          sucesso: false,
+          erro: `Não encontrei nenhum colaborador ativo na equipe com o termo "${colaborador}".`,
+        };
+      }
+
+      colab = rows[0];
     }
 
-    const colab = rows[0];
+    let telCanonico = String(colab.telefone).replace(/\D/g, "");
+    if (!telCanonico.startsWith("55") && (telCanonico.length === 10 || telCanonico.length === 11)) {
+      telCanonico = `55${telCanonico}`;
+    }
+
+    const effectiveInstance =
+      instanceName ||
+      (await obterInstanciaWhatsAppAtiva(pool, "geracao-digital"));
+
+    const baseUrl =
+      process.env.GD_EVOLUTION_URL ||
+      process.env.EVOLUTION_API_URL ||
+      "https://vexo-evolution-api.xdvm8y.easypanel.host";
+
     const textoMensagem = `Olá ${colab.nome}! Aqui é a *Heloísa* (Secretária Executiva da Diretoria).\n\n${mensagem}\n\n_Mensagem enviada sob orientação da diretoria da Geração Digital._`;
 
     // Dispara WhatsApp real
-    await sendTextMessageViaEvolution({
-      instanceName,
-      number: colab.telefone,
+    const envio = await sendTextMessageViaEvolution({
+      instanceName: effectiveInstance,
+      number: telCanonico,
       text: textoMensagem,
+      baseUrl,
     });
 
-    console.log(`[Heloísa] Cobrança/Aviso enviado para ${colab.nome} (${colab.telefone})`);
+    console.log(`[Heloísa] Cobrança/Aviso enviado para ${colab.nome} (${telCanonico}) via ${effectiveInstance}`);
 
     return {
       sucesso: true,
       colaborador: colab.nome,
       funcao: colab.funcao,
-      telefone: colab.telefone,
+      telefone: telCanonico,
+      instanceName: effectiveInstance,
       mensagem: `Mensagem enviada com sucesso no WhatsApp de ${colab.nome} (${colab.funcao}).`,
+      waMessageId: envio?.waMessageId || null,
     };
   } catch (err) {
     console.error("[Heloísa] Erro ao cobrar colaborador:", err);
@@ -435,6 +610,35 @@ export const HELOISA_TOOLS = [
           escopo: { type: "string", description: "Escopo contratado (ex: Social Media, Tráfego Pago, Vexo)" },
         },
         required: ["nome"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "enviar_mensagem_whatsapp",
+      description: "Envia uma mensagem real e direta no WhatsApp para qualquer pessoa: diretores (Conrado Finzi, Caio Almeida), colaboradores (Santana, Duda, Éflen, Humberto, etc.), clientes ou qualquer número de telefone (com DDD). Use SEMPRE que o usuário pedir para enviar mensagem, mandar WhatsApp, cobrar, avisar ou fazer follow-up por WhatsApp.",
+      parameters: {
+        type: "object",
+        properties: {
+          destinatario: {
+            type: "string",
+            description: "Nome da pessoa (ex: Conrado, Caio, Santana, cliente) ou número de telefone direto com DDD (ex: 34997817660)",
+          },
+          mensagem: {
+            type: "string",
+            description: "Conteúdo da mensagem a ser enviada no WhatsApp",
+          },
+          telefone: {
+            type: "string",
+            description: "Telefone com DDD se disponível (opcional)",
+          },
+          tenant_id: {
+            type: "string",
+            description: "ID do tenant se houver um específico (opcional)",
+          },
+        },
+        required: ["destinatario", "mensagem"],
       },
     },
   },
@@ -721,6 +925,8 @@ export async function processarMensagemHeloisa({
     let resultado = null;
     if (fnName === "cadastrar_cliente") {
       resultado = await executarCadastrarCliente(args, pool);
+    } else if (fnName === "enviar_mensagem_whatsapp") {
+      resultado = await executarEnviarMensagemWhatsApp(args, pool, instanceName);
     } else if (fnName === "cobrar_colaborador") {
       resultado = await executarCobrarColaborador(args, pool, instanceName);
     } else if (fnName === "agendar_compromisso") {
@@ -1018,6 +1224,8 @@ ${compromissosTexto}
 
     if (fnName === "cadastrar_cliente") {
       resultado = await executarCadastrarCliente(args, pool);
+    } else if (fnName === "enviar_mensagem_whatsapp") {
+      resultado = await executarEnviarMensagemWhatsApp(args, pool);
     } else if (fnName === "cobrar_colaborador") {
       resultado = await executarCobrarColaborador(args, pool);
     } else if (fnName === "agendar_compromisso") {
@@ -1066,10 +1274,22 @@ ${compromissosTexto}
         messages: synthesisMessages,
         tools: HELOISA_TOOLS,
       });
-      responseText = finalAssistantMessage?.content || "Ação executada com sucesso.";
+
+      const primeiroErro = toolResults.find((tr) => tr.resultado && tr.resultado.sucesso === false)?.resultado?.erro;
+
+      if (primeiroErro && (!finalAssistantMessage?.content || finalAssistantMessage.content.toLowerCase().includes("sucesso"))) {
+        responseText = `Atenção: Houve uma falha no WhatsApp ao tentar enviar: ${primeiroErro}`;
+      } else {
+        responseText = finalAssistantMessage?.content || (primeiroErro ? `Houve uma falha: ${primeiroErro}` : "Ação executada com sucesso.");
+      }
     } catch (err) {
       console.warn("[Heloísa Voz] Falha ao sintetizar resposta de tools, usando fallback:", err.message);
-      responseText = "Ações operacionais solicitadas foram executadas com sucesso.";
+      const primeiroErro = toolResults.find((tr) => tr.resultado && tr.resultado.sucesso === false)?.resultado?.erro;
+      if (primeiroErro) {
+        responseText = `Não foi possível concluir o envio: ${primeiroErro}`;
+      } else {
+        responseText = "Mensagem enviada com sucesso no WhatsApp.";
+      }
     }
   }
 
