@@ -99,6 +99,7 @@ import { stopDueDispatchScheduler } from "./domains/campaigns/routes.js";
 import { startTrelloSlackScheduler, stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
 import { startGdVigiaScheduler, stopGdVigiaScheduler } from "./services/gdVigiaScheduler.js";
 import { startGdBriefingReminderScheduler, stopGdBriefingReminderScheduler } from "./services/gdBriefingReminderService.js";
+import { startTrafficCollectorScheduler, stopTrafficCollectorScheduler } from "./traffic/collectorScheduler.js";
 import { loadKnownLeadsColumns } from "./services/leadUpsert.js";
 // getSegmentationCatalog, normalizeSegmentationCatalog, isFilterShape, normalizeFilters,
 // leadMatchesSegmentation, buildDefaultSegmentationConfig, sanitizeSegmentationConfig ficaram
@@ -775,6 +776,7 @@ function startBackgroundServices() {
   startTrelloSlackScheduler();
   startGdVigiaScheduler();
   startGdBriefingReminderScheduler();
+  startTrafficCollectorScheduler();
   if (supabase) {
     setSupabaseClient(supabase);
   }
@@ -921,6 +923,7 @@ async function gracefulShutdown(signal) {
       stopTrelloSlackScheduler();
       stopGdVigiaScheduler();
       stopGdBriefingReminderScheduler();
+      stopTrafficCollectorScheduler();
       await Promise.allSettled([
         stopFollowupWorker(),
         stopRagWorker(),
