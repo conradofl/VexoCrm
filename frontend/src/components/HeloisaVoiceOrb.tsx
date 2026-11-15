@@ -18,6 +18,7 @@ import {
   Radio,
   CheckCircle2,
   Ear,
+  AlertCircle,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchApi } from "@/lib/api";
@@ -174,6 +175,7 @@ export function HeloisaVoiceOrb() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
+  const [audioLevel, setAudioLevel] = useState<number>(0);
 
   const [messages, setMessages] = useState<VoiceMessage[]>([
     {
@@ -192,6 +194,12 @@ export function HeloisaVoiceOrb() {
   const isOpenRef = useRef<boolean>(isOpen);
   const isMutedRef = useRef<boolean>(isMuted);
   const resumeListeningTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   // Mantém refs sincronizadas para callbacks assíncronos
   useEffect(() => {
@@ -212,12 +220,12 @@ export function HeloisaVoiceOrb() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && (e.key === "h" || e.key === "H")) {
         e.preventDefault();
-        setIsOpen((prev) => !prev);
+        toggleOpen();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Rolagem suave para o fim das mensagens
   useEffect(() => {
@@ -246,16 +254,71 @@ export function HeloisaVoiceOrb() {
       clearTimeout(resumeListeningTimerRef.current);
       resumeListeningTimerRef.current = null;
     }
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
         recognitionRef.current.abort();
       } catch {}
       recognitionRef.current = null;
     }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch {}
+      audioContextRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch {}
+      mediaStreamRef.current = null;
+    }
+    setAudioLevel(0);
     setLiveTranscript("");
   }, []);
 
-  // Iniciar escuta (somente se aberto e não estiver falando)
+  // Conecta AnalyserNode para medir volume e frequências reais do microfone
+  const conectarAudioAnalyser = useCallback((stream: MediaStream) => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const audioCtx = new AudioCtx();
+      audioContextRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVolumeLoop = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setAudioLevel(Math.min(100, Math.round((avg / 255) * 100)));
+        animationFrameRef.current = requestAnimationFrame(updateVolumeLoop);
+      };
+      updateVolumeLoop();
+    } catch (e) {
+      console.warn("[Heloísa] Aviso ao conectar analisador de áudio:", e);
+    }
+  }, []);
+
+  // Iniciar escuta via Web Speech API com tolerância a ciclo de vida
   const startListening = useCallback(() => {
     if (typeof window === "undefined") return;
     if (!isOpenRef.current || isSpeakingRef.current) return;
@@ -268,9 +331,11 @@ export function HeloisaVoiceOrb() {
       return;
     }
 
-    // Se já estiver rodando, não duplica
+    // Se já houver instância, limpa eventos para não disparar onend em cascata
     if (recognitionRef.current) {
       try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
         recognitionRef.current.abort();
       } catch {}
       recognitionRef.current = null;
@@ -302,9 +367,11 @@ export function HeloisaVoiceOrb() {
         const rawSpoken = (finalConcat || interim).trim();
         if (!rawSpoken) return;
 
-        // Se contiver o chamamento "Heloísa", limpa o prefixo para a ordem direta
+        // Se o usuário falou apenas "Heloísa", enviamos "Olá Heloísa" para ela responder cordialmente
+        const isJustWakeWord = /^helo[íi]sa[?!.]*$/i.test(rawSpoken);
         const cleanOrder = rawSpoken.replace(/^.*?\bhelo[íi]sa\b[,.]?\s*/i, "").trim();
-        const textoExibicao = cleanOrder || rawSpoken;
+        const textoExibicao = isJustWakeWord ? rawSpoken : (cleanOrder || rawSpoken);
+
         setLiveTranscript(textoExibicao);
         setStatus("ouvindo");
 
@@ -313,8 +380,8 @@ export function HeloisaVoiceOrb() {
           clearTimeout(silenceTimerRef.current);
         }
 
-        const comandoParaEnviar = cleanOrder || rawSpoken;
-        if (comandoParaEnviar && comandoParaEnviar.length >= 3) {
+        const comandoParaEnviar = isJustWakeWord ? "Olá Heloísa" : (cleanOrder || rawSpoken);
+        if (comandoParaEnviar && comandoParaEnviar.length >= 2) {
           silenceTimerRef.current = setTimeout(() => {
             if (!isSpeakingRef.current && comandoParaEnviar && isOpenRef.current) {
               enviarParaHeloisa({ text: comandoParaEnviar });
@@ -326,19 +393,24 @@ export function HeloisaVoiceOrb() {
 
       recognition.onerror = (e: any) => {
         if (e.error === "not-allowed") {
-          setErrorMessage("Permissão de microfone bloqueada pelo navegador.");
+          setErrorMessage(
+            "Microfone bloqueado pelo navegador. Clique no ícone de configurações ao lado do URL para permitir."
+          );
           setStatus("idle");
-        } else if (e.error !== "no-speech") {
+        } else if (e.error !== "no-speech" && e.error !== "aborted") {
           console.warn("[Heloísa SpeechRecognition] Info:", e.error);
         }
       };
 
       recognition.onend = () => {
-        // Reinicia escuta somente se o orbe continuar aberto e a Heloísa não estiver falando
+        recognitionRef.current = null;
+        // Reinicia com uma NOVA instância somente se o painel estiver aberto e não estiver falando
         if (isOpenRef.current && !isSpeakingRef.current) {
-          try {
-            recognition.start();
-          } catch {}
+          restartTimerRef.current = setTimeout(() => {
+            if (isOpenRef.current && !isSpeakingRef.current) {
+              startListening();
+            }
+          }, 200);
         }
       };
 
@@ -350,7 +422,7 @@ export function HeloisaVoiceOrb() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Interromper fala
+  // Interromper fala da Heloísa
   const pararFala = useCallback(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -365,24 +437,34 @@ export function HeloisaVoiceOrb() {
     setStatus("idle");
   }, []);
 
-  // Gerenciamento de ciclo de vida do microfone baseado em isOpen
-  useEffect(() => {
-    if (isOpen) {
-      // Quando abre o orbe, inicia escuta
+  // Solicita explicitamente o microfone e abre a orbe
+  const toggleOpen = async () => {
+    const nextState = !isOpen;
+    setIsOpen(nextState);
+
+    if (nextState) {
+      setErrorMessage(null);
+      try {
+        if (navigator.mediaDevices?.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaStreamRef.current = stream;
+          conectarAudioAnalyser(stream);
+        }
+      } catch (err: any) {
+        console.warn("[Heloísa] Permissão de microfone:", err);
+        if (err.name === "NotAllowedError" || err.message?.includes("Permission denied")) {
+          setErrorMessage("Permissão de microfone negada. Clique no ícone de cadeado do navegador para permitir.");
+        }
+      }
       startListening();
     } else {
-      // Quando fecha o orbe, encerra 100% o microfone e para qualquer fala
       stopListeningAndHardware();
       pararFala();
       setStatus("idle");
     }
+  };
 
-    return () => {
-      stopListeningAndHardware();
-    };
-  }, [isOpen, startListening, stopListeningAndHardware, pararFala]);
-
-  // Execução de áudio com fallback infalível para síntese nativa gratuita
+  // Reprodução de áudio com fallback infalível para síntese nativa gratuita
   const tocarRespostaVoz = useCallback(
     (audioBase64: string | null, responseText: string) => {
       if (isMutedRef.current) {
@@ -589,6 +671,31 @@ export function HeloisaVoiceOrb() {
     ]);
   };
 
+  // Botão interativo de Toque-para-Falar / Forçar Envio
+  const handleActionClick = () => {
+    if (status === "falando") {
+      pararFala();
+      return;
+    }
+
+    if (liveTranscript && liveTranscript.trim()) {
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
+      enviarParaHeloisa({ text: liveTranscript });
+      setLiveTranscript("");
+      return;
+    }
+
+    if (status === "ouvindo") {
+      // Já está ouvindo
+      return;
+    }
+
+    // Se estiver idle, reinicia escuta
+    startListening();
+  };
+
   return (
     <>
       <style>{`
@@ -603,8 +710,8 @@ export function HeloisaVoiceOrb() {
           }
         }
         @keyframes heloisaSineWave {
-          0%, 100% { height: 6px; transform: scaleY(0.7); }
-          50% { height: 28px; transform: scaleY(1.35); }
+          0%, 100% { height: 8px; transform: scaleY(0.7); }
+          50% { height: 32px; transform: scaleY(1.35); }
         }
         @keyframes heloisaOrbParticle {
           0% { transform: rotate(0deg) translateX(36px) rotate(0deg); opacity: 0.8; }
@@ -617,7 +724,7 @@ export function HeloisaVoiceOrb() {
         <div
           role="region"
           aria-label="Painel de Transcrição Heloísa"
-          className="fixed bottom-24 right-4 sm:right-6 z-50 w-[360px] sm:w-[420px] max-w-[calc(100vw-1.5rem)] h-[540px] max-h-[calc(100vh-7.5rem)] rounded-3xl backdrop-blur-2xl bg-slate-950/85 border border-purple-500/30 shadow-[0_25px_70px_rgba(79,70,229,0.35)] flex flex-col overflow-hidden text-slate-100 transition-all duration-300 animate-in fade-in slide-in-from-bottom-5"
+          className="fixed bottom-24 right-4 sm:right-6 z-50 w-[360px] sm:w-[430px] max-w-[calc(100vw-1.5rem)] h-[560px] max-h-[calc(100vh-7.5rem)] rounded-3xl backdrop-blur-2xl bg-slate-950/90 border border-purple-500/30 shadow-[0_25px_70px_rgba(79,70,229,0.35)] flex flex-col overflow-hidden text-slate-100 transition-all duration-300 animate-in fade-in slide-in-from-bottom-5"
         >
           {/* Cabeçalho Glassmorphism */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-purple-500/20 bg-gradient-to-r from-purple-950/60 via-slate-950/80 to-indigo-950/60">
@@ -649,7 +756,7 @@ export function HeloisaVoiceOrb() {
                     <Ear className="h-2.5 w-2.5" /> Voz Ativa
                   </Badge>
                 </div>
-                <p className="text-xs text-slate-400">Secretária Executiva • Vexo OS</p>
+                <p className="text-xs text-slate-400">Secretária Executiva Master • Vexo OS</p>
               </div>
             </div>
 
@@ -675,7 +782,7 @@ export function HeloisaVoiceOrb() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setIsOpen(false)}
+                onClick={toggleOpen}
                 className="h-8 w-8 text-slate-400 hover:text-white hover:bg-white/10"
                 title="Minimizar (Alt + H)"
               >
@@ -686,40 +793,64 @@ export function HeloisaVoiceOrb() {
 
           {/* Linha de Frequência Sonora Reativa e Status Neon */}
           <div className="relative px-4 py-3 bg-gradient-to-b from-purple-950/30 to-transparent border-b border-white/5 flex flex-col items-center justify-center">
-            {/* Visualizador de Ondas Senoidais Neon */}
-            <div className="flex items-center justify-center gap-1.5 h-10 w-full">
-              {[0.1, 0.25, 0.45, 0.65, 0.5, 0.35, 0.2, 0.55, 0.7].map((delay, idx) => (
-                <div
-                  key={idx}
-                  className={cn(
-                    "w-1.5 rounded-full transition-all duration-150",
-                    status === "ouvindo"
-                      ? "bg-gradient-to-t from-cyan-400 via-indigo-400 to-purple-400 shadow-[0_0_8px_#22d3ee]"
-                      : status === "falando"
-                      ? "bg-gradient-to-t from-purple-500 via-pink-400 to-cyan-300 shadow-[0_0_8px_#c084fc]"
-                      : status === "consultando"
-                      ? "bg-amber-400/80 shadow-[0_0_6px_#fbbf24]"
-                      : "bg-slate-700/60 h-2"
-                  )}
-                  style={{
-                    height: status === "ouvindo" || status === "falando" ? undefined : "6px",
-                    animation:
-                      status === "ouvindo" || status === "falando"
-                        ? `heloisaSineWave 0.85s ease-in-out infinite`
-                        : undefined,
-                    animationDelay: `${delay}s`,
-                  }}
-                />
-              ))}
+            {/* Visualizador de Ondas Senoidais Neon que reage a voz real do microfone */}
+            <div
+              onClick={handleActionClick}
+              className="cursor-pointer flex items-center justify-center gap-1.5 h-12 w-full px-4 rounded-2xl hover:bg-white/5 transition-all group"
+              title="Toque para falar ou enviar"
+            >
+              {[0.1, 0.25, 0.45, 0.65, 0.5, 0.35, 0.2, 0.55, 0.7].map((delay, idx) => {
+                const heightCalculada =
+                  status === "ouvindo"
+                    ? Math.max(8, Math.min(36, Math.round(audioLevel * 0.4 + (idx % 3) * 6)))
+                    : undefined;
+
+                return (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "w-1.5 rounded-full transition-all duration-100",
+                      status === "ouvindo"
+                        ? "bg-gradient-to-t from-cyan-400 via-indigo-400 to-purple-400 shadow-[0_0_8px_#22d3ee]"
+                        : status === "falando"
+                        ? "bg-gradient-to-t from-purple-500 via-pink-400 to-cyan-300 shadow-[0_0_8px_#c084fc]"
+                        : status === "consultando"
+                        ? "bg-amber-400/80 shadow-[0_0_6px_#fbbf24]"
+                        : "bg-slate-700/60 h-2"
+                    )}
+                    style={{
+                      height:
+                        status === "ouvindo"
+                          ? `${heightCalculada}px`
+                          : status === "falando"
+                          ? undefined
+                          : "6px",
+                      animation:
+                        status === "falando"
+                          ? `heloisaSineWave 0.85s ease-in-out infinite`
+                          : undefined,
+                      animationDelay: `${delay}s`,
+                    }}
+                  />
+                );
+              })}
             </div>
 
-            {/* Status Descritivo */}
+            {/* Status Descritivo e Botão de Ação */}
             <div className="mt-1 flex items-center gap-2 text-xs font-medium">
               {status === "ouvindo" && (
-                <span className="flex items-center gap-1.5 text-cyan-300 animate-pulse">
-                  <Radio className="h-3.5 w-3.5" />
-                  Ouvindo... (Pausa de 2s envia automaticamente)
-                </span>
+                <button
+                  type="button"
+                  onClick={handleActionClick}
+                  className="flex items-center gap-1.5 text-cyan-300 animate-pulse hover:text-cyan-200 transition-colors"
+                >
+                  <Radio className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>
+                    {liveTranscript
+                      ? "Ouvindo... (Pausa envia ou toque para enviar)"
+                      : "Microfone ouvindo... Pode falar 'Heloísa' ou sua ordem"}
+                  </span>
+                </button>
               )}
               {status === "consultando" && (
                 <span className="flex items-center gap-1.5 text-amber-300">
@@ -740,25 +871,38 @@ export function HeloisaVoiceOrb() {
                 </span>
               )}
               {status === "idle" && (
-                <span className="text-slate-400 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleActionClick}
+                  className="text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
+                >
                   <Sparkles className="h-3 w-3 text-cyan-400" />
-                  Pode falar sua mensagem ou comando
-                </span>
+                  Toque para falar ou diga <strong className="text-cyan-300">"Heloísa"</strong>
+                </button>
               )}
             </div>
 
             {/* Transcrição em Tempo Real da Fala Atual */}
             {liveTranscript && status === "ouvindo" && (
-              <div className="mt-2 w-full p-2 rounded-xl bg-purple-950/40 border border-purple-400/30 text-xs text-cyan-200 animate-in fade-in flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
-                <span className="italic truncate">{liveTranscript}</span>
+              <div
+                onClick={handleActionClick}
+                className="cursor-pointer mt-2 w-full p-2.5 rounded-xl bg-purple-950/50 border border-cyan-400/40 text-xs text-cyan-200 animate-in fade-in flex items-center justify-between gap-2 shadow-[0_0_15px_rgba(34,211,238,0.2)]"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                  <span className="italic truncate font-medium">"{liveTranscript}"</span>
+                </div>
+                <span className="text-[10px] text-cyan-300/80 shrink-0 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-400/30">
+                  Toque p/ enviar
+                </span>
               </div>
             )}
 
-            {/* Mensagem de Erro Legível */}
+            {/* Mensagem de Erro ou Alerta de Permissão */}
             {errorMessage && (
-              <div className="mt-2 text-[11px] text-rose-300 text-center bg-rose-950/50 border border-rose-500/30 px-2.5 py-1.5 rounded-xl w-full">
-                {errorMessage}
+              <div className="mt-2 text-[11px] text-rose-300 text-left bg-rose-950/60 border border-rose-500/40 px-3 py-2 rounded-xl w-full flex items-start gap-2 shadow-sm">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-400" />
+                <span className="leading-snug">{errorMessage}</span>
               </div>
             )}
           </div>
@@ -867,7 +1011,7 @@ export function HeloisaVoiceOrb() {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setIsOpen(!isOpen)}
+                onClick={toggleOpen}
                 style={{
                   animation:
                     status === "ouvindo" || status === "falando"
@@ -892,29 +1036,41 @@ export function HeloisaVoiceOrb() {
 
                 {/* Linha de Frequência Sonora Reativa Central */}
                 <div className="flex items-center justify-center gap-0.5 h-6">
-                  {[0.1, 0.3, 0.5, 0.2, 0.4].map((delay, idx) => (
-                    <span
-                      key={idx}
-                      className={cn(
-                        "w-1 rounded-full transition-all duration-200",
-                        status === "ouvindo"
-                          ? "bg-cyan-200 shadow-[0_0_6px_#22d3ee]"
-                          : status === "falando"
-                          ? "bg-purple-200 shadow-[0_0_6px_#c084fc]"
-                          : status === "consultando"
-                          ? "bg-amber-300 animate-pulse"
-                          : "bg-white/80 h-3"
-                      )}
-                      style={{
-                        height: status === "ouvindo" || status === "falando" ? undefined : "12px",
-                        animation:
-                          status === "ouvindo" || status === "falando"
-                            ? `heloisaSineWave 0.75s ease-in-out infinite`
-                            : undefined,
-                        animationDelay: `${delay}s`,
-                      }}
-                    />
-                  ))}
+                  {[0.1, 0.3, 0.5, 0.2, 0.4].map((delay, idx) => {
+                    const orbHeight =
+                      status === "ouvindo"
+                        ? Math.max(8, Math.min(24, Math.round(audioLevel * 0.25 + (idx % 2) * 5)))
+                        : undefined;
+
+                    return (
+                      <span
+                        key={idx}
+                        className={cn(
+                          "w-1 rounded-full transition-all duration-100",
+                          status === "ouvindo"
+                            ? "bg-cyan-200 shadow-[0_0_6px_#22d3ee]"
+                            : status === "falando"
+                            ? "bg-purple-200 shadow-[0_0_6px_#c084fc]"
+                            : status === "consultando"
+                            ? "bg-amber-300 animate-pulse"
+                            : "bg-white/80 h-3"
+                        )}
+                        style={{
+                          height:
+                            status === "ouvindo"
+                              ? `${orbHeight}px`
+                              : status === "falando"
+                              ? undefined
+                              : "12px",
+                          animation:
+                            status === "falando"
+                              ? `heloisaSineWave 0.75s ease-in-out infinite`
+                              : undefined,
+                          animationDelay: `${delay}s`,
+                        }}
+                      />
+                    );
+                  })}
                 </div>
 
                 {/* Microfone Flutuante de Canto */}
