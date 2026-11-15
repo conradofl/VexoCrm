@@ -430,25 +430,18 @@ export async function queryStalledLeadsList(pool, {
   // Contagem de leads parados (em conversa prévia, inativos há >= minDays dias)
   const countSql = `SELECT COUNT(*)::int AS count FROM public.leads l ${whereClause}`;
 
-  // Contagem de leads nunca abordados (estágio ativo/aberto sem nenhuma mensagem ou interação)
-  const neverApproachedParams = [clientId];
-  const neverApproachedConditions = [
-    `l.client_id = $1`,
-    sqlStalledStageCondition("l"),
-    `l.last_message_at IS NULL`,
-    `l.last_interaction_at IS NULL`,
-  ];
-  if (stage && stage !== "all") {
-    neverApproachedParams.push(String(stage).toLowerCase().trim());
-    neverApproachedConditions.push(`lower(l.stage) = $${neverApproachedParams.length}`);
-  }
-  if (ownerUid) {
-    neverApproachedParams.push(String(ownerUid).trim());
-    neverApproachedConditions.push(
-      `(l.assigned_to = $${neverApproachedParams.length} OR l.dados->>'sdr_rotation_owner' = $${neverApproachedParams.length})`
-    );
-  }
-  const neverApproachedSql = `SELECT COUNT(*)::int AS count FROM public.leads l WHERE ${neverApproachedConditions.join(" AND ")}`;
+  // "Nunca abordados" é o MESMO número da Visão geral do Dashboard (definição única, 14/11/2026): telefone válido,
+  // estágio aberto, nenhuma mensagem recebida ou enviada e nenhum envio de campanha, descontado quem pediu para
+  // sair. Antes esta tela contava "last_message_at e last_interaction_at vazios", que dava outro número para a
+  // mesma pergunta. Import dinâmico: dashboardOverview.js já importa deste arquivo.
+  // Se a conta falhar, o número sai null (a tela mostra travessão), nunca zero, e a lista de parados segue.
+  const neverApproachedPromise = import("./dashboardOverview.js")
+    .then(({ measureBaseSlices }) => measureBaseSlices(pool, { clientId, asOf: new Date(), stage, ownerUid }))
+    .then((base) => base.neverApproached.reachable)
+    .catch((err) => {
+      console.error(`[leads-parados] nunca abordados indisponível (client=${clientId}):`, err?.message || err);
+      return null;
+    });
 
   // Verifica se a tabela public.lead_messages existe no banco
   let hasMessagesTable = false;
@@ -511,14 +504,13 @@ export async function queryStalledLeadsList(pool, {
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
   `;
 
-  const [{ rows: countRows }, { rows: neverApproachedRows }, { rows: leadRows }] = await Promise.all([
+  const [{ rows: countRows }, neverApproachedCount, { rows: leadRows }] = await Promise.all([
     pool.query(countSql, params.slice(0, params.length - 2)),
-    pool.query(neverApproachedSql, neverApproachedParams),
+    neverApproachedPromise,
     pool.query(leadsSql, params),
   ]);
 
   const stalledCount = Number(countRows[0]?.count) || 0;
-  const neverApproachedCount = Number(neverApproachedRows[0]?.count) || 0;
 
   return {
     count: stalledCount,

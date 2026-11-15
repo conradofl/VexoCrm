@@ -46,7 +46,9 @@ export const COVERAGE_MIN_PCT = 50;
 // Opt-out tem duas fontes que não se conversam (campaign/queueOptOut.js): a flag do lead e a tabela
 // lead_optouts. `optout_recorded` diz quantos opt-outs a empresa TEM gravados; a tela usa isso para não
 // afirmar que descontou alguém quando nada é registrado.
-export function buildBaseSlicesSql() {
+// `leadFilterSql`: condição extra sobre os leads (alias l), com parâmetros a partir de $3. A tela Leads Parados usa
+// para filtrar por estágio e por responsável sem ter uma segunda conta de "nunca abordado".
+export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
   return `
     WITH msg AS MATERIALIZED (
       SELECT ${SQL_CANONICAL_PHONE("lm.phone")} AS cphone,
@@ -86,7 +88,7 @@ export function buildBaseSlicesSql() {
                (${sqlStalledStageCondition("l")}) AS estagio_aberto,
                COALESCE(l.opt_out IS TRUE OR l.metadata->>'opt_out' = 'true' OR l.dados->>'opt_out' = 'true', false) AS opt_flag
         FROM public.leads l
-        WHERE l.client_id = $1 AND l.created_at < $2
+        WHERE l.client_id = $1 AND l.created_at < $2${leadFilterSql ? ` AND (${leadFilterSql})` : ""}
         OFFSET 0
       ) b
       GROUP BY b.tel
@@ -152,8 +154,18 @@ export function buildBaseSlicesResult(row) {
 }
 
 // Base de leads ATÉ o fim do período (asOf): o mesmo recorte de measureBaseHealth.
-export async function measureBaseSlices(pool, { clientId, currentEnd, asOf = currentEnd }) {
-  const { rows } = await pool.query(buildBaseSlicesSql(), [clientId, iso(asOf)]);
+export async function measureBaseSlices(pool, { clientId, currentEnd, asOf = currentEnd, stage = null, ownerUid = null }) {
+  const params = [clientId, iso(asOf)];
+  const filters = [];
+  if (stage && stage !== "all") {
+    params.push(String(stage).toLowerCase().trim());
+    filters.push(`lower(l.stage) = $${params.length}`);
+  }
+  if (ownerUid) {
+    params.push(String(ownerUid).trim());
+    filters.push(`(l.assigned_to = $${params.length} OR l.dados->>'sdr_rotation_owner' = $${params.length})`);
+  }
+  const { rows } = await pool.query(buildBaseSlicesSql({ leadFilterSql: filters.join(" AND ") }), params);
   return buildBaseSlicesResult(rows[0]);
 }
 

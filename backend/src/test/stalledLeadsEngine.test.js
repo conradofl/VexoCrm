@@ -12,7 +12,7 @@
 //    - Omissão dos parênteses no grupo OR de sqlIsStalled falha o teste.
 //    - Reinserção de created_at ou updated_at no cálculo de lead parado falha o teste.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import http from "http";
 import { registerLeadsRoutes } from "../domains/leads/routes.js";
@@ -112,8 +112,34 @@ const SCHEMA = `
     lead_source text,
     potential_contract_value numeric(14,2),
     raw_chat_summary text,
+    opt_out boolean,
+    metadata jsonb,
     UNIQUE (client_id, telefone)
   );
+
+  -- O que a conta de "nunca abordados" da Visão geral lê (mesma conta nesta tela desde 14/11/2026).
+  CREATE TABLE lead_messages (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id text NOT NULL,
+    lead_id uuid,
+    phone text NOT NULL,
+    direction text NOT NULL,
+    engagement_signal text,
+    sender_type text,
+    is_group boolean,
+    message_text text,
+    message_timestamp timestamptz,
+    delivered_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE campaign_dispatch_runs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id text NOT NULL,
+    phone text NOT NULL,
+    status text NOT NULL DEFAULT 'sent',
+    sent_at timestamptz
+  );
+  CREATE TABLE lead_optouts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text, phone text);
 `;
 
 describe("Pilar 1: Engine de Leads Parados (stalledLeadsEngine)", () => {
@@ -203,6 +229,15 @@ describe("Pilar 1: Engine de Leads Parados (stalledLeadsEngine)", () => {
               NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day', NOW() - INTERVAL '5 days');
     `);
 
+    // Conversa de verdade dos leads 1 a 4, com a mesma data das colunas do lead: é o que faz deles "abordados".
+    await db.exec(`
+      INSERT INTO lead_messages (client_id, phone, direction, message_text, message_timestamp) VALUES
+        ('${TENANT_A}', '5511999990001', 'outbound', 'Segue a proposta', NOW() - INTERVAL '10 days'),
+        ('${TENANT_A}', '5511999990002', 'inbound', 'Vou pensar', NOW() - INTERVAL '5 days'),
+        ('${TENANT_A}', '5511999990003', 'outbound', 'Oi, tudo bem?', NOW() - INTERVAL '4 days'),
+        ('${TENANT_A}', '5511999990004', 'inbound', 'Pode me ligar amanhã', NOW() - INTERVAL '1 day');
+    `);
+
     // Lead 5: Importado de planilha há 30 dias SEM last_message_at e SEM last_interaction_at
     // CRÍTICO para separação canônica: NUNCA ABORDADO (base fria), NÃO parado!
     await db.exec(`
@@ -244,6 +279,8 @@ describe("Pilar 1: Engine de Leads Parados (stalledLeadsEngine)", () => {
       INSERT INTO leads (client_id, telefone, nome, stage, last_message_at, updated_at, created_at)
       VALUES ('${TENANT_B}', '5511999999999', 'Lead Outro Tenant B', 'open_budget',
               NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days', NOW() - INTERVAL '20 days');
+      INSERT INTO lead_messages (client_id, phone, direction, message_text, message_timestamp)
+      VALUES ('${TENANT_B}', '5511999999999', 'outbound', 'Oi', NOW() - INTERVAL '15 days');
     `);
 
     // 4. Servidor Express de teste
@@ -368,25 +405,60 @@ describe("Pilar 1: Engine de Leads Parados (stalledLeadsEngine)", () => {
     expect(res.leads[0].days_idle).toBeGreaterThanOrEqual(10);
   });
 
-  it("7. Teste 3 (Regra Canônica): A soma de stalled_count + never_approached_count bate com a base ativa aberta", async () => {
-    // No Tenant A, estágios abertos ativos (não fechados/perdidos) são:
-    // Lead 1 (10d), Lead 2 (5d), Lead 3 (4d), Lead 4 (1d) e Lead 5 (sem mensagem). Total = 5 leads abertos.
-    const { rows: openBaseRows } = await pool.query(`
-      SELECT count(*)::int AS count
-      FROM leads l
-      WHERE l.client_id = $1
-        AND ${sqlStalledStageCondition("l")}
-    `, [TENANT_A]);
-    const totalOpenBase = openBaseRows[0].count;
-    expect(totalOpenBase).toBe(5);
+  it("7. [TESTE OBRIGATÓRIO] 'Nunca abordados' é o MESMO número da Visão geral do Dashboard, com e sem filtro", async () => {
+    const { measureBaseSlices } = await import("../services/dashboardOverview.js");
+    const visaoGeral = await measureBaseSlices(pool, { clientId: TENANT_A, asOf: new Date() });
 
-    // Quando minDays = 0 (ou seja, qualquer lead com mensagem >= 0 dias é considerado parado):
-    const resAllInteracted = await queryStalledLeadsList(pool, { clientId: TENANT_A, stalledDays: 0 });
-    expect(resAllInteracted.stalled_count).toBe(4); // Leads 1, 2, 3 e 4
-    expect(resAllInteracted.never_approached_count).toBe(1); // Lead 5
+    const tela = await queryStalledLeadsList(pool, { clientId: TENANT_A, stalledDays: 0 });
+    expect(tela.never_approached_count).toBe(visaoGeral.neverApproached.reachable);
+    expect(tela.never_approached_count).toBe(1); // Lead 5: telefone válido, estágio aberto, nenhuma mensagem
 
-    // Invariante canônica: stalled_count + never_approached_count == totalOpenBase
-    expect(resAllInteracted.stalled_count + resAllInteracted.never_approached_count).toBe(totalOpenBase);
+    // Filtro por estágio: só conta dentro do estágio, pela mesma regra.
+    const noEstagio = await queryStalledLeadsList(pool, { clientId: TENANT_A, stalledDays: 0, stage: "open_budget" });
+    expect(noEstagio.never_approached_count).toBe(1);
+    const outroEstagio = await queryStalledLeadsList(pool, { clientId: TENANT_A, stalledDays: 0, stage: "inquiry" });
+    expect(outroEstagio.never_approached_count).toBe(0);
+
+    // Outra empresa não entra na conta.
+    const outra = await queryStalledLeadsList(pool, { clientId: TENANT_B, stalledDays: 0 });
+    expect(outra.never_approached_count).toBe(0);
+  });
+
+  it("7b. [TESTE OBRIGATÓRIO] colunas do lead vazias não bastam: quem recebeu campanha ou escreveu não é 'nunca abordado'", async () => {
+    // Dois leads sem last_message_at e sem last_interaction_at (a regra antiga contaria os dois).
+    await db.exec(`
+      INSERT INTO leads (client_id, telefone, nome, stage, created_at) VALUES
+        ('${TENANT_A}', '5511999990021', 'Recebeu campanha', 'open_budget', NOW() - INTERVAL '3 days'),
+        ('${TENANT_A}', '5511999990022', 'Escreveu primeiro', 'open_budget', NOW() - INTERVAL '3 days');
+      INSERT INTO campaign_dispatch_runs (client_id, phone, status, sent_at) VALUES ('${TENANT_A}', '11999990021', 'sent', NOW() - INTERVAL '2 days');
+      INSERT INTO lead_messages (client_id, phone, direction, message_text, message_timestamp) VALUES
+        ('${TENANT_A}', '5511999990022@s.whatsapp.net', 'inbound', 'Oi', NOW() - INTERVAL '2 days');
+    `);
+    try {
+      const tela = await queryStalledLeadsList(pool, { clientId: TENANT_A, stalledDays: 0 });
+      expect(tela.never_approached_count).toBe(1); // continua só o Lead 5
+    } finally {
+      await db.exec(`
+        DELETE FROM campaign_dispatch_runs WHERE phone = '11999990021';
+        DELETE FROM lead_messages WHERE phone = '5511999990022@s.whatsapp.net';
+        DELETE FROM leads WHERE telefone IN ('5511999990021', '5511999990022');
+      `);
+    }
+  });
+
+  it("7c. conta que falha sai null, nunca zero, e a lista de parados continua", async () => {
+    const quebrado = {
+      query: (sql, params) => (String(sql).includes("WITH msg AS MATERIALIZED") ? Promise.reject(new Error("timeout")) : db.query(sql, params)),
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const tela = await queryStalledLeadsList(quebrado, { clientId: TENANT_A, stalledDays: 5 });
+      expect(tela.never_approached_count).toBeNull();
+      expect(tela.stalled_count).toBe(2);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("8. Teste de Precedência SQL (Parênteses no OR): Lead com last_message_at de ONTEM não pode aparecer como parado com limiar de 5 dias", async () => {

@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 interface LeadsParadosHeaderProps {
   count: number;
   stalledCount?: number;
-  neverApproachedCount?: number;
+  // null = não foi possível calcular agora: mostra travessão, nunca zero.
+  neverApproachedCount?: number | null;
   minDays: number;
   reactivationEnabled?: boolean;
   maxDaysIdle?: number;
@@ -18,7 +19,7 @@ interface LeadsParadosHeaderProps {
 export function LeadsParadosHeader({
   count,
   stalledCount,
-  neverApproachedCount = 0,
+  neverApproachedCount = null,
   minDays,
   reactivationEnabled = false,
   maxDaysIdle = 0,
@@ -110,7 +111,12 @@ export function LeadsParadosHeader({
           </div>
           <div>
             <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Nunca Abordados (base fria)</p>
-            <p className="text-xl font-bold text-foreground">{neverApproachedCount}</p>
+            <p className="text-xl font-bold text-foreground" data-testid="never-approached-count">
+              {neverApproachedCount === null ? "—" : neverApproachedCount.toLocaleString("pt-BR")}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {neverApproachedCount === null ? "Não foi possível calcular agora." : "Mesmo número da Visão geral do Dashboard."}
+            </p>
           </div>
         </Card>
 
