@@ -11,13 +11,16 @@ import {
   isHeloisaAuthorizedSender,
   isHeloisaAuthorizedSenderAsync,
   executarCadastrarCliente,
+  executarEnviarMensagemWhatsApp,
   executarCobrarColaborador,
   executarAgendarCompromisso,
   executarCriarFollowup,
   executarConsultarOperacao,
+  enviarMensagemWhatsAppComFallback,
   DIRETORES_AUTORIZADOS,
   chamarLlmHeloisa,
 } from "../domains/goclaw/heloisaEngine.js";
+import { sendTextMessageViaEvolution } from "../services/evolution.js";
 import { GROQ_MODELOS_MORTOS, defaultGroqModel } from "../services/llmModels.js";
 
 describe("Heloísa Engine (heloisaEngine.js)", () => {
@@ -126,6 +129,34 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     expect(res.sucesso).toBe(true);
     expect(res.colaborador).toBe("Santana");
     expect(res.telefone).toBe("5516982447360");
+  });
+
+  it("executa enviar_mensagem_whatsapp para Caio com fallback automático quando a primeira instância falha com 404", async () => {
+    const mockPool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [
+          { name: "vexo-adm-vexo-atende", client_id: "geracao-digital", connection_state: "open" },
+        ],
+      }),
+    };
+
+    // Configura o mock do sendTextMessageViaEvolution para falhar na primeira instância (404)
+    // e ter sucesso na segunda ("geracao-digital-teste-vexo")
+    sendTextMessageViaEvolution
+      .mockRejectedValueOnce(new Error('Evolution HTTP 404: {"message":["The \\"vexo-adm-vexo-atende\\" instance does not exist"]}'))
+      .mockResolvedValueOnce({ waMessageId: "msg-caio-123" });
+
+    const res = await executarEnviarMensagemWhatsApp(
+      { destinatario: "Caio", mensagem: "Oi Caio! A Heloísa agora está ativa por voz no Vexo OS." },
+      mockPool,
+      "vexo-adm-vexo-atende"
+    );
+
+    expect(res.sucesso).toBe(true);
+    expect(res.destinatario).toBe("Caio Almeida");
+    expect(res.telefone).toBe("5534997719779");
+    expect(res.instanceName).toBe("geracao-digital-teste-vexo");
+    expect(res.waMessageId).toBe("msg-caio-123");
   });
 
   it("executa agendar_compromisso e criar_followup com sucesso", async () => {

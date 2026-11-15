@@ -184,7 +184,8 @@ function speakNativeTTS({
 }
 
 export function HeloisaVoiceOrb() {
-  const { isInternalUser, isAdminUser, getIdToken } = useAuth();
+  const { isInternalUser, isAdminUser, getIdToken, user } = useAuth();
+  const userName = user?.displayName ? user.displayName.split(" ")[0] : "Conrado";
   const location = useLocation();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -199,7 +200,7 @@ export function HeloisaVoiceOrb() {
     {
       id: "init-1",
       sender: "heloisa",
-      text: "Olá! Sou a Heloísa, sua copiloto estratégica no Vexo OS. Fale comigo naturalmente ou envie sua ordem.",
+      text: `Oi, ${userName}! Que ótimo falar com você! Sou a Heloísa, sua copiloto e amiga aqui no Vexo OS. Só me chamar ou falar o que precisa que eu cuido de tudo pra você com o maior prazer!`,
       timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
@@ -683,7 +684,7 @@ export function HeloisaVoiceOrb() {
       {
         id: `init-${Date.now()}`,
         sender: "heloisa",
-        text: "Histórico reiniciado. Estou à disposição para te apoiar por voz ou comando.",
+        text: `Prontinho, ${userName}! Histórico zerado. Estou super a postos pra te ouvir ou tocar qualquer tarefa!`,
         timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
       },
     ]);
@@ -774,7 +775,7 @@ export function HeloisaVoiceOrb() {
                     <Ear className="h-2.5 w-2.5" /> Voz Ativa
                   </Badge>
                 </div>
-                <p className="text-xs text-slate-400">Secretária Executiva Master • Vexo OS</p>
+                <p className="text-xs text-slate-400">Secretária Executiva & Amiga • Vexo OS</p>
               </div>
             </div>
 
@@ -1005,7 +1006,7 @@ export function HeloisaVoiceOrb() {
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="Fale no microfone ou digite sua ordem..."
+                placeholder={`Fale no microfone ou digite sua ordem, ${userName}...`}
                 disabled={status === "consultando"}
                 className="flex-1 bg-slate-900 border border-purple-500/20 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors"
               />

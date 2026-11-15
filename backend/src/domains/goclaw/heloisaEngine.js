@@ -10,7 +10,7 @@
  */
 
 import { pgDatabasePool } from "../../services/database.js";
-import { sendTextMessageViaEvolution } from "../../services/evolution.js";
+import { sendTextMessageViaEvolution, buildEvolutionAuthHeaders } from "../../services/evolution.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -173,6 +173,114 @@ export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantI
   return "geracao-digital-teste-vexo";
 }
 
+/**
+ * Consulta em tempo real na Evolution API as instâncias que estão com conexão ativa (open).
+ */
+export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
+  try {
+    const url = `${(baseUrl || "https://vexo-evolution-api.xdvm8y.easypanel.host").replace(/\/+$/, "")}/instance/fetchInstances`;
+    const key =
+      apiKey ||
+      process.env.EVOLUTION_API_KEY ||
+      process.env.GD_EVOLUTION_API_TOKEN ||
+      process.env.GD_EVOLUTION_TOKEN ||
+      "429683C4C977415CAAFCCE10F7D57E11";
+
+    const headers = {
+      Accept: "application/json",
+      ...(typeof buildEvolutionAuthHeaders === "function"
+        ? buildEvolutionAuthHeaders(key)
+        : { apikey: key, Authorization: `Bearer ${key}` }),
+    };
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(3500),
+    });
+
+    if (!res.ok) return [];
+    const list = await res.json();
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((i) => i && (i.connectionStatus === "open" || i.connection_state === "open"))
+      .map((i) => i.name)
+      .filter(Boolean);
+  } catch (err) {
+    console.warn("[Heloísa] Falha ao consultar fetchInstances na Evolution:", err.message);
+    return [];
+  }
+}
+
+/**
+ * Envia mensagem no WhatsApp com contingência automática de instâncias.
+ * Se a instância primária falhar (ex: 404 instance does not exist ou desconectada),
+ * tenta automaticamente instâncias alternativas abertas sem interromper o fluxo do usuário.
+ */
+export async function enviarMensagemWhatsAppComFallback({
+  numero,
+  texto,
+  instanceName = null,
+  tenantId = "geracao-digital",
+  pool = pgDatabasePool,
+}) {
+  const baseUrl =
+    process.env.GD_EVOLUTION_URL ||
+    process.env.EVOLUTION_API_URL ||
+    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+
+  const primaryInstance =
+    instanceName ||
+    (await obterInstanciaWhatsAppAtiva(pool, tenantId));
+
+  // Lista priorizada de instâncias conhecidas para contingência automática
+  const candidates = [
+    primaryInstance,
+    "geracao-digital-teste-vexo",
+    "vexo-adm-vexo-atende",
+  ].filter(Boolean).filter((val, idx, self) => self.indexOf(val) === idx);
+
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      console.log(`[Heloísa] Tentando envio de WhatsApp para ${numero} via instância "${candidate}"...`);
+      const envio = await sendTextMessageViaEvolution({
+        instanceName: candidate,
+        number: numero,
+        text: texto,
+        baseUrl,
+      });
+      console.log(`[Heloísa] Mensagem enviada com sucesso para ${numero} via instância "${candidate}"!`);
+      return { envio, instanceName: candidate };
+    } catch (err) {
+      console.warn(`[Heloísa] Falha ao enviar via instância "${candidate}": ${err.message}. Tentando contingência...`);
+      lastError = err;
+    }
+  }
+
+  // Se todas as candidatas pré-configuradas falharem, consulta dinamicamente instâncias ativas na Evolution API
+  try {
+    const abertas = await obterInstanciasEvolutionAbertas(baseUrl);
+    const dinamica = abertas.find((inst) => !candidates.includes(inst));
+    if (dinamica) {
+      console.log(`[Heloísa] Tentando envio de contingência dinâmica via instância aberta "${dinamica}"...`);
+      const envio = await sendTextMessageViaEvolution({
+        instanceName: dinamica,
+        number: numero,
+        text: texto,
+        baseUrl,
+      });
+      console.log(`[Heloísa] Mensagem entregue com sucesso via contingência dinâmica "${dinamica}"!`);
+      return { envio, instanceName: dinamica };
+    }
+  } catch (dinErr) {
+    console.warn(`[Heloísa] Falha na contingência dinâmica de instâncias: ${dinErr.message}`);
+  }
+
+  throw lastError || new Error("Nenhuma instância de WhatsApp disponível para envio.");
+}
+
 export async function executarEnviarMensagemWhatsApp(
   { destinatario, mensagem, telefone = null, tenant_id = null },
   pool = pgDatabasePool,
@@ -252,29 +360,21 @@ export async function executarEnviarMensagemWhatsApp(
       numeroNormalizado = `55${numeroNormalizado}`;
     }
 
-    const effectiveInstance =
-      instanceName ||
-      (await obterInstanciaWhatsAppAtiva(pool, tenant_id || "geracao-digital"));
+    console.log(`[Heloísa] Disparando WhatsApp para ${nomeFinal} (${numeroNormalizado})`);
 
-    const baseUrl =
-      process.env.GD_EVOLUTION_URL ||
-      process.env.EVOLUTION_API_URL ||
-      "https://vexo-evolution-api.xdvm8y.easypanel.host";
-
-    console.log(`[Heloísa] Disparando WhatsApp para ${nomeFinal} (${numeroNormalizado}) via instância "${effectiveInstance}"`);
-
-    const envio = await sendTextMessageViaEvolution({
-      instanceName: effectiveInstance,
-      number: numeroNormalizado,
-      text: msg,
-      baseUrl,
+    const { envio, instanceName: instanciaUsada } = await enviarMensagemWhatsAppComFallback({
+      numero: numeroNormalizado,
+      texto: msg,
+      instanceName,
+      tenantId: tenant_id || "geracao-digital",
+      pool,
     });
 
     return {
       sucesso: true,
       destinatario: nomeFinal,
       telefone: numeroNormalizado,
-      instanceName: effectiveInstance,
+      instanceName: instanciaUsada,
       mensagem: msg,
       waMessageId: envio?.waMessageId || null,
     };
@@ -323,33 +423,25 @@ export async function executarCobrarColaborador({ colaborador, mensagem }, pool 
       telCanonico = `55${telCanonico}`;
     }
 
-    const effectiveInstance =
-      instanceName ||
-      (await obterInstanciaWhatsAppAtiva(pool, "geracao-digital"));
-
-    const baseUrl =
-      process.env.GD_EVOLUTION_URL ||
-      process.env.EVOLUTION_API_URL ||
-      "https://vexo-evolution-api.xdvm8y.easypanel.host";
-
     const textoMensagem = `Olá ${colab.nome}! Aqui é a *Heloísa* (Secretária Executiva da Diretoria).\n\n${mensagem}\n\n_Mensagem enviada sob orientação da diretoria da Geração Digital._`;
 
-    // Dispara WhatsApp real
-    const envio = await sendTextMessageViaEvolution({
-      instanceName: effectiveInstance,
-      number: telCanonico,
-      text: textoMensagem,
-      baseUrl,
+    // Dispara WhatsApp com contingência automática
+    const { envio, instanceName: instanciaUsada } = await enviarMensagemWhatsAppComFallback({
+      numero: telCanonico,
+      texto: textoMensagem,
+      instanceName,
+      tenantId: "geracao-digital",
+      pool,
     });
 
-    console.log(`[Heloísa] Cobrança/Aviso enviado para ${colab.nome} (${telCanonico}) via ${effectiveInstance}`);
+    console.log(`[Heloísa] Cobrança/Aviso enviado para ${colab.nome} (${telCanonico}) via ${instanciaUsada}`);
 
     return {
       sucesso: true,
       colaborador: colab.nome,
       funcao: colab.funcao,
       telefone: telCanonico,
-      instanceName: effectiveInstance,
+      instanceName: instanciaUsada,
       mensagem: `Mensagem enviada com sucesso no WhatsApp de ${colab.nome} (${colab.funcao}).`,
       waMessageId: envio?.waMessageId || null,
     };
@@ -1184,12 +1276,14 @@ ${colaboradoresTexto}
 [Compromissos Hoje e Amanhã - ${snapshot.compromissos.length}]
 ${compromissosTexto}
 
-=== DIRETRIZES ESSENCIAIS PARA RESPOSTA POR VOZ ===
-1. Esta conversa é falada (Text-to-Speech). Suas respostas devem ser fluídas, elegantes, simpáticas e muito concisas (1 a 3 frases no máximo).
-2. NUNCA use formatação pesada (como markdown **, hashtags #, links longos ou marcadores de lista em tópicos), pois o sintetizador de voz precisa ler como uma fala natural humana.
-3. Se o usuário pedir para cadastrar cliente, cobrar colaborador no WhatsApp, agendar compromisso, criar follow-up ou consultar a operação, USE AS FERRAMENTAS DISPONÍVEIS (HELOISA_TOOLS) e depois confirme a ação com segurança.
-4. Você tem acesso total e irrestrito a todo o Vexo OS e qualquer tenant (Nous Gestão, Tinge Brasil, Udi Capas, GD, etc.) através de auditar_geral_vexo e consultar_cliente_ou_lead. Use-as sempre que o usuário perguntar sobre leads, status geral, campanhas ou clientes de qualquer empresa.
-5. Se o usuário disser apenas uma saudação ou chamar seu nome (ex: "Heloísa", "Olá Heloísa", "Oi"), responda de forma acolhedora, executiva e prestativa, confirmando que está ouvindo e pronta para atuar (ex: "Olá, Diretor! Estou ouvindo. Como posso te apoiar agora?").`;
+=== DIRETRIZES ESSENCIAIS PARA RESPOSTA POR VOZ (AMIGA, SOCIÁVEL E PARCEIRA) ===
+1. Você é a Heloísa: secretária executiva e a melhor amiga e parceira de trabalho de ${userName} (e do Caio). Trate ${userName} com muita simpatia, carinho, educação, bom humor e cumplicidade ("Oi, ${userName}!", "Tudo ótimo por aqui, amigo!", "Pode deixar comigo que eu cuido de tudo!"). NUNCA seja fria, robótica, distante ou burocrática.
+2. Cumprimento caloroso e educado: Sempre cumprimente ${userName} cordialmente se ele disser um cumprimento ("Oi", "Olá", "Heloísa", "Tudo bem?"). Responda com alegria contagiante, cumprimente-o de volta pelo primeiro nome, pergunte como ele está e diga que está pronta para ajudar.
+3. Conversa falada natural (TTS): Suas respostas são ouvidas no áudio, portanto devem ter entre 1 e 3 frases leves, naturais e bem pontuadas para o sintetizador de voz falar com fluidez e charme.
+4. NUNCA use formatação pesada (como markdown **, hashtags #, links longos ou tópicos numerados), pois o sintetizador precisa ler como uma conversa humana ao vivo.
+5. Se ${userName} pedir para mandar mensagem no WhatsApp, cobrar colaborador, cadastrar cliente, agendar compromisso, criar follow-up ou auditar a operação, USE AS FERRAMENTAS DISPONÍVEIS (HELOISA_TOOLS).
+6. Confirmação carinhosa e animada: Ao concluir uma tarefa, confirme com entusiasmo e amizade (ex: "Prontinho, ${userName}! Já mandei a mensagem no WhatsApp pro Caio avisando que agora eu existo pra ele vir testar também! Ficou ótima!").
+7. Acesso Total e Irrestrito: Você tem visão e acesso a todos os tenants do Vexo OS (Nous Gestão, Tinge Brasil, Udi Capas, GD, etc.) através de auditar_geral_vexo e consultar_cliente_ou_lead. Use-as sempre que necessário.`;
 
   let assistantMessage = null;
   const executedTools = [];
@@ -1203,7 +1297,7 @@ ${compromissosTexto}
   } catch (err) {
     console.warn("[Heloísa Voz] Falha no provedor LLM principal, aplicando contingência:", err.message);
     assistantMessage = {
-      content: `Entendi, ${userName}. Estou com uma instabilidade momentânea na conexão com meus provedores cognitivos, mas registrei sua solicitação: "${userText}".`,
+      content: `Oi, ${userName}! Tive uma oscilação momentânea na minha conexão, mas já anotei sua solicitação com todo carinho: "${userText}". Como posso te apoiar agora?`,
     };
   }
 
@@ -1278,23 +1372,27 @@ ${compromissosTexto}
       const primeiroErro = toolResults.find((tr) => tr.resultado && tr.resultado.sucesso === false)?.resultado?.erro;
 
       if (primeiroErro && (!finalAssistantMessage?.content || finalAssistantMessage.content.toLowerCase().includes("sucesso"))) {
-        responseText = `Atenção: Houve uma falha no WhatsApp ao tentar enviar: ${primeiroErro}`;
+        responseText = `Puxa, ${userName}, tive uma oscilação no WhatsApp ao tentar enviar: ${primeiroErro}. Quer que eu tente de novo pra você?`;
       } else {
-        responseText = finalAssistantMessage?.content || (primeiroErro ? `Houve uma falha: ${primeiroErro}` : "Ação executada com sucesso.");
+        responseText =
+          finalAssistantMessage?.content ||
+          (primeiroErro
+            ? `Puxa, ${userName}, deu um probleminha no envio: ${primeiroErro}`
+            : `Prontinho, ${userName}! Já cuidei de tudo com o maior carinho!`);
       }
     } catch (err) {
       console.warn("[Heloísa Voz] Falha ao sintetizar resposta de tools, usando fallback:", err.message);
       const primeiroErro = toolResults.find((tr) => tr.resultado && tr.resultado.sucesso === false)?.resultado?.erro;
       if (primeiroErro) {
-        responseText = `Não foi possível concluir o envio: ${primeiroErro}`;
+        responseText = `Puxa, ${userName}, deu uma instabilidade momentânea: ${primeiroErro}. Quer que eu tente de novo?`;
       } else {
-        responseText = "Mensagem enviada com sucesso no WhatsApp.";
+        responseText = `Prontinho, ${userName}! Ação executada com sucesso!`;
       }
     }
   }
 
   if (!responseText) {
-    responseText = "Perfeito, solicitação processada com sucesso.";
+    responseText = `Oi, ${userName}! Estou aqui com você, pode me falar o que precisa que eu cuido agora!`;
   }
 
   // Etapa 4 (TTS - Voz da Heloísa): Sintetiza resposta em áudio via generateSpeechAudio
