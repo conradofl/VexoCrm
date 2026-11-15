@@ -106,7 +106,7 @@ export default function LeadsParados() {
         <LeadsParadosHeader
           count={totalCount}
           stalledCount={data?.stalled_count ?? totalCount}
-          neverApproachedCount={data?.never_approached_count ?? 0}
+          neverApproachedCount={data ? data.never_approached_count ?? null : null}
           minDays={data?.minDays ?? 7}
           reactivationEnabled={data?.reactivation_enabled}
           maxDaysIdle={maxDaysIdle}
