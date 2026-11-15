@@ -62,9 +62,49 @@ export async function generateSpeechAudio({
   const voiceKey = isSupportedVoice(voice) ? voice.trim().toLowerCase() : "nova";
   const profile = VOICE_PROFILES[voiceKey] || VOICE_PROFILES.nova;
   const numSpeed = Number(speed);
+  const cleanText = text.replace(/[*#_`~>]/g, "").trim().slice(0, 3000);
+
+  // 1. Tenta OpenAI tts-1 se OPENAI_API_KEY estiver presente
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const openAiVoice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(voiceKey) ? voiceKey : "nova";
+      const startMs = Date.now();
+      const resp = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "tts-1",
+          input: cleanText,
+          voice: openAiVoice,
+          response_format: "mp3",
+          speed: !isNaN(numSpeed) && numSpeed >= 0.25 && numSpeed <= 4.0 ? numSpeed : 1.0,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+
+      if (resp.ok) {
+        const arrayBuf = await resp.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        const durationMs = Date.now() - startMs;
+        console.log(`[voiceService] Áudio sintetizado via OpenAI tts-1 (${openAiVoice}, ${durationMs}ms, ${buffer.length} bytes)`);
+        return {
+          base64: buffer.toString("base64"),
+          mimetype: "audio/mpeg",
+          format: "mp3",
+        };
+      }
+      console.warn(`[voiceService] OpenAI TTS retornou status ${resp.status}, tentando EdgeTTS fallback`);
+    } catch (e) {
+      console.warn("[voiceService] Falha na síntese OpenAI TTS:", e.message);
+    }
+  }
+
+  // 2. Fallback para EdgeTTS
   const userRateOffset = !isNaN(numSpeed) && numSpeed >= 0.25 && numSpeed <= 4.0 ? Math.round((numSpeed - 1) * 100) : 0;
   const rate = userRateOffset !== 0 ? `${userRateOffset >= 0 ? "+" : ""}${userRateOffset}%` : profile.baseRate;
-  const cleanText = text.trim().slice(0, 3000);
   const tempFile = path.join(os.tmpdir(), `vexo_tts_${Date.now()}_${crypto.randomUUID().slice(0, 8)}.mp3`);
   const startMs = Date.now();
 

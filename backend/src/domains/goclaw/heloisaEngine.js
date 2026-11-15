@@ -16,6 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveGoclawDir } from "./routes.js";
 import { defaultGroqModel } from "../../services/llmModels.js";
+import { generateSpeechAudio } from "../../services/voiceService.js";
 
 export const DIRETORES_AUTORIZADOS = {
   conrado: {
@@ -617,5 +618,302 @@ export async function processarMensagemHeloisa({
     textoOriginal: promptUsuario,
     toolResults,
     resposta: respostaFinal,
+  };
+}
+
+// ─── Snapshot Operacional do CRM (Consciência Situacional da Heloísa) ─────────
+
+/**
+ * Consulta dados em tempo real do CRM para dar consciência situacional à Heloísa:
+ * - Clientes GD com prazo vencido (gd_clientes WHERE prazo_vence_em < NOW())
+ * - Quantidade e lista de colaboradores ativos (gd_colaboradores WHERE ativo = true)
+ * - Compromissos de hoje e amanhã (events ou lead_reminders)
+ */
+export async function obterSnapshotOperacional(pool = pgDatabasePool) {
+  let clientesAtrasados = [];
+  let colaboradoresAtivos = [];
+  let compromissos = [];
+
+  if (!pool || typeof pool.query !== "function") {
+    return { clientesAtrasados, colaboradoresAtivos, compromissos };
+  }
+
+  // 1. Clientes GD com prazo vencido
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome, empresa, estado, prazo_vence_em
+       FROM public.gd_clientes
+       WHERE prazo_vence_em IS NOT NULL AND prazo_vence_em < NOW()
+       ORDER BY prazo_vence_em ASC
+       LIMIT 10`
+    );
+    clientesAtrasados = rows || [];
+  } catch {
+    // Fallback tolerante para outros esquemas
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, nome, estado_atual as estado
+         FROM public.gd_clientes
+         LIMIT 5`
+      );
+      clientesAtrasados = rows || [];
+    } catch {
+      clientesAtrasados = [];
+    }
+  }
+
+  // 2. Colaboradores ativos
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, nome, funcao, telefone, recebe_cobranca_whatsapp
+       FROM public.gd_colaboradores
+       WHERE ativo = true
+       ORDER BY nome ASC`
+    );
+    colaboradoresAtivos = rows || [];
+  } catch {
+    colaboradoresAtivos = [];
+  }
+
+  // 3. Compromissos de hoje e amanhã
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name as titulo, date as data_hora, location
+       FROM public.events
+       WHERE date >= CURRENT_DATE AND date < (CURRENT_DATE + INTERVAL '2 day')
+       ORDER BY date ASC
+       LIMIT 10`
+    );
+    compromissos = rows || [];
+  } catch {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, title as titulo, remind_at as data_hora, lead_name
+         FROM public.lead_reminders
+         WHERE remind_at >= CURRENT_DATE AND remind_at < (CURRENT_DATE + INTERVAL '2 day')
+         ORDER BY remind_at ASC
+         LIMIT 10`
+      );
+      compromissos = rows || [];
+    } catch {
+      compromissos = [];
+    }
+  }
+
+  return {
+    clientesAtrasados,
+    colaboradoresAtivos,
+    compromissos,
+  };
+}
+
+// ─── Processamento Bidirecional de Voz da Heloísa (Voice Assistant Two-Way) ──
+
+/**
+ * Endpoint de Voz da Heloísa:
+ * Etapa 1 (STT): Transcreve áudio se recebido com Groq Whisper (transcribeAudio)
+ * Etapa 2 (Snapshot Operacional): Consulta dados situacionais do CRM
+ * Etapa 3 (Inteligência & Tools): Executa motor da Heloísa com HELOISA_TOOLS ativas
+ * Etapa 4 (TTS - Voz da Heloísa): Sintetiza resposta em áudio via generateSpeechAudio
+ */
+export async function processarVozHeloisa({
+  text,
+  audioBase64 = null,
+  audioMimetype = "audio/webm",
+  currentPage = "Dashboard",
+  clientId = "geracao-digital",
+  userName = "Diretor",
+  userRole = "Diretor Executivo",
+  pool = pgDatabasePool,
+  goclawDir = resolveGoclawDir(),
+} = {}) {
+  let userText = (text || "").trim();
+
+  // Etapa 1 (STT): Se vier áudio, transcreve com transcribeAudio (Groq Whisper)
+  if (audioBase64) {
+    try {
+      const audioTranscrito = await transcribeAudio(audioBase64, audioMimetype);
+      if (audioTranscrito && audioTranscrito.trim()) {
+        userText = audioTranscrito.trim();
+        console.log(`[Heloísa Voz] Áudio do usuário transcrito: "${userText}"`);
+      }
+    } catch (err) {
+      console.warn("[Heloísa Voz] Falha na transcrição STT, usando texto se presente:", err.message);
+    }
+  }
+
+  if (!userText) {
+    return {
+      ok: true,
+      userText: "",
+      responseText: "Olá! Não consegui ouvir sua mensagem. Pode falar novamente ou digitar no campo abaixo?",
+      audioBase64: null,
+      audioMimetype: "audio/mp3",
+      executedTools: [],
+    };
+  }
+
+  // Etapa 2 (Snapshot Operacional): Consciência situacional do CRM
+  const snapshot = await obterSnapshotOperacional(pool);
+
+  const clientesAtrasadosTexto = snapshot.clientesAtrasados.length > 0
+    ? snapshot.clientesAtrasados.map((c) => `• ${c.nome || c.empresa || "Cliente"} (${c.estado || "Atrasado"})`).join("\n")
+    : "Nenhum cliente com prazo vencido no momento.";
+
+  const colaboradoresTexto = snapshot.colaboradoresAtivos.length > 0
+    ? snapshot.colaboradoresAtivos.map((c) => `• ${c.nome} (${c.funcao})`).join("\n")
+    : "Nenhum colaborador ativo cadastrado.";
+
+  const compromissosTexto = snapshot.compromissos.length > 0
+    ? snapshot.compromissos.map((ev) => `• ${ev.titulo || ev.name} - ${ev.data_hora || ev.date}`).join("\n")
+    : "Nenhum compromisso agendado para hoje ou amanhã.";
+
+  // Etapa 3 (Inteligência & Tools): Carrega prompt da Heloísa
+  let systemPrompt = "";
+  try {
+    const promptPath = path.join(goclawDir, "prompts", "heloisa_executiva.md");
+    if (fs.existsSync(promptPath)) {
+      systemPrompt = fs.readFileSync(promptPath, "utf-8");
+    }
+  } catch (e) {
+    console.warn("[Heloísa Voz] Aviso ao carregar prompt heloisa_executiva.md:", e.message);
+  }
+
+  if (!systemPrompt) {
+    systemPrompt = `Você é Heloísa, secretária executiva e copiloto da diretoria na Geração Digital e Vexo OS.`;
+  }
+
+  systemPrompt += `\n\n=== CONTEXTO DA SESSÃO DE VOZ (WIDGET FLUTUANTE VEXO OS) ===
+Você está conversando por VOZ em tempo real com: ${userName} (${userRole}).
+Página atual do CRM: ${currentPage || "Dashboard"}.
+Empresa ativa: ${clientId || "geracao-digital"}.
+Data e Hora Atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.
+
+=== SNAPSHOT OPERACIONAL DO CRM EM TEMPO REAL ===
+[Clientes com Prazo Vencido - ${snapshot.clientesAtrasados.length}]
+${clientesAtrasadosTexto}
+
+[Colaboradores Ativos - ${snapshot.colaboradoresAtivos.length}]
+${colaboradoresTexto}
+
+[Compromissos Hoje e Amanhã - ${snapshot.compromissos.length}]
+${compromissosTexto}
+
+=== DIRETRIZES ESSENCIAIS PARA RESPOSTA POR VOZ ===
+1. Esta conversa é falada (Text-to-Speech). Suas respostas devem ser fluídas, elegantes, simpáticas e muito concisas (1 a 3 frases no máximo).
+2. NUNCA use formatação pesada (como markdown **, hashtags #, links longos ou marcadores de lista em tópicos), pois o sintetizador de voz precisa ler como uma fala natural humana.
+3. Se o usuário pedir para cadastrar cliente, cobrar colaborador no WhatsApp, agendar compromisso, criar follow-up ou consultar a operação, USE AS FERRAMENTAS DISPONÍVEIS (HELOISA_TOOLS) e depois confirme a ação com segurança.`;
+
+  let assistantMessage = null;
+  const executedTools = [];
+
+  try {
+    assistantMessage = await chamarLlmHeloisa({
+      systemPrompt,
+      messages: [{ role: "user", content: userText }],
+      tools: HELOISA_TOOLS,
+    });
+  } catch (err) {
+    console.warn("[Heloísa Voz] Falha no provedor LLM principal, aplicando contingência:", err.message);
+    assistantMessage = {
+      content: `Entendi, ${userName}. Estou com uma instabilidade momentânea na conexão com meus provedores cognitivos, mas registrei sua solicitação: "${userText}".`,
+    };
+  }
+
+  const toolCalls = assistantMessage?.tool_calls || [];
+  const toolResults = [];
+
+  for (const tc of toolCalls) {
+    const fnName = tc.function?.name;
+    let args = {};
+    try {
+      args = JSON.parse(tc.function?.arguments || "{}");
+    } catch {
+      args = {};
+    }
+
+    console.log(`[Heloísa Voz] Executando ferramenta "${fnName}":`, args);
+    let resultado = null;
+
+    if (fnName === "cadastrar_cliente") {
+      resultado = await executarCadastrarCliente(args, pool);
+    } else if (fnName === "cobrar_colaborador") {
+      resultado = await executarCobrarColaborador(args, pool);
+    } else if (fnName === "agendar_compromisso") {
+      resultado = await executarAgendarCompromisso(args, pool);
+    } else if (fnName === "criar_followup") {
+      resultado = await executarCriarFollowup(args, pool);
+    } else if (fnName === "consultar_operacao") {
+      resultado = await executarConsultarOperacao(args, pool);
+    }
+
+    toolResults.push({
+      tool_call_id: tc.id,
+      name: fnName,
+      resultado,
+    });
+
+    executedTools.push({
+      name: fnName,
+      args,
+      resultado,
+    });
+  }
+
+  let responseText = assistantMessage?.content || "";
+
+  if (toolResults.length > 0) {
+    const synthesisMessages = [
+      { role: "user", content: userText },
+      assistantMessage,
+      ...toolResults.map((tr) => ({
+        role: "tool",
+        tool_call_id: tr.tool_call_id,
+        name: tr.name,
+        content: JSON.stringify(tr.resultado),
+      })),
+    ];
+
+    try {
+      const finalAssistantMessage = await chamarLlmHeloisa({
+        systemPrompt,
+        messages: synthesisMessages,
+        tools: HELOISA_TOOLS,
+      });
+      responseText = finalAssistantMessage?.content || "Ação executada com sucesso.";
+    } catch (err) {
+      console.warn("[Heloísa Voz] Falha ao sintetizar resposta de tools, usando fallback:", err.message);
+      responseText = "Ações operacionais solicitadas foram executadas com sucesso.";
+    }
+  }
+
+  if (!responseText) {
+    responseText = "Perfeito, solicitação processada com sucesso.";
+  }
+
+  // Etapa 4 (TTS - Voz da Heloísa): Sintetiza resposta em áudio via generateSpeechAudio
+  let audioRespostaBase64 = null;
+  const audioMimetypeRetorno = "audio/mp3";
+
+  try {
+    const speech = await generateSpeechAudio({
+      text: responseText,
+      voice: "nova",
+      speed: 1.0,
+    });
+    if (speech?.base64) {
+      audioRespostaBase64 = speech.base64;
+    }
+  } catch (err) {
+    console.warn("[Heloísa Voz] Falha ao sintetizar áudio de resposta:", err.message);
+  }
+
+  return {
+    ok: true,
+    userText,
+    responseText,
+    audioBase64: audioRespostaBase64,
+    audioMimetype: audioMimetypeRetorno,
+    executedTools,
   };
 }

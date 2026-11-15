@@ -1,9 +1,20 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import http from "http";
 import fs from "fs";
 import path from "path";
 import os from "os";
+
+// Mock de node-edge-tts para testes rápidos e isolados
+vi.mock("node-edge-tts", () => {
+  return {
+    EdgeTTS: vi.fn().mockImplementation(function (options) {
+      this.options = options;
+      this.ttsPromise = vi.fn().mockResolvedValue(undefined);
+    }),
+  };
+});
+
 import { registerGoclawRoutes } from "../domains/goclaw/routes.js";
 
 let server;
@@ -68,6 +79,65 @@ const mockPool = {
       if (idx === -1) return { rows: [] };
       const removed = mockUsuarios.splice(idx, 1)[0];
       return { rows: [removed] };
+    }
+    if (sql.includes("gd_clientes")) {
+      return {
+        rows: [
+          {
+            id: "c-1",
+            nome: "Restaurante Sabor",
+            empresa: "Restaurante Sabor Ltda",
+            estado: "onboarding",
+            prazo_vence_em: "2026-11-10T12:00:00Z",
+          },
+        ],
+      };
+    }
+    if (sql.includes("gd_colaboradores")) {
+      return {
+        rows: [
+          {
+            id: "col-1",
+            nome: "Carlos Santana",
+            funcao: "Designer",
+            telefone: "5534999999999",
+            recebe_cobranca_whatsapp: true,
+            ativo: true,
+          },
+        ],
+      };
+    }
+    if (sql.includes("events")) {
+      if (sql.includes("INSERT")) {
+        const [titulo, data, local] = params;
+        return { rows: [{ id: "ev-novo", name: titulo, date: data, location: local }] };
+      }
+      return {
+        rows: [
+          {
+            id: "ev-1",
+            name: "Reunião de Alinhamento",
+            date: "2026-11-15T14:00:00Z",
+            location: "Google Meet",
+          },
+        ],
+      };
+    }
+    if (sql.includes("lead_reminders")) {
+      if (sql.includes("INSERT")) {
+        const [lead_name, title, notes, remind_at] = params;
+        return { rows: [{ id: "rem-novo", title, remind_at }] };
+      }
+      return {
+        rows: [
+          {
+            id: "rem-1",
+            title: "Ligar para cliente",
+            remind_at: "2026-11-15T10:00:00Z",
+            lead_name: "Restaurante Sabor",
+          },
+        ],
+      };
     }
     return { rows: [] };
   },
@@ -225,6 +295,214 @@ describe("Rotas de Gestão do GoClaw (goclaw/routes.js)", () => {
       const json = await res.json();
       expect(json.ok).toBe(true);
       expect(json.data.nome).toBe("Caio Almeida");
+    });
+  });
+
+  describe("Endpoint de Voz da Heloísa (/api/goclaw/heloisa/voice-chat)", () => {
+    let originalFetch;
+    const oldGroqKey = process.env.GROQ_API_KEY;
+    const oldGeminiKey = process.env.GEMINI_API_KEY;
+    const oldOpenAiKey = process.env.OPENAI_API_KEY;
+
+    beforeAll(() => {
+      originalFetch = globalThis.fetch;
+      process.env.GROQ_API_KEY = "mock-groq-key";
+      process.env.GEMINI_API_KEY = "mock-gemini-key";
+      process.env.OPENAI_API_KEY = "mock-openai-key";
+    });
+
+    afterAll(() => {
+      globalThis.fetch = originalFetch;
+      process.env.GROQ_API_KEY = oldGroqKey;
+      process.env.GEMINI_API_KEY = oldGeminiKey;
+      process.env.OPENAI_API_KEY = oldOpenAiKey;
+    });
+
+    it("rejeita requisição vazia sem texto e sem áudio com 400", async () => {
+      const res = await originalFetch(`${base}/api/goclaw/heloisa/voice-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toBe("Nenhum áudio ou texto fornecido para a Heloísa.");
+    });
+
+    it("processa mensagem de texto e retorna estrutura padronizada de voz", async () => {
+      const spyFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
+        const urlStr = String(url);
+        if (urlStr.includes("audio/speech")) {
+          return {
+            ok: true,
+            arrayBuffer: async () => Buffer.from("mock-audio-mp3-bytes"),
+          };
+        }
+        if (urlStr.includes("generativelanguage") || urlStr.includes("groq") || urlStr.includes("1337") || urlStr.includes("openai")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: "A operação está estável com todos os colaboradores ativos e clientes em acompanhamento.",
+                  },
+                },
+              ],
+            }),
+          };
+        }
+        return originalFetch(url, opts);
+      });
+
+      const res = await originalFetch(`${base}/api/goclaw/heloisa/voice-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Heloísa, como está a operação da agência hoje?",
+          currentPage: "/crm/dashboard",
+          clientId: "geracao-digital",
+        }),
+      });
+
+      spyFetch.mockRestore();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.userText).toBe("Heloísa, como está a operação da agência hoje?");
+      expect(json.responseText).toContain("A operação está estável");
+      expect(json.audioMimetype).toBe("audio/mp3");
+      expect(Array.isArray(json.executedTools)).toBe(true);
+    });
+
+    it("executa tool quando a IA solicita (ex: cadastrar_cliente ou agendar_compromisso)", async () => {
+      const spyFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
+        const urlStr = String(url);
+        if (urlStr.includes("audio/speech")) {
+          return {
+            ok: true,
+            arrayBuffer: async () => Buffer.from("mock-audio-mp3-bytes"),
+          };
+        }
+        if (urlStr.includes("generativelanguage") || urlStr.includes("groq") || urlStr.includes("1337") || urlStr.includes("openai")) {
+          const bodyStr = opts?.body ? String(opts.body) : "";
+          if (bodyStr.includes('"role":"tool"')) {
+            return {
+              ok: true,
+              json: async () => ({
+                choices: [
+                  {
+                    message: {
+                      role: "assistant",
+                      content: "Compromisso de alinhamento agendado com sucesso para amanhã às 14 horas.",
+                    },
+                  },
+                ],
+              }),
+            };
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        id: "call_123",
+                        function: {
+                          name: "agendar_compromisso",
+                          arguments: JSON.stringify({
+                            titulo: "Alinhamento com Santana",
+                            data_hora: "2026-11-15T14:00:00Z",
+                            local_ou_link: "Google Meet",
+                          }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          };
+        }
+        return originalFetch(url, opts);
+      });
+
+      const res = await originalFetch(`${base}/api/goclaw/heloisa/voice-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Heloísa, marque um alinhamento com o Santana para amanhã às 14h.",
+          currentPage: "/crm/calendario",
+        }),
+      });
+
+      spyFetch.mockRestore();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.executedTools.length).toBe(1);
+      expect(json.executedTools[0].name).toBe("agendar_compromisso");
+      expect(json.executedTools[0].resultado.sucesso).toBe(true);
+      expect(json.responseText).toContain("agendado com sucesso");
+    });
+
+    it("processa áudio base64 chamando STT", async () => {
+      const spyFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
+        const urlStr = String(url);
+        if (urlStr.includes("audio/transcriptions")) {
+          return {
+            ok: true,
+            json: async () => ({ text: "Áudio falado pelo diretor Conrado" }),
+          };
+        }
+        if (urlStr.includes("audio/speech")) {
+          return {
+            ok: true,
+            arrayBuffer: async () => Buffer.from("mock-audio-mp3-bytes"),
+          };
+        }
+        if (urlStr.includes("generativelanguage") || urlStr.includes("groq") || urlStr.includes("1337") || urlStr.includes("openai")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    content: "Olá Conrado, ouvi sua mensagem perfeitamente.",
+                  },
+                },
+              ],
+            }),
+          };
+        }
+        return originalFetch(url, opts);
+      });
+
+      const res = await originalFetch(`${base}/api/goclaw/heloisa/voice-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audioBase64: Buffer.from("audio-mock-bytes").toString("base64"),
+          audioMimetype: "audio/webm",
+          currentPage: "/crm/banco-de-dados",
+        }),
+      });
+
+      spyFetch.mockRestore();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.userText).toBe("Áudio falado pelo diretor Conrado");
+      expect(json.responseText).toContain("ouvi sua mensagem");
+      expect(json.audioMimetype).toBe("audio/mp3");
     });
   });
 });

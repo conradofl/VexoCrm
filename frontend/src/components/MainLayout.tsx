@@ -2,6 +2,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { CrmClientProvider } from "@/contexts/CrmClientContext";
 import { useSmartLinkAlerts } from "@/hooks/useSmartLinkAlerts";
 import { Outlet } from "react-router-dom";
+import { HeloisaVoiceOrb } from "@/components/HeloisaVoiceOrb";
 
 function SmartLinkAlertsListener() {
   useSmartLinkAlerts();
@@ -23,6 +24,7 @@ export function MainLayout() {
             <Outlet />
           </main>
         </div>
+        <HeloisaVoiceOrb />
       </CrmClientProvider>
     </div>
   );

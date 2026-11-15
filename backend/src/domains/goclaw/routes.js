@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { despacharVigia, gerarRelatorioVigia, normalizarNumerosWhatsApp } from "../../scripts/vigia-gd.mjs";
 import { pgDatabasePool } from "../../services/database.js";
+import { processarVozHeloisa } from "./heloisaEngine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -382,6 +383,48 @@ export function registerGoclawRoutes(app, {
       console.error("[goclaw-routes] Erro ao remover usuário da Heloísa:", err);
       return res.status(500).json({
         error: "Falha ao remover usuário autorizado da Heloísa.",
+        details: err.message,
+      });
+    }
+  });
+
+  // ─── Heloísa Voice Chat (Widget de Voz Two-Way do Vexo OS) ────────────────
+  app.post("/api/goclaw/heloisa/voice-chat", requireAuth, async (req, res) => {
+    try {
+      const {
+        audioBase64,
+        audioMimetype = "audio/webm",
+        text,
+        currentPage = "Dashboard",
+        clientId = "geracao-digital",
+      } = req.body || {};
+
+      if (!text && !audioBase64) {
+        return res.status(400).json({
+          error: "Nenhum áudio ou texto fornecido para a Heloísa.",
+        });
+      }
+
+      const userName = req.user?.name || req.user?.displayName || req.user?.email || "Diretor";
+      const userRole = req.user?.role || "Diretor Executivo";
+
+      const resultado = await processarVozHeloisa({
+        text,
+        audioBase64,
+        audioMimetype,
+        currentPage,
+        clientId,
+        userName,
+        userRole,
+        pool,
+        goclawDir,
+      });
+
+      return res.json(resultado);
+    } catch (err) {
+      console.error("[goclaw-routes] Erro no endpoint voice-chat da Heloísa:", err);
+      return res.status(500).json({
+        error: "Falha ao processar solicitação de voz com a Heloísa.",
         details: err.message,
       });
     }

@@ -815,7 +815,17 @@ export async function transcribeAudio(base64Data, mimetype = "audio/ogg") {
 
   const startMs = Date.now();
   try {
-    const ext = mimetype.includes("ogg") ? "ogg" : mimetype.includes("mp4") ? "mp4" : mimetype.includes("mpeg") ? "mp3" : "ogg";
+    const ext = mimetype.includes("webm")
+      ? "webm"
+      : mimetype.includes("ogg")
+      ? "ogg"
+      : mimetype.includes("mp4") || mimetype.includes("m4a")
+      ? "mp4"
+      : mimetype.includes("mpeg") || mimetype.includes("mp3")
+      ? "mp3"
+      : mimetype.includes("wav")
+      ? "wav"
+      : "webm";
     const buffer = Buffer.from(base64Data, "base64");
     const blob = new Blob([buffer], { type: mimetype });
 
