@@ -397,6 +397,7 @@ export function registerGoclawRoutes(app, {
         text,
         currentPage = "Dashboard",
         clientId = "geracao-digital",
+        history = [],
       } = req.body || {};
 
       if (!text && !audioBase64) {
@@ -416,6 +417,7 @@ export function registerGoclawRoutes(app, {
         clientId,
         userName,
         userRole,
+        history,
         pool,
         goclawDir,
       });

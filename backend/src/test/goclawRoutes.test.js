@@ -504,5 +504,81 @@ describe("Rotas de Gestão do GoClaw (goclaw/routes.js)", () => {
       expect(json.responseText).toContain("ouvi sua mensagem");
       expect(json.audioMimetype).toBe("audio/mp3");
     });
+
+    it("injeta histórico de conversa e executa a ferramenta global auditar_geral_vexo", async () => {
+      let capturedBody = null;
+      const spyFetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
+        const urlStr = String(url);
+        if (urlStr.includes("audio/speech")) {
+          return {
+            ok: true,
+            arrayBuffer: async () => Buffer.from("mock-audio-mp3-bytes"),
+          };
+        }
+        if (urlStr.includes("generativelanguage") || urlStr.includes("groq") || urlStr.includes("1337") || urlStr.includes("openai")) {
+          const bodyStr = opts?.body ? String(opts.body) : "";
+          capturedBody = bodyStr;
+          if (bodyStr.includes('"role":"tool"')) {
+            return {
+              ok: true,
+              json: async () => ({
+                choices: [
+                  {
+                    message: {
+                      role: "assistant",
+                      content: "Auditoria concluída com sucesso para o Vexo OS.",
+                    },
+                  },
+                ],
+              }),
+            };
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [
+                {
+                  message: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        id: "call_audit_1",
+                        function: {
+                          name: "auditar_geral_vexo",
+                          arguments: JSON.stringify({ tenant_id: "nous-gestao" }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          };
+        }
+        return originalFetch(url, opts);
+      });
+
+      const res = await originalFetch(`${base}/api/goclaw/heloisa/voice-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Heloísa, como estão os leads da Nous Gestão?",
+          currentPage: "/crm/dashboard",
+          history: [
+            { sender: "user", text: "Oi Heloísa" },
+            { sender: "heloisa", text: "Olá! Como posso te ajudar?" },
+          ],
+        }),
+      });
+
+      spyFetch.mockRestore();
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.executedTools.length).toBe(1);
+      expect(json.executedTools[0].name).toBe("auditar_geral_vexo");
+      expect(capturedBody).toContain("Oi Heloísa");
+    });
   });
 });

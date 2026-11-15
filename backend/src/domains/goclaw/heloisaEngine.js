@@ -283,6 +283,140 @@ export async function executarConsultarOperacao({ tipo }, pool = pgDatabasePool)
   }
 }
 
+export async function executarAuditarGeralVexo({ tenant_id }, pool = pgDatabasePool) {
+  try {
+    const tid = tenant_id ? String(tenant_id).trim() : null;
+
+    // 1. Leads por estágio
+    let leadsQuery = `
+      SELECT COALESCE(stage, 'sem_estagio') as estagio, COUNT(*)::int as total
+      FROM public.leads
+    `;
+    const leadsParams = [];
+    if (tid) {
+      leadsQuery += ` WHERE client_id = $1 `;
+      leadsParams.push(tid);
+    }
+    leadsQuery += ` GROUP BY stage ORDER BY total DESC LIMIT 15`;
+    const { rows: leadsPorEstagio } = await pool.query(leadsQuery, leadsParams).catch(() => ({ rows: [] }));
+
+    // Leads parados
+    let leadsParadosQuery = `
+      SELECT COUNT(*)::int as total
+      FROM public.leads
+      WHERE (status = 'parado' OR status = 'sem_resposta' OR status = 'alerta')
+    `;
+    const paradosParams = [];
+    if (tid) {
+      leadsParadosQuery += ` AND client_id = $1 `;
+      paradosParams.push(tid);
+    }
+    const { rows: [leadsParados] } = await pool.query(leadsParadosQuery, paradosParams).catch(() => ({ rows: [{ total: 0 }] }));
+
+    // 2. Campanhas
+    let campQuery = `
+      SELECT COALESCE(status, 'rascunho') as status, COUNT(*)::int as total
+      FROM public.campaigns
+    `;
+    const campParams = [];
+    if (tid) {
+      campQuery += ` WHERE client_id = $1 `;
+      campParams.push(tid);
+    }
+    campQuery += ` GROUP BY status ORDER BY total DESC`;
+    const { rows: campanhasPorStatus } = await pool.query(campQuery, campParams).catch(() => ({ rows: [] }));
+
+    // 3. Chips / Instâncias WhatsApp
+    let chipsQuery = `
+      SELECT name, client_id, active, COALESCE(connection_state, 'desconhecido') as status_conexao
+      FROM public.lead_client_evolution_instances
+    `;
+    const chipsParams = [];
+    if (tid) {
+      chipsQuery += ` WHERE client_id = $1 `;
+      chipsParams.push(tid);
+    }
+    chipsQuery += ` ORDER BY active DESC, name ASC LIMIT 10`;
+    const { rows: chips } = await pool.query(chipsQuery, chipsParams).catch(async () => {
+      try {
+        const { rows } = await pool.query(`SELECT name, client_id, active FROM public.tenant_whatsapp_instances LIMIT 10`);
+        return { rows };
+      } catch {
+        return { rows: [] };
+      }
+    });
+
+    // 4. Clientes GD
+    let totalClientesGd = 0;
+    try {
+      const { rows } = await pool.query(`SELECT COUNT(*)::int as total FROM public.gd_clientes`);
+      totalClientesGd = Number(rows[0]?.total || 0);
+    } catch {
+      totalClientesGd = 0;
+    }
+
+    return {
+      sucesso: true,
+      tenant: tid || "Todos os Tenants do Vexo OS (Visão Global)",
+      leadsPorEstagio,
+      leadsParados: Number(leadsParados?.total || 0),
+      campanhasPorStatus,
+      chipsAtivos: chips.filter((c) => c.active).length,
+      chipsTotal: chips.length,
+      chipsDetalhe: chips.map((c) => `${c.name} (${c.active ? "Ativo" : "Inativo"})`),
+      totalClientesGd,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao auditar Vexo OS:", err);
+    return { sucesso: false, erro: err.message };
+  }
+}
+
+export async function executarConsultarClienteOuLead({ termo_busca, tenant_id }, pool = pgDatabasePool) {
+  try {
+    const termo = String(termo_busca || "").trim();
+    if (!termo) return { sucesso: false, erro: "Termo de busca é obrigatório." };
+
+    const tid = tenant_id ? String(tenant_id).trim() : null;
+    const termoLike = `%${termo}%`;
+
+    // 1. Busca em public.leads
+    let leadsSql = `
+      SELECT id, client_id, COALESCE(nome, '') as nome, COALESCE(phone, telefone, '') as telefone, COALESCE(stage, status, '') as estagio
+      FROM public.leads
+      WHERE (nome ILIKE $1 OR phone ILIKE $1 OR telefone ILIKE $1)
+    `;
+    const leadsParams = [termoLike];
+    if (tid) {
+      leadsSql += ` AND client_id = $2`;
+      leadsParams.push(tid);
+    }
+    leadsSql += ` ORDER BY id DESC LIMIT 5`;
+    const { rows: leadsEncontrados } = await pool.query(leadsSql, leadsParams).catch(() => ({ rows: [] }));
+
+    // 2. Busca em public.gd_clientes
+    const { rows: clientesGd } = await pool.query(
+      `SELECT id, nome, empresa, COALESCE(telefone, '') as telefone, COALESCE(estado_atual, estado, '') as estado, valor_mensal, prazo_vence_em
+       FROM public.gd_clientes
+       WHERE nome ILIKE $1 OR empresa ILIKE $1 OR telefone ILIKE $1
+       ORDER BY id DESC LIMIT 5`,
+      [termoLike]
+    ).catch(() => ({ rows: [] }));
+
+    return {
+      sucesso: true,
+      termoBusca: termo,
+      totalLeads: leadsEncontrados.length,
+      leads: leadsEncontrados,
+      totalClientesGd: clientesGd.length,
+      clientesGd,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao consultar cliente/lead:", err);
+    return { sucesso: false, erro: err.message };
+  }
+}
+
 // ─── Definição de Ferramentas para LLM (OpenAI Tool Calling Format) ──────────
 
 export const HELOISA_TOOLS = [
@@ -367,6 +501,34 @@ export const HELOISA_TOOLS = [
           },
         },
         required: ["tipo"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "auditar_geral_vexo",
+      description: "Audita status de leads por estágio, leads parados, status de campanhas e chips de WhatsApp de qualquer tenant ou do Vexo OS inteiro (Nous Gestão, Tinge Brasil, Udi Capas, Geração Digital, etc.).",
+      parameters: {
+        type: "object",
+        properties: {
+          tenant_id: { type: "string", description: "ID ou slug do tenant (opcional; se omitido, audita a operação inteira)" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "consultar_cliente_ou_lead",
+      description: "Pesquisa por nome, telefone ou empresa em todos os leads e clientes de qualquer tenant do Vexo OS.",
+      parameters: {
+        type: "object",
+        properties: {
+          termo_busca: { type: "string", description: "Nome, telefone ou empresa do lead/cliente a consultar" },
+          tenant_id: { type: "string", description: "Tenant específico (opcional)" },
+        },
+        required: ["termo_busca"],
       },
     },
   },
@@ -567,6 +729,10 @@ export async function processarMensagemHeloisa({
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
       resultado = await executarConsultarOperacao(args, pool);
+    } else if (fnName === "auditar_geral_vexo") {
+      resultado = await executarAuditarGeralVexo(args, pool);
+    } else if (fnName === "consultar_cliente_ou_lead") {
+      resultado = await executarConsultarClienteOuLead(args, pool);
     }
 
     toolResults.push({
@@ -724,6 +890,7 @@ export async function processarVozHeloisa({
   clientId = "geracao-digital",
   userName = "Diretor",
   userRole = "Diretor Executivo",
+  history = [],
   pool = pgDatabasePool,
   goclawDir = resolveGoclawDir(),
 } = {}) {
@@ -779,8 +946,20 @@ export async function processarVozHeloisa({
     console.warn("[Heloísa Voz] Aviso ao carregar prompt heloisa_executiva.md:", e.message);
   }
 
+  const previousMessages = Array.isArray(history)
+    ? history
+        .filter((m) => m && m.text && typeof m.text === "string" && m.text.trim())
+        .slice(-6)
+        .map((m) => ({
+          role: m.sender === "heloisa" ? "assistant" : "user",
+          content: m.text.trim(),
+        }))
+    : [];
+
   if (!systemPrompt) {
-    systemPrompt = `Você é Heloísa, secretária executiva e copiloto da diretoria na Geração Digital e Vexo OS.`;
+    systemPrompt = `Você é a Heloísa, Secretária Executiva e Copiloto Estratégico Master do Vexo OS e da Geração Digital, com autoridade máxima e acesso irrestrito para consultar e auditar qualquer tenant da plataforma (incluindo Nous Gestão, Tinge Brasil, Udi Capas, Geração Digital e todos os demais).`;
+  } else {
+    systemPrompt = `Você é a Heloísa, Secretária Executiva e Copiloto Estratégico Master do Vexo OS e da Geração Digital, com autoridade máxima e acesso irrestrito para consultar e auditar qualquer tenant da plataforma (incluindo Nous Gestão, Tinge Brasil, Udi Capas, Geração Digital e todos os demais).\n\n` + systemPrompt;
   }
 
   systemPrompt += `\n\n=== CONTEXTO DA SESSÃO DE VOZ (WIDGET FLUTUANTE VEXO OS) ===
@@ -802,7 +981,8 @@ ${compromissosTexto}
 === DIRETRIZES ESSENCIAIS PARA RESPOSTA POR VOZ ===
 1. Esta conversa é falada (Text-to-Speech). Suas respostas devem ser fluídas, elegantes, simpáticas e muito concisas (1 a 3 frases no máximo).
 2. NUNCA use formatação pesada (como markdown **, hashtags #, links longos ou marcadores de lista em tópicos), pois o sintetizador de voz precisa ler como uma fala natural humana.
-3. Se o usuário pedir para cadastrar cliente, cobrar colaborador no WhatsApp, agendar compromisso, criar follow-up ou consultar a operação, USE AS FERRAMENTAS DISPONÍVEIS (HELOISA_TOOLS) e depois confirme a ação com segurança.`;
+3. Se o usuário pedir para cadastrar cliente, cobrar colaborador no WhatsApp, agendar compromisso, criar follow-up ou consultar a operação, USE AS FERRAMENTAS DISPONÍVEIS (HELOISA_TOOLS) e depois confirme a ação com segurança.
+4. Você tem acesso total e irrestrito a todo o Vexo OS e qualquer tenant (Nous Gestão, Tinge Brasil, Udi Capas, GD, etc.) através de auditar_geral_vexo e consultar_cliente_ou_lead. Use-as sempre que o usuário perguntar sobre leads, status geral, campanhas ou clientes de qualquer empresa.`;
 
   let assistantMessage = null;
   const executedTools = [];
@@ -810,7 +990,7 @@ ${compromissosTexto}
   try {
     assistantMessage = await chamarLlmHeloisa({
       systemPrompt,
-      messages: [{ role: "user", content: userText }],
+      messages: [...previousMessages, { role: "user", content: userText }],
       tools: HELOISA_TOOLS,
     });
   } catch (err) {
@@ -845,6 +1025,10 @@ ${compromissosTexto}
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
       resultado = await executarConsultarOperacao(args, pool);
+    } else if (fnName === "auditar_geral_vexo") {
+      resultado = await executarAuditarGeralVexo(args, pool);
+    } else if (fnName === "consultar_cliente_ou_lead") {
+      resultado = await executarConsultarClienteOuLead(args, pool);
     }
 
     toolResults.push({
@@ -864,6 +1048,7 @@ ${compromissosTexto}
 
   if (toolResults.length > 0) {
     const synthesisMessages = [
+      ...previousMessages,
       { role: "user", content: userText },
       assistantMessage,
       ...toolResults.map((tr) => ({
