@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import Dashboard from "../pages/Dashboard";
 
-let hookResult: { data: unknown; isLoading: boolean; error: unknown } = { data: undefined, isLoading: false, error: null };
+let hookResult: { data: unknown; isLoading: boolean; error: unknown; refreshingInBackground?: boolean } = { data: undefined, isLoading: false, error: null };
+const headerProps: Array<{ cacheStatus: string }> = [];
 const onboardingProps: Array<{ baseTotal?: number }> = [];
 
 vi.mock("@/hooks/useDashboard", async (importOriginal) => {
@@ -22,7 +23,12 @@ vi.mock("@/components/dashboard/OnboardingProgressCard", () => ({
     return null;
   },
 }));
-vi.mock("../pages/Dashboard/DashboardHeader", () => ({ DashboardHeader: () => null }));
+vi.mock("../pages/Dashboard/DashboardHeader", () => ({
+  DashboardHeader: (props: { cacheStatus: string }) => {
+    headerProps.push(props);
+    return null;
+  },
+}));
 vi.mock("../pages/Dashboard/OverviewTab", () => ({ OverviewTab: () => <div data-testid="visao-geral" /> }));
 vi.mock("../pages/Dashboard/PlanTab", () => ({ PlanTab: () => <div data-testid="aba-plano" /> }));
 vi.mock("../pages/Dashboard/DetailTabs", () => ({
@@ -47,6 +53,7 @@ describe("Página do Dashboard — só a Visão geral", () => {
   beforeEach(() => {
     hookResult = { data: undefined, isLoading: false, error: null };
     onboardingProps.length = 0;
+    headerProps.length = 0;
   });
 
   it("abre na Visão geral, com as abas de detalhe e sem o painel anterior", () => {
@@ -82,5 +89,17 @@ describe("Página do Dashboard — só a Visão geral", () => {
     expect(screen.queryByTestId("visao-geral")).not.toBeInTheDocument();
     expect(screen.getByText("Os números desta empresa ainda são de um cálculo antigo.")).toBeInTheDocument();
     expect(screen.getByText(/Atualizar agora/)).toBeInTheDocument();
+  });
+
+  it("cálculo velho sendo refeito por trás: o cabeçalho diz que está atualizando", () => {
+    hookResult = { data: { ...base, cacheStatus: "stale", overview: { base: { total: 1 } } }, isLoading: false, error: null, refreshingInBackground: true };
+    render(<Dashboard fixedClientId="c1" />);
+    expect(headerProps.at(-1)?.cacheStatus).toBe("updating");
+  });
+
+  it("cálculo em dia: o cabeçalho fica pronto", () => {
+    hookResult = { data: { ...base, overview: { base: { total: 1 } } }, isLoading: false, error: null, refreshingInBackground: false };
+    render(<Dashboard fixedClientId="c1" />);
+    expect(headerProps.at(-1)?.cacheStatus).toBe("ready");
   });
 });

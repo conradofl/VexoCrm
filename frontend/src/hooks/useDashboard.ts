@@ -228,13 +228,31 @@ export function dashboardQueryKey(clientId: string, period: DashboardPeriod, ran
   return ["dashboard", clientId, period, range?.from ?? null, range?.to ?? null] as const;
 }
 
+// Cálculo guardado há mais de 15 min: o servidor devolve o número velho na hora e recalcula por trás
+// ("stale"). Sem buscar de novo, a tela ficava com o número velho (já se viu "Contado em 13/11" no dia 15)
+// até alguém recarregar. Enquanto vier velho, a tela pergunta de novo a cada 10 s, por até ~90 s.
+// Se o recálculo falhou (lastError), não insiste: cada pergunta dispararia outro cálculo pesado.
+export const DASHBOARD_STALE_POLL_MS = 10_000;
+export const DASHBOARD_STALE_POLL_MAX = 9;
+
+export function dashboardStalePollInterval(
+  data: Pick<DashboardPayload, "cacheStatus" | "lastError"> | undefined,
+  updateCount: number,
+): number | false {
+  if (!data || data.cacheStatus !== "stale" || data.lastError) return false;
+  return updateCount <= DASHBOARD_STALE_POLL_MAX ? DASHBOARD_STALE_POLL_MS : false;
+}
+
 export function useDashboard(clientId: string, period: DashboardPeriod = "30d", range?: DashboardRange | null) {
   const { isAuthenticated, getIdToken } = useAuth();
+  const queryClient = useQueryClient();
   // "Personalizado" só consulta depois que as datas foram aplicadas
   const hasRange = period !== "custom" || !!range;
+  const queryKey = dashboardQueryKey(clientId, period, range);
 
-  return useQuery({
-    queryKey: dashboardQueryKey(clientId, period, range),
+  const query = useQuery({
+    queryKey,
+    refetchInterval: (q) => dashboardStalePollInterval(q.state.data, q.state.dataUpdateCount),
     enabled: isAuthenticated && !!clientId && hasRange,
     queryFn: async (): Promise<DashboardPayload> => {
       const token = await getIdToken();
@@ -256,6 +274,11 @@ export function useDashboard(clientId: string, period: DashboardPeriod = "30d", 
     retry: (failureCount, error) => failureCount < 1 && !/ 400 /.test(String((error as Error)?.message)),
     staleTime: 60 * 1000,
   });
+
+  // Verdadeiro enquanto a tela espera o recálculo de trás: o cabeçalho mostra "Atualizando...".
+  const updateCount = queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0;
+  const refreshingInBackground = dashboardStalePollInterval(query.data, updateCount) !== false;
+  return { ...query, refreshingInBackground };
 }
 
 export function useRefreshDashboard(clientId: string) {
