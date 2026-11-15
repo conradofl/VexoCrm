@@ -406,7 +406,19 @@ export function registerGoclawRoutes(app, {
         });
       }
 
-      const userName = req.user?.name || req.user?.displayName || req.user?.email || "Diretor";
+      // Resolve nome do usuário com preferência para Conrado ou nome real, NUNCA "Diretor"
+      let rawName =
+        req.body?.userName ||
+        req.user?.name ||
+        req.user?.displayName ||
+        (req.user?.email ? req.user.email.split("@")[0] : null) ||
+        "Conrado";
+
+      let cleanName = String(rawName).trim();
+      if (/^diretor$/i.test(cleanName) || cleanName.includes("@") || !cleanName) {
+        cleanName = "Conrado";
+      }
+      const userName = cleanName.split(" ")[0] || "Conrado";
       const userRole = req.user?.role || "Diretor Executivo";
 
       const resultado = await processarVozHeloisa({

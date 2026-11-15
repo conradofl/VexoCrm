@@ -200,7 +200,7 @@ export function HeloisaVoiceOrb() {
     {
       id: "init-1",
       sender: "heloisa",
-      text: `Oi, ${userName}! Que ótimo falar com você! Sou a Heloísa, sua copiloto e amiga aqui no Vexo OS. Só me chamar ou falar o que precisa que eu cuido de tudo pra você com o maior prazer!`,
+      text: `Oi, ${userName}! Sou a Heloísa. Tô conectada e pronta por aqui, pode falar o que precisa.`,
       timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
@@ -386,27 +386,29 @@ export function HeloisaVoiceOrb() {
         const rawSpoken = (finalConcat || interim).trim();
         if (!rawSpoken) return;
 
-        // Se o usuário falou apenas "Heloísa", enviamos "Olá Heloísa" para ela responder cordialmente
+        // Se o usuário falou apenas a palavra de ativação "Heloísa", enviamos "Olá Heloísa"
         const isJustWakeWord = /^helo[íi]sa[?!.]*$/i.test(rawSpoken);
-        const cleanOrder = rawSpoken.replace(/^.*?\bhelo[íi]sa\b[,.]?\s*/i, "").trim();
-        const textoExibicao = isJustWakeWord ? rawSpoken : (cleanOrder || rawSpoken);
+        let cleanOrder = rawSpoken;
+        if (/^helo[íi]sa\b/i.test(rawSpoken)) {
+          cleanOrder = rawSpoken.replace(/^helo[íi]sa[,.:;!?\s]*/i, "").trim() || rawSpoken;
+        }
+        const comandoParaEnviar = isJustWakeWord ? "Olá Heloísa" : cleanOrder;
 
-        setLiveTranscript(textoExibicao);
+        setLiveTranscript(comandoParaEnviar);
         setStatus("ouvindo");
 
-        // Detecção de Silêncio: Timer de 2000ms (2.0 segundos)
+        // Detecção de Silêncio: Timer de 1200ms (1.2s) para resposta rápida, natural e sem corte
         if (silenceTimerRef.current) {
           clearTimeout(silenceTimerRef.current);
         }
 
-        const comandoParaEnviar = isJustWakeWord ? "Olá Heloísa" : (cleanOrder || rawSpoken);
         if (comandoParaEnviar && comandoParaEnviar.length >= 2) {
           silenceTimerRef.current = setTimeout(() => {
             if (!isSpeakingRef.current && comandoParaEnviar && isOpenRef.current) {
               enviarParaHeloisa({ text: comandoParaEnviar });
               setLiveTranscript("");
             }
-          }, 2000);
+          }, 1200);
         }
       };
 
@@ -499,11 +501,11 @@ export function HeloisaVoiceOrb() {
       const finalizarFala = () => {
         isSpeakingRef.current = false;
         setStatus("idle");
-        // Anti-atropelo: Reativa o microfone 500ms após o término do áudio
+        // Reativação ágil do microfone (120ms) para não cortar a fala subsequente do usuário
         if (isOpenRef.current) {
           resumeListeningTimerRef.current = setTimeout(() => {
             startListening();
-          }, 500);
+          }, 120);
         }
       };
 
@@ -614,6 +616,7 @@ export function HeloisaVoiceOrb() {
           },
           body: JSON.stringify({
             text: promptLimpo,
+            userName: userName || "Conrado",
             currentPage: location.pathname,
             clientId: "geracao-digital",
             history: historyPayload,
@@ -684,7 +687,7 @@ export function HeloisaVoiceOrb() {
       {
         id: `init-${Date.now()}`,
         sender: "heloisa",
-        text: `Prontinho, ${userName}! Histórico zerado. Estou super a postos pra te ouvir ou tocar qualquer tarefa!`,
+        text: `Histórico limpo, ${userName}. Pode falar.`,
         timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
       },
     ]);

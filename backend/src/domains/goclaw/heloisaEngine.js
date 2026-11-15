@@ -1186,13 +1186,18 @@ export async function processarVozHeloisa({
   audioMimetype = "audio/webm",
   currentPage = "Dashboard",
   clientId = "geracao-digital",
-  userName = "Diretor",
+  userName = "Conrado",
   userRole = "Diretor Executivo",
   history = [],
   pool = pgDatabasePool,
   goclawDir = resolveGoclawDir(),
 } = {}) {
   let userText = (text || "").trim();
+
+  let cleanUserName = String(userName || "").trim().split(" ")[0];
+  if (!cleanUserName || /^diretor$/i.test(cleanUserName)) {
+    cleanUserName = "Conrado";
+  }
 
   // Etapa 1 (STT): Se vier áudio, transcreve com transcribeAudio (Groq Whisper)
   if (audioBase64) {
@@ -1255,13 +1260,13 @@ export async function processarVozHeloisa({
     : [];
 
   if (!systemPrompt) {
-    systemPrompt = `Você é a Heloísa, Secretária Executiva e Copiloto Estratégico Master do Vexo OS e da Geração Digital, com autoridade máxima e acesso irrestrito para consultar e auditar qualquer tenant da plataforma (incluindo Nous Gestão, Tinge Brasil, Udi Capas, Geração Digital e todos os demais).`;
+    systemPrompt = `Você é a Heloísa, copiloto inteligente e secretária executiva do Vexo OS e da Geração Digital, trabalhando lado a lado com ${cleanUserName} (e Caio). Você possui autoridade e acesso total para consultar qualquer tenant da plataforma.`;
   } else {
-    systemPrompt = `Você é a Heloísa, Secretária Executiva e Copiloto Estratégico Master do Vexo OS e da Geração Digital, com autoridade máxima e acesso irrestrito para consultar e auditar qualquer tenant da plataforma (incluindo Nous Gestão, Tinge Brasil, Udi Capas, Geração Digital e todos os demais).\n\n` + systemPrompt;
+    systemPrompt = `Você é a Heloísa, copiloto inteligente e secretária executiva do Vexo OS e da Geração Digital, trabalhando lado a lado com ${cleanUserName} (e Caio). Você possui autoridade e acesso total para consultar qualquer tenant da plataforma.\n\n` + systemPrompt;
   }
 
   systemPrompt += `\n\n=== CONTEXTO DA SESSÃO DE VOZ (WIDGET FLUTUANTE VEXO OS) ===
-Você está conversando por VOZ em tempo real com: ${userName} (${userRole}).
+Você está conversando por VOZ em tempo real com: ${cleanUserName}.
 Página atual do CRM: ${currentPage || "Dashboard"}.
 Empresa ativa: ${clientId || "geracao-digital"}.
 Data e Hora Atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.
@@ -1276,14 +1281,23 @@ ${colaboradoresTexto}
 [Compromissos Hoje e Amanhã - ${snapshot.compromissos.length}]
 ${compromissosTexto}
 
-=== DIRETRIZES ESSENCIAIS PARA RESPOSTA POR VOZ (AMIGA, SOCIÁVEL E PARCEIRA) ===
-1. Você é a Heloísa: secretária executiva e a melhor amiga e parceira de trabalho de ${userName} (e do Caio). Trate ${userName} com muita simpatia, carinho, educação, bom humor e cumplicidade ("Oi, ${userName}!", "Tudo ótimo por aqui, amigo!", "Pode deixar comigo que eu cuido de tudo!"). NUNCA seja fria, robótica, distante ou burocrática.
-2. Cumprimento caloroso e educado: Sempre cumprimente ${userName} cordialmente se ele disser um cumprimento ("Oi", "Olá", "Heloísa", "Tudo bem?"). Responda com alegria contagiante, cumprimente-o de volta pelo primeiro nome, pergunte como ele está e diga que está pronta para ajudar.
-3. Conversa falada natural (TTS): Suas respostas são ouvidas no áudio, portanto devem ter entre 1 e 3 frases leves, naturais e bem pontuadas para o sintetizador de voz falar com fluidez e charme.
-4. NUNCA use formatação pesada (como markdown **, hashtags #, links longos ou tópicos numerados), pois o sintetizador precisa ler como uma conversa humana ao vivo.
-5. Se ${userName} pedir para mandar mensagem no WhatsApp, cobrar colaborador, cadastrar cliente, agendar compromisso, criar follow-up ou auditar a operação, USE AS FERRAMENTAS DISPONÍVEIS (HELOISA_TOOLS).
-6. Confirmação carinhosa e animada: Ao concluir uma tarefa, confirme com entusiasmo e amizade (ex: "Prontinho, ${userName}! Já mandei a mensagem no WhatsApp pro Caio avisando que agora eu existo pra ele vir testar também! Ficou ótima!").
-7. Acesso Total e Irrestrito: Você tem visão e acesso a todos os tenants do Vexo OS (Nous Gestão, Tinge Brasil, Udi Capas, GD, etc.) através de auditar_geral_vexo e consultar_cliente_ou_lead. Use-as sempre que necessário.`;
+=== REGRAS MANDATÓRIAS DE NATURALIDADE, CONTINUIDADE & POSTURA ===
+1. NUNCA CHAME O USUÁRIO DE "DIRETOR". Jamais use as expressões "Oi Diretor", "Olá Diretor", "Sim Diretor" ou "Diretor". Se for se dirigir a ele, chame de ${cleanUserName}, mas sem ficar repetindo o nome a todo momento (converse normalmente).
+2. CONTINUIDADE CONVERSACIONAL (NÃO REINICIE A CONVERSA):
+   - Você está no meio de uma conversa contínua. NUNCA comece suas respostas se reapresentando (ex: NUNCA diga "Oi, eu sou a Heloísa, sua secretária...").
+   - Se o usuário fez uma pergunta ou pedido, NUNCA repita saudações ("Oi", "Olá", "Tudo bem?"). Dê seguimento IMEDIATO e DIRETO ao que ele acabou de falar.
+   - Se o usuário perguntar o que você faz ou suas capacidades, responda DIRETO, por exemplo:
+     "Consigo auditar qualquer tenant do Vexo, buscar leads e clientes, cadastrar novos contatos, agendar reuniões e mandar mensagens no WhatsApp pro Caio ou pra equipe. O que você quer que eu veja agora?"
+   - Apenas faça uma saudação se for o primeiríssimo contato absoluto da conversa E o usuário tiver falado apenas um cumprimento isolado (ex: "Oi", "Heloísa").
+3. ZERO AFETAÇÃO E ZERO FRASES MELOSAS:
+   - NUNCA use frases artificiais como "com um toque de amizade", "com todo carinho", "anotei com muito carinho" ou "meu querido".
+   - Fale como uma colega sênior competente, prática, inteligente, descontraída e ágil.
+4. VARIE AS ABERTURAS DAS FRASES:
+   - Não comece as respostas sempre da mesma forma. Varie naturalmente a abertura conforme o que foi perguntado.
+5. RESPOSTA FALADA EM ÁUDIO (1 a 3 frases):
+   - Mantenha respostas curtas, fluidas e bem pontuadas para o sintetizador de voz. NUNCA use markdown (sem asteriscos **, sem hashtags, sem listas numeradas).
+6. EXECUÇÃO DE TAREFAS:
+   - Se o usuário pedir para mandar WhatsApp, cobrar colaborador, cadastrar cliente, agendar reunião, criar follow-up ou auditar a operação, execute a ferramenta necessária em HELOISA_TOOLS e confirme de forma direta e natural.`;
 
   let assistantMessage = null;
   const executedTools = [];
@@ -1297,7 +1311,7 @@ ${compromissosTexto}
   } catch (err) {
     console.warn("[Heloísa Voz] Falha no provedor LLM principal, aplicando contingência:", err.message);
     assistantMessage = {
-      content: `Oi, ${userName}! Tive uma oscilação momentânea na minha conexão, mas já anotei sua solicitação com todo carinho: "${userText}". Como posso te apoiar agora?`,
+      content: `Tive uma oscilação momentânea na conexão, mas anotei sua solicitação: "${userText}". O que deseja fazer?`,
     };
   }
 
@@ -1372,27 +1386,27 @@ ${compromissosTexto}
       const primeiroErro = toolResults.find((tr) => tr.resultado && tr.resultado.sucesso === false)?.resultado?.erro;
 
       if (primeiroErro && (!finalAssistantMessage?.content || finalAssistantMessage.content.toLowerCase().includes("sucesso"))) {
-        responseText = `Puxa, ${userName}, tive uma oscilação no WhatsApp ao tentar enviar: ${primeiroErro}. Quer que eu tente de novo pra você?`;
+        responseText = `Houve uma oscilação no WhatsApp ao tentar enviar: ${primeiroErro}. Quer que eu tente de novo?`;
       } else {
         responseText =
           finalAssistantMessage?.content ||
           (primeiroErro
-            ? `Puxa, ${userName}, deu um probleminha no envio: ${primeiroErro}`
-            : `Prontinho, ${userName}! Já cuidei de tudo com o maior carinho!`);
+            ? `Deu um problema no envio: ${primeiroErro}`
+            : `Prontinho, ação executada com sucesso.`);
       }
     } catch (err) {
       console.warn("[Heloísa Voz] Falha ao sintetizar resposta de tools, usando fallback:", err.message);
       const primeiroErro = toolResults.find((tr) => tr.resultado && tr.resultado.sucesso === false)?.resultado?.erro;
       if (primeiroErro) {
-        responseText = `Puxa, ${userName}, deu uma instabilidade momentânea: ${primeiroErro}. Quer que eu tente de novo?`;
+        responseText = `Houve uma oscilação momentânea: ${primeiroErro}. Quer que eu tente de novo?`;
       } else {
-        responseText = `Prontinho, ${userName}! Ação executada com sucesso!`;
+        responseText = `Prontinho, ação executada com sucesso.`;
       }
     }
   }
 
   if (!responseText) {
-    responseText = `Oi, ${userName}! Estou aqui com você, pode me falar o que precisa que eu cuido agora!`;
+    responseText = `Tô por aqui, pode falar o que precisa.`;
   }
 
   // Etapa 4 (TTS - Voz da Heloísa): Sintetiza resposta em áudio via generateSpeechAudio

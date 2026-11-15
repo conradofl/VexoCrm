@@ -17,6 +17,7 @@ import {
   executarCriarFollowup,
   executarConsultarOperacao,
   enviarMensagemWhatsAppComFallback,
+  processarVozHeloisa,
   DIRETORES_AUTORIZADOS,
   chamarLlmHeloisa,
 } from "../domains/goclaw/heloisaEngine.js";
@@ -210,6 +211,23 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     const resResumo = await executarConsultarOperacao({ tipo: "resumo_geral" }, mockPool);
     expect(resResumo.sucesso).toBe(true);
     expect(resResumo.tipo).toBe("resumo_geral");
+  });
+
+  it("processarVozHeloisa sanitiza o nome do usuário para Conrado se vier Diretor", async () => {
+    const mockPool = {
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+    };
+
+    const res = await processarVozHeloisa({
+      text: "quais são as suas funcionalidades?",
+      userName: "Diretor",
+      pool: mockPool,
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.responseText).not.toContain("Oi, Diretor");
+    expect(res.responseText).not.toContain("Olá, Diretor");
+    expect(res.responseText).not.toContain("toque de amizade");
   });
 });
 
