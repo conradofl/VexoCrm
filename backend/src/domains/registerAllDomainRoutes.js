@@ -66,7 +66,14 @@ export function registerAllDomainRoutes(app) {
   registerContractRoutes(app);
   registerContractWebhookRoutes(app);
   registerGdClientesRoutes(app);
-  registerGoclawRoutes(app, { requireAuth: requireInternalAccess });
+
+  const requireAuthGoclaw = (req, res, next) => {
+    requireFirebaseAuth(req, res, (err) => {
+      if (err) return next(err);
+      requireInternalAccess(req, res, next);
+    });
+  };
+  registerGoclawRoutes(app, { requireAuth: requireAuthGoclaw });
 
   // ─── Base de Conhecimento RAG (upload/indexação, fila própria) ────────────
   registerRagRoutes(app);

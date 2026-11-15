@@ -424,8 +424,7 @@ export function registerGoclawRoutes(app, {
     } catch (err) {
       console.error("[goclaw-routes] Erro no endpoint voice-chat da Heloísa:", err);
       return res.status(500).json({
-        error: "Falha ao processar solicitação de voz com a Heloísa.",
-        details: err.message,
+        error: err?.message || "Erro interno ao processar voz com a Heloísa.",
       });
     }
   });
