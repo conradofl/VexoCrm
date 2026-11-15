@@ -16,8 +16,13 @@ import {
   AUDIO_LIBRARY_MAX_SECONDS,
   AUDIO_LIBRARY_NAME_MAX,
   AUDIO_LIBRARY_WHEN_TO_USE_MAX,
+  AGENT_AUDIO_MAX_ITEMS,
+  AUDIO_USAGE_WINDOW_DAYS,
   archiveAudio,
+  countAudioSends,
   createAudio,
+  listAttendanceAgents,
+  setAudioAgents,
   findAudioTenant,
   getAudioForTenant,
   listAudios,
@@ -39,6 +44,10 @@ const RULE_ERROR_STATUS = {
   INVALID_WHEN_TO_USE: 400,
   WHEN_TO_USE_TOO_LONG: 400,
   NOTHING_TO_UPDATE: 400,
+  WHEN_TO_USE_REQUIRED: 400,
+  INVALID_AGENTS: 400,
+  AGENT_NOT_AVAILABLE: 400,
+  AGENT_AUDIO_LIMIT: 409,
   AUDIO_IN_USE: 409,
 };
 
@@ -121,6 +130,7 @@ export function registerAudioLibraryRoutes(app) {
         maxSeconds: AUDIO_LIBRARY_MAX_SECONDS,
         nameMax: AUDIO_LIBRARY_NAME_MAX,
         whenToUseMax: AUDIO_LIBRARY_WHEN_TO_USE_MAX,
+        agentMaxAudios: AGENT_AUDIO_MAX_ITEMS,
       },
     });
   });
@@ -139,10 +149,47 @@ export function registerAudioLibraryRoutes(app) {
       const rows = await listAudios(pool, clientId);
       return res.json({
         success: true,
-        audios: rows.map((row) => toPublicAudio(row, { followupSteps: row.followup_steps })),
+        audios: rows.map((row) =>
+          toPublicAudio(row, { followupSteps: row.followup_steps, agentIds: row.agent_ids || [] })
+        ),
       });
     } catch (err) {
       return sendErr(res, 500, "AUDIO_LIST_FAILED", err.message || "Falha ao listar os áudios.");
+    }
+  });
+
+  // GET /api/audio-library/agents?clientId= — agentes de ATENDIMENTO da empresa
+  // (os únicos que podem enviar áudio na conversa), com quantos áudios já têm.
+  router.get("/agents", async (req, res) => {
+    const clientId = resolveAuthorizedClientId(req, res, str(req.query.clientId));
+    if (!clientId) return;
+    if (!(await assertAudioLibraryAccess(req, res, clientId))) return;
+    const pool = getDb();
+    if (!pool) return sendErr(res, 500, "DB_UNAVAILABLE", "Banco de dados indisponível.");
+    try {
+      const rows = await listAttendanceAgents(pool, clientId);
+      return res.json({
+        success: true,
+        agents: rows.map((a) => ({ id: a.id, name: a.name, audioCount: a.audio_count })),
+        maxAudiosPerAgent: AGENT_AUDIO_MAX_ITEMS,
+      });
+    } catch (err) {
+      return sendErr(res, 500, "AUDIO_AGENTS_FAILED", err.message || "Falha ao listar os agentes.");
+    }
+  });
+
+  // GET /api/audio-library/usage?clientId= — envios de cada áudio pelo agente,
+  // contados nas mensagens gravadas. Rota à parte: a lista não espera por ela.
+  router.get("/usage", async (req, res) => {
+    const clientId = resolveAuthorizedClientId(req, res, str(req.query.clientId));
+    if (!clientId) return;
+    if (!(await assertAudioLibraryAccess(req, res, clientId))) return;
+    const pool = getDb();
+    if (!pool) return sendErr(res, 500, "DB_UNAVAILABLE", "Banco de dados indisponível.");
+    try {
+      return res.json({ success: true, windowDays: AUDIO_USAGE_WINDOW_DAYS, sends: await countAudioSends(pool, clientId) });
+    } catch (err) {
+      return sendErr(res, 500, "AUDIO_USAGE_FAILED", err.message || "Falha ao contar os envios.");
     }
   });
 
@@ -177,7 +224,7 @@ export function registerAudioLibraryRoutes(app) {
         whenToUse,
         createdByUid: req.authUser?.uid || req.authAccess?.uid || null,
       });
-      return res.status(201).json({ success: true, audio: toPublicAudio(row, { followupSteps: 0 }) });
+      return res.status(201).json({ success: true, audio: toPublicAudio(row, { followupSteps: 0, agentIds: [] }) });
     } catch (err) {
       return sendRuleOrServerErr(res, err, "AUDIO_CREATE_FAILED", "Falha ao salvar o áudio.");
     }
@@ -202,6 +249,22 @@ export function registerAudioLibraryRoutes(app) {
       return res.json({ success: true, audio: toPublicAudio(row) });
     } catch (err) {
       return sendRuleOrServerErr(res, err, "AUDIO_UPDATE_FAILED", "Falha ao alterar o áudio.");
+    }
+  });
+
+  // PUT /api/audio-library/:id/agents  { companyIds: [] } — quais agentes de
+  // atendimento podem enviar este áudio na conversa (substitui a lista).
+  router.put("/:id/agents", async (req, res) => {
+    const pool = getDb();
+    if (!pool) return sendErr(res, 500, "DB_UNAVAILABLE", "Banco de dados indisponível.");
+    try {
+      const clientId = await authorizeById(req, res, pool, req.params.id);
+      if (!clientId) return;
+      const agentIds = await setAudioAgents(pool, { id: req.params.id, clientId, companyIds: req.body?.companyIds });
+      if (!agentIds) return sendErr(res, 404, "NOT_FOUND", "Áudio não encontrado.");
+      return res.json({ success: true, agentIds });
+    } catch (err) {
+      return sendRuleOrServerErr(res, err, "AUDIO_AGENTS_UPDATE_FAILED", "Falha ao salvar os agentes do áudio.");
     }
   });
 

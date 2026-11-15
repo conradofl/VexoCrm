@@ -7,7 +7,8 @@
 //   - enviar um arquivo de áudio de verdade faz a linha aparecer e abre o "quando usar" dentro da janela;
 //   - o player TOCA: o Chromium decodifica o arquivo devolvido pela API e mede a duração;
 //   - arquivar pede confirmação, e o aviso de "em uso" do servidor aparece na tela;
-//   - no passo de follow-up, o seletor (Radix) abre, escolhe um áudio e o salvar manda audio_library_id.
+//   - no passo de follow-up, o seletor (Radix) abre, escolhe um áudio e o salvar manda audio_library_id;
+//   - o editor do áudio mostra os agentes de atendimento, liga um, trava o que está no teto, e cabe na janela.
 //
 // Uso: npx playwright test --config playwright.harness.config.ts agente-audios
 import { expect, test, type Page } from "@playwright/test";
@@ -38,7 +39,13 @@ function makeWav(seconds: number) {
   return buf;
 }
 
-const LIMITS = { maxBytes: 5 * 1024 * 1024, maxSeconds: 180, nameMax: 80, whenToUseMax: 140 };
+const LIMITS = { maxBytes: 5 * 1024 * 1024, maxSeconds: 180, nameMax: 80, whenToUseMax: 140, agentMaxAudios: 10 };
+
+const AGENTS = [
+  { id: "ag-bia", name: "Bia — atendimento da loja do Centro", audioCount: 1 },
+  { id: "ag-caio", name: "Caio", audioCount: 10 },
+  { id: "ag-pos", name: "Pós-venda", audioCount: 0 },
+];
 
 interface FakeAudio {
   id: string;
@@ -51,14 +58,15 @@ interface FakeAudio {
   updatedAt: string;
   archivedAt: null;
   followupSteps: number;
+  agentIds: string[];
 }
 
 function seed(): FakeAudio[] {
   const base = { mimeType: "audio/ogg", createdAt: "2026-11-10T12:00:00Z", updatedAt: "2026-11-10T12:00:00Z", archivedAt: null as null };
   return [
-    { ...base, id: "a1", name: "Apresentação da loja", whenToUse: "Quando o cliente pergunta quem somos e há quanto tempo estamos no mercado", sizeBytes: 412_000, durationSeconds: 47, followupSteps: 2 },
-    { ...base, id: "a2", name: "Como funciona a entrega para outras cidades do Triângulo Mineiro", whenToUse: "Quando perguntam sobre frete ou prazo", sizeBytes: 1_250_000, durationSeconds: 125, followupSteps: 0 },
-    { ...base, id: "a3", name: "Agradecimento", whenToUse: null, sizeBytes: 96_000, durationSeconds: 12, followupSteps: 0 },
+    { ...base, id: "a1", name: "Apresentação da loja", whenToUse: "Quando o cliente pergunta quem somos e há quanto tempo estamos no mercado", sizeBytes: 412_000, durationSeconds: 47, followupSteps: 2, agentIds: ["ag-bia"] },
+    { ...base, id: "a2", name: "Como funciona a entrega para outras cidades do Triângulo Mineiro", whenToUse: "Quando perguntam sobre frete ou prazo", sizeBytes: 1_250_000, durationSeconds: 125, followupSteps: 0, agentIds: [] },
+    { ...base, id: "a3", name: "Agradecimento", whenToUse: null, sizeBytes: 96_000, durationSeconds: 12, followupSteps: 0, agentIds: [] },
   ];
 }
 
@@ -67,11 +75,12 @@ interface Served {
   uploads: { filename: string; bytes: number }[];
   patches: { id: string; body: { name: string; whenToUse: string | null } }[];
   archived: string[];
+  agentPuts: { id: string; companyIds: string[] }[];
   templatePosts: Record<string, unknown>[];
 }
 
 async function serve(page: Page): Promise<Served> {
-  const served: Served = { audios: seed(), uploads: [], patches: [], archived: [], templatePosts: [] };
+  const served: Served = { audios: seed(), uploads: [], patches: [], archived: [], agentPuts: [], templatePosts: [] };
   const wav = makeWav(2);
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -81,6 +90,20 @@ async function serve(page: Page): Promise<Served> {
 
     if (url.pathname === "/api/audio-library/access") {
       return json(200, { success: true, allowed: true, reason: null, message: null, limits: LIMITS });
+    }
+    if (url.pathname === "/api/audio-library/agents") {
+      return json(200, { success: true, agents: AGENTS, maxAudiosPerAgent: 10 });
+    }
+    if (url.pathname === "/api/audio-library/usage") {
+      return json(200, { success: true, windowDays: 90, sends: { a1: 37 } });
+    }
+    const agentsPut = url.pathname.match(/^\/api\/audio-library\/([^/]+)\/agents$/);
+    if (agentsPut && method === "PUT") {
+      const body = req.postDataJSON();
+      served.agentPuts.push({ id: agentsPut[1], companyIds: body.companyIds });
+      const alvo = served.audios.find((a) => a.id === agentsPut[1]);
+      if (alvo) alvo.agentIds = body.companyIds;
+      return json(200, { success: true, agentIds: body.companyIds });
     }
     if (url.pathname === "/api/audio-library" && method === "GET") {
       return json(200, { success: true, audios: served.audios });
@@ -100,6 +123,7 @@ async function serve(page: Page): Promise<Served> {
         updatedAt: new Date().toISOString(),
         archivedAt: null,
         followupSteps: 0,
+        agentIds: [],
       };
       served.audios = [novo, ...served.audios];
       return json(201, { success: true, audio: novo });
@@ -261,6 +285,61 @@ for (const viewport of [
       await page.getByRole("alertdialog").getByRole("button", { name: "Arquivar" }).click();
       await expect(livre).toHaveCount(0);
       expect(served.archived).toEqual(["a3"]);
+      await expectNoSideScroll(page);
+    });
+  });
+
+  test.describe(`aba Áudios, agentes na conversa — ${viewport.nome}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test("a linha mostra quem envia na conversa; o editor liga um agente, trava o que está no teto e cabe na janela", async ({ page }) => {
+      const served = await serve(page);
+      await page.goto(ABA);
+      const rows = page.getByTestId("audio-library-row");
+      await expect(rows).toHaveCount(3);
+
+      // Linha: agente ligado e contagem de envios, dentro da tela.
+      const naConversa = rows.nth(0).getByTestId("audio-library-row-agents");
+      await expect(naConversa).toHaveText("Na conversa: Bia — atendimento da loja do Centro");
+      await expectInsideViewport(page, naConversa);
+      await expect(rows.nth(0).getByText(/enviado 37 vezes pelo agente em 90 dias/)).toBeVisible();
+      await expectNoSideScroll(page);
+
+      // Editor do segundo áudio (sem agente).
+      await rows.nth(1).getByRole("button", { name: "Editar" }).click();
+      const dialog = page.getByRole("dialog");
+      const bloco = dialog.getByTestId("audio-library-agents");
+      await expect(bloco).toBeVisible();
+      await expectInsideViewport(page, dialog);
+      await expectInsideViewport(page, bloco);
+
+      const pos = bloco.getByRole("checkbox", { name: "Agente Pós-venda" });
+      const caio = bloco.getByRole("checkbox", { name: "Agente Caio" });
+      await expect(caio).toBeDisabled();
+      await expect(bloco.getByText(/já tem 10 áudios, o máximo/)).toBeVisible();
+      await pos.click();
+      await expect(pos).toBeChecked();
+      await page.screenshot({ path: `${SHOTS}/agentes-${viewport.nome}-editor.png` });
+
+      const salvar = dialog.getByRole("button", { name: "Salvar" });
+      await salvar.scrollIntoViewIfNeeded();
+      await expectInsideViewport(page, salvar);
+      await salvar.click();
+      await expect(dialog).toBeHidden();
+      expect(served.agentPuts).toEqual([{ id: "a2", companyIds: ["ag-pos"] }]);
+      await expect(rows.nth(1).getByTestId("audio-library-row-agents")).toHaveText("Na conversa: Pós-venda");
+
+      // Sem "quando usar", a ligação fica travada e o aviso aparece.
+      await rows.nth(2).getByRole("button", { name: "Editar" }).click();
+      const bloco3 = page.getByRole("dialog").getByTestId("audio-library-agents");
+      await expect(bloco3.getByRole("checkbox", { name: "Agente Pós-venda" })).toBeDisabled();
+      const aviso = bloco3.getByText(/Preencha o “quando usar”/);
+      await expect(aviso).toBeVisible();
+      await expectInsideViewport(page, aviso);
+      await page.screenshot({ path: `${SHOTS}/agentes-${viewport.nome}-sem-quando-usar.png` });
+      await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click();
+
+      await page.screenshot({ path: `${SHOTS}/agentes-${viewport.nome}-lista.png`, fullPage: true });
       await expectNoSideScroll(page);
     });
   });

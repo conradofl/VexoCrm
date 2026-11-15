@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Archive, Loader2, Mic, Pencil, Play, Square, Upload } from "lucide-react";
+import { AlertTriangle, Archive, Bot, Loader2, Mic, Pencil, Play, Square, Upload } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,9 @@ import {
   useArchiveLibraryAudio,
   useAudioLibrary,
   useAudioLibraryAccess,
+  useAudioLibraryAgents,
+  useAudioLibraryUsage,
+  useSetLibraryAudioAgents,
   useFetchLibraryAudioFile,
   useUpdateLibraryAudio,
   useUploadLibraryAudio,
@@ -61,6 +65,12 @@ export function AudioLibraryTab() {
   const archiveMutation = useArchiveLibraryAudio(clientId);
   const fetchAudioFile = useFetchLibraryAudioFile();
 
+  // Fase 3: quais agentes de atendimento podem enviar cada áudio na conversa.
+  const { data: agents = [] } = useAudioLibraryAgents(canUse ? clientId : undefined);
+  const { data: usage } = useAudioLibraryUsage(canUse ? clientId : undefined);
+  const setAgentsMutation = useSetLibraryAudioAgents(clientId);
+  const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+
   const maxMb = Math.round(limits.maxBytes / (1024 * 1024));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +83,8 @@ export function AudioLibraryTab() {
   const [editing, setEditing] = useState<LibraryAudio | null>(null);
   const [editName, setEditName] = useState("");
   const [editWhenToUse, setEditWhenToUse] = useState("");
+  const [editAgentIds, setEditAgentIds] = useState<string[]>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [archiving, setArchiving] = useState<LibraryAudio | null>(null);
 
   useEffect(() => {
@@ -128,24 +140,42 @@ export function AudioLibraryTab() {
     setEditing(audio);
     setEditName(audio.name);
     setEditWhenToUse(audio.whenToUse || "");
+    setEditAgentIds(audio.agentIds || []);
+  };
+
+  const toggleEditAgent = (agentId: string, checked: boolean) => {
+    setEditAgentIds((prev) => (checked ? [...prev.filter((id) => id !== agentId), agentId] : prev.filter((id) => id !== agentId)));
   };
 
   const trimmedName = editName.trim();
   const whenToUseLength = editWhenToUse.trim().length;
   const editInvalid = !trimmedName || trimmedName.length > limits.nameMax || whenToUseLength > limits.whenToUseMax;
 
-  const handleSaveEdit = () => {
+  // Sem "quando usar" o agente não sabe em que momento mandar: a ligação fica travada.
+  const agentsBlockedByText = whenToUseLength === 0;
+
+  const handleSaveEdit = async () => {
     if (!editing || editInvalid) return;
-    updateMutation.mutate(
-      { id: editing.id, name: trimmedName, whenToUse: editWhenToUse.trim() || null },
-      {
-        onSuccess: () => {
-          toast.success("Áudio salvo.");
-          setEditing(null);
-        },
-        onError: (err) => toast.error(errorText(err, "Erro ao salvar o áudio.")),
-      }
-    );
+    const before = [...(editing.agentIds || [])].sort().join(",");
+    const wanted = agentsBlockedByText ? [] : editAgentIds;
+    const agentsChanged = before !== [...wanted].sort().join(",");
+    const details = { id: editing.id, name: trimmedName, whenToUse: editWhenToUse.trim() || null };
+
+    setIsSavingEdit(true);
+    try {
+      // Ordem importa: o servidor não deixa apagar o "quando usar" de áudio
+      // ligado, nem ligar áudio sem "quando usar". Desligar vem antes de
+      // salvar o texto; ligar vem depois.
+      if (agentsChanged && wanted.length === 0) await setAgentsMutation.mutateAsync({ id: editing.id, companyIds: [] });
+      await updateMutation.mutateAsync(details);
+      if (agentsChanged && wanted.length > 0) await setAgentsMutation.mutateAsync({ id: editing.id, companyIds: wanted });
+      toast.success("Áudio salvo.");
+      setEditing(null);
+    } catch (err) {
+      toast.error(errorText(err, "Erro ao salvar o áudio."), { duration: 9000 });
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleArchive = () => {
@@ -193,8 +223,8 @@ export function AudioLibraryTab() {
               <div className="min-w-0">
                 <CardTitle className="text-base font-bold">Biblioteca de áudios</CardTitle>
                 <CardDescription className="text-xs">
-                  Áudios gravados por você, com a sua voz, para reutilizar. Envie uma vez e escolha o áudio nos passos do
-                  follow-up.
+                  Áudios gravados por você, com a sua voz, para reutilizar. Envie uma vez, escolha o áudio nos passos do
+                  follow-up e diga quais agentes podem mandá-lo na conversa.
                 </CardDescription>
               </div>
             </div>
@@ -239,6 +269,8 @@ export function AudioLibraryTab() {
             const isPlaying = playing?.id === audio.id;
             const isLoadingFile = loadingAudioId === audio.id;
             const steps = audio.followupSteps || 0;
+            const linkedAgents = (audio.agentIds || []).map((id) => agentNameById.get(id)).filter(Boolean) as string[];
+            const sends = usage?.sends?.[audio.id] || 0;
             return (
               <div
                 key={audio.id}
@@ -269,7 +301,15 @@ export function AudioLibraryTab() {
                     <p className="text-[11px] text-muted-foreground">
                       {formatAudioDuration(audio.durationSeconds)} · {formatBytes(audio.sizeBytes)}
                       {steps > 0 && ` · em uso em ${steps} ${steps === 1 ? "passo" : "passos"} de follow-up`}
+                      {sends > 0 &&
+                        ` · enviado ${sends} ${sends === 1 ? "vez" : "vezes"} pelo agente em ${usage?.windowDays || 90} dias`}
                     </p>
+                    {linkedAgents.length > 0 && (
+                      <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-400 break-words flex items-start gap-1" data-testid="audio-library-row-agents">
+                        <Bot className="w-3.5 h-3.5 shrink-0 mt-px" />
+                        <span>Na conversa: {linkedAgents.join(", ")}</span>
+                      </p>
+                    )}
                     {audio.whenToUse ? (
                       <p className="mt-1.5 text-xs text-foreground/80 break-words">
                         <span className="font-semibold">Quando usar:</span> {audio.whenToUse}
@@ -347,13 +387,55 @@ export function AudioLibraryTab() {
                 {whenToUseLength}/{limits.whenToUseMax}
               </p>
             </div>
+
+            {agents.length > 0 && (
+              <div className="space-y-2" data-testid="audio-library-agents">
+                <Label>Agentes que podem enviar na conversa</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  O agente marcado manda este áudio sozinho, depois do texto, quando a conversa bater com o “quando
+                  usar”. Só agentes de atendimento aparecem aqui.
+                </p>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto rounded-md border border-border p-2">
+                  {agents.map((agent) => {
+                    const checked = editAgentIds.includes(agent.id);
+                    const alreadyLinked = Boolean(editing?.agentIds?.includes(agent.id));
+                    const full = !alreadyLinked && agent.audioCount >= limits.agentMaxAudios;
+                    const disabled = agentsBlockedByText || (full && !checked);
+                    return (
+                      <label
+                        key={agent.id}
+                        className={`flex items-center gap-2 text-xs ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                      >
+                        <Checkbox
+                          checked={checked && !agentsBlockedByText}
+                          disabled={disabled}
+                          onCheckedChange={(value) => toggleEditAgent(agent.id, value === true)}
+                          aria-label={`Agente ${agent.name}`}
+                        />
+                        <span className="min-w-0 break-words">
+                          {agent.name}
+                          {full && (
+                            <span className="text-muted-foreground"> (já tem {limits.agentMaxAudios} áudios, o máximo)</span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {agentsBlockedByText && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-500">
+                    Preencha o “quando usar” para poder ligar este áudio a um agente.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => setEditing(null)}>
               Cancelar
             </Button>
-            <Button type="button" onClick={handleSaveEdit} disabled={editInvalid || updateMutation.isPending}>
-              {updateMutation.isPending ? "Salvando..." : "Salvar"}
+            <Button type="button" onClick={handleSaveEdit} disabled={editInvalid || isSavingEdit}>
+              {isSavingEdit ? "Salvando..." : "Salvar"}
             </Button>
           </DialogFooter>
         </DialogContent>
