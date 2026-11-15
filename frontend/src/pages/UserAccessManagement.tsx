@@ -300,6 +300,7 @@ const INTERNAL_PAGE_LABELS: Record<InternalPage, string> = {
   livpub: "LivPub",
   "banco-de-dados": "Banco de Dados",
   "leads-parados": "Leads Parados",
+  trafego: "Tráfego",
 };
 
 const CLIENT_PAGE_TABS = [

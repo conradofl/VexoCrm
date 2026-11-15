@@ -47,7 +47,7 @@ describe("os dois catalogos descrevem os mesmos modulos (em memoria)", () => {
 
     expect([...backendSet].sort()).toEqual([...frontendSet].sort());
     expect(backendSet.size).toBe(frontendSet.size);
-    expect(backendSet.size).toBe(35);
+    expect(backendSet.size).toBe(36);
   });
 });
 

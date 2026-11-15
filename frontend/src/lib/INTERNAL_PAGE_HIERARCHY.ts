@@ -8,6 +8,7 @@ export const INTERNAL_PAGE_HIERARCHY = [
       { key: "leads-parados", label: "Leads Parados" },
       { key: "whatsapp", label: "Conversas" },
       { key: "inteligencia-comercial", label: "Inteligência Comercial" },
+      { key: "trafego", label: "Tráfego" },
       { key: "chatbot-kanban", label: "Chatbot Kanban" },
       { key: "chatbot-config", label: "Chatbot" },
       {

@@ -78,6 +78,7 @@ export const INTERNAL_PAGE_KEYS = [
   "relacionamento",
   "leads-parados",
   "livpub",
+  "trafego",
 ];
 export const ACCESS_SCOPE_KEYS = ["all_clients", "assigned_clients", "no_client_access"];
 export const APPROVAL_LEVEL_KEYS = ["none", "operator", "supervisor", "manager", "director"];

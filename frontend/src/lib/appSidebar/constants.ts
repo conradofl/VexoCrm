@@ -23,6 +23,7 @@ import {
   CalendarDays,
   AlertTriangle,
   UserCheck,
+  Megaphone,
 } from "lucide-react";
 import { type InternalPage } from "@/lib/access";
 
@@ -71,6 +72,14 @@ export const MODULE_ITEMS: SidebarItem[] = [];
 // ━━ MÓDULOS DE TERCEIROS (Restritos por Tenant/Admin) ━━
 export const GERACAO_DIGITAL_ITEMS: SidebarItem[] = [
   { key: "geracao-digital", label: "Geração Digital", url: "/crm/apresentacao-gd", icon: Briefcase, page: "apresentacao-gd" }
+];
+
+// Gestor de Tráfego: Fase 1 roda só no piloto. O servidor decide de verdade
+// (traffic/access.js, TRAFFIC_PILOT_TENANTS); esta lista só evita mostrar o item
+// para empresa que receberia "ainda não disponível".
+export const TRAFFIC_PILOT_CLIENT_IDS = ["geracao-digital"];
+export const TRAFEGO_ITEMS: SidebarItem[] = [
+  { key: "trafego", label: "Tráfego", url: "/crm/trafego", icon: Megaphone, page: "trafego" },
 ];
 
 export const LIVPUB_ITEMS: SidebarItem[] = [
