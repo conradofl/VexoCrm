@@ -10,7 +10,7 @@
  */
 
 import { pgDatabasePool } from "../../services/database.js";
-import { sendTextMessageViaEvolution, getBase64FromMediaMessage } from "../../services/evolution.js";
+import { sendTextMessageViaEvolution } from "../../services/evolution.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
 import path from "node:path";
