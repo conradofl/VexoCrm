@@ -114,8 +114,33 @@ function formatToolBadge(tool: ExecutedTool) {
   }
 }
 
+// Variáveis a nível de módulo para prevenir Garbage Collection (Bug Crítico Safari/iOS)
+let _activeUtterance: SpeechSynthesisUtterance | null = null;
+let _speechWatchdog: any = null;
+
+export function getActiveUtterance(): SpeechSynthesisUtterance | null {
+  return _activeUtterance;
+}
+
+/**
+ * Destravamento de Áudio no Primeiro Gesto do Usuário (Mobile Audio Unlock - iOS Safari & Android Chrome)
+ * Executa uma fala muda rápida de 0s e invoca resume() para capturar o User Gesture Token do navegador.
+ */
+export function destravarAudioMobile() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  try {
+    window.speechSynthesis.resume();
+    const dummy = new SpeechSynthesisUtterance("");
+    dummy.volume = 0;
+    dummy.rate = 10;
+    window.speechSynthesis.speak(dummy);
+  } catch (e) {
+    console.warn("[Heloísa] Falha ao destravar áudio mobile:", e);
+  }
+}
+
 // ─── Síntese de Voz Gratuita Nativa (Web Speech API) ──────────────────────────
-function speakNativeTTS({
+export function speakNativeTTS({
   text,
   onStart,
   onEnd,
@@ -129,8 +154,6 @@ function speakNativeTTS({
     return;
   }
 
-  window.speechSynthesis.cancel();
-
   // Limpeza de marcações markdown para dicção fluida e executiva
   const cleanText = text
     .replace(/[*#_`~>•-]/g, "")
@@ -143,44 +166,109 @@ function speakNativeTTS({
     return;
   }
 
-  const utterance = new SpeechSynthesisUtterance(cleanText);
-  utterance.lang = "pt-BR";
-  utterance.rate = 1.05;
-  utterance.pitch = 1.02;
+  const doSpeak = () => {
+    try {
+      window.speechSynthesis.resume();
+    } catch {}
 
-  const voices = window.speechSynthesis.getVoices();
-  const ptVoices = voices.filter(
-    (v) => v.lang === "pt-BR" || v.lang.toLowerCase().startsWith("pt")
-  );
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = "pt-BR";
+    utterance.rate = 1.05;
+    utterance.pitch = 1.02;
 
-  // Seleciona a melhor voz em pt-BR disponível no sistema
-  const selectedVoice =
-    ptVoices.find((v) => /Google.*português/i.test(v.name)) ||
-    ptVoices.find((v) => /Luciana/i.test(v.name)) ||
-    ptVoices.find((v) => /Francisca/i.test(v.name)) ||
-    ptVoices.find((v) => /Leticia|Letícia/i.test(v.name)) ||
-    ptVoices.find((v) => /Feminina|Female/i.test(v.name)) ||
-    ptVoices.find((v) => v.lang === "pt-BR") ||
-    ptVoices[0];
+    // Fallback de Voz no iOS:
+    // No iOS, window.speechSynthesis.getVoices() costuma retornar array vazio inicialmente.
+    // Se selectedVoice for indefinido, NÃO force utterance.voice = undefined. Apenas defina utterance.lang = "pt-BR".
+    try {
+      const voices = window.speechSynthesis.getVoices() || [];
+      const ptVoices = voices.filter(
+        (v) => v.lang === "pt-BR" || (v.lang && v.lang.toLowerCase().startsWith("pt"))
+      );
 
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
+      const selectedVoice =
+        ptVoices.find((v) => /Google.*português/i.test(v.name)) ||
+        ptVoices.find((v) => /Luciana/i.test(v.name)) ||
+        ptVoices.find((v) => /Francisca/i.test(v.name)) ||
+        ptVoices.find((v) => /Leticia|Letícia/i.test(v.name)) ||
+        ptVoices.find((v) => /Feminina|Female/i.test(v.name)) ||
+        ptVoices.find((v) => v.lang === "pt-BR") ||
+        ptVoices[0];
+
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      }
+    } catch (err) {
+      console.warn("[Heloísa TTS] Erro ao carregar vozes:", err);
+    }
+
+    // Prevenção de Garbage Collection (Bug Crítico Safari/iOS)
+    _activeUtterance = utterance;
+    if (typeof window !== "undefined") {
+      (window as any)._activeUtterance = utterance;
+    }
+
+    const limparUtterance = () => {
+      _activeUtterance = null;
+      if (typeof window !== "undefined") {
+        (window as any)._activeUtterance = null;
+      }
+      if (_speechWatchdog) {
+        clearInterval(_speechWatchdog);
+        _speechWatchdog = null;
+      }
+    };
+
+    utterance.onstart = () => {
+      // Watchdog de Fala:
+      // Adiciona watchdog com setInterval de 1s que executa window.speechSynthesis.resume()
+      // enquanto window.speechSynthesis.speaking for true, evitando que o navegador pause a fala no meio da frase.
+      if (_speechWatchdog) clearInterval(_speechWatchdog);
+      _speechWatchdog = setInterval(() => {
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.resume();
+          } else {
+            if (_speechWatchdog) {
+              clearInterval(_speechWatchdog);
+              _speechWatchdog = null;
+            }
+          }
+        }
+      }, 1000);
+
+      onStart?.();
+    };
+
+    utterance.onend = () => {
+      limparUtterance();
+      onEnd?.();
+    };
+
+    utterance.onerror = (e) => {
+      console.warn("[Heloísa TTS] Evento de erro ou cancelamento:", e);
+      limparUtterance();
+      onEnd?.();
+    };
+
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.warn("[Heloísa TTS] Falha ao invocar speak():", err);
+      limparUtterance();
+      onEnd?.();
+    }
+  };
+
+  // Eliminar Deadlock do speechSynthesis.cancel():
+  // NÃO chame window.speechSynthesis.cancel() colado no speak().
+  // Se window.speechSynthesis.speaking for true, chame cancel() e aguarde 80ms via setTimeout
+  // antes de chamar window.speechSynthesis.resume() e window.speechSynthesis.speak().
+  if (window.speechSynthesis.speaking) {
+    window.speechSynthesis.cancel();
+    setTimeout(doSpeak, 80);
+  } else {
+    doSpeak();
   }
-
-  utterance.onstart = () => {
-    onStart?.();
-  };
-
-  utterance.onend = () => {
-    onEnd?.();
-  };
-
-  utterance.onerror = (e) => {
-    console.warn("[Heloísa TTS] Evento de erro ou cancelamento:", e);
-    onEnd?.();
-  };
-
-  window.speechSynthesis.speak(utterance);
 }
 
 export function HeloisaVoiceOrb() {
@@ -339,6 +427,7 @@ export function HeloisaVoiceOrb() {
 
   // Iniciar escuta via Web Speech API com tolerância a ciclo de vida
   const startListening = useCallback(() => {
+    destravarAudioMobile();
     if (typeof window === "undefined") return;
     if (!isOpenRef.current || isSpeakingRef.current) return;
 
@@ -452,6 +541,7 @@ export function HeloisaVoiceOrb() {
 
   // Solicita explicitamente o microfone e abre a orbe
   const toggleOpen = async () => {
+    destravarAudioMobile();
     const nextState = !isOpen;
     setIsOpen(nextState);
 
@@ -664,6 +754,7 @@ export function HeloisaVoiceOrb() {
   // Envio manual de texto via form
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
+    destravarAudioMobile();
     const textoLimpo = inputText.trim();
     if (!textoLimpo || status === "consultando") return;
 
@@ -686,6 +777,7 @@ export function HeloisaVoiceOrb() {
 
   // Botão interativo de Toque-para-Falar / Forçar Envio
   const handleActionClick = () => {
+    destravarAudioMobile();
     if (status === "falando") {
       pararFala();
       return;
@@ -968,25 +1060,37 @@ export function HeloisaVoiceOrb() {
           {/* Comandos Rápidos Sugeridos */}
           <div className="px-3 py-1.5 border-t border-white/5 bg-slate-950/60 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-[11px]">
             <button
-              onClick={() => enviarParaHeloisa({ text: "Heloísa, faça uma auditoria geral da operação de todos os tenants do Vexo OS." })}
+              onClick={() => {
+                destravarAudioMobile();
+                enviarParaHeloisa({ text: "Heloísa, faça uma auditoria geral da operação de todos os tenants do Vexo OS." });
+              }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
               📊 Auditar Vexo OS
             </button>
             <button
-              onClick={() => enviarParaHeloisa({ text: "Heloísa, quais clientes estão com prazo vencido?" })}
+              onClick={() => {
+                destravarAudioMobile();
+                enviarParaHeloisa({ text: "Heloísa, quais clientes estão com prazo vencido?" });
+              }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
               ⏰ Prazos vencidos
             </button>
             <button
-              onClick={() => enviarParaHeloisa({ text: "Heloísa, quais são meus compromissos de hoje e amanhã?" })}
+              onClick={() => {
+                destravarAudioMobile();
+                enviarParaHeloisa({ text: "Heloísa, quais são meus compromissos de hoje e amanhã?" });
+              }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
               📅 Minha agenda
             </button>
             <button
-              onClick={() => enviarParaHeloisa({ text: "Heloísa, consulte como está o status da operação da agência hoje." })}
+              onClick={() => {
+                destravarAudioMobile();
+                enviarParaHeloisa({ text: "Heloísa, consulte como está o status da operação da agência hoje." });
+              }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
               💼 Status da Operação
