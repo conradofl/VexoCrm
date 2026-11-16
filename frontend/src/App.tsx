@@ -22,6 +22,7 @@ import LandingPage from "./pages/LandingPage";
 import Leads from "./pages/Leads";
 import BancoDeDados from "./pages/BancoDeDados";
 import LeadsParados from "./pages/LeadsParados";
+import Trafego from "./pages/Trafego";
 import LeadImports from "./pages/LeadImports";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
@@ -114,6 +115,7 @@ function InternalIndexRedirect() {
     calendario: "calendario",
     agenda: "calendario",
     "leads-parados": "leads-parados",
+    trafego: "trafego",
   };
 
   const path = pageToPath[target] || target;
@@ -218,6 +220,14 @@ const App = () => (
                 element={
                   <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="leads-parados">
                     <LeadsParados />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="trafego"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]} requiredInternalPage="trafego">
+                    <Trafego />
                   </ProtectedRoute>
                 }
               />

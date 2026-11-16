@@ -7,6 +7,7 @@ import { registerContractWebhookRoutes } from "./geracaoDigitalContracts/webhook
 import { registerGdClientesRoutes } from "./gdClientes/routes.js";
 import { registerRagRoutes } from "../rag/routes.js";
 import { registerAudioLibraryRoutes } from "../audioLibrary/routes.js";
+import { registerTrafficRoutes } from "../traffic/routes.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { registerEventosRoutes } from "./eventos/routes.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -80,6 +81,9 @@ export function registerAllDomainRoutes(app) {
 
   // ─── Biblioteca de Áudios (áudios do cliente, reutilizáveis) ──────────────
   registerAudioLibraryRoutes(app);
+
+  // ─── Gestor de Tráfego (Fase 1: leitura, metas e decisão; nada é aplicado) ─
+  registerTrafficRoutes(app);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);

@@ -34,6 +34,7 @@ export const INTERNAL_PAGE_ORDER = [
   "livpub",
   "banco-de-dados",
   "leads-parados",
+  "trafego",
 ] as const;
 
 export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];
@@ -63,7 +64,8 @@ export type AccessPermission =
   | "campaigns.delete"
   | "dispatches.execute"
   | "dispatches.pause"
-  | "dispatches.export_failed";
+  | "dispatches.export_failed"
+  | "trafego.view";
 export type SystemAccessPreset =
   | "admin_vexo"
   | "gestor"
@@ -239,6 +241,10 @@ export const ACCESS_PERMISSION_DEFINITIONS: Record<
   "dispatches.export_failed": {
     label: "Disparos (Exportar falhas)",
     description: "Pode exportar relatórios de disparos com erro.",
+  },
+  "trafego.view": {
+    label: "Gestor de Tráfego",
+    description: "Pode abrir o Gestor de Tráfego (Meta e Google Ads): conexão, metas e desempenho.",
   },
 };
 

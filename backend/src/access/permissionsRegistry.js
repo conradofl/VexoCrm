@@ -150,6 +150,7 @@ export const PERMISSIONS_REGISTRY = [
   { key: "reports.commercial", category: "relatorios", label: "Acessar Relatórios Comerciais", roles: ["internal", "client"], legacyPages: ["inteligencia-comercial"], legacyViews: [] },
   { key: "reports.dispatches", category: "relatorios", label: "Acessar Relatórios de Envio de WhatsApp", roles: ["internal", "client"], legacyPages: ["planilhas", "disparos"], legacyViews: [] },
   { key: "reports.export_pdf", category: "relatorios", label: "Exportar Relatórios em PDF", roles: ["internal", "client"], legacyPages: ["inteligencia-comercial"], legacyViews: [] },
+  { key: "trafego.view", category: "relatorios", label: "Acessar o Gestor de Tráfego (Meta e Google Ads)", roles: ["internal"], legacyPages: ["trafego"], legacyViews: [] },
 
   // E) ADMINISTRAÇÃO DA EMPRESA
   { key: "users.view", category: "administracao", label: "Visualizar Usuários Cadastrados", roles: ["internal"], legacyPages: ["usuarios"], legacyViews: [] },

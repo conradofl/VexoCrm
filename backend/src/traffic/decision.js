@@ -51,13 +51,14 @@ function pct(fracao) {
 /**
  * @param {object} params
  * @param {number|null} params.valorKpi   Valor medido do KPI na janela. null = não houve resultado para calcular.
- * @param {object} params.kpi             { key, target, better: 'lower'|'higher', scale_at, kill_at, min_spend }
+ * @param {object} params.kpi             { key, label, target, better: 'lower'|'higher', scale_at, kill_at, min_spend }
  * @param {number} params.gasto           Gasto na mesma janela, na moeda da conta.
  * @param {number} [params.minSpendFactor] Fator do perfil (padrão 1,2).
  * @returns {{ decisao: string, motivo: string, numeros: object }}
  */
 export function decidir({ valorKpi, kpi, gasto, minSpendFactor = DEFAULT_MIN_SPEND_FACTOR } = {}) {
-  const chave = kpi?.key || "kpi";
+  // Nome que aparece na frase do motivo: o rótulo, quando vier; senão a chave.
+  const chave = kpi?.label || kpi?.key || "kpi";
   const meta = numeroOuNull(kpi?.target);
   const melhor = kpi?.better === "higher" ? "higher" : "lower";
   const escalarEm = numeroOuNull(kpi?.scale_at) ?? DEFAULT_SCALE_AT;
@@ -67,7 +68,7 @@ export function decidir({ valorKpi, kpi, gasto, minSpendFactor = DEFAULT_MIN_SPE
   const valor = numeroOuNull(valorKpi);
 
   const numeros = {
-    kpi: chave,
+    kpi: kpi?.key || chave,
     valor,
     meta,
     melhor,

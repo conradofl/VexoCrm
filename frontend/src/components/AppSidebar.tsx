@@ -22,6 +22,8 @@ import {
   MODULE_ITEMS,
   GERACAO_DIGITAL_ITEMS, 
   LIVPUB_ITEMS, 
+  TRAFEGO_ITEMS,
+  TRAFFIC_PILOT_CLIENT_IDS,
   AJUDA_ITEMS, 
   ADMIN_ITEMS, 
   COLOR_PRESETS 
@@ -168,6 +170,7 @@ export function AppSidebar() {
   const visibleModulos = filterItems(MODULE_ITEMS);
   const visibleGeracaoDigital = selectedClientId === "geracao-digital" ? filterItems(GERACAO_DIGITAL_ITEMS) : [];
   const visibleLivpub = (isAdminUser || selectedClientId === "livpub") ? filterItems(LIVPUB_ITEMS) : [];
+  const visibleTrafego = TRAFFIC_PILOT_CLIENT_IDS.includes(selectedClientId || "") ? filterItems(TRAFEGO_ITEMS) : [];
 
   const visibleAjuda = AJUDA_ITEMS.filter((f) => {
     const modId = getModuleIdFromSidebarItemKey(f.key) || getModuleIdFromPath(f.url);
@@ -287,7 +290,7 @@ export function AppSidebar() {
         )}
 
         {/* ── MÓDULOS ── */}
-        {(visibleModulos.length > 0 || visibleGeracaoDigital.length > 0 || visibleLivpub.length > 0) && (
+        {(visibleModulos.length > 0 || visibleGeracaoDigital.length > 0 || visibleLivpub.length > 0 || visibleTrafego.length > 0) && (
           <>
             {!collapsed && (
               <p className="mt-4 px-2.5 pb-2 font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-muted-foreground/70">
@@ -307,6 +310,9 @@ export function AppSidebar() {
                 <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
               {visibleLivpub.map((item) => (
+                <NavItem key={item.key} item={item} collapsed={collapsed} />
+              ))}
+              {visibleTrafego.map((item) => (
                 <NavItem key={item.key} item={item} collapsed={collapsed} />
               ))}
             </div>
