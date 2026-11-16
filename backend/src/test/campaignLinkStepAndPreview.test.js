@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   normalizeCampaignAnalyticsMeta,
   validateCampaignAnalyticsMeta,
@@ -71,6 +71,16 @@ describe("Link Preview Nativo e Passo de Envio de Link", () => {
   });
 
   describe("sendTextMessageViaEvolution com detecção automática de Link Preview", () => {
+    // A blindagem do evolution.js devolve resposta falsa em teste e nem chama o fetch.
+    // Aqui o fetch é de mentira e o baseUrl é de teste, então liberamos só neste bloco
+    // para o código real montar o payload que o teste confere.
+    beforeEach(() => {
+      vi.stubEnv("ALLOW_LIVE_WHATSAPP", "true");
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     it("Envia payload com linkPreview: true e generateHighQualityLinkPreview: true quando o texto tem URL", async () => {
       const originalFetch = global.fetch;
       let capturedPayload = null;
