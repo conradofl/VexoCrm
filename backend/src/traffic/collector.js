@@ -5,10 +5,16 @@
 // last_sync_error, last_sync_at não avança e as métricas que já estavam no banco
 // continuam como estavam. Quem lê a tela vê "sem atualização desde ...".
 //
-// Sem token no ambiente a conta está "não conectada": não é erro, não grava
-// nada e não mostra número.
+// Sem credencial da plataforma no ambiente a conta está "não conectada": não é
+// erro, não grava nada e não mostra número.
 
 import { createMetaAdsClient, getMetaAccessToken, mapMetaInsightRow } from "./metaAdsClient.js";
+import {
+  createGoogleAdsClient,
+  getGoogleAdsCredentials,
+  mapGoogleAdsRow,
+  summarizeGoogleConversions,
+} from "./googleAdsClient.js";
 
 export const FIRST_LOAD_DAYS = 30;
 // A plataforma revisa os números dos últimos dias; por isso toda coleta relê 7.
@@ -114,32 +120,62 @@ function describeError(err) {
   return message.slice(0, MAX_ERROR_LENGTH);
 }
 
+/** Fonte de coleta da Meta: relatório por anúncio e por dia, mais o estado atual de cada anúncio. */
+export function createMetaSource(client) {
+  return {
+    platform: "meta",
+    fetchAccountInfo: (accountId) => client.fetchAccountInfo(accountId),
+    async fetchRows(accountId, window) {
+      const insights = await client.fetchAdInsights(accountId, window);
+      const statuses = await client.fetchAdStatuses(accountId);
+      const rows = [];
+      for (const raw of insights) {
+        const mapped = mapMetaInsightRow(raw);
+        if (!mapped) continue;
+        rows.push({ ...mapped, effective_status: statuses.get(mapped.ad_id) || null });
+      }
+      return rows;
+    },
+  };
+}
+
+/** Fonte de coleta do Google Ads: métricas por anúncio e por dia, mais as conversões por categoria. */
+export function createGoogleSource(client) {
+  return {
+    platform: "google",
+    fetchAccountInfo: (accountId) => client.fetchAccountInfo(accountId),
+    async fetchRows(accountId, window) {
+      const metrics = await client.fetchAdMetrics(accountId, window);
+      const conversions = summarizeGoogleConversions(await client.fetchAdConversions(accountId, window));
+      const rows = [];
+      for (const raw of metrics) {
+        const mapped = mapGoogleAdsRow(raw, conversions);
+        if (mapped) rows.push(mapped);
+      }
+      return rows;
+    },
+  };
+}
+
 /**
- * Coleta uma conta da Meta. Nunca lança: devolve { ok } e deixa o resultado
- * registrado na própria conta.
+ * Coleta uma conta. Nunca lança: devolve { ok } e deixa o resultado registrado
+ * na própria conta. Lê TUDO da plataforma antes de gravar, e grava numa
+ * transação: falha no meio não deixa a conta pela metade.
  *
  * @param {object} params
  * @param {{ query: Function, connect: Function }} params.pool
  * @param {object} params.account  Linha de traffic_accounts.
- * @param {object} params.client   Cliente da Meta (createMetaAdsClient).
+ * @param {{ platform: string, fetchAccountInfo: Function, fetchRows: Function }} params.source
  * @param {Date} [params.now]
  */
-export async function collectMetaAccount({ pool, account, client, now = new Date() }) {
+export async function collectAccount({ pool, account, source, now = new Date() }) {
   const firstLoad = !account.last_sync_at;
   const days = firstLoad ? FIRST_LOAD_DAYS : REFRESH_DAYS;
 
   try {
-    const info = await client.fetchAccountInfo(account.external_account_id);
+    const info = await source.fetchAccountInfo(account.external_account_id);
     const window = resolveCollectionWindow({ now, timeZone: info.timezone || account.timezone, days });
-    const insights = await client.fetchAdInsights(account.external_account_id, window);
-    const statuses = await client.fetchAdStatuses(account.external_account_id);
-
-    const rows = [];
-    for (const raw of insights) {
-      const mapped = mapMetaInsightRow(raw);
-      if (!mapped) continue;
-      rows.push({ ...mapped, effective_status: statuses.get(mapped.ad_id) || null });
-    }
+    const rows = await source.fetchRows(account.external_account_id, window);
 
     const db = await pool.connect();
     let saved = 0;
@@ -147,7 +183,7 @@ export async function collectMetaAccount({ pool, account, client, now = new Date
       await db.query("BEGIN");
       saved = await upsertDailyMetrics(db, {
         clientId: account.client_id,
-        platform: "meta",
+        platform: source.platform,
         externalAccountId: account.external_account_id,
         rows,
         collectedAt: now,
@@ -190,10 +226,44 @@ export async function collectMetaAccount({ pool, account, client, now = new Date
   }
 }
 
+/** Coleta uma conta da Meta (cliente de createMetaAdsClient). */
+export function collectMetaAccount({ pool, account, client, now = new Date() }) {
+  return collectAccount({ pool, account, source: createMetaSource(client), now });
+}
+
+/** Coleta uma conta do Google Ads (cliente de createGoogleAdsClient). */
+export function collectGoogleAccount({ pool, account, client, now = new Date() }) {
+  return collectAccount({ pool, account, source: createGoogleSource(client), now });
+}
+
+function emptyPlatformSummary() {
+  return { connected: false, accounts: 0, ok: 0, failed: 0, results: [] };
+}
+
+async function collectPlatform({ pool, platform, source, now, summary }) {
+  const { rows: accounts } = await pool.query(
+    `SELECT id, client_id, platform, external_account_id, timezone, last_sync_at
+       FROM public.traffic_accounts
+      WHERE platform = $1 AND status = 'active'
+      ORDER BY client_id, external_account_id`,
+    [platform]
+  );
+  summary.accounts = accounts.length;
+
+  for (const account of accounts) {
+    const result = await collectAccount({ pool, account, source, now });
+    summary.results.push(result);
+    if (result.ok) summary.ok++;
+    else summary.failed++;
+  }
+}
+
 /**
- * Roda a coleta de todas as contas ativas, uma por vez.
+ * Roda a coleta de todas as contas ativas, uma por vez: primeiro Meta, depois
+ * Google. Plataforma sem credencial no ambiente fica "não conectada": sem
+ * erro, sem número, nada é lido nem gravado para ela.
  *
- * @returns {Promise<{ meta: { connected: boolean, accounts: number, ok: number, failed: number, results: object[] } }>}
+ * @returns {Promise<{ meta: object, google: object }>} Por plataforma: { connected, accounts, ok, failed, results }.
  */
 export async function runTrafficCollection({
   pool,
@@ -204,29 +274,21 @@ export async function runTrafficCollection({
 } = {}) {
   if (!pool) throw new Error("Pool de banco indisponível para a coleta de tráfego.");
 
-  const summary = { meta: { connected: false, accounts: 0, ok: 0, failed: 0, results: [] } };
+  const summary = { meta: emptyPlatformSummary(), google: emptyPlatformSummary() };
+  const shared = { fetchImpl, env, ...(sleep ? { sleep } : {}) };
 
-  const token = getMetaAccessToken(env);
-  if (!token) {
-    // Não conectada: sem erro e sem número. Nada é lido nem gravado.
-    return summary;
+  const metaToken = getMetaAccessToken(env);
+  if (metaToken) {
+    summary.meta.connected = true;
+    const source = createMetaSource(createMetaAdsClient({ token: metaToken, ...shared }));
+    await collectPlatform({ pool, platform: "meta", source, now, summary: summary.meta });
   }
-  summary.meta.connected = true;
 
-  const { rows: accounts } = await pool.query(
-    `SELECT id, client_id, platform, external_account_id, timezone, last_sync_at
-       FROM public.traffic_accounts
-      WHERE platform = 'meta' AND status = 'active'
-      ORDER BY client_id, external_account_id`
-  );
-  summary.meta.accounts = accounts.length;
-
-  const client = createMetaAdsClient({ token, fetchImpl, env, ...(sleep ? { sleep } : {}) });
-  for (const account of accounts) {
-    const result = await collectMetaAccount({ pool, account, client, now });
-    summary.meta.results.push(result);
-    if (result.ok) summary.meta.ok++;
-    else summary.meta.failed++;
+  const googleCredentials = getGoogleAdsCredentials(env);
+  if (googleCredentials) {
+    summary.google.connected = true;
+    const source = createGoogleSource(createGoogleAdsClient({ credentials: googleCredentials, now: () => now, ...shared }));
+    await collectPlatform({ pool, platform: "google", source, now, summary: summary.google });
   }
 
   return summary;

@@ -123,13 +123,14 @@ function performance(days: number, accounts: unknown[]) {
 interface Options {
   allowed?: boolean;
   metaConnected?: boolean;
+  googleConnected?: boolean;
   collectorEnabled?: boolean;
   syncError?: boolean;
   empty?: boolean;
 }
 
 async function serve(page: Page, options: Options = {}) {
-  const { allowed = true, metaConnected = true, collectorEnabled = true, syncError = false, empty = false } = options;
+  const { allowed = true, metaConnected = true, googleConnected = false, collectorEnabled = true, syncError = false, empty = false } = options;
   const state = {
     accounts: empty
       ? []
@@ -183,7 +184,7 @@ async function serve(page: Page, options: Options = {}) {
     if (url.pathname === "/api/traffic/accounts" && method === "GET") {
       return json(200, {
         success: true,
-        platforms: { meta: { available: true, connected: metaConnected }, google: { available: false, connected: false } },
+        platforms: { meta: { available: true, connected: metaConnected }, google: { available: true, connected: googleConnected } },
         collector: { enabled: collectorEnabled, hours: ["07:00", "13:00", "19:00"] },
         accounts: state.accounts,
       });
@@ -193,8 +194,8 @@ async function serve(page: Page, options: Options = {}) {
       state.posts.push(body);
       const account = {
         id: "22222222-2222-4222-8222-222222222222",
-        platform: "meta",
-        externalAccountId: String(body.externalAccountId).replace(/^act_/, ""),
+        platform: body.platform,
+        externalAccountId: String(body.externalAccountId).replace(/^act_/, "").replace(/-/g, ""),
         displayName: body.displayName || null,
         currency: null,
         timezone: null,
@@ -350,7 +351,7 @@ for (const viewport of [
       await page.goto(`${URL_BASE}?tab=conexao`);
 
       await expect(page.getByTestId("plataforma-meta")).toContainText("Não conectada");
-      await expect(page.getByTestId("plataforma-google")).toContainText("Disponível em breve");
+      await expect(page.getByTestId("plataforma-google")).toContainText("Não conectada");
       await expect(page.getByTestId("estado-coleta")).toContainText("Coleta automática desligada");
 
       const conta = page.getByTestId("conta");
@@ -448,6 +449,34 @@ for (const viewport of [
       });
       // Depois de salvar, o aviso de "sem metas" some (a tela releu o perfil).
       await expect(page.getByText("Esta empresa ainda não tem metas.")).toHaveCount(0);
+    });
+
+    test("Conexão: Google conectado, cadastrar conta do Google manda a plataforma certa e a linha aparece", async ({ page }) => {
+      const state = await serve(page, { googleConnected: true });
+      await page.goto(`${URL_BASE}?tab=conexao`);
+
+      await expect(page.getByTestId("plataforma-google")).toContainText("Conectada");
+      await expect(page.getByTestId("plataforma-google")).not.toContainText("Não conectada");
+      await expect(page.getByTestId("ajuda-conta")).toContainText("compartilhada com a Geração Digital como parceira");
+
+      const plataforma = page.getByLabel("Plataforma");
+      await expectInsideViewport(page, plataforma);
+      await plataforma.selectOption("google");
+      await expect(page.getByTestId("ajuda-conta")).toContainText("conta gerenciadora da Geração Digital");
+      await expect(page.getByLabel("Número da conta")).toHaveAttribute("placeholder", "Ex.: 123-456-7890");
+
+      await page.getByLabel("Número da conta").fill("123-456-7890");
+      const cadastrar = page.getByRole("button", { name: "Cadastrar" });
+      await expectInsideViewport(page, cadastrar);
+      await cadastrar.click();
+
+      const nova = page.getByTestId("conta").nth(1);
+      await expect(nova).toContainText("Google Ads · 1234567890");
+      await expect(nova).toContainText("Aguardando a primeira coleta");
+      expect(state.posts).toEqual([{ clientId: "geracao-digital", platform: "google", externalAccountId: "123-456-7890" }]);
+
+      await expectNoSideScroll(page);
+      await page.screenshot({ path: `${SHOTS}/trafego-${viewport.nome}-conexao-google.png`, fullPage: true });
     });
 
     test("empresa fora do piloto vê o motivo e nenhuma aba", async ({ page }) => {

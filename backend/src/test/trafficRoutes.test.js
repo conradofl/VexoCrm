@@ -64,6 +64,9 @@ describe("rotas do Gestor de Tráfego", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.stubEnv("TRAFFIC_PILOT_TENANTS", `${A},${B}`);
     vi.stubEnv("META_ADS_ACCESS_TOKEN", "");
+    for (const name of ["GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ADS_SERVICE_ACCOUNT_EMAIL", "GOOGLE_ADS_SERVICE_ACCOUNT_PRIVATE_KEY"]) {
+      vi.stubEnv(name, "");
+    }
     vi.stubEnv("TRAFFIC_COLLECTOR_ENABLED", "");
     db = await createTrafficDb();
     pool = poolFor(db);
@@ -171,16 +174,27 @@ describe("rotas do Gestor de Tráfego", () => {
   describe("conexão", () => {
     it("sem token a Meta aparece como não conectada; com token, conectada, e o token nunca sai", async () => {
       let res = await get(`/api/traffic/accounts?clientId=${A}`, USER_A);
-      expect(res.body.platforms).toEqual({ meta: { available: true, connected: false }, google: { available: false, connected: false } });
+      expect(res.body.platforms).toEqual({ meta: { available: true, connected: false }, google: { available: true, connected: false } });
       expect(res.body.collector).toEqual({ enabled: false, hours: ["07:00", "13:00", "19:00"] });
 
       vi.stubEnv("META_ADS_ACCESS_TOKEN", SEGREDO);
       res = await get(`/api/traffic/accounts?clientId=${A}`, USER_A);
       expect(res.body.platforms.meta.connected).toBe(true);
+      expect(res.body.platforms.google.connected).toBe(false);
+      expect(res.text).not.toContain(SEGREDO);
+
+      // Google: credencial pela metade não conecta; completa conecta, e nada dela sai.
+      vi.stubEnv("GOOGLE_ADS_CLIENT_ID", "cid");
+      vi.stubEnv("GOOGLE_ADS_REFRESH_TOKEN", `${SEGREDO}-refresh`);
+      res = await get(`/api/traffic/accounts?clientId=${A}`, USER_A);
+      expect(res.body.platforms.google.connected).toBe(false);
+      vi.stubEnv("GOOGLE_ADS_CLIENT_SECRET", `${SEGREDO}-secret`);
+      res = await get(`/api/traffic/accounts?clientId=${A}`, USER_A);
+      expect(res.body.platforms.google).toEqual({ available: true, connected: true });
       expect(res.text).not.toContain(SEGREDO);
     });
 
-    it("cadastra conta da Meta aceitando act_, recusa repetida, Google e número inválido", async () => {
+    it("cadastra conta da Meta aceitando act_, recusa repetida e número inválido; cadastra conta do Google com hífens", async () => {
       const criar = (body) => http.call("POST", "/api/traffic/accounts", { access: USER_A, body: { clientId: A, ...body } });
 
       const ok = await criar({ platform: "meta", externalAccountId: "act_123456", displayName: "  Conta GD  " });
@@ -191,9 +205,20 @@ describe("rotas do Gestor de Tráfego", () => {
       expect(repetida.status).toBe(409);
       expect(repetida.body.error.code).toBe("ACCOUNT_ALREADY_EXISTS");
 
-      expect((await criar({ platform: "google", externalAccountId: "123" })).body.error.code).toBe("PLATFORM_NOT_AVAILABLE");
       expect((await criar({ platform: "meta", externalAccountId: "123/ads" })).body.error.code).toBe("INVALID_ACCOUNT_ID");
-      expect((await db.query("SELECT count(*)::int AS n FROM traffic_accounts")).rows[0].n).toBe(1);
+      expect((await criar({ platform: "tiktok", externalAccountId: "123" })).body.error.code).toBe("INVALID_PLATFORM");
+
+      const google = await criar({ platform: "google", externalAccountId: "123-456-7890" });
+      expect(google.status).toBe(201);
+      expect(google.body.account).toMatchObject({ platform: "google", externalAccountId: "1234567890", status: "active" });
+      // Conta do Google não é número de conta da Meta: 10 dígitos exatos.
+      const curto = await criar({ platform: "google", externalAccountId: "123456" });
+      expect(curto.body.error.code).toBe("INVALID_ACCOUNT_ID");
+      expect(curto.body.error.message).toContain("Google Ads");
+      expect((await criar({ platform: "google", externalAccountId: "1234567890" })).status).toBe(409);
+
+      const { rows } = await db.query("SELECT platform, external_account_id FROM traffic_accounts ORDER BY platform");
+      expect(rows).toEqual([{ platform: "google", external_account_id: "1234567890" }, { platform: "meta", external_account_id: "123456" }]);
     });
 
     it("pausa e reativa a conta; erro de coleta aparece na listagem", async () => {

@@ -13,9 +13,24 @@ import {
   useSetTrafficAccountStatus,
   useTrafficAccounts,
   type TrafficAccount,
+  type TrafficPlatform,
 } from "@/hooks/useTraffic";
 
 const PLATFORM_LABEL = { meta: "Meta Ads", google: "Google Ads" } as const;
+
+const SELECT_CLASS =
+  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+
+const ACCOUNT_FORM: Record<TrafficPlatform, { placeholder: string; help: string }> = {
+  meta: {
+    placeholder: "Ex.: 1234567890",
+    help: "Número da conta de anúncios. A conta precisa estar compartilhada com a Geração Digital como parceira.",
+  },
+  google: {
+    placeholder: "Ex.: 123-456-7890",
+    help: "Número de 10 dígitos da conta do Google Ads. A conta precisa estar vinculada à conta gerenciadora da Geração Digital.",
+  },
+};
 
 function AccountState({ account, platformConnected }: { account: TrafficAccount; platformConnected: boolean }) {
   if (!platformConnected) {
@@ -71,6 +86,7 @@ export function ConexaoTab({ clientId }: { clientId: string }) {
   const { data, isLoading, isError, error } = useTrafficAccounts(clientId);
   const createAccount = useCreateTrafficAccount(clientId);
   const setStatus = useSetTrafficAccountStatus(clientId);
+  const [platform, setPlatform] = useState<TrafficPlatform>("meta");
   const [accountId, setAccountId] = useState("");
   const [displayName, setDisplayName] = useState("");
 
@@ -90,7 +106,7 @@ export function ConexaoTab({ clientId }: { clientId: string }) {
     event.preventDefault();
     try {
       await createAccount.mutateAsync({
-        platform: "meta",
+        platform,
         externalAccountId: accountId.trim(),
         displayName: displayName.trim() || undefined,
       });
@@ -129,7 +145,7 @@ export function ConexaoTab({ clientId }: { clientId: string }) {
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
                 {!state.available
-                  ? "A coleta do Google Ads entra na próxima entrega."
+                  ? "Coleta ainda não disponível para esta plataforma."
                   : state.connected
                     ? "O acesso de leitura está configurado no servidor."
                     : "O acesso de leitura ainda não foi configurado no servidor. Enquanto isso, nenhuma conta é lida."}
@@ -189,17 +205,32 @@ export function ConexaoTab({ clientId }: { clientId: string }) {
       </div>
 
       <form onSubmit={submit} className="rounded-2xl border bg-card/60 p-4">
-        <h2 className="font-medium">Cadastrar conta da Meta</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Use o número da conta de anúncios. A conta precisa estar compartilhada com a Geração Digital como parceira.
-        </p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+        <h2 className="font-medium">Cadastrar conta de anúncio</h2>
+        <p className="mt-1 text-sm text-muted-foreground" data-testid="ajuda-conta">{ACCOUNT_FORM[platform].help}</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-[180px_1fr_1fr_auto] sm:items-end">
+          <div className="space-y-1.5">
+            <Label htmlFor="trafego-conta-plataforma">Plataforma</Label>
+            <select
+              id="trafego-conta-plataforma"
+              className={SELECT_CLASS}
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value as TrafficPlatform)}
+            >
+              {(["meta", "google"] as const)
+                .filter((item) => data.platforms[item].available)
+                .map((item) => (
+                  <option key={item} value={item}>
+                    {PLATFORM_LABEL[item]}
+                  </option>
+                ))}
+            </select>
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="trafego-conta-id">Número da conta</Label>
             <Input
               id="trafego-conta-id"
               inputMode="numeric"
-              placeholder="Ex.: 1234567890"
+              placeholder={ACCOUNT_FORM[platform].placeholder}
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               required
