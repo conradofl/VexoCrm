@@ -14,6 +14,8 @@
 
 import { pgDatabasePool } from "../services/database.js";
 import { runTrafficCollection } from "./collector.js";
+import { getTrafficPilotTenants } from "./access.js";
+import { generateDailyPlans } from "./plan.js";
 
 export const TIMEZONE = "America/Sao_Paulo";
 export const SCHEDULE_ENABLED_ENV = "TRAFFIC_COLLECTOR_ENABLED";
@@ -72,6 +74,9 @@ export async function withCollectorLock(pool, fn) {
 export function createTrafficCollectorScheduler({
   pool = pgDatabasePool,
   runner = runTrafficCollection,
+  // Fase 2: depois da coleta, gera o plano do dia das empresas do piloto em
+  // "Sugere". Falha aqui nunca derruba a coleta.
+  planner = generateDailyPlans,
   enabled,
   tickIntervalMs = DEFAULT_TICK_INTERVAL_MS,
 } = {}) {
@@ -92,7 +97,24 @@ export function createTrafficCollectorScheduler({
     lastAttemptedSlotKey = slot.slotKey;
     running = true;
     try {
-      const outcome = await withCollectorLock(pool, () => runner({ pool, now }));
+      const outcome = await withCollectorLock(pool, async () => {
+        const collected = await runner({ pool, now });
+        if (!planner) return collected;
+        try {
+          const plans = await planner({ pool, now, tenants: getTrafficPilotTenants() });
+          for (const plan of plans || []) {
+            console.log(
+              plan.ok
+                ? `[traffic-plan] Plano do dia gerado para ${plan.clientId}: ${plan.items} item(ns).`
+                : `[traffic-plan] Plano do dia não gerado para ${plan.clientId}: ${plan.code}.`
+            );
+          }
+          return { ...collected, plans };
+        } catch (err) {
+          console.warn("[traffic-plan] Falha ao gerar planos do dia:", err?.message || err);
+          return collected;
+        }
+      });
       if (!outcome.locked) return { ran: false, reason: "CONCURRENT_LOCK_HELD", slotKey: slot.slotKey };
 
       const describe = (platform) =>

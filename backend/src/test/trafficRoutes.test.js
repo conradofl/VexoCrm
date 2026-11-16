@@ -241,7 +241,7 @@ describe("rotas do Gestor de Tráfego", () => {
     it("sem perfil devolve os padrões e diz que não existe", async () => {
       const res = await get(`/api/traffic/profile?clientId=${A}`, USER_A);
       expect(res.body.profile).toMatchObject({ exists: false, kpis: [], primaryKpi: null, windows: [4, 7, 14, 30], minSpendFactor: 1.2, maxIncreasePct: 50, autonomyLevel: "relatorio" });
-      expect(res.body.autonomy).toEqual({ levels: ["relatorio", "sugere", "aplica_com_limites"], available: ["relatorio"] });
+      expect(res.body.autonomy).toEqual({ levels: ["relatorio", "sugere", "aplica_com_limites"], available: ["relatorio", "sugere"] });
       expect(res.body.catalog.map((k) => k.key)).toContain("cpl");
     });
 
@@ -273,14 +273,16 @@ describe("rotas do Gestor de Tráfego", () => {
       ]);
     });
 
-    it("o servidor só aceita o nível Relatório, e a recusa não grava nada", async () => {
-      for (const autonomyLevel of ["sugere", "aplica_com_limites"]) {
-        const res = await salvar({ autonomyLevel, kpis: [{ key: "cpl", target: 50 }], primaryKpi: "cpl" });
-        expect(res.status).toBe(400);
-        expect(res.body.error.code).toBe("AUTONOMY_NOT_AVAILABLE");
-      }
+    it("Fase 2: o servidor aceita Relatório e Sugere; recusa Aplica com limites sem gravar nada", async () => {
+      const recusa = await salvar({ autonomyLevel: "aplica_com_limites", kpis: [{ key: "cpl", target: 50 }], primaryKpi: "cpl" });
+      expect(recusa.status).toBe(400);
+      expect(recusa.body.error.code).toBe("AUTONOMY_NOT_AVAILABLE");
       expect((await salvar({ autonomyLevel: "total" })).body.error.code).toBe("INVALID_AUTONOMY");
       expect((await db.query("SELECT count(*)::int AS n FROM traffic_profiles")).rows[0].n).toBe(0);
+
+      const sugere = await salvar({ autonomyLevel: "sugere", kpis: [{ key: "cpl", target: 50 }], primaryKpi: "cpl" });
+      expect(sugere.status).toBe(200);
+      expect(sugere.body.profile.autonomyLevel).toBe("sugere");
     });
 
     it("recusa KPI desconhecido, repetido, meta inválida e KPI principal fora da lista", async () => {

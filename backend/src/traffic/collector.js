@@ -8,11 +8,12 @@
 // Sem credencial da plataforma no ambiente a conta está "não conectada": não é
 // erro, não grava nada e não mostra número.
 
-import { createMetaAdsClient, getMetaAccessToken, mapMetaInsightRow } from "./metaAdsClient.js";
+import { createMetaAdsClient, getMetaAccessToken, mapMetaBudgets, mapMetaInsightRow } from "./metaAdsClient.js";
 import {
   createGoogleAdsClient,
   getGoogleAdsCredentials,
   mapGoogleAdsRow,
+  mapGoogleBudgets,
   summarizeGoogleConversions,
 } from "./googleAdsClient.js";
 
@@ -136,6 +137,9 @@ export function createMetaSource(client) {
       }
       return rows;
     },
+    async fetchBudgets(accountId, info) {
+      return mapMetaBudgets(await client.fetchBudgets(accountId), info?.currency);
+    },
   };
 }
 
@@ -153,6 +157,9 @@ export function createGoogleSource(client) {
         if (mapped) rows.push(mapped);
       }
       return rows;
+    },
+    async fetchBudgets(accountId) {
+      return mapGoogleBudgets(await client.fetchBudgets(accountId));
     },
   };
 }
@@ -208,7 +215,8 @@ export async function collectAccount({ pool, account, source, now = new Date() }
       db.release();
     }
 
-    return { ok: true, accountId: account.id, clientId: account.client_id, rows: saved, window, firstLoad };
+    const budgets = await collectBudgets({ pool, account, source, info, now });
+    return { ok: true, accountId: account.id, clientId: account.client_id, rows: saved, window, firstLoad, budgets };
   } catch (err) {
     const error = describeError(err);
     try {
@@ -223,6 +231,69 @@ export async function collectAccount({ pool, account, source, now = new Date() }
     }
     console.warn(`[traffic-collector] Coleta falhou (conta ${account.id}, empresa ${account.client_id}): ${error}`);
     return { ok: false, accountId: account.id, clientId: account.client_id, error };
+  }
+}
+
+/**
+ * Verba atual da conta (Fase 2, só leitura). Roda DEPOIS de as métricas
+ * estarem gravadas e nunca lança: falha aqui não desfaz a coleta de métricas.
+ * Falha não vira zero nem apaga a verba anterior; a verba antiga fica com o
+ * collected_at velho e o plano do dia a trata como "não lida na última
+ * coleta" (sem proposta de verba).
+ *
+ * Sucesso troca a verba da conta inteira numa transação: campanha que sumiu
+ * da plataforma sai daqui também.
+ */
+export async function collectBudgets({ pool, account, source, info = null, now = new Date() }) {
+  if (typeof source.fetchBudgets !== "function") return { ok: false, error: "fonte sem leitura de verba" };
+  let budgets;
+  try {
+    budgets = await source.fetchBudgets(account.external_account_id, info);
+  } catch (err) {
+    const error = describeError(err);
+    console.warn(`[traffic-collector] Verba não lida (conta ${account.id}, empresa ${account.client_id}): ${error}`);
+    return { ok: false, error };
+  }
+
+  let db;
+  try {
+    db = await pool.connect();
+  } catch (err) {
+    const error = describeError(err);
+    console.warn(`[traffic-collector] Verba não gravada (conta ${account.id}, empresa ${account.client_id}): ${error}`);
+    return { ok: false, error };
+  }
+  try {
+    await db.query("BEGIN");
+    await db.query(
+      `DELETE FROM public.traffic_budgets WHERE client_id = $1 AND platform = $2 AND external_account_id = $3`,
+      [account.client_id, source.platform, account.external_account_id]
+    );
+    if (budgets.length > 0) {
+      await db.query(
+        `INSERT INTO public.traffic_budgets (
+           client_id, platform, external_account_id, level, entity_id, campaign_id, name,
+           daily_budget, lifetime_budget, shared, status, collected_at
+         )
+         SELECT $1, $2, $3, b.level, b.entity_id, b.campaign_id, b.name,
+                b.daily_budget, b.lifetime_budget, coalesce(b.shared, false), b.status, $5
+           FROM jsonb_to_recordset($4::jsonb) AS b(
+             level text, entity_id text, campaign_id text, name text,
+             daily_budget numeric, lifetime_budget numeric, shared boolean, status text
+           )
+         ON CONFLICT (client_id, platform, level, entity_id) DO NOTHING`,
+        [account.client_id, source.platform, account.external_account_id, JSON.stringify(budgets), now]
+      );
+    }
+    await db.query("COMMIT");
+    return { ok: true, count: budgets.length };
+  } catch (err) {
+    await db.query("ROLLBACK").catch(() => {});
+    const error = describeError(err);
+    console.warn(`[traffic-collector] Verba não gravada (conta ${account.id}, empresa ${account.client_id}): ${error}`);
+    return { ok: false, error };
+  } finally {
+    db.release();
   }
 }
 

@@ -11,9 +11,10 @@ import { normalizeGoogleCustomerId } from "./googleAdsClient.js";
 
 export const ALLOWED_WINDOWS = [4, 7, 14, 30];
 export const AUTONOMY_LEVELS = ["relatorio", "sugere", "aplica_com_limites"];
-// Fase 1: o servidor só aceita relatório. Os outros dois existem no banco e na
-// tela (desabilitados), mas não entram por aqui.
-export const AUTONOMY_AVAILABLE = ["relatorio"];
+// Fase 2: "sugere" (gera plano do dia para aprovação dupla) liberado.
+// "aplica_com_limites" existe no banco e na tela (desabilitado), mas não entra
+// por aqui: nesta fase nada é aplicado em plataforma.
+export const AUTONOMY_AVAILABLE = ["relatorio", "sugere"];
 export const APPROVER_ROLES = ["gestor_gd", "cliente"];
 export const REPORT_TIMEZONE = "America/Sao_Paulo";
 
@@ -161,7 +162,7 @@ export function normalizeProfileInput(input = {}) {
   const autonomyLevel = String(input.autonomyLevel || "relatorio");
   if (!AUTONOMY_LEVELS.includes(autonomyLevel)) throw rule("INVALID_AUTONOMY", "Nível de autonomia inválido.");
   if (!AUTONOMY_AVAILABLE.includes(autonomyLevel)) {
-    throw rule("AUTONOMY_NOT_AVAILABLE", "Nesta fase só o nível Relatório está disponível.");
+    throw rule("AUTONOMY_NOT_AVAILABLE", "Nesta fase o Vexo não aplica nada nas plataformas: só Relatório e Sugere estão disponíveis.");
   }
 
   const objectives = (Array.isArray(input.objectives) ? input.objectives : [])
@@ -226,12 +227,23 @@ export function normalizeProfileInput(input = {}) {
     throw rule("INVALID_MAX_INCREASE", "O aumento máximo por mudança precisa ficar entre 0% e 100%.");
   }
 
+  // O email liga o aprovador ao login: é por ele que o servidor sabe de que
+  // lado a pessoa aprova. Sem email, o aprovador aparece mas não aprova.
   const approvers = [];
+  const emailRole = new Map();
   for (const raw of (Array.isArray(input.approvers) ? input.approvers : []).slice(0, 10)) {
     const name = typeof raw?.name === "string" ? raw.name.trim().slice(0, 80) : "";
     if (!name) continue;
     if (!APPROVER_ROLES.includes(raw.role)) throw rule("INVALID_APPROVER", "Aprovador precisa ser gestor da GD ou cliente.");
-    approvers.push({ name, role: raw.role });
+    const email = typeof raw.email === "string" ? raw.email.trim().toLowerCase().slice(0, 160) : "";
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw rule("INVALID_APPROVER_EMAIL", `Email de ${name} não parece um email.`);
+    }
+    if (email && emailRole.has(email) && emailRole.get(email) !== raw.role) {
+      throw rule("APPROVER_BOTH_SIDES", "A mesma pessoa não pode aprovar pelos dois lados (GD e cliente).");
+    }
+    if (email) emailRole.set(email, raw.role);
+    approvers.push(email ? { name, role: raw.role, email } : { name, role: raw.role });
   }
 
   return { objectives, kpis, primaryKpi, windows, minSpendFactor, dailyBudgetCap, monthlyBudgetCap, maxIncreasePct, autonomyLevel, approvers };

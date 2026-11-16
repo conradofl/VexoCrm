@@ -28,6 +28,20 @@ import {
   saveProfile,
   setAccountStatus,
 } from "./service.js";
+import {
+  TrafficPlanError,
+  approveItem,
+  findPlanItemTenant,
+  findPlanTenant,
+  generatePlan,
+  getPlan,
+  getTodayPlan,
+  listApplyQueue,
+  listPlans,
+  markItemApplied,
+  rejectItem,
+  rolesForIdentity,
+} from "./plan.js";
 
 const RULE_ERROR_STATUS = { ACCOUNT_ALREADY_EXISTS: 409 };
 
@@ -38,6 +52,9 @@ function sendErr(res, status, code, message) {
 function sendRuleOrServerErr(res, err, where) {
   if (err instanceof TrafficRuleError) {
     return sendErr(res, RULE_ERROR_STATUS[err.code] || 400, err.code, err.message);
+  }
+  if (err instanceof TrafficPlanError) {
+    return res.status(err.status).json({ success: false, error: { code: err.code, message: err.message, ...(err.details || {}) } });
   }
   console.error(`[traffic/routes][${where}]`, err?.message || err);
   return sendErr(res, 500, "TRAFFIC_INTERNAL_ERROR", "Não foi possível concluir. Tente novamente em instantes.");
@@ -169,6 +186,116 @@ export function registerTrafficRoutes(app) {
       sendRuleOrServerErr(res, err, "performance");
     }
   });
+
+  // ─── Plano do dia e aprovação dupla (Fase 2). Nada é aplicado em plataforma.
+
+  function identityOf(req) {
+    return { uid: req.authUser?.uid || null, email: req.authUser?.email || null };
+  }
+
+  router.get("/plans/today", async (req, res) => {
+    const clientId = authorize(req, res, str(req.query.clientId));
+    if (!clientId) return;
+    const pool = requireDb(res);
+    if (!pool) return;
+    try {
+      const [today, profile, applyQueue] = await Promise.all([
+        getTodayPlan(pool, clientId),
+        getProfile(pool, clientId),
+        listApplyQueue(pool, clientId),
+      ]);
+      res.json({
+        success: true,
+        plan: today?.plan || null,
+        items: today?.items || [],
+        applyQueue,
+        autonomyLevel: profile.autonomyLevel,
+        // De que lado quem está logado aprova (pelo email na lista de aprovadores).
+        myRoles: rolesForIdentity(profile, identityOf(req)),
+      });
+    } catch (err) {
+      sendRuleOrServerErr(res, err, "plan-today");
+    }
+  });
+
+  router.get("/plans", async (req, res) => {
+    const clientId = authorize(req, res, str(req.query.clientId));
+    if (!clientId) return;
+    const pool = requireDb(res);
+    if (!pool) return;
+    try {
+      res.json({ success: true, plans: await listPlans(pool, clientId, { limit: Number(req.query.limit) || 30 }) });
+    } catch (err) {
+      sendRuleOrServerErr(res, err, "plan-list");
+    }
+  });
+
+  router.get("/plans/:id", async (req, res) => {
+    const pool = requireDb(res);
+    if (!pool) return;
+    try {
+      const owner = await findPlanTenant(pool, req.params.id);
+      if (!owner) return sendErr(res, 404, "NOT_FOUND", "Plano não encontrado.");
+      const clientId = authorize(req, res, owner);
+      if (!clientId) return;
+      const found = await getPlan(pool, clientId, req.params.id);
+      if (!found) return sendErr(res, 404, "NOT_FOUND", "Plano não encontrado.");
+      res.json({ success: true, ...found });
+    } catch (err) {
+      sendRuleOrServerErr(res, err, "plan-get");
+    }
+  });
+
+  router.post("/plans/generate", async (req, res) => {
+    const clientId = authorize(req, res, str(req.body?.clientId));
+    if (!clientId) return;
+    const pool = requireDb(res);
+    if (!pool) return;
+    try {
+      const generated = await generatePlan(pool, clientId, { generatedBy: identityOf(req).uid || "pessoa" });
+      res.status(201).json({ success: true, ...generated });
+    } catch (err) {
+      sendRuleOrServerErr(res, err, "plan-generate");
+    }
+  });
+
+  async function itemAction(req, res, where, fn) {
+    const pool = requireDb(res);
+    if (!pool) return;
+    try {
+      const owner = await findPlanItemTenant(pool, req.params.id);
+      if (!owner) return sendErr(res, 404, "NOT_FOUND", "Item do plano não encontrado.");
+      const clientId = authorize(req, res, owner);
+      if (!clientId) return;
+      res.json({ success: true, item: await fn(pool, clientId) });
+    } catch (err) {
+      sendRuleOrServerErr(res, err, where);
+    }
+  }
+
+  router.post("/plan-items/:id/approve", (req, res) =>
+    itemAction(req, res, "plan-approve", (pool, clientId) =>
+      approveItem(pool, { clientId, itemId: req.params.id, role: str(req.body?.role), identity: identityOf(req) })
+    )
+  );
+
+  router.post("/plan-items/:id/reject", (req, res) =>
+    itemAction(req, res, "plan-reject", (pool, clientId) =>
+      rejectItem(pool, {
+        clientId,
+        itemId: req.params.id,
+        role: str(req.body?.role),
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "",
+        identity: identityOf(req),
+      })
+    )
+  );
+
+  router.post("/plan-items/:id/applied", (req, res) =>
+    itemAction(req, res, "plan-applied", (pool, clientId) =>
+      markItemApplied(pool, { clientId, itemId: req.params.id, identity: identityOf(req) })
+    )
+  );
 
   app.use("/api/traffic", router);
 }

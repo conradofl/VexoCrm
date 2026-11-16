@@ -211,7 +211,84 @@ export function createMetaAdsClient({
       const rows = await graphGetAllPages(`act_${id}/ads`, { fields: "id,effective_status" }, options);
       return new Map(rows.filter((row) => row?.id).map((row) => [String(row.id), row.effective_status || null]));
     },
+
+    /**
+     * Verba atual (Fase 2, só leitura): campanhas e conjuntos da conta com
+     * daily_budget / lifetime_budget como a Meta devolve (unidade mínima da
+     * moeda, centavos no real).
+     */
+    async fetchBudgets(accountId) {
+      const id = normalizeMetaAccountId(accountId);
+      const campaigns = await graphGetAllPages(
+        `act_${id}/campaigns`,
+        { fields: "id,name,daily_budget,lifetime_budget,effective_status" },
+        options
+      );
+      const adsets = await graphGetAllPages(
+        `act_${id}/adsets`,
+        { fields: "id,name,campaign_id,daily_budget,lifetime_budget,effective_status" },
+        options
+      );
+      return { campaigns, adsets };
+    },
   };
+}
+
+// Moedas em que a Meta não usa centavos (fator 1). Para o resto, o valor vem
+// em centavos (fator 100). A GD fatura em real. A CONFERIR com conta real.
+const META_ZERO_DECIMAL_CURRENCIES = new Set(["CLP", "COP", "CRC", "HUF", "ISK", "IDR", "JPY", "KRW", "PYG", "TWD", "VND"]);
+
+function metaMoney(value, currency) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const factor = META_ZERO_DECIMAL_CURRENCIES.has(String(currency || "").toUpperCase()) ? 1 : 100;
+  return Math.round((n / factor) * 100) / 100;
+}
+
+/**
+ * Converte a leitura de verba da Meta em linhas de traffic_budgets.
+ * Campanha com verba (CBO) vira linha de nível campanha. Campanha sem verba
+ * própria leva a verba nos conjuntos: cada conjunto com verba vira linha de
+ * nível conjunto.
+ */
+export function mapMetaBudgets({ campaigns = [], adsets = [] } = {}, currency = null) {
+  const out = [];
+  const campaignHasBudget = new Set();
+  for (const row of campaigns) {
+    if (!row?.id) continue;
+    const daily = metaMoney(row.daily_budget, currency);
+    const lifetime = metaMoney(row.lifetime_budget, currency);
+    if (daily === null && lifetime === null) continue;
+    campaignHasBudget.add(String(row.id));
+    out.push({
+      level: "campaign",
+      entity_id: String(row.id),
+      campaign_id: String(row.id),
+      name: row.name || null,
+      daily_budget: daily,
+      lifetime_budget: lifetime,
+      shared: false,
+      status: row.effective_status || null,
+    });
+  }
+  for (const row of adsets) {
+    if (!row?.id || !row.campaign_id || campaignHasBudget.has(String(row.campaign_id))) continue;
+    const daily = metaMoney(row.daily_budget, currency);
+    const lifetime = metaMoney(row.lifetime_budget, currency);
+    if (daily === null && lifetime === null) continue;
+    out.push({
+      level: "adset",
+      entity_id: String(row.id),
+      campaign_id: String(row.campaign_id),
+      name: row.name || null,
+      daily_budget: daily,
+      lifetime_budget: lifetime,
+      shared: false,
+      status: row.effective_status || null,
+    });
+  }
+  return out;
 }
 
 function toNumber(value) {

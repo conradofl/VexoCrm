@@ -104,7 +104,8 @@ describe("coletor de tráfego da Meta", () => {
     await insertAccount(db, { clientId: TENANT_A, externalAccountId: "111" });
     const { calls } = await run(metaHandlerFor({ 111: {} }));
 
-    expect(calls.length).toBe(3);
+    // Conta, relatório, anúncios, e a verba (campanhas e conjuntos, Fase 2).
+    expect(calls.length).toBe(5);
     for (const call of calls) {
       expect(call.init.method).toBe("GET");
       expect(call.init.headers.Authorization).toBe(`Bearer ${TOKEN}`);
