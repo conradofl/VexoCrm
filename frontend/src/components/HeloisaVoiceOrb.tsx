@@ -425,14 +425,6 @@ export function HeloisaVoiceOrb() {
 
       recognition.onend = () => {
         recognitionRef.current = null;
-        // Reinicia com uma NOVA instância somente se o painel estiver aberto e não estiver falando
-        if (isOpenRef.current && !isSpeakingRef.current) {
-          restartTimerRef.current = setTimeout(() => {
-            if (isOpenRef.current && !isSpeakingRef.current) {
-              startListening();
-            }
-          }, 200);
-        }
       };
 
       recognition.start();
@@ -490,23 +482,14 @@ export function HeloisaVoiceOrb() {
     (audioBase64: string | null, responseText: string) => {
       if (isMutedRef.current) {
         setStatus("idle");
-        if (isOpenRef.current) {
-          resumeListeningTimerRef.current = setTimeout(() => {
-            startListening();
-          }, 500);
-        }
         return;
       }
 
       const finalizarFala = () => {
         isSpeakingRef.current = false;
         setStatus("idle");
-        // Reativação ágil do microfone (120ms) para não cortar a fala subsequente do usuário
-        if (isOpenRef.current) {
-          resumeListeningTimerRef.current = setTimeout(() => {
-            startListening();
-          }, 120);
-        }
+        // Trava anti-loop: Heloísa NÃO reativa o microfone automaticamente após responder.
+        // O status permanece 'idle' aguardando novo clique voluntário do usuário.
       };
 
       const iniciarFala = () => {
@@ -579,11 +562,24 @@ export function HeloisaVoiceOrb() {
       const promptLimpo = text.trim();
       if (!promptLimpo) return;
 
-      // Pausa reconhecimento durante a consulta
+      // 1. Imediatamente aborte o reconhecimento de voz e limpe timers de silêncio
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
         } catch {}
+        recognitionRef.current = null;
+      }
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = null;
+      }
+      if (resumeListeningTimerRef.current) {
+        clearTimeout(resumeListeningTimerRef.current);
+        resumeListeningTimerRef.current = null;
       }
 
       setStatus("consultando");
@@ -660,14 +656,9 @@ export function HeloisaVoiceOrb() {
             : "Falha de comunicação com o servidor.";
         setErrorMessage(readableError);
         setStatus("idle");
-        if (isOpenRef.current) {
-          resumeListeningTimerRef.current = setTimeout(() => {
-            startListening();
-          }, 500);
-        }
       }
     },
-    [getIdToken, location.pathname, messages, startListening, tocarRespostaVoz]
+    [getIdToken, location.pathname, messages, tocarRespostaVoz]
   );
 
   // Envio manual de texto via form

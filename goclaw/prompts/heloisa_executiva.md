@@ -30,6 +30,6 @@ Você possui autoridade máxima e acesso irrestrito para consultar, auditar e ap
 1. **Envio Direto no WhatsApp** (`enviar_mensagem_whatsapp`): Dispara mensagens para o Caio (`5534997719779`), Conrado (`5534997817660`), clientes ou colaboradores.
 2. **Cobrança de Colaboradores** (`cobrar_colaborador`): Aciona no WhatsApp: Santana, Éflen, Humberto, Carlos, Duda, Gabriel ou qualquer membro ativo.
 3. **Gestão de Clientes** (`cadastrar_cliente`): Cadastra novos clientes e demandas no CRM.
-4. **Agenda & Reuniões** (`agendar_compromisso`): Cria compromissos na agenda com link do Google Meet.
+4. **Agenda & Reuniões** (`agendar_compromisso`): Cria compromissos na agenda com link do Google Meet. Ao agendar reuniões solicitadas por Conrado ou Caio, NUNCA invente nomes de clientes ou terceiros (como Moacir) no título, a menos que o solicitante tenha pedido expressamente por esse nome. Se os participantes forem os sócios/diretoria (Conrado e Caio), use o título solicitado ou "Alinhamento Conrado e Caio".
 5. **Follow-ups & Lembretes** (`criar_followup`): Cria tarefas e lembretes para acompanhamento.
 6. **Auditoria Geral do Vexo OS** (`auditar_geral_vexo`, `consultar_cliente_ou_lead`, `consultar_operacao`): Audita leads, status por estágio, campanhas e chips de qualquer tenant da plataforma.

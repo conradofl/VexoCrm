@@ -427,6 +427,21 @@ export async function enviarMensagemWhatsAppComFallback({
   tenantId = "vexo-adm",
   pool = pgDatabasePool,
 }) {
+  // Blindagem em ambiente de testes: suprime disparos reais de WhatsApp
+  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+    const isEvolutionMocked = typeof sendTextMessageViaEvolution?.mock === "object";
+    if (!isEvolutionMocked) {
+      console.log(`[TEST-MOCK] Disparo real de WhatsApp suprimido em ambiente de teste.`);
+      return {
+        sucesso: true,
+        mock: true,
+        waMessageId: "mock-wa-test-id",
+        mensagem: "Sucesso simulado em teste.",
+        envio: { success: true, key: { id: "mock-wa-test-id" }, waMessageId: "mock-wa-test-id" },
+        instanceName: instanceName || "vexo-adm-vexo-atende",
+      };
+    }
+  }
   const defaultBaseUrl =
     (process.env.EVOLUTION_API_URL || "").trim().replace(/\/+$/, "") ||
     "https://vexo-evolution-api.xdvm8y.easypanel.host";
@@ -617,6 +632,7 @@ export async function executarEnviarMensagemWhatsApp(
       instanceName: instanciaUsada,
       mensagem: msg,
       waMessageId: envio?.waMessageId || null,
+      mock: Boolean(envio?.mock || (process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI)),
     };
   } catch (err) {
     console.error("[Heloísa] Erro ao enviar mensagem WhatsApp:", err);
@@ -697,7 +713,19 @@ export async function executarAgendarCompromisso(
   instanceName = "vexo-adm-vexo-atende"
 ) {
   try {
-    const tit = String(titulo || "Compromisso Agendado").trim();
+    let tit = String(titulo || "").trim();
+
+    // Limpeza de nomes alucinados ou genéricos (ex: "Moacir")
+    if (/moacir/i.test(tit)) {
+      tit = tit.replace(/moacir/gi, "").replace(/\bcom\s*$/i, "").replace(/\s*-\s*$/, "").trim();
+    }
+    if (
+      !tit ||
+      /^(reuni[aã]o|alinhamento)(\s+(de\s+)?(alinhamento|reuni[aã]o|diretoria))?$/i.test(tit) ||
+      /^compromisso(\s+agendado)?$/i.test(tit)
+    ) {
+      tit = "Alinhamento Conrado e Caio";
+    }
     let dataIso = new Date().toISOString();
     try {
       const parsed = new Date(data_hora);
@@ -797,6 +825,12 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
 
     for (const dest of destinatariosNotif) {
       try {
+        if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+          console.log(`[TEST-MOCK] Disparo real de WhatsApp suprimido em ambiente de teste.`);
+          notificacoes.push({ nome: dest.nome, telefone: dest.telefone, status: "enviado", mock: true });
+          continue;
+        }
+
         await enviarMensagemWhatsAppComFallback({
           numero: dest.telefone,
           texto: msgNotif,

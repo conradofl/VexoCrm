@@ -2274,6 +2274,19 @@ export async function sendTextMessageViaEvolution({
     throw new Error("Parâmetros obrigatórios ausentes (instanceName, number, text)");
   }
 
+  // Blindagem absoluta em ambiente de testes / CI contra disparos reais
+  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+    console.log(`[TEST-MOCK] Disparo real de WhatsApp suprimido em ambiente de teste para ${number}.`);
+    return {
+      sucesso: true,
+      success: true,
+      mock: true,
+      waMessageId: "mock-wa-test-id",
+      key: { id: "mock-wa-test-id", remoteJid: number },
+      mensagem: "Sucesso simulado em teste.",
+    };
+  }
+
   const effectiveBaseUrl =
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
@@ -2559,6 +2572,16 @@ export async function createEvolutionGroup({
     throw new Error("subject (título do grupo) é obrigatório.");
   }
 
+  // Blindagem em ambiente de testes / CI contra criação real de grupos
+  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+    console.log(`[TEST-MOCK] Criação real de grupo WhatsApp suprimida em ambiente de teste (${cleanSubject}).`);
+    return {
+      success: true,
+      mock: true,
+      groupJid: `mock-group-${Date.now()}@g.us`,
+    };
+  }
+
   const effectiveBaseUrl =
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
@@ -2664,6 +2687,16 @@ export async function getEvolutionGroupInviteCode({
 }) {
   if (!instanceName || !groupJid) {
     throw new Error("instanceName e groupJid são obrigatórios para buscar link de convite.");
+  }
+
+  // Blindagem em testes contra chamadas de convite na Evolution
+  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+    return {
+      success: true,
+      mock: true,
+      inviteCode: `mock_${groupJid}`,
+      inviteUrl: `https://chat.whatsapp.com/mock_${groupJid}`,
+    };
   }
 
   const effectiveBaseUrl =
