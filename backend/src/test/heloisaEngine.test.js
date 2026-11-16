@@ -18,6 +18,7 @@ import {
   executarConsultarOperacao,
   enviarMensagemWhatsAppComFallback,
   processarVozHeloisa,
+  processarMensagemHeloisa,
   DIRETORES_AUTORIZADOS,
   chamarLlmHeloisa,
 } from "../domains/goclaw/heloisaEngine.js";
@@ -228,6 +229,52 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     expect(res.responseText).not.toContain("Oi, Diretor");
     expect(res.responseText).not.toContain("Olá, Diretor");
     expect(res.responseText).not.toContain("toque de amizade");
+  });
+
+  it("enviarMensagemWhatsAppComFallback não inclui a instância legada vexo-adm-vexo-atende em candidates", async () => {
+    sendTextMessageViaEvolution.mockReset().mockResolvedValue({ key: { id: "msg-123" } });
+    const mockPool = {
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+    };
+
+    const res = await enviarMensagemWhatsAppComFallback({
+      numero: "5534997817660",
+      texto: "Teste de envio seguro",
+      pool: mockPool,
+    });
+
+    expect(res.envio).toBeDefined();
+    expect(res.instanceName).toBe("geracao-digital-teste-vexo");
+    expect(sendTextMessageViaEvolution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "geracao-digital-teste-vexo",
+        number: "5534997817660",
+        text: "Teste de envio seguro",
+      })
+    );
+  });
+
+  it("processarMensagemHeloisa trata '[áudio]' como vazio e dispara aviso via fallback caso a transcrição não retorne texto", async () => {
+    sendTextMessageViaEvolution.mockReset().mockResolvedValue({ key: { id: "msg-aviso" } });
+    const mockPool = {
+      query: vi.fn().mockResolvedValue({ rows: [] }),
+    };
+
+    const res = await processarMensagemHeloisa({
+      phone: "5534997817660",
+      texto: "[áudio]",
+      audioBase64: null,
+      pool: mockPool,
+    });
+
+    expect(res.autorizado).toBe(true);
+    expect(res.resposta).toContain("Recebi seu áudio, mas não consegui ouvir com clareza. Pode reenviar ou me mandar por texto?");
+    expect(sendTextMessageViaEvolution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        number: "5534997817660",
+        text: expect.stringContaining("Recebi seu áudio, mas não consegui ouvir com clareza"),
+      })
+    );
   });
 });
 

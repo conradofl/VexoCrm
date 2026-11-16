@@ -165,10 +165,10 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
 
     const mockLeadRows = [
       {
-        id: "lead-conrado-1",
+        id: "lead-audio-1",
         client_id: "vexo-adm",
-        telefone: "5534997817660",
-        phone: "5534997817660",
+        telefone: "5511988887777",
+        phone: "5511988887777",
         historico: [],
         dados: {},
         status_conversa: "aberto",
@@ -295,9 +295,13 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
     const webhookHandler = routes["POST /api/hardcoded-chat-webhook"];
     expect(webhookHandler).toBeDefined();
 
-    // 2. Dispara webhook com fixture de áudio real
+    // 2. Dispara webhook com fixture de áudio real ajustado para lead de teste
+    const reqBody = JSON.parse(JSON.stringify(fixture));
+    if (reqBody.data?.key) reqBody.data.key.remoteJid = "5511988887777@s.whatsapp.net";
+    if (reqBody.sender) reqBody.sender = "5511988887777@s.whatsapp.net";
+
     const req = {
-      body: fixture,
+      body: reqBody,
       query: { clientId: "vexo-adm" },
     };
     const res = {
@@ -320,7 +324,7 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
     // SEM lançar 'ReferenceError: normalizeHttpUrl is not defined'
     expect(capturedAudioSend).not.toBeNull();
     expect(capturedAudioSend.url).toBe("https://vexo-evolution-api.xdvm8y.easypanel.host/message/sendWhatsAppAudio/vexo-adm-vexo-atende");
-    expect(capturedAudioSend.body.number).toBe("5534997817660");
+    expect(capturedAudioSend.body.number).toBe("5511988887777");
     expect(capturedAudioSend.body.audio).toBeDefined();
     expect(capturedAudioSend.body.encoding).toBe(true);
     expect(capturedAudioSend.headers.apikey).toBe("evo-secret-token");

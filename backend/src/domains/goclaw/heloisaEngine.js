@@ -237,7 +237,6 @@ export async function enviarMensagemWhatsAppComFallback({
   const candidates = [
     primaryInstance,
     "geracao-digital-teste-vexo",
-    "vexo-adm-vexo-atende",
   ].filter(Boolean).filter((val, idx, self) => self.indexOf(val) === idx);
 
   let lastError = null;
@@ -953,6 +952,9 @@ export async function processarMensagemHeloisa({
   }
 
   let promptUsuario = (texto || "").trim();
+  if (/^\[[áa]udio\]$/i.test(promptUsuario)) {
+    promptUsuario = "";
+  }
 
   // Transcrição de áudio se recebido
   if (!promptUsuario && audioBase64) {
@@ -969,9 +971,22 @@ export async function processarMensagemHeloisa({
   }
 
   if (!promptUsuario) {
+    const msgAviso = `Olá ${diretor.nome}! Sou a Heloísa. Recebi seu áudio, mas não consegui ouvir com clareza. Pode reenviar ou me mandar por texto?`;
+    try {
+      await enviarMensagemWhatsAppComFallback({
+        numero: diretor.telefone,
+        texto: msgAviso,
+        instanceName,
+        pool,
+      });
+      console.log(`[Heloísa] Aviso de áudio não compreendido enviado para ${diretor.nome} (${diretor.telefone})`);
+    } catch (errEnvio) {
+      console.error(`[Heloísa] Falha ao enviar aviso de áudio para ${diretor.nome}:`, errEnvio);
+    }
+
     return {
       autorizado: true,
-      resposta: `Olá ${diretor.nome}! Sou a Heloísa. Não consegui ouvir ou ler sua mensagem. Pode reenviar por favor?`,
+      resposta: msgAviso,
     };
   }
 
@@ -1061,15 +1076,16 @@ export async function processarMensagemHeloisa({
       tools: HELOISA_TOOLS,
     });
 
-    respostaFinal = finalResponse?.content || "Ações executadas com sucesso, Diretor.";
+    respostaFinal = finalResponse?.content || "Prontinho! Já resolvi tudo por aqui.";
   }
 
-  // Disparo de volta no WhatsApp do Diretor
+  // Disparo de volta no WhatsApp do Diretor com contingência de instância
   try {
-    await sendTextMessageViaEvolution({
+    await enviarMensagemWhatsAppComFallback({
+      numero: diretor.telefone,
+      texto: respostaFinal,
       instanceName,
-      number: diretor.telefone,
-      text: respostaFinal,
+      pool,
     });
     console.log(`[Heloísa] Resposta enviada com sucesso para ${diretor.nome} (${diretor.telefone})`);
   } catch (err) {

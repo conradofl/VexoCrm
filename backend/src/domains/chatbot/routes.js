@@ -3223,8 +3223,12 @@ export function registerChatbotRoutes(app, deps) {
       req.query?.agent === "heloisa";
     const isDirector = (await isHeloisaAuthorizedSenderAsync(phone, pgDatabasePool)) || isHeloisaAuthorizedSender(phone);
     const hasHeloisaPrefix = /^(helo[ií]sa|[!\/]h)\b/i.test(messageData?.text || "");
+    const isPersonal = isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName);
 
-    if (!fromMe && (isHeloisaTarget || (isDirector && hasHeloisaPrefix))) {
+    // Se o remetente for Diretor autorizado, intercepta 100% das mensagens (áudio ou texto)
+    // para a Heloísa, sem exigir prefixo "heloísa". Se for terceiro/lead, só se o alvo explícito for heloisa.
+    // Chips pessoais não são interceptados para manter comunicação humana livre de robôs.
+    if (!fromMe && !isPersonal && (isDirector || isHeloisaTarget)) {
       const cleanText = hasHeloisaPrefix
         ? (messageData.text || "").replace(/^(helo[ií]sa|[!\/]h)[:,]?\s*/i, "").trim()
         : messageData.text;
@@ -3236,7 +3240,7 @@ export function registerChatbotRoutes(app, deps) {
         texto: cleanText,
         audioBase64: messageData.mediaBase64 || null,
         audioMimetype: messageData.mimetype || "audio/ogg",
-        instanceName: instanceName || "heloisa",
+        instanceName: instanceName || "geracao-digital-teste-vexo",
         pool: pgDatabasePool,
       }).catch((err) => {
         console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);
