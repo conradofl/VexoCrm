@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { DEMO_PHONE_NUMBER } from "./constants";
 import { fetchApi } from "@/lib/api";
+import { getAdAttribution } from "@/lib/adAttribution";
 import type { LeadFormData } from "./types";
 
 interface LeadCaptureModalProps {
@@ -121,6 +122,7 @@ export function LeadCaptureModal({
       client_id: clientId,
       mode,
       planName: planName || null,
+      attribution: getAdAttribution(),
     };
 
     try {

@@ -10,6 +10,7 @@ import {
   sendTextMessageViaEvolution,
 } from "./evolution.js";
 import { maskPhoneForLog, normalizeTenantKey } from "./tenant.js";
+import { leadSourceForAdOrigin, parseAdAttribution, recordLeadAdOrigin } from "../traffic/adOrigin.js";
 
 /** Memória em processo para rate limit de IP (captura e telemetria). */
 const ipSubmissionWindow = new Map();
@@ -146,6 +147,8 @@ export function validateCapturePayload(body = {}) {
       followupProcess: String(body.followupProcess || body.processoFollowup || "").trim() || null,
       mainPain: String(body.mainPain || body.dorPrincipal || "").trim() || null,
       instanceName: String(body.instance_name || body.instanceName || "").trim() || null,
+      // Parâmetros de campanha lidos da URL pela página. null = sem origem registrada.
+      adOrigin: parseAdAttribution(body.attribution),
     },
   };
 }
@@ -413,14 +416,17 @@ export function formatOwnerAlertMessage({ fullName, phone, email, answers, clien
  * @param {object} params
  * @returns {Promise<{ leadId?: string, action: "inserted"|"updated" }>}
  */
-export async function saveCaptureLead(pool, { clientId, phone, fullName, email, answers }) {
+export async function saveCaptureLead(pool, { clientId, phone, fullName, email, answers, adOrigin = null }) {
   if (!pool) throw new Error("Pool de banco indisponível");
 
+  // lead_source só com prova: anúncio pago vira "trafego_pago". Sem prova a
+  // coluna não é escrita (lead novo fica sem origem = "Não informado"; lead
+  // antigo mantém a dele). Antes daqui todo formulário virava "organico".
   const fields = {
     nome: fullName,
     tags: ["diagnostico-site"],
     lead_origin: "diagnostico-site",
-    lead_source: "organico",
+    lead_source: leadSourceForAdOrigin(adOrigin),
     status: "NOVO",
     dados: {
       ...answers,
@@ -431,6 +437,18 @@ export async function saveCaptureLead(pool, { clientId, phone, fullName, email, 
   };
 
   const action = await upsertLeadByPhone(pool, clientId, phone, fields);
+
+  // Origem do anúncio em tabela própria. Falhar aqui não derruba a captura:
+  // o lead já está salvo e o visitante recebe a resposta.
+  let adOriginRecorded = false;
+  if (adOrigin) {
+    try {
+      await recordLeadAdOrigin(pool, { clientId, phone, channel: "site", origin: adOrigin });
+      adOriginRecorded = true;
+    } catch (originErr) {
+      console.warn("[leadCapture] origem do anúncio não gravada:", originErr?.message || originErr);
+    }
+  }
 
   // Insere notificação in-app para o tenant no CRM
   try {
@@ -447,7 +465,7 @@ export async function saveCaptureLead(pool, { clientId, phone, fullName, email, 
     console.warn("[leadCapture] Aviso ao gravar notificação in-app:", notifErr?.message || notifErr);
   }
 
-  return { action };
+  return { action, adOriginRecorded };
 }
 
 /** Constantes de segurança e proteção do chip WhatsApp. */
