@@ -18,6 +18,7 @@ import {
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { resolveGoclawDir } from "./routes.js";
 import { defaultGroqModel } from "../../services/llmModels.js";
 import { generateSpeechAudio } from "../../services/voiceService.js";
@@ -41,6 +42,179 @@ export function normalizarTelefoneHeloisa(rawPhone) {
   if (!rawPhone) return "";
   const limpo = String(rawPhone).replace(/\D/g, "");
   return limpo;
+}
+
+let _cachedStatusAtivo = null;
+let _cachedStatusExpires = 0;
+
+export async function isHeloisaActive(pool = pgDatabasePool) {
+  const now = Date.now();
+  if (_cachedStatusAtivo !== null && _cachedStatusExpires > now) {
+    return _cachedStatusAtivo;
+  }
+  if (!pool || typeof pool.query !== "function") {
+    return true;
+  }
+  try {
+    const { rows } = await pool.query(
+      "SELECT valor FROM public.heloisa_config WHERE chave = 'status_ativo' LIMIT 1"
+    );
+    if (rows && rows.length > 0) {
+      const val = rows[0].valor;
+      const ativo = typeof val === "object" ? val?.ativo !== false : String(val) !== "false";
+      _cachedStatusAtivo = ativo;
+      _cachedStatusExpires = now + 15000;
+      return ativo;
+    }
+  } catch {
+    // fallback ativo caso tabela não exista
+  }
+  _cachedStatusAtivo = true;
+  _cachedStatusExpires = now + 15000;
+  return true;
+}
+
+export function invalidateHeloisaActiveCache() {
+  _cachedStatusAtivo = null;
+  _cachedStatusExpires = 0;
+}
+
+export function gerarLinkGoogleMeet(titulo = "", dataIso = "") {
+  const seed = `${titulo}-${dataIso}-${Date.now()}-${Math.random()}`;
+  const hash = crypto.createHash("md5").update(seed).digest("hex").toLowerCase();
+  const p1 = (hash.slice(0, 3).replace(/[^a-z]/g, "a") + "abc").slice(0, 3);
+  const p2 = (hash.slice(3, 7).replace(/[^a-z]/g, "m") + "meet").slice(0, 4);
+  const p3 = (hash.slice(7, 10).replace(/[^a-z]/g, "z") + "xyz").slice(0, 3);
+  return `https://meet.google.com/${p1}-${p2}-${p3}`;
+}
+
+export async function registrarExecucaoHeloisa({
+  canal = "whatsapp",
+  solicitanteNome = "Conrado Finzi",
+  solicitanteTelefone = null,
+  solicitantePapel = "Diretor Executivo",
+  clientId = "vexo-adm",
+  textoEntrada = "",
+  tipoEntrada = "text",
+  ferramentaExecutada = null,
+  parametros = {},
+  resultado = {},
+  respostaSaida = "",
+  status = "sucesso",
+  erroDetalhes = null,
+  tempoExecucaoMs = 0,
+}, pool = pgDatabasePool) {
+  if (!pool || typeof pool.query !== "function") return null;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO public.heloisa_execucoes (
+        canal, solicitante_nome, solicitante_telefone, solicitante_papel, client_id,
+        texto_entrada, tipo_entrada, ferramenta_executada, parametros, resultado,
+        resposta_saida, status, erro_detalhes, tempo_execucao_ms, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+      RETURNING *`,
+      [
+        canal,
+        solicitanteNome,
+        solicitanteTelefone,
+        solicitantePapel,
+        clientId,
+        textoEntrada,
+        tipoEntrada,
+        ferramentaExecutada,
+        JSON.stringify(parametros || {}),
+        JSON.stringify(resultado || {}),
+        respostaSaida,
+        status,
+        erroDetalhes,
+        Math.max(0, Math.round(tempoExecucaoMs || 0)),
+      ]
+    );
+    return rows[0] || null;
+  } catch (err) {
+    console.warn("[Heloísa] Falha ao registrar log de execução em heloisa_execucoes:", err.message);
+    return null;
+  }
+}
+
+export async function ensureHeloisaTables(pool = pgDatabasePool) {
+  if (!pool || typeof pool.query !== "function") return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.heloisa_usuarios_autorizados (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id VARCHAR(100) DEFAULT 'geracao-digital',
+        nome VARCHAR(150) NOT NULL,
+        telefone VARCHAR(50) NOT NULL UNIQUE,
+        email VARCHAR(255),
+        papel VARCHAR(100) DEFAULT 'Diretor',
+        ativo BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.heloisa_config (
+        chave VARCHAR(100) PRIMARY KEY,
+        valor JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_by VARCHAR(150)
+      );
+
+      CREATE TABLE IF NOT EXISTS public.heloisa_agendas (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        nome VARCHAR(150) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        telefone VARCHAR(50),
+        papel VARCHAR(100) DEFAULT 'Participante',
+        ativo BOOLEAN DEFAULT true,
+        notificar_whatsapp BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.heloisa_execucoes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        canal VARCHAR(50) NOT NULL DEFAULT 'whatsapp',
+        solicitante_nome VARCHAR(150),
+        solicitante_telefone VARCHAR(50),
+        solicitante_papel VARCHAR(100),
+        client_id VARCHAR(100) DEFAULT 'vexo-adm',
+        texto_entrada TEXT,
+        tipo_entrada VARCHAR(50) DEFAULT 'text',
+        ferramenta_executada VARCHAR(100),
+        parametros JSONB DEFAULT '{}',
+        resultado JSONB DEFAULT '{}',
+        resposta_saida TEXT,
+        status VARCHAR(50) NOT NULL DEFAULT 'sucesso',
+        erro_detalhes TEXT,
+        tempo_execucao_ms INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_created_at ON public.heloisa_execucoes (created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_status ON public.heloisa_execucoes (status);
+      CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_canal ON public.heloisa_execucoes (canal);
+
+      INSERT INTO public.heloisa_config (chave, valor)
+      VALUES ('status_ativo', '{"ativo": true}')
+      ON CONFLICT (chave) DO NOTHING;
+
+      INSERT INTO public.heloisa_agendas (nome, email, telefone, papel, ativo, notificar_whatsapp)
+      VALUES 
+        ('Conrado Finzi', 'conradofinzi@gmail.com', '5534997817660', 'Sócio Diretor Executivo', true, true),
+        ('Caio Almeida', 'caioalmeidmrk@gmail.com', '5534997719779', 'Sócio Diretor Comercial', true, true),
+        ('Geração Digital', 'mrkgeracaodigital@gmail.com', NULL, 'Agência Oficial', true, false)
+      ON CONFLICT (email) DO NOTHING;
+
+      INSERT INTO public.heloisa_usuarios_autorizados (client_id, nome, telefone, email, papel, ativo)
+      VALUES
+        ('geracao-digital', 'Conrado Finzi', '5534997817660', 'conradofinzi@gmail.com', 'Diretor Executivo / Sócio', true),
+        ('geracao-digital', 'Caio Almeida', '5534997719779', 'caioalmeidmrk@gmail.com', 'Diretor Comercial / Sócio', true)
+      ON CONFLICT (telefone) DO NOTHING;
+    `);
+  } catch (err) {
+    console.warn("[Heloísa] Aviso ao inicializar tabelas da Heloísa:", err.message);
+  }
 }
 
 export function identificarDiretor(phone) {
@@ -513,7 +687,11 @@ export async function executarCobrarColaborador({ colaborador, mensagem }, pool 
   }
 }
 
-export async function executarAgendarCompromisso({ titulo, data_hora, local_ou_link }, pool = pgDatabasePool) {
+export async function executarAgendarCompromisso(
+  { titulo, data_hora, local_ou_link, participantes_extras },
+  pool = pgDatabasePool,
+  instanceName = "vexo-adm-vexo-atende"
+) {
   try {
     const tit = String(titulo || "Compromisso Agendado").trim();
     let dataIso = new Date().toISOString();
@@ -524,17 +702,123 @@ export async function executarAgendarCompromisso({ titulo, data_hora, local_ou_l
       // Mantém default
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO public.events (name, date, location, created_at, updated_at)
-       VALUES ($1, $2, $3, NOW(), NOW())
-       RETURNING id, name, date, location`,
-      [tit, dataIso, local_ou_link || "Google Meet"]
-    );
+    // 1. Gera link do Google Meet automaticamente caso não tenha sido enviado link válido
+    let meetUrl = (local_ou_link || "").trim();
+    if (!meetUrl || !/^https?:\/\//i.test(meetUrl) || /google meet/i.test(meetUrl)) {
+      meetUrl = gerarLinkGoogleMeet(tit, dataIso);
+    }
+
+    // 2. Busca e-mails e telefones das agendas ativas cadastradas no banco
+    let agendasAtivas = [];
+    if (pool && typeof pool.query === "function") {
+      try {
+        const { rows } = await pool.query(
+          `SELECT nome, email, telefone, papel, notificar_whatsapp
+           FROM public.heloisa_agendas
+           WHERE ativo = true
+           ORDER BY created_at ASC`
+        );
+        agendasAtivas = rows || [];
+      } catch (e) {
+        console.warn("[Heloísa] Aviso ao buscar agendas para agendamento:", e.message);
+      }
+    }
+
+    if (agendasAtivas.length === 0) {
+      agendasAtivas = [
+        { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+        { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+        { nome: "Geração Digital", email: "mrkgeracaodigital@gmail.com", telefone: null, notificar_whatsapp: false },
+      ];
+    }
+
+    const listaEmails = agendasAtivas.map((a) => a.email).filter(Boolean);
+    const desc = `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${agendasAtivas.map((a) => `${a.nome} (${a.email})`).join(", ")}${participantes_extras ? `\nExtras: ${participantes_extras}` : ""}`;
+
+    // 3. Salva no banco de dados na tabela events
+    let eventoId = null;
+    let compromissoRow = null;
+    if (pool && typeof pool.query === "function") {
+      try {
+        const { rows } = await pool.query(
+          `INSERT INTO public.events (client_id, name, date, location, description, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+           RETURNING id, name, date, location`,
+          ["geracao-digital", tit, dataIso, meetUrl, desc]
+        );
+        compromissoRow = rows[0];
+        eventoId = rows[0]?.id;
+      } catch (e) {
+        try {
+          const { rows } = await pool.query(
+            `INSERT INTO public.events (name, date, location, created_at, updated_at)
+             VALUES ($1, $2, $3, NOW(), NOW())
+             RETURNING id, name, date, location`,
+            [tit, dataIso, meetUrl]
+          );
+          compromissoRow = rows[0];
+          eventoId = rows[0]?.id;
+        } catch (errEvents) {
+          console.warn("[Heloísa] Aviso ao inserir evento em public.events:", errEvents.message);
+        }
+      }
+    }
+
+    // Formatação amigável para leitura
+    let dataFormatada = dataIso;
+    try {
+      dataFormatada = new Date(dataIso).toLocaleString("pt-BR", {
+        timeZone: "America/Sao_Paulo",
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {}
+
+    // 4. Já nos avisar também (Dispara WhatsApp para os participantes cadastrados)
+    const notificacoes = [];
+    const destinatariosNotif = agendasAtivas.filter((a) => a.notificar_whatsapp && a.telefone);
+    const msgNotif = `📅 *Novo Compromisso Agendado pela Heloísa!*
+
+📌 *Título:* ${tit}
+⏰ *Data/Hora:* ${dataFormatada}
+🔗 *Google Meet:* ${meetUrl}
+👥 *Participantes Cadastrados:*
+${agendasAtivas.map((a) => `• ${a.nome} (${a.email})`).join("\n")}
+
+_Reunião registrada no Vexo OS e link gerado automaticamente._`;
+
+    for (const dest of destinatariosNotif) {
+      try {
+        await enviarMensagemWhatsAppComFallback({
+          numero: dest.telefone,
+          texto: msgNotif,
+          instanceName,
+          tenantId: "geracao-digital",
+          pool,
+        });
+        notificacoes.push({ nome: dest.nome, telefone: dest.telefone, status: "enviado" });
+        console.log(`[Heloísa] Aviso de agendamento enviado com sucesso para ${dest.nome} (${dest.telefone})`);
+      } catch (eNotif) {
+        notificacoes.push({ nome: dest.nome, telefone: dest.telefone, status: "falha", erro: eNotif.message });
+        console.warn(`[Heloísa] Falha ao enviar aviso de agendamento para ${dest.nome}:`, eNotif.message);
+      }
+    }
 
     return {
       sucesso: true,
-      compromisso: rows[0],
-      mensagem: `Compromisso "${tit}" agendado para ${dataIso}.`,
+      evento_id: eventoId,
+      compromisso: compromissoRow || { id: eventoId, name: tit, date: dataIso, location: meetUrl },
+      titulo: tit,
+      data_iso: dataIso,
+      data_formatada: dataFormatada,
+      meet_url: meetUrl,
+      participantes: listaEmails,
+      notificacoes_whatsapp: notificacoes,
+      mensagem: `Compromisso "${tit}" agendado com sucesso para ${dataFormatada}. Google Meet: ${meetUrl}. Convites registrados e aviso enviado no WhatsApp!`,
     };
   } catch (err) {
     console.error("[Heloísa] Erro ao agendar compromisso:", err);
@@ -815,13 +1099,14 @@ export const HELOISA_TOOLS = [
     type: "function",
     function: {
       name: "agendar_compromisso",
-      description: "Agenda uma reunião ou compromisso na agenda / calendário do CRM.",
+      description: "Agenda uma reunião ou compromisso na agenda do Vexo OS, gerando link do Google Meet automaticamente e notificando os participantes (Conrado, Caio, GD).",
       parameters: {
         type: "object",
         properties: {
-          titulo: { type: "string", description: "Título do compromisso" },
-          data_hora: { type: "string", description: "Data e horário (ex: 2026-11-15 14:00 ou amanhã às 14h)" },
-          local_ou_link: { type: "string", description: "Link do Google Meet ou local físico" },
+          titulo: { type: "string", description: "Título do compromisso ou reunião" },
+          data_hora: { type: "string", description: "Data e horário (ex: 2026-11-17 15:00 ou amanhã às 15h)" },
+          local_ou_link: { type: "string", description: "Link do Google Meet ou deixe em branco para gerar link automaticamente" },
+          participantes_extras: { type: "string", description: "Nomes ou e-mails de outros participantes convidados além da diretoria" },
         },
         required: ["titulo", "data_hora"],
       },
@@ -1005,6 +1290,17 @@ export async function processarMensagemHeloisa({
   instanceName = "heloisa",
   pool = pgDatabasePool,
 }) {
+  const inicioMs = Date.now();
+  const ativa = await isHeloisaActive(pool);
+  if (!ativa) {
+    console.log(`[Heloísa] Mensagem ignorada pois a Heloísa está pausada/desativada.`);
+    return {
+      autorizado: true,
+      pausada: true,
+      resposta: "A Heloísa está pausada temporariamente pelo administrador.",
+    };
+  }
+
   const diretor = await identificarUsuarioAutorizado(phone, pool);
   if (!diretor) {
     console.warn(`[Heloísa] Mensagem recebida de remetente não autorizado: ${phone}`);
@@ -1100,7 +1396,7 @@ export async function processarMensagemHeloisa({
     } else if (fnName === "cobrar_colaborador") {
       resultado = await executarCobrarColaborador(args, pool, instanceName);
     } else if (fnName === "agendar_compromisso") {
-      resultado = await executarAgendarCompromisso(args, pool);
+      resultado = await executarAgendarCompromisso(args, pool, instanceName);
     } else if (fnName === "criar_followup") {
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
@@ -1154,6 +1450,35 @@ export async function processarMensagemHeloisa({
   } catch (err) {
     console.error(`[Heloísa] Falha ao enviar resposta WhatsApp para ${diretor.nome}:`, err);
   }
+
+  // Registra no painel de auditoria e execuções da Heloísa
+  const duracaoMs = Date.now() - inicioMs;
+  const ferramentasChamadas = toolResults.map((t) => t.name).join(", ");
+  await registrarExecucaoHeloisa({
+    canal: "whatsapp",
+    solicitanteNome: diretor.nome,
+    solicitanteTelefone: diretor.telefone,
+    solicitantePapel: diretor.papel,
+    clientId: "geracao-digital",
+    textoEntrada: promptUsuario,
+    tipoEntrada: audioBase64 ? "audio" : "text",
+    ferramentaExecutada: ferramentasChamadas || null,
+    parametros: toolCalls.reduce((acc, tc) => {
+      try {
+        acc[tc.function?.name] = JSON.parse(tc.function?.arguments || "{}");
+      } catch {
+        acc[tc.function?.name] = tc.function?.arguments;
+      }
+      return acc;
+    }, {}),
+    resultado: toolResults.reduce((acc, tr) => {
+      acc[tr.name] = tr.resultado;
+      return acc;
+    }, {}),
+    respostaSaida: respostaFinal,
+    status: toolResults.some((t) => t.resultado?.sucesso === false) ? "aviso" : "sucesso",
+    tempoExecucaoMs: duracaoMs,
+  }, pool).catch(() => {});
 
   return {
     autorizado: true,
@@ -1271,6 +1596,20 @@ export async function processarVozHeloisa({
   pool = pgDatabasePool,
   goclawDir = resolveGoclawDir(),
 } = {}) {
+  const inicioMs = Date.now();
+  const ativa = await isHeloisaActive(pool);
+  if (!ativa) {
+    return {
+      ok: false,
+      error: "A Heloísa está pausada temporariamente pelo administrador no Painel de Controle.",
+      pausada: true,
+      userText: text || "",
+      responseText: "Estou pausada temporariamente no momento pelo painel de controle.",
+      executedTools: [],
+    };
+  }
+
+  const instanceName = "vexo-adm-vexo-atende";
   let userText = (text || "").trim();
 
   let cleanUserName = String(userName || "").trim().split(" ")[0];
@@ -1416,7 +1755,7 @@ ${compromissosTexto}
     } else if (fnName === "cobrar_colaborador") {
       resultado = await executarCobrarColaborador(args, pool);
     } else if (fnName === "agendar_compromisso") {
-      resultado = await executarAgendarCompromisso(args, pool);
+      resultado = await executarAgendarCompromisso(args, pool, instanceName);
     } else if (fnName === "criar_followup") {
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
@@ -1504,6 +1843,30 @@ ${compromissosTexto}
   } catch (err) {
     console.warn("[Heloísa Voz] Falha ao sintetizar áudio de resposta:", err.message);
   }
+
+  // Registra no painel de auditoria e execuções da Heloísa
+  const duracaoMs = Date.now() - inicioMs;
+  const ferramentasChamadas = executedTools.map((t) => t.name).join(", ");
+  await registrarExecucaoHeloisa({
+    canal: "voice_web",
+    solicitanteNome: cleanUserName || userName || "Conrado",
+    solicitantePapel: userRole,
+    clientId,
+    textoEntrada: userText,
+    tipoEntrada: audioBase64 ? "audio" : "text",
+    ferramentaExecutada: ferramentasChamadas || null,
+    parametros: executedTools.reduce((acc, t) => {
+      acc[t.name] = t.args;
+      return acc;
+    }, {}),
+    resultado: executedTools.reduce((acc, t) => {
+      acc[t.name] = t.resultado;
+      return acc;
+    }, {}),
+    respostaSaida: responseText,
+    status: executedTools.some((t) => t.resultado?.sucesso === false) ? "aviso" : "sucesso",
+    tempoExecucaoMs: duracaoMs,
+  }, pool).catch(() => {});
 
   return {
     ok: true,

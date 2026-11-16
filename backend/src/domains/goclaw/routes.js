@@ -13,7 +13,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { despacharVigia, gerarRelatorioVigia, normalizarNumerosWhatsApp } from "../../scripts/vigia-gd.mjs";
 import { pgDatabasePool } from "../../services/database.js";
-import { processarVozHeloisa } from "./heloisaEngine.js";
+import {
+  processarVozHeloisa,
+  ensureHeloisaTables,
+  isHeloisaActive,
+  invalidateHeloisaActiveCache,
+} from "./heloisaEngine.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +53,10 @@ export function registerGoclawRoutes(app, {
   goclawDir = resolveGoclawDir(),
   pool = pgDatabasePool,
 } = {}) {
+  // Inicializa e garante tabelas da Heloísa (usuarios, config, agendas, execucoes)
+  ensureHeloisaTables(pool).catch((e) => {
+    console.warn("[goclaw-routes] Aviso ao inicializar tabelas da Heloísa:", e.message);
+  });
   // ─── Status & Healthcheck ──────────────────────────────────────────────────
   app.get("/api/goclaw/status", requireAuth, async (_req, res) => {
     const goclawUrl = (process.env.GOCLAW_URL || "http://vexo_goclaw:1337").replace(/\/+$/, "");
@@ -440,6 +449,379 @@ export function registerGoclawRoutes(app, {
       return res.status(500).json({
         error: err?.message || "Erro interno ao processar voz com a Heloísa.",
       });
+    }
+  });
+
+  // ─── Configurações Gerais & Kill-Switch da Heloísa ──────────────────────────
+
+  // GET /api/goclaw/heloisa/config: Retorna status ativo (liga/desliga) e configs
+  app.get("/api/goclaw/heloisa/config", requireAuth, async (_req, res) => {
+    try {
+      const ativa = await isHeloisaActive(pool);
+      let notificarWhatsApp = true;
+      try {
+        const { rows } = await pool.query(
+          "SELECT valor FROM public.heloisa_config WHERE chave = 'notificar_whatsapp' LIMIT 1"
+        );
+        if (rows.length > 0 && typeof rows[0].valor === "object" && rows[0].valor.notificar !== undefined) {
+          notificarWhatsApp = rows[0].valor.notificar !== false;
+        }
+      } catch {}
+
+      return res.json({
+        ok: true,
+        config: {
+          ativo: ativa,
+          notificar_whatsapp: notificarWhatsApp,
+        },
+      });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao obter config da Heloísa:", err);
+      return res.status(500).json({ error: "Falha ao obter configuração da Heloísa." });
+    }
+  });
+
+  // PATCH /api/goclaw/heloisa/config: Atualiza status ativo ou configs
+  app.patch("/api/goclaw/heloisa/config", requireAuth, async (req, res) => {
+    try {
+      const { ativo, notificar_whatsapp } = req.body || {};
+
+      if (ativo !== undefined && pool && typeof pool.query === "function") {
+        await pool.query(
+          `INSERT INTO public.heloisa_config (chave, valor, updated_at)
+           VALUES ('status_ativo', $1, NOW())
+           ON CONFLICT (chave) DO UPDATE SET valor = $1, updated_at = NOW()`,
+          [JSON.stringify({ ativo: Boolean(ativo) })]
+        );
+        invalidateHeloisaActiveCache();
+      }
+
+      if (notificar_whatsapp !== undefined && pool && typeof pool.query === "function") {
+        await pool.query(
+          `INSERT INTO public.heloisa_config (chave, valor, updated_at)
+           VALUES ('notificar_whatsapp', $1, NOW())
+           ON CONFLICT (chave) DO UPDATE SET valor = $1, updated_at = NOW()`,
+          [JSON.stringify({ notificar: Boolean(notificar_whatsapp) })]
+        );
+      }
+
+      const statusAtivo = await isHeloisaActive(pool);
+      return res.json({
+        ok: true,
+        message: statusAtivo
+          ? "Heloísa ATIVADA com sucesso (online no WhatsApp e Web)!"
+          : "Heloísa PAUSADA/DESLIGADA com sucesso pelo administrador.",
+        config: {
+          ativo: statusAtivo,
+          notificar_whatsapp: notificar_whatsapp !== undefined ? Boolean(notificar_whatsapp) : true,
+        },
+      });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao atualizar config da Heloísa:", err);
+      return res.status(500).json({ error: "Falha ao atualizar configuração da Heloísa." });
+    }
+  });
+
+  // ─── Histórico & Auditoria de Execuções da Heloísa ──────────────────────────
+
+  // GET /api/goclaw/heloisa/execucoes: Lista tarefas e comandos executados
+  app.get("/api/goclaw/heloisa/execucoes", requireAuth, async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+      const offset = (page - 1) * limit;
+
+      const { status, canal, busca } = req.query;
+
+      const whereClauses = [];
+      const queryParams = [];
+      let paramIndex = 1;
+
+      if (status && status !== "todos") {
+        whereClauses.push(`status = $${paramIndex++}`);
+        queryParams.push(status);
+      }
+
+      if (canal && canal !== "todos") {
+        whereClauses.push(`canal = $${paramIndex++}`);
+        queryParams.push(canal);
+      }
+
+      if (busca && typeof busca === "string" && busca.trim()) {
+        const termo = `%${busca.trim()}%`;
+        whereClauses.push(
+          `(texto_entrada ILIKE $${paramIndex} OR resposta_saida ILIKE $${paramIndex} OR solicitante_nome ILIKE $${paramIndex} OR ferramenta_executada ILIKE $${paramIndex})`
+        );
+        queryParams.push(termo);
+        paramIndex++;
+      }
+
+      const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+      let rows = [];
+      let total = 0;
+
+      if (pool && typeof pool.query === "function") {
+        try {
+          const countRes = await pool.query(
+            `SELECT COUNT(*)::int as total FROM public.heloisa_execucoes ${whereSql}`,
+            queryParams
+          );
+          total = countRes.rows[0]?.total || 0;
+
+          const dataRes = await pool.query(
+            `SELECT id, canal, solicitante_nome, solicitante_telefone, solicitante_papel,
+                    client_id, texto_entrada, tipo_entrada, ferramenta_executada,
+                    parametros, resultado, resposta_saida, status, erro_detalhes,
+                    tempo_execucao_ms, created_at
+             FROM public.heloisa_execucoes
+             ${whereSql}
+             ORDER BY created_at DESC
+             LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
+            [...queryParams, limit, offset]
+          );
+          rows = dataRes.rows || [];
+        } catch (e) {
+          console.warn("[goclaw-routes] Aviso ao consultar heloisa_execucoes:", e.message);
+        }
+      }
+
+      // Estatísticas gerais para os cards do painel
+      let stats = { total: 0, sucesso: 0, erro: 0, hoje: 0, whatsapp: 0, voice_web: 0 };
+      if (pool && typeof pool.query === "function") {
+        try {
+          const statsRes = await pool.query(`
+            SELECT
+              COUNT(*)::int as total,
+              COUNT(*) FILTER (WHERE status = 'sucesso')::int as sucesso,
+              COUNT(*) FILTER (WHERE status = 'erro')::int as erro,
+              COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int as hoje,
+              COUNT(*) FILTER (WHERE canal = 'whatsapp')::int as whatsapp,
+              COUNT(*) FILTER (WHERE canal = 'voice_web')::int as voice_web
+            FROM public.heloisa_execucoes
+          `);
+          if (statsRes.rows.length > 0) {
+            stats = statsRes.rows[0];
+          }
+        } catch {}
+      }
+
+      return res.json({
+        ok: true,
+        data: rows,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit) || 1,
+        },
+        stats,
+      });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao listar execuções da Heloísa:", err);
+      return res.status(500).json({ error: "Falha ao carregar histórico de execuções." });
+    }
+  });
+
+  // DELETE /api/goclaw/heloisa/execucoes/:id: Remove registro individual
+  app.delete("/api/goclaw/heloisa/execucoes/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (pool && typeof pool.query === "function") {
+        await pool.query("DELETE FROM public.heloisa_execucoes WHERE id = $1", [id]);
+      }
+      return res.json({ ok: true, message: "Registro removido com sucesso." });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao excluir execução:", err);
+      return res.status(500).json({ error: "Falha ao excluir registro." });
+    }
+  });
+
+  // POST /api/goclaw/heloisa/execucoes/limpar: Limpa histórico
+  app.post("/api/goclaw/heloisa/execucoes/limpar", requireAuth, async (_req, res) => {
+    try {
+      if (pool && typeof pool.query === "function") {
+        await pool.query("DELETE FROM public.heloisa_execucoes");
+      }
+      return res.json({ ok: true, message: "Histórico de execuções limpo com sucesso." });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao limpar histórico:", err);
+      return res.status(500).json({ error: "Falha ao limpar histórico." });
+    }
+  });
+
+  // ─── Agendas e E-mails (Google Meet & Convites Automáticos) ─────────────────
+
+  // GET /api/goclaw/heloisa/agendas: Lista todas as agendas configuradas
+  app.get("/api/goclaw/heloisa/agendas", requireAuth, async (_req, res) => {
+    try {
+      let rows = [];
+      if (pool && typeof pool.query === "function") {
+        try {
+          const resQuery = await pool.query(
+            `SELECT id, nome, email, telefone, papel, ativo, notificar_whatsapp, created_at, updated_at
+             FROM public.heloisa_agendas
+             ORDER BY created_at ASC`
+          );
+          rows = resQuery.rows || [];
+        } catch (e) {
+          console.warn("[goclaw-routes] Aviso ao consultar heloisa_agendas:", e.message);
+        }
+      }
+
+      if (rows.length === 0) {
+        rows = [
+          {
+            id: "default-conrado",
+            nome: "Conrado Finzi",
+            email: "conradofinzi@gmail.com",
+            telefone: "5534997817660",
+            papel: "Sócio Diretor Executivo",
+            ativo: true,
+            notificar_whatsapp: true,
+          },
+          {
+            id: "default-caio",
+            nome: "Caio Almeida",
+            email: "caioalmeidmrk@gmail.com",
+            telefone: "5534997719779",
+            papel: "Sócio Diretor Comercial",
+            ativo: true,
+            notificar_whatsapp: true,
+          },
+          {
+            id: "default-gd",
+            nome: "Geração Digital",
+            email: "mrkgeracaodigital@gmail.com",
+            telefone: null,
+            papel: "Agência Oficial",
+            ativo: true,
+            notificar_whatsapp: false,
+          },
+        ];
+      }
+
+      return res.json({ ok: true, data: rows });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao listar agendas da Heloísa:", err);
+      return res.status(500).json({ error: "Falha ao listar agendas." });
+    }
+  });
+
+  // POST /api/goclaw/heloisa/agendas: Cadastra nova agenda/e-mail
+  app.post("/api/goclaw/heloisa/agendas", requireAuth, async (req, res) => {
+    try {
+      const {
+        nome,
+        email,
+        telefone = null,
+        papel = "Participante",
+        ativo = true,
+        notificar_whatsapp = true,
+      } = req.body || {};
+
+      if (!nome || typeof nome !== "string" || !nome.trim()) {
+        return res.status(422).json({ error: "O nome do participante ou agenda é obrigatório." });
+      }
+
+      if (!email || typeof email !== "string" || !email.includes("@")) {
+        return res.status(422).json({ error: "E-mail de agenda válido é obrigatório." });
+      }
+
+      const emailLimpo = email.trim().toLowerCase();
+      let telFormatado = null;
+      if (telefone) {
+        const val = normalizarNumerosWhatsApp(telefone);
+        if (val.length > 0) telFormatado = val[0];
+      }
+
+      if (pool && typeof pool.query === "function") {
+        const { rows } = await pool.query(
+          `INSERT INTO public.heloisa_agendas (nome, email, telefone, papel, ativo, notificar_whatsapp, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+           ON CONFLICT (email) DO UPDATE SET
+             nome = EXCLUDED.nome,
+             telefone = COALESCE(EXCLUDED.telefone, heloisa_agendas.telefone),
+             papel = EXCLUDED.papel,
+             ativo = EXCLUDED.ativo,
+             notificar_whatsapp = EXCLUDED.notificar_whatsapp,
+             updated_at = NOW()
+           RETURNING *`,
+          [nome.trim(), emailLimpo, telFormatado, papel, Boolean(ativo), Boolean(notificar_whatsapp)]
+        );
+
+        return res.json({
+          ok: true,
+          message: `Agenda de ${nome} (${emailLimpo}) cadastrada com sucesso!`,
+          data: rows[0],
+        });
+      }
+
+      return res.json({ ok: true, message: "Agenda salva com sucesso (modo simulado)." });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao cadastrar agenda:", err);
+      return res.status(500).json({ error: "Falha ao cadastrar agenda.", details: err.message });
+    }
+  });
+
+  // PATCH /api/goclaw/heloisa/agendas/:id: Atualiza status ou dados da agenda
+  app.patch("/api/goclaw/heloisa/agendas/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { nome, email, telefone, papel, ativo, notificar_whatsapp } = req.body || {};
+
+      const updates = [];
+      const values = [];
+      let idx = 1;
+
+      if (nome !== undefined) { updates.push(`nome = $${idx++}`); values.push(nome); }
+      if (email !== undefined) { updates.push(`email = $${idx++}`); values.push(email.trim().toLowerCase()); }
+      if (telefone !== undefined) {
+        let tVal = null;
+        if (telefone) {
+          const valids = normalizarNumerosWhatsApp(telefone);
+          tVal = valids[0] || null;
+        }
+        updates.push(`telefone = $${idx++}`);
+        values.push(tVal);
+      }
+      if (papel !== undefined) { updates.push(`papel = $${idx++}`); values.push(papel); }
+      if (ativo !== undefined) { updates.push(`ativo = $${idx++}`); values.push(Boolean(ativo)); }
+      if (notificar_whatsapp !== undefined) { updates.push(`notificar_whatsapp = $${idx++}`); values.push(Boolean(notificar_whatsapp)); }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: "Nenhum dado informado para atualização." });
+      }
+
+      updates.push(`updated_at = NOW()`);
+      values.push(id);
+
+      if (pool && typeof pool.query === "function") {
+        const { rows } = await pool.query(
+          `UPDATE public.heloisa_agendas SET ${updates.join(", ")} WHERE id = $${idx} RETURNING *`,
+          values
+        );
+        return res.json({ ok: true, data: rows[0] });
+      }
+
+      return res.json({ ok: true, message: "Agenda atualizada." });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao atualizar agenda:", err);
+      return res.status(500).json({ error: "Falha ao atualizar agenda.", details: err.message });
+    }
+  });
+
+  // DELETE /api/goclaw/heloisa/agendas/:id: Remove agenda
+  app.delete("/api/goclaw/heloisa/agendas/:id", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (pool && typeof pool.query === "function") {
+        await pool.query("DELETE FROM public.heloisa_agendas WHERE id = $1", [id]);
+      }
+      return res.json({ ok: true, message: "Agenda removida com sucesso." });
+    } catch (err) {
+      console.error("[goclaw-routes] Erro ao excluir agenda:", err);
+      return res.status(500).json({ error: "Falha ao excluir agenda.", details: err.message });
     }
   });
 }

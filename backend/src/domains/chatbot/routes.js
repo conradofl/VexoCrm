@@ -58,7 +58,7 @@ import {
 } from "../../services/inboxWorkState.js";
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
-import { isHeloisaAuthorizedSender, isHeloisaAuthorizedSenderAsync, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
+import { isHeloisaActive, isHeloisaAuthorizedSender, isHeloisaAuthorizedSenderAsync, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
 import { getChatMemory } from "../../hardcoded-chatbot.js";
 import { defaultLlmModel, providerOfModelId } from "../../services/llmModels.js";
 import {
@@ -3228,24 +3228,30 @@ export function registerChatbotRoutes(app, deps) {
     // Se o remetente for Diretor autorizado, intercepta 100% das mensagens (áudio ou texto)
     // para a Heloísa, sem exigir prefixo "heloísa". Se for terceiro/lead, só se o alvo explícito for heloisa.
     // Chips pessoais não são interceptados para manter comunicação humana livre de robôs.
+    // CONFIGURAÇÃO LIGA/DESLIGA: Se a Heloísa estiver desativada pelo administrador, não intercepta.
     if (!fromMe && !isPersonal && (isDirector || isHeloisaTarget)) {
-      const cleanText = hasHeloisaPrefix
-        ? (messageData.text || "").replace(/^(helo[ií]sa|[!\/]h)[:,]?\s*/i, "").trim()
-        : messageData.text;
+      const heloisaAtiva = await isHeloisaActive(pgDatabasePool);
+      if (!heloisaAtiva) {
+        console.log(`[chatbot-webhook] Heloísa está DESATIVADA no Painel de Controle. Mensagem de ${maskPhoneForLog(phone)} seguirá o fluxo padrão/humano.`);
+      } else {
+        const cleanText = hasHeloisaPrefix
+          ? (messageData.text || "").replace(/^(helo[ií]sa|[!\/]h)[:,]?\s*/i, "").trim()
+          : messageData.text;
 
-      responder({ handled: "heloisa", phone: maskPhoneForLog(phone) });
+        responder({ handled: "heloisa", phone: maskPhoneForLog(phone) });
 
-      processarMensagemHeloisa({
-        phone,
-        texto: cleanText,
-        audioBase64: messageData.mediaBase64 || null,
-        audioMimetype: messageData.mimetype || "audio/ogg",
-        instanceName: instanceName || "vexo-adm-vexo-atende",
-        pool: pgDatabasePool,
-      }).catch((err) => {
-        console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);
-      });
-      return;
+        processarMensagemHeloisa({
+          phone,
+          texto: cleanText,
+          audioBase64: messageData.mediaBase64 || null,
+          audioMimetype: messageData.mimetype || "audio/ogg",
+          instanceName: instanceName || "vexo-adm-vexo-atende",
+          pool: pgDatabasePool,
+        }).catch((err) => {
+          console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);
+        });
+        return;
+      }
     }
 
     // Resposta do lead para a cadência de follow-up. Só mensagem do lead (não fromMe)

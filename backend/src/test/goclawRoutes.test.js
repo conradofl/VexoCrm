@@ -44,8 +44,141 @@ let mockUsuarios = [
   },
 ];
 
+let mockConfig = { status_ativo: { ativo: true }, notificar_whatsapp: { notificar: true } };
+let mockAgendas = [
+  {
+    id: "ag-1",
+    nome: "Conrado Finzi",
+    email: "conradofinzi@gmail.com",
+    telefone: "5534997817660",
+    papel: "Sócio Diretor Executivo",
+    ativo: true,
+    notificar_whatsapp: true,
+  },
+  {
+    id: "ag-2",
+    nome: "Caio Almeida",
+    email: "caioalmeidmrk@gmail.com",
+    telefone: "5534997719779",
+    papel: "Sócio Diretor Comercial",
+    ativo: true,
+    notificar_whatsapp: true,
+  },
+];
+let mockExecucoes = [
+  {
+    id: "ex-1",
+    canal: "whatsapp",
+    solicitante_nome: "Conrado Finzi",
+    solicitante_telefone: "5534997817660",
+    solicitante_papel: "Diretor Executivo",
+    texto_entrada: "Agenda reunião com o Caio amanhã às 15h",
+    ferramenta_executada: "agendar_compromisso",
+    status: "sucesso",
+    created_at: new Date().toISOString(),
+  },
+];
+
 const mockPool = {
   query: async (sql, params = []) => {
+    if (sql.includes("heloisa_config")) {
+      if (sql.includes("SELECT") && sql.includes("chave = 'status_ativo'")) {
+        return { rows: [{ valor: mockConfig.status_ativo }] };
+      }
+      if (sql.includes("SELECT") && sql.includes("chave = 'notificar_whatsapp'")) {
+        return { rows: [{ valor: mockConfig.notificar_whatsapp }] };
+      }
+      if (sql.includes("INSERT INTO public.heloisa_config")) {
+        const chave = params[0] === "status_ativo" ? "status_ativo" : "notificar_whatsapp";
+        try {
+          mockConfig[chave] = typeof params[0] === "string" && params[0].startsWith("{") ? JSON.parse(params[0]) : params[0];
+        } catch {
+          mockConfig[chave] = params[0];
+        }
+        return { rows: [] };
+      }
+      return { rows: [] };
+    }
+    if (sql.includes("heloisa_agendas")) {
+      if (sql.includes("SELECT")) {
+        return { rows: [...mockAgendas] };
+      }
+      if (sql.includes("INSERT INTO public.heloisa_agendas")) {
+        const [nome, email, telefone, papel, ativo, notificar_whatsapp] = params;
+        const novo = {
+          id: `ag-${Date.now()}`,
+          nome,
+          email,
+          telefone,
+          papel,
+          ativo,
+          notificar_whatsapp,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        mockAgendas.push(novo);
+        return { rows: [novo] };
+      }
+      if (sql.includes("UPDATE public.heloisa_agendas")) {
+        const id = params[params.length - 1];
+        const ag = mockAgendas.find((a) => a.id === id);
+        if (ag && params[0] !== undefined) {
+          if (sql.includes("ativo =")) ag.ativo = params[0];
+          if (sql.includes("nome =")) ag.nome = params[0];
+        }
+        return { rows: ag ? [ag] : [] };
+      }
+      if (sql.includes("DELETE FROM public.heloisa_agendas")) {
+        const id = params[0];
+        const idx = mockAgendas.findIndex((a) => a.id === id);
+        if (idx !== -1) mockAgendas.splice(idx, 1);
+        return { rows: [] };
+      }
+    }
+    if (sql.includes("heloisa_execucoes")) {
+      if (sql.includes("COUNT(*)::int as total FROM public.heloisa_execucoes")) {
+        return { rows: [{ total: mockExecucoes.length }] };
+      }
+      if (sql.includes("COUNT(*) FILTER")) {
+        return {
+          rows: [
+            {
+              total: mockExecucoes.length,
+              sucesso: mockExecucoes.filter((e) => e.status === "sucesso").length,
+              erro: mockExecucoes.filter((e) => e.status === "erro").length,
+              hoje: mockExecucoes.length,
+              whatsapp: mockExecucoes.filter((e) => e.canal === "whatsapp").length,
+              voice_web: mockExecucoes.filter((e) => e.canal === "voice_web").length,
+            },
+          ],
+        };
+      }
+      if (sql.includes("SELECT") && sql.includes("FROM public.heloisa_execucoes")) {
+        return { rows: [...mockExecucoes] };
+      }
+      if (sql.includes("INSERT INTO public.heloisa_execucoes")) {
+        const novo = {
+          id: `ex-${Date.now()}`,
+          canal: params[0],
+          solicitante_nome: params[1],
+          texto_entrada: params[5],
+          status: params[11],
+          created_at: new Date().toISOString(),
+        };
+        mockExecucoes.push(novo);
+        return { rows: [novo] };
+      }
+      if (sql.includes("DELETE FROM public.heloisa_execucoes WHERE id = $1")) {
+        const id = params[0];
+        const idx = mockExecucoes.findIndex((e) => e.id === id);
+        if (idx !== -1) mockExecucoes.splice(idx, 1);
+        return { rows: [] };
+      }
+      if (sql.includes("DELETE FROM public.heloisa_execucoes")) {
+        mockExecucoes = [];
+        return { rows: [] };
+      }
+    }
     if (sql.includes("SELECT") && sql.includes("heloisa_usuarios_autorizados")) {
       return { rows: [...mockUsuarios] };
     }
@@ -662,6 +795,114 @@ describe("Rotas de Gestão do GoClaw (goclaw/routes.js)", () => {
       expect(json.executedTools[0].resultado.sucesso).toBe(true);
       expect(json.executedTools[0].resultado.destinatario).toBe("Conrado Finzi");
       expect(whatsappDisparado).toBe(true);
+    });
+  });
+
+  describe("Configuração Liga/Desliga da Heloísa (/api/goclaw/heloisa/config)", () => {
+    it("GET /api/goclaw/heloisa/config retorna status ativo", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/config`);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.config).toBeDefined();
+      expect(typeof json.config.ativo).toBe("boolean");
+    });
+
+    it("PATCH /api/goclaw/heloisa/config atualiza status ativo e notificação", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativo: false, notificar_whatsapp: true }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(json.config).toBeDefined();
+    });
+  });
+
+  describe("Painel de Histórico e Tarefas da Heloísa (/api/goclaw/heloisa/execucoes)", () => {
+    it("GET /api/goclaw/heloisa/execucoes retorna lista paginada e contadores", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/execucoes?limit=10`);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(Array.isArray(json.data)).toBe(true);
+      expect(json.pagination).toBeDefined();
+      expect(json.stats).toBeDefined();
+    });
+
+    it("DELETE /api/goclaw/heloisa/execucoes/:id remove execução individual", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/execucoes/ex-1`, {
+        method: "DELETE",
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+    });
+
+    it("POST /api/goclaw/heloisa/execucoes/limpar esvazia o histórico", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/execucoes/limpar`, {
+        method: "POST",
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+    });
+  });
+
+  describe("Gestão de Agendas e E-mails (/api/goclaw/heloisa/agendas)", () => {
+    it("GET /api/goclaw/heloisa/agendas lista as agendas cadastradas", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/agendas`);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+      expect(Array.isArray(json.data)).toBe(true);
+    });
+
+    it("POST /api/goclaw/heloisa/agendas valida e cadastra novo e-mail", async () => {
+      const resInvalido = await fetch(`${base}/api/goclaw/heloisa/agendas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome: "Teste", email: "email-invalido" }),
+      });
+      expect(resInvalido.status).toBe(422);
+
+      const resValido = await fetch(`${base}/api/goclaw/heloisa/agendas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome: "Santana Designer",
+          email: "santana@gd.com",
+          telefone: "34999999999",
+          papel: "Designer Criativo",
+          ativo: true,
+          notificar_whatsapp: true,
+        }),
+      });
+      expect(resValido.status).toBe(200);
+      const json = await resValido.json();
+      expect(json.ok).toBe(true);
+    });
+
+    it("PATCH /api/goclaw/heloisa/agendas/:id atualiza dados da agenda", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/agendas/ag-1`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativo: false }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
+    });
+
+    it("DELETE /api/goclaw/heloisa/agendas/:id remove a agenda", async () => {
+      const res = await fetch(`${base}/api/goclaw/heloisa/agendas/ag-2`, {
+        method: "DELETE",
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.ok).toBe(true);
     });
   });
 });
