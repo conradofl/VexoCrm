@@ -12,9 +12,13 @@
 import { pgDatabasePool } from "../../services/database.js";
 import {
   sendTextMessageViaEvolution,
+  createEvolutionGroup,
+  getEvolutionGroupInviteCode,
   buildEvolutionAuthHeaders,
   extractEvolutionInstanceSlug,
 } from "../../services/evolution.js";
+import { setupClientDriveFolders } from "../../services/googleDriveClientSetup.js";
+import { obterTelefonesEquipeGd } from "../gdClientes/gdColaboradoresMemoria.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -1030,9 +1034,300 @@ export async function executarConsultarClienteOuLead({ termo_busca, tenant_id },
   }
 }
 
+/**
+ * Executa o onboarding operacional completo de um cliente da Geração Digital:
+ * 1. Localiza cliente em public.gd_clientes
+ * 2. Obtém telefones da equipe GD em gd_colaboradores ou fallback
+ * 3. Cria estrutura de 4 pastas no Google Drive
+ * 4. Cria grupos WhatsApp (PASTA: {CLIENTE} e MÁQUINA DE VENDAS: {CLIENTE}) via Evolution API
+ * 5. Envia mensagem de boas-vindas no grupo do cliente
+ * 6. Atualiza gd_clientes com jids, links e onboarding_concluido_em
+ * 7. Transiciona estado para GRUPOS_CRIADOS via public.gd_registrar_evento
+ * 8. Registra auditoria em public.heloisa_execucoes
+ */
+export async function executarOnboardingCliente(
+  { cliente_nome, cliente_id, telefone_cliente },
+  pool = pgDatabasePool,
+  instanceName = "heloisa",
+  diretor = null
+) {
+  try {
+    if (!pool || typeof pool.query !== "function") {
+      return { sucesso: false, erro: "Conexão com banco de dados indisponível." };
+    }
+
+    // 1. Localiza o cliente na tabela public.gd_clientes por UUID ou busca textual
+    let cliente = null;
+    if (cliente_id) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT * FROM public.gd_clientes WHERE id = $1 LIMIT 1`,
+          [cliente_id]
+        );
+        if (rows && rows.length > 0) cliente = rows[0];
+      } catch (err) {
+        console.warn("[Heloísa Onboarding] Erro ao buscar por cliente_id:", err.message);
+      }
+    }
+
+    if (!cliente && cliente_nome) {
+      const termoLike = `%${String(cliente_nome).trim().toLowerCase()}%`;
+      try {
+        const { rows } = await pool.query(
+          `SELECT * FROM public.gd_clientes WHERE LOWER(nome) LIKE $1 OR LOWER(empresa) LIKE $1 ORDER BY created_at DESC LIMIT 1`,
+          [termoLike]
+        );
+        if (rows && rows.length > 0) cliente = rows[0];
+      } catch {
+        try {
+          const { rows } = await pool.query(
+            `SELECT * FROM public.gd_clientes WHERE LOWER(nome) LIKE $1 ORDER BY created_at DESC LIMIT 1`,
+            [termoLike]
+          );
+          if (rows && rows.length > 0) cliente = rows[0];
+        } catch (err) {
+          console.warn("[Heloísa Onboarding] Erro ao buscar por cliente_nome:", err.message);
+        }
+      }
+    }
+
+    if (!cliente) {
+      return { sucesso: false, erro: "Cliente não localizado no CRM." };
+    }
+
+    const clienteTelefone = normalizarTelefoneHeloisa(
+      telefone_cliente || cliente.aprovador_telefone || cliente.telefone || ""
+    );
+
+    // 2. Obtém os telefones da equipe GD através de gd_colaboradores ou fallback oficial
+    let equipeParticipantes = [];
+    try {
+      const { rows: colabs } = await pool.query(
+        `SELECT telefone FROM public.gd_colaboradores WHERE ativo = true`
+      );
+      if (colabs && colabs.length > 0) {
+        equipeParticipantes = colabs
+          .map((c) => normalizarTelefoneHeloisa(c.telefone))
+          .filter(Boolean);
+      }
+    } catch (e) {
+      console.warn("[Heloísa Onboarding] Aviso ao buscar gd_colaboradores:", e.message);
+    }
+
+    if (equipeParticipantes.length === 0) {
+      try {
+        equipeParticipantes = obterTelefonesEquipeGd()
+          .map(normalizarTelefoneHeloisa)
+          .filter(Boolean);
+      } catch {
+        equipeParticipantes = ["5534997719779", "5534997817660"];
+      }
+    }
+
+    // 3. Google Drive: criar estrutura de 4 pastas
+    let driveUrlFinal = cliente.drive_url || null;
+    try {
+      const driveResult = await setupClientDriveFolders({
+        clientName: cliente.nome,
+        makePublic: true,
+        allowMockFallback: true,
+      });
+      if (driveResult?.driveLink) {
+        driveUrlFinal = driveResult.driveLink;
+      }
+    } catch (e) {
+      console.warn(`[Heloísa Onboarding] Falha ao provisionar pasta no Google Drive para ${cliente.nome}:`, e.message);
+    }
+
+    // 4. Criação dos grupos de WhatsApp via Evolution API
+    // 4a. Grupo Interno: PASTA: CLIENTE
+    const subjectInterno = `PASTA: ${cliente.nome.toUpperCase()}`.slice(0, 100);
+    let jidInterno = null;
+    let urlInterno = null;
+
+    try {
+      const resInterno = await createEvolutionGroup({
+        instanceName,
+        subject: subjectInterno,
+        description: `Grupo interno da equipe Geração Digital para alinhamento e operação de ${cliente.nome}.`,
+        participants: equipeParticipantes,
+      });
+      jidInterno = resInterno?.groupJid || null;
+
+      if (jidInterno) {
+        try {
+          const invite = await getEvolutionGroupInviteCode({ instanceName, groupJid: jidInterno });
+          urlInterno = invite?.inviteUrl || null;
+        } catch (e) {
+          console.warn(`[Heloísa Onboarding] Falha ao obter invite code do grupo interno (${jidInterno}):`, e.message);
+        }
+
+        try {
+          await sendTextMessageViaEvolution({
+            instanceName,
+            number: jidInterno,
+            text: `📁 *PASTA OPERACIONAL GD: ${cliente.nome.toUpperCase()}*\n\n` +
+                  `Grupo interno da equipe Geração Digital para alinhamento estratégico e operacional.\n\n` +
+                  `🔗 *Pasta no Google Drive:* ${driveUrlFinal || "Acessar via CRM"}\n` +
+                  `👤 *Aprovador:* ${cliente.aprovador_nome || cliente.nome} (${clienteTelefone || "Sem telefone"})`,
+          });
+        } catch (e) {
+          console.warn(`[Heloísa Onboarding] Falha ao enviar mensagem no grupo interno (${jidInterno}):`, e.message);
+        }
+      }
+    } catch (e) {
+      console.warn(`[Heloísa Onboarding] Erro ao criar grupo interno para ${cliente.nome}:`, e.message);
+    }
+
+    // 4b. Grupo com o Cliente: MÁQUINA DE VENDAS: CLIENTE
+    const subjectCliente = `MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}`.slice(0, 100);
+    const participantesClienteGrupo = [...equipeParticipantes];
+    if (clienteTelefone && !participantesClienteGrupo.includes(clienteTelefone)) {
+      participantesClienteGrupo.push(clienteTelefone);
+    }
+
+    let jidCliente = null;
+    let urlCliente = null;
+
+    try {
+      const resCliente = await createEvolutionGroup({
+        instanceName,
+        subject: subjectCliente,
+        description: `Canal oficial de acompanhamento e suporte da Geração Digital para ${cliente.nome}.`,
+        participants: participantesClienteGrupo,
+      });
+      jidCliente = resCliente?.groupJid || null;
+
+      if (jidCliente) {
+        try {
+          const invite = await getEvolutionGroupInviteCode({ instanceName, groupJid: jidCliente });
+          urlCliente = invite?.inviteUrl || null;
+        } catch (e) {
+          console.warn(`[Heloísa Onboarding] Falha ao obter invite code do grupo do cliente (${jidCliente}):`, e.message);
+        }
+
+        const nomeDestinatario = cliente.aprovador_nome || cliente.nome;
+        const textoBoasVindas = `Olá, ${nomeDestinatario}! Seja muito bem-vindo(a) à Geração Digital! 🚀\n\nEste é o nosso canal oficial de atendimento, alinhamento e acompanhamento com toda a nossa equipe. Qualquer dúvida ou solicitação, estamos sempre por aqui.\n\nEm breve daremos início aos próximos passos do seu onboarding!`;
+
+        try {
+          await sendTextMessageViaEvolution({
+            instanceName,
+            number: jidCliente,
+            text: textoBoasVindas,
+          });
+        } catch (e) {
+          console.warn(`[Heloísa Onboarding] Falha ao enviar mensagem de boas-vindas no grupo ${jidCliente}:`, e.message);
+        }
+      }
+    } catch (e) {
+      console.warn(`[Heloísa Onboarding] Erro ao criar grupo do cliente para ${cliente.nome}:`, e.message);
+    }
+
+    // 5. Atualiza public.gd_clientes
+    try {
+      await pool.query(
+        `UPDATE public.gd_clientes
+            SET grupo_interno_jid = $1,
+                grupo_interno_url = $2,
+                grupo_cliente_jid = $3,
+                grupo_cliente_url = $4,
+                drive_url = COALESCE($5, drive_url),
+                onboarding_concluido_em = now()
+          WHERE id = $6`,
+        [jidInterno, urlInterno, jidCliente, urlCliente, driveUrlFinal, cliente.id]
+      );
+    } catch (e) {
+      console.warn(`[Heloísa Onboarding] Falha ao atualizar gd_clientes:`, e.message);
+    }
+
+    // 6. Registra evento de transição chamando public.gd_registrar_evento para o estado GRUPOS_CRIADOS
+    try {
+      await pool.query(
+        `SELECT public.gd_registrar_evento($1, $2, now(), false, 'fluxo', 'goclaw', 'heloisa', $3, $4::jsonb)`,
+        [
+          cliente.id,
+          "GRUPOS_CRIADOS",
+          "Onboarding operacional executado com sucesso pela Heloísa (Drive e Grupos WhatsApp).",
+          JSON.stringify({
+            grupo_interno: { jid: jidInterno, url: urlInterno },
+            grupo_cliente: { jid: jidCliente, url: urlCliente },
+            drive_url: driveUrlFinal,
+          }),
+        ]
+      );
+    } catch (e) {
+      console.warn(`[Heloísa Onboarding] Falha ao registrar evento GRUPOS_CRIADOS:`, e.message);
+    }
+
+    // 7. Registra auditoria na tabela public.heloisa_execucoes
+    try {
+      await registrarExecucaoHeloisa({
+        canal: "whatsapp",
+        solicitanteNome: diretor?.nome || "Conrado Finzi",
+        solicitanteTelefone: diretor?.telefone || null,
+        solicitantePapel: diretor?.papel || "Diretor Executivo",
+        textoEntrada: `Onboarding do cliente ${cliente.nome}`,
+        tipoEntrada: "tool",
+        ferramentaExecutada: "executar_onboarding_cliente",
+        parametros: { cliente_nome, cliente_id, telefone_cliente },
+        resultado: {
+          sucesso: true,
+          cliente_id: cliente.id,
+          cliente_nome: cliente.nome,
+          grupo_interno: { jid: jidInterno, url: urlInterno },
+          grupo_cliente: { jid: jidCliente, url: urlCliente },
+          drive_url: driveUrlFinal,
+        },
+        respostaSaida: `Onboarding de ${cliente.nome} executado com sucesso. Pastas Google Drive e grupos WhatsApp criados.`,
+        status: "sucesso",
+      }, pool);
+    } catch (e) {
+      console.warn(`[Heloísa Onboarding] Falha ao auditar execução da Heloísa:`, e.message);
+    }
+
+    return {
+      sucesso: true,
+      cliente: cliente.nome,
+      cliente_id: cliente.id,
+      drive_url: driveUrlFinal,
+      grupo_interno: { jid: jidInterno, url: urlInterno },
+      grupo_cliente: { jid: jidCliente, url: urlCliente },
+      detalhes: `Estrutura no Google Drive criada, grupo interno "PASTA: ${cliente.nome.toUpperCase()}" e grupo "MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}" criados no WhatsApp com boas-vindas enviadas. Estado atualizado para GRUPOS_CRIADOS.`,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao executar onboarding do cliente:", err);
+    return { sucesso: false, erro: err.message };
+  }
+}
+
 // ─── Definição de Ferramentas para LLM (OpenAI Tool Calling Format) ──────────
 
 export const HELOISA_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "executar_onboarding_cliente",
+      description: "Executa o onboarding operacional completo de um cliente da Geração Digital: cria as 4 pastas no Google Drive, cria o grupo interno no WhatsApp (PASTA: CLIENTE), cria o grupo com o cliente no WhatsApp (MÁQUINA DE VENDAS: CLIENTE), envia mensagem de boas-vindas e atualiza o estado para GRUPOS_CRIADOS.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente_nome: {
+            type: "string",
+            description: "Nome ou empresa do cliente a realizar o onboarding (ex: Almeida Advocacia, Ótica Visão Prime)",
+          },
+          cliente_id: {
+            type: "string",
+            description: "UUID do cliente no banco gd_clientes se já souber",
+          },
+          telefone_cliente: {
+            type: "string",
+            description: "WhatsApp do cliente/aprovador caso queira sobrescrever ou informar novo",
+          },
+        },
+        required: ["cliente_nome"],
+      },
+    },
+  },
   {
     type: "function",
     function: {
@@ -1389,7 +1684,9 @@ export async function processarMensagemHeloisa({
     console.log(`[Heloísa] Executando tool "${fnName}":`, args);
 
     let resultado = null;
-    if (fnName === "cadastrar_cliente") {
+    if (fnName === "executar_onboarding_cliente") {
+      resultado = await executarOnboardingCliente(args, pool, instanceName, diretor);
+    } else if (fnName === "cadastrar_cliente") {
       resultado = await executarCadastrarCliente(args, pool);
     } else if (fnName === "enviar_mensagem_whatsapp") {
       resultado = await executarEnviarMensagemWhatsApp(args, pool, instanceName);
@@ -1748,7 +2045,10 @@ ${compromissosTexto}
     console.log(`[Heloísa Voz] Executando ferramenta "${fnName}":`, args);
     let resultado = null;
 
-    if (fnName === "cadastrar_cliente") {
+    if (fnName === "executar_onboarding_cliente") {
+      const diretor = { nome: userName || "Conrado Finzi", papel: userRole || "Diretor Executivo" };
+      resultado = await executarOnboardingCliente(args, pool, instanceName, diretor);
+    } else if (fnName === "cadastrar_cliente") {
       resultado = await executarCadastrarCliente(args, pool);
     } else if (fnName === "enviar_mensagem_whatsapp") {
       resultado = await executarEnviarMensagemWhatsApp(args, pool);
