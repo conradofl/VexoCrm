@@ -266,7 +266,7 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
     await waitFor(() => {
       expect(screen.getByText("Confirmar Disparo de Campanha")).toBeInTheDocument();
       expect(screen.getByText("Total de Destinatários")).toBeInTheDocument();
-      expect(screen.getByText("Já Receberam")).toBeInTheDocument();
+      expect(screen.getByText("Já Receberam Envio")).toBeInTheDocument();
       // O mock tem 1 lead já recebido e 1 novo previsto
       expect(screen.getByText(/1 lead\(s\) desta seleção já receberam/i)).toBeInTheDocument();
       expect(screen.getByText(/Novos envios previstos: 1 lead\(s\)/i)).toBeInTheDocument();
@@ -421,5 +421,32 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
       expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Sucesso!" }));
     });
     expect(triggerBodies).toEqual([{}, { forceOutsideWindow: true }]);
+  });
+
+  describe("Reconhecimento de contatos já disparados no modal de confirmação", () => {
+    it("exibe contagem de Total de Destinatários, Já Receberam Envio e Novos Envios a Realizar no modal", async () => {
+      mockCampaignsList = [testCampaign];
+      mockRecipientsResponse = {
+        recipients: [
+          { telefone: "5534999990001", status: "sent", leadId: "lead-1" },
+        ],
+        counts: { total: 10, sent: 1, pending: 9, failed: 0 },
+      };
+
+      renderLeadImports("enviadas");
+      fireEvent.click(await screen.findByRole("button", { name: /Ver detalhes de Campanha em Edição/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Editar$/i }));
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Total de Destinatários/i)).toBeInTheDocument();
+        expect(screen.getByText(/Já Receberam Envio/i)).toBeInTheDocument();
+        expect(screen.getByText(/Novos Envios a Realizar/i)).toBeInTheDocument();
+      });
+    });
   });
 });

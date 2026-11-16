@@ -98,6 +98,11 @@ interface AuditItem {
   last_error_message: string | null;
   has_replied: boolean;
   failure_reason: string | null;
+  last_sent_message?: string | null;
+  last_message_text?: string | null;
+  last_sent_message_at?: string | null;
+  last_reply_message?: string | null;
+  last_reply_message_at?: string | null;
 }
 
 export interface LeadImportAuditReportProps {
@@ -511,7 +516,14 @@ export function LeadImportAuditReport({
         case "replied":
           return item.has_replied;
         case "sent":
-          return item.delivery_state === "enviado_por_esta_planilha" || item.delivery_state === "enviado_por_outra_campanha";
+          return (
+            item.delivery_state === "enviado_por_esta_planilha" ||
+            item.delivery_state === "enviado_por_outra_campanha" ||
+            (item.sent_count != null && item.sent_count > 0) ||
+            Boolean(item.last_sent_at) ||
+            Boolean(item.last_sent_message) ||
+            Boolean(item.last_message_text)
+          );
         case "pending":
           return item.delivery_state === "pendente";
         default:
@@ -1413,6 +1425,7 @@ export function LeadImportAuditReport({
                   <div className="flex flex-wrap items-center gap-1.5">
                     {([
                       { key: "all", label: "Todos" },
+                      { key: "sent", label: "Enviadas" },
                       { key: "failed", label: "Falhas" },
                       { key: "replied", label: "Com Retorno" },
                     ] as const).map((f) => (
@@ -1522,6 +1535,7 @@ export function LeadImportAuditReport({
                           >
                             Retorno (14d)
                           </SortableTableHead>
+                          <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Último Envio / Resposta</TableHead>
                           <SortableTableHead sortKey="tempo" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Há quanto tempo</SortableTableHead>
                           <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Motivo da Falha / Detalhe</TableHead>
                         </TableRow>
@@ -1588,6 +1602,44 @@ export function LeadImportAuditReport({
                                   <Badge className="border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800/40 dark:bg-indigo-950/20 dark:text-indigo-400 font-bold text-[9px] rounded-lg px-2 py-0.25">
                                     Respondido 💬
                                   </Badge>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="py-2 max-w-[280px]">
+                                {item.last_sent_message || item.last_message_text ? (
+                                  <div className="space-y-1">
+                                    <div className="bg-slate-100 dark:bg-slate-800/80 rounded-lg p-1.5 text-[11px] text-foreground border border-slate-200 dark:border-slate-700">
+                                      <div className="flex items-center justify-between text-[9px] text-muted-foreground mb-0.5 font-medium">
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">Disparo</span>
+                                        <span>{formatTime(item.last_sent_message_at || item.last_sent_at)}</span>
+                                      </div>
+                                      <p className="line-clamp-2 select-text" title={item.last_sent_message || item.last_message_text || ""}>
+                                        {item.last_sent_message || item.last_message_text}
+                                      </p>
+                                    </div>
+                                    {item.last_reply_message && (
+                                      <div className="bg-indigo-50 dark:bg-indigo-950/40 rounded-lg p-1.5 text-[11px] text-foreground border border-indigo-200 dark:border-indigo-800/60 ml-2">
+                                        <div className="flex items-center justify-between text-[9px] text-indigo-600 dark:text-indigo-400 mb-0.5 font-medium">
+                                          <span className="font-bold">Resposta do Lead</span>
+                                          <span>{formatTime(item.last_reply_message_at)}</span>
+                                        </div>
+                                        <p className="line-clamp-2 select-text text-indigo-950 dark:text-indigo-200 font-medium" title={item.last_reply_message}>
+                                          {item.last_reply_message}
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : item.last_reply_message ? (
+                                  <div className="bg-indigo-50 dark:bg-indigo-950/40 rounded-lg p-1.5 text-[11px] text-foreground border border-indigo-200 dark:border-indigo-800/60">
+                                    <div className="flex items-center justify-between text-[9px] text-indigo-600 dark:text-indigo-400 mb-0.5 font-medium">
+                                      <span className="font-bold">Resposta do Lead</span>
+                                      <span>{formatTime(item.last_reply_message_at)}</span>
+                                    </div>
+                                    <p className="line-clamp-2 select-text text-indigo-950 dark:text-indigo-200 font-medium" title={item.last_reply_message}>
+                                      {item.last_reply_message}
+                                    </p>
+                                  </div>
                                 ) : (
                                   <span className="text-[10px] text-slate-400">—</span>
                                 )}

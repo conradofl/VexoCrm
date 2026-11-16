@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Copy, Pencil, Trash2, ChevronDown, History } from "lucide-react";
+import { Copy, Pencil, Trash2, ChevronDown, History, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +19,15 @@ import { RecordView, type RecordCardState, type RecordField } from "@/components
 import { DispatchKpiCards } from "./DispatchKpiCards";
 import { RecurrenceHistoryDialog } from "./RecurrenceHistoryDialog";
 import { LastUpdatedIndicator } from "@/components/LastUpdatedIndicator";
+import { useToast } from "@/hooks/use-toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 
 /** Os campos do cartão fechado — e, na lista, as colunas. O cartão e a linha mostram exatamente estes. */
@@ -35,6 +44,12 @@ export function buildCampaignFields(dispatches?: CampaignDispatch[]): RecordFiel
 
 export const CAMPAIGN_FIELDS: RecordField<Campaign>[] = buildCampaignFields();
 
+export interface EvolutionInstanceOption {
+  id: string;
+  name: string;
+  isDefault?: boolean;
+}
+
 interface CampaignsTableProps {
   clientId: string | null;
   campaigns: Campaign[];
@@ -43,6 +58,8 @@ interface CampaignsTableProps {
   dataUpdatedAt?: number;
   onRefresh?: () => void;
   isFetching?: boolean;
+  evolutionInstanceOptions?: EvolutionInstanceOption[];
+  onChipChange?: (campaignId: string, chipId: string, chipName: string) => Promise<void> | void;
   onEditCampaign: (campaign: Campaign) => void;
   onDuplicateCampaign: (campaign: Campaign) => void;
   onDeleteCampaign: (campaign: Campaign) => void;
@@ -58,10 +75,38 @@ export function CampaignsTable({
   dataUpdatedAt,
   onRefresh,
   isFetching,
+  evolutionInstanceOptions = [],
+  onChipChange,
   onEditCampaign,
   onDuplicateCampaign,
   onDeleteCampaign,
 }: CampaignsTableProps) {
+  const { toast } = useToast();
+  const [optimisticChips, setOptimisticChips] = useState<Record<string, string>>({});
+
+  const handleSelectChip = async (c: Campaign, instance: EvolutionInstanceOption) => {
+    setOptimisticChips((prev) => ({ ...prev, [c.id]: instance.name }));
+    try {
+      if (onChipChange) {
+        await onChipChange(c.id, instance.id, instance.name);
+      }
+      toast({
+        title: "Chip atualizado",
+        description: `Chip da campanha atualizado para ${instance.name} com sucesso!`,
+      });
+    } catch (err) {
+      setOptimisticChips((prev) => {
+        const next = { ...prev };
+        delete next[c.id];
+        return next;
+      });
+      toast({
+        title: "Erro ao trocar chip",
+        description: err instanceof Error ? err.message : "Não foi possível alterar o chip.",
+        variant: "destructive",
+      });
+    }
+  };
   const view = useViewMode("campanhas");
   const [historyCampaign, setHistoryCampaign] = useState<Campaign | null>(null);
   const { filtered: filteredCampaigns, controls: filterControls } = useListFilter(campaigns, CAMPAIGNS_FILTER);
@@ -84,7 +129,7 @@ export function CampaignsTable({
         </p>
         <p data-testid={`campaign-last-chip-${c.id}`}>
           <span className="font-semibold text-foreground">Último chip:</span>{" "}
-          {c.chip_name ?? "Nenhum lote enviado ainda"}
+          {optimisticChips[c.id] || c.chip_name || "Nenhum lote enviado ainda"}
         </p>
         {c.is_recurring && (
           <p data-testid={`campaign-recurrence-detail-${c.id}`}>
@@ -287,6 +332,45 @@ export function CampaignsTable({
               >
                 🔄 {formatRecurrenceBadge(c)}
               </Badge>
+            )}
+            {evolutionInstanceOptions && evolutionInstanceOptions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 gap-1 px-2 text-[10px] font-semibold rounded-lg border-slate-300 dark:border-white/10 hover:border-primary text-foreground ml-auto sm:ml-0"
+                    title="Alterar Chip"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Smartphone className="h-3 w-3 text-muted-foreground" />
+                    <span>Alterar Chip</span>
+                    <ChevronDown className="h-2.5 w-2.5 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56" onClick={(e) => e.stopPropagation()}>
+                  <DropdownMenuLabel className="text-xs font-semibold">Selecione o Chip / WhatsApp</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {evolutionInstanceOptions.map((inst) => {
+                    const currentChip = optimisticChips[c.id] || c.chip_name;
+                    const isSelected = currentChip === inst.name;
+                    return (
+                      <DropdownMenuItem
+                        key={inst.id}
+                        onClick={() => handleSelectChip(c, inst)}
+                        className="flex items-center justify-between text-xs cursor-pointer"
+                      >
+                        <span className={cn("truncate", isSelected && "font-bold text-primary")}>
+                          {inst.name}
+                        </span>
+                        {inst.isDefault && (
+                          <span className="text-[10px] text-muted-foreground ml-1">(Padrão)</span>
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
 

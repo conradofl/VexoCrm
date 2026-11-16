@@ -390,6 +390,7 @@ export default function LeadImports({
           (item.raw_data as any)?.telefone ||
           (item.raw_data as any)?.Telefone ||
           "",
+        dispatched: Boolean((item as any).dispatched),
       };
     });
   }, [importedItemsData, imports]);
@@ -1391,8 +1392,8 @@ export default function LeadImports({
   const { data: campaignRecipientsData } = useCampaignRecipients(editingCampaignId);
 
   const alreadyReceivedCount = useMemo(() => {
-    if (!editingCampaignId) return 0;
-    if (campaignRecipientsData?.recipients && campaignRecipientsData.recipients.length > 0) {
+    const rows = selectedFile ? previewRows : filteredRows;
+    if (editingCampaignId && campaignRecipientsData?.recipients && campaignRecipientsData.recipients.length > 0) {
       const sentPhones = new Set<string>();
       const sentLeadIds = new Set<string>();
       for (const r of campaignRecipientsData.recipients) {
@@ -1411,7 +1412,6 @@ export default function LeadImports({
       }
       if (sentPhones.size > 0 || sentLeadIds.size > 0) {
         let matchCount = 0;
-        const rows = selectedFile ? previewRows : filteredRows;
         for (const row of rows) {
           const d = String(row.telefone || "").replace(/\D/g, "");
           const ddi = d.startsWith("55") ? d : `55${d}`;
@@ -1426,9 +1426,43 @@ export default function LeadImports({
         }
         return matchCount;
       }
+      return campaignRecipientsData?.counts?.sent ?? 0;
     }
-    return campaignRecipientsData?.counts?.sent ?? 0;
-  }, [editingCampaignId, campaignRecipientsData, selectedFile, previewRows, filteredRows]);
+
+    if (rows && rows.length > 0) {
+      const count = rows.filter((r: any) => Boolean(r.dispatched)).length;
+      if (count > 0) return count;
+    }
+
+    if (importedItemsData?.items?.length && rows?.length) {
+      const sentPhones = new Set<string>();
+      for (const it of importedItemsData.items) {
+        if ((it as any).dispatched && it.telefone) {
+          const digits = String(it.telefone).replace(/\D/g, "");
+          if (digits) {
+            sentPhones.add(digits);
+            if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+              sentPhones.add(digits.slice(2));
+            } else if (digits.length === 10 || digits.length === 11) {
+              sentPhones.add(`55${digits}`);
+            }
+          }
+        }
+      }
+      if (sentPhones.size > 0) {
+        let matches = 0;
+        for (const row of rows) {
+          const d = String(row.telefone || "").replace(/\D/g, "");
+          const ddi = d.startsWith("55") ? d : `55${d}`;
+          const nonDdi = d.startsWith("55") ? d.slice(2) : d;
+          if (d && (sentPhones.has(d) || sentPhones.has(ddi) || sentPhones.has(nonDdi))) matches++;
+        }
+        if (matches > 0) return matches;
+      }
+    }
+
+    return editingCampaignId ? (campaignRecipientsData?.counts?.sent ?? 0) : 0;
+  }, [editingCampaignId, campaignRecipientsData, selectedFile, previewRows, filteredRows, importedItemsData]);
 
   async function handleCreateAndDispatch({ deliberateDispatch = false }: { deliberateDispatch?: boolean } = {}) {
     if (newTriggerType === "scheduled" && !deliberateDispatch) {
@@ -2014,6 +2048,38 @@ export default function LeadImports({
       refetchDispatches();
     } catch (err) {
       toast({ title: "Erro", description: err instanceof Error ? err.message : "Não foi possível pausar.", variant: "destructive" });
+    }
+  };
+
+  const handleQuickChipChange = async (campaignId: string, chipId: string, chipName: string) => {
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          evolutionInstanceId: chipId,
+          dispatchChipIds: [chipId],
+          analyticsMeta: {
+            dispatchOptions: {
+              evolutionInstanceId: chipId,
+              dispatchChipIds: [chipId],
+            },
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao atualizar chip da campanha"));
+      await refetchCampaigns();
+    } catch (err) {
+      toast({
+        title: "Erro ao trocar chip",
+        description: err instanceof Error ? err.message : "Não foi possível atualizar o chip.",
+        variant: "destructive",
+      });
+      throw err;
     }
   };
 
@@ -2691,6 +2757,8 @@ export default function LeadImports({
           dataUpdatedAt={campaignsUpdatedAt}
           onRefresh={() => void refetchCampaigns()}
           isFetching={fetchingCampaigns}
+          evolutionInstanceOptions={evolutionInstanceOptions}
+          onChipChange={handleQuickChipChange}
           onEditCampaign={handleEditCampaign}
           onDuplicateCampaign={handleDuplicateCampaign}
           onDeleteCampaign={handleDeleteCampaign}

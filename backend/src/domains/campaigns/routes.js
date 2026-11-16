@@ -264,6 +264,42 @@ export function buildImportAuditSql() {
            AND ${lmTimestamp} > t.sent_at
            AND ${lmTimestamp} <= t.sent_at + interval '14 days'
           WHERE t.status = 'sent' AND t.sent_at IS NOT NULL
+        ),
+        last_sent_msg AS (
+          SELECT DISTINCT ON (cp)
+            cp,
+            message_text AS last_sent_message,
+            ${lmTimestamp} AS last_sent_message_at
+          FROM (
+            SELECT
+              ${CP("lm.phone")} AS cp,
+              lm.message_text,
+              ${lmTimestamp}
+            FROM public.lead_messages lm
+            WHERE lm.client_id = $1
+              AND lm.direction = 'outbound'
+              AND COALESCE(btrim(lm.message_text), '') <> ''
+              AND ${CP("lm.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
+            ORDER BY ${CP("lm.phone")}, ${lmTimestamp} DESC
+          ) sub
+        ),
+        last_reply_msg AS (
+          SELECT DISTINCT ON (cp)
+            cp,
+            message_text AS last_reply_message,
+            ${lmTimestamp} AS last_reply_message_at
+          FROM (
+            SELECT
+              ${CP("lm.phone")} AS cp,
+              lm.message_text,
+              ${lmTimestamp}
+            FROM public.lead_messages lm
+            WHERE lm.client_id = $1
+              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
+              AND COALESCE(btrim(lm.message_text), '') <> ''
+              AND ${CP("lm.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
+            ORDER BY ${CP("lm.phone")}, ${lmTimestamp} DESC
+          ) sub
         )
         SELECT
           i.id AS lead_import_item_id,
@@ -284,6 +320,11 @@ export function buildImportAuditSql() {
           p.last_attempt_at,
           la.last_status,
           la.last_error_message,
+          COALESCE(lsm.last_sent_message, '') AS last_sent_message,
+          COALESCE(lsm.last_sent_message, '') AS last_message_text,
+          lsm.last_sent_message_at,
+          COALESCE(lrm.last_reply_message, '') AS last_reply_message,
+          lrm.last_reply_message_at,
           CASE
             WHEN i.cp IS NULL THEN 'sem_telefone_valido'
             WHEN COALESCE(p.sent_by_import_count, 0) > 0 THEN 'enviado_por_esta_planilha'
@@ -297,6 +338,8 @@ export function buildImportAuditSql() {
         LEFT JOIN per_phone p ON p.cp = i.cp
         LEFT JOIN last_attempt la ON la.cp = i.cp
         LEFT JOIN replied rp ON rp.cp = i.cp
+        LEFT JOIN last_sent_msg lsm ON lsm.cp = i.cp
+        LEFT JOIN last_reply_msg lrm ON lrm.cp = i.cp
         ORDER BY i.row_number ASC
   `;
 }
@@ -1620,6 +1663,26 @@ export function registerCampaignsRoutes(app, deps) {
     if (["disparo", "agente"].includes(req.body?.mode)) updates.mode = req.body.mode;
     if (req.body?.archived === true) updates.archived_at = new Date().toISOString();
     if (req.body?.archived === false) updates.archived_at = null;
+
+    const rawChipId = normalizeString(req.body?.evolutionInstanceId) ||
+      (Array.isArray(req.body?.dispatchChipIds) && req.body.dispatchChipIds[0] ? normalizeString(req.body.dispatchChipIds[0]) : null);
+    if (rawChipId) {
+      if (!req.body.analyticsMeta || typeof req.body.analyticsMeta !== "object") {
+        req.body.analyticsMeta = {
+          dispatchOptions: {
+            evolutionInstanceId: rawChipId,
+            dispatchChipIds: [rawChipId],
+          },
+        };
+      } else {
+        req.body.analyticsMeta.dispatchOptions = {
+          ...(req.body.analyticsMeta.dispatchOptions || {}),
+          evolutionInstanceId: rawChipId,
+          dispatchChipIds: [rawChipId],
+        };
+      }
+    }
+
     // analytics_meta e mesclado com o salvo dentro do try, com a linha atual em maos (mergeCampaignAnalyticsMetaForUpdate).
     const analyticsMetaRequested = Boolean(req.body?.analyticsMeta && typeof req.body.analyticsMeta === "object");
     // Recorrencia: resolvida abaixo, com a linha atual em maos (resolveRecurrenceSave).
@@ -1801,6 +1864,31 @@ export function registerCampaignsRoutes(app, deps) {
           }
         } catch (scheduleCascadeErr) {
           console.error("cascade scheduled_for to pending dispatches error:", scheduleCascadeErr);
+        }
+      }
+
+      // Se o chip da campanha mudou, atualiza os lotes pendentes
+      const updatedChipId = rawChipId ||
+        updates.analytics_meta?.dispatchOptions?.evolutionInstanceId ||
+        (Array.isArray(updates.analytics_meta?.dispatchOptions?.dispatchChipIds) ? updates.analytics_meta.dispatchOptions.dispatchChipIds[0] : null);
+
+      if (updatedChipId && pgDatabasePool) {
+        try {
+          await pgDatabasePool.query(
+            `UPDATE public.campaign_dispatches
+             SET
+               evolution_instance_id = CASE WHEN $1 ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN $1::uuid ELSE evolution_instance_id END,
+               dispatch_options = jsonb_set(
+                 jsonb_set(COALESCE(dispatch_options, '{}'::jsonb), '{evolutionInstanceId}', to_jsonb($1::text)),
+                 '{dispatchChipIds}',
+                 to_jsonb(ARRAY[$1::text])
+               ),
+               updated_at = now()
+             WHERE campaign_id = $2 AND status IN ('scheduled', 'draft', 'paused')`,
+            [updatedChipId, id]
+          );
+        } catch (chipCascadeErr) {
+          console.error("cascade evolution_instance_id to pending dispatches error:", chipCascadeErr);
         }
       }
 

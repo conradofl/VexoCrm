@@ -1204,16 +1204,21 @@ export function SchedulingStep({
             </DialogHeader>
 
             <div className="space-y-3 py-2 text-xs">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div className="rounded-xl border p-3 bg-muted/30">
                   <span className="text-[11px] text-muted-foreground block">Total de Destinatários</span>
                   <span className="text-xl font-extrabold text-foreground">{totalLeads}</span>
                   <span className="text-[10px] text-muted-foreground block">leads na seleção atual</span>
                 </div>
                 <div className="rounded-xl border p-3 bg-muted/30">
-                  <span className="text-[11px] text-muted-foreground block">Já Receberam</span>
+                  <span className="text-[11px] text-muted-foreground block">Já Receberam Envio</span>
                   <span className="text-xl font-extrabold text-amber-600 dark:text-amber-400">{alreadyReceivedCount}</span>
-                  <span className="text-[10px] text-muted-foreground block">desta campanha</span>
+                  <span className="text-[10px] text-muted-foreground block">desta ou outras campanhas</span>
+                </div>
+                <div className="rounded-xl border p-3 bg-muted/30">
+                  <span className="text-[11px] text-muted-foreground block">Novos Envios a Realizar</span>
+                  <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400">{Math.max(0, totalLeads - alreadyReceivedCount)}</span>
+                  <span className="text-[10px] text-muted-foreground block">novos contatos</span>
                 </div>
               </div>
 
@@ -1221,7 +1226,7 @@ export function SchedulingStep({
                 <div className="rounded-xl border border-amber-300/60 bg-amber-500/10 p-3 text-[11px] text-amber-900 dark:border-amber-500/30 dark:bg-amber-950/30 dark:text-amber-200">
                   <p className="font-semibold">Atenção ao público já impactado:</p>
                   <p className="mt-0.5">
-                    {alreadyReceivedCount} lead(s) desta seleção já receberam mensagens desta campanha no ciclo atual. O sistema de proteção por ciclo irá ignorá-los para não enviar em duplicidade.
+                    {alreadyReceivedCount} lead(s) desta seleção já receberam mensagens anteriormente (nesta campanha ou em campanhas anteriores da mesma base). O sistema de proteção contra duplicidade irá ignorá-los para não enviar novamente.
                   </p>
                   <p className="mt-1 font-semibold text-emerald-700 dark:text-emerald-300">
                     Novos envios previstos: {Math.max(0, totalLeads - alreadyReceivedCount)} lead(s).
