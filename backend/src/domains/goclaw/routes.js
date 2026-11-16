@@ -582,7 +582,7 @@ export function registerGoclawRoutes(app, {
           );
           rows = dataRes.rows || [];
         } catch (e) {
-          console.warn("[goclaw-routes] Aviso ao consultar heloisa_execucoes:", e.message);
+          console.error("[goclaw-routes] Erro ao consultar heloisa_execucoes:", e);
         }
       }
 
@@ -603,7 +603,9 @@ export function registerGoclawRoutes(app, {
           if (statsRes.rows.length > 0) {
             stats = statsRes.rows[0];
           }
-        } catch {}
+        } catch (eStats) {
+          console.error("[goclaw-routes] Erro ao consultar estatísticas de heloisa_execucoes:", eStats);
+        }
       }
 
       return res.json({

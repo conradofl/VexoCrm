@@ -18,6 +18,7 @@ import {
   extractEvolutionInstanceSlug,
 } from "../../services/evolution.js";
 import { setupClientDriveFolders } from "../../services/googleDriveClientSetup.js";
+import { createBriefingCalendarEvent } from "../../services/gdCalendarService.js";
 import { obterTelefonesEquipeGd } from "../gdClientes/gdColaboradoresMemoria.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
@@ -46,6 +47,39 @@ export function normalizarTelefoneHeloisa(rawPhone) {
   if (!rawPhone) return "";
   const limpo = String(rawPhone).replace(/\D/g, "");
   return limpo;
+}
+
+/**
+ * Interpreta datas no fuso horário do Brasil (America/Sao_Paulo / -03:00)
+ * Garante que horários solicitados pelo diretor (ex: "2026-11-16 18:00")
+ * não sejam interpretados erroneamente como UTC puro.
+ */
+export function parseDataHoraBrasilia(dataHoraStr) {
+  if (!dataHoraStr) return new Date().toISOString();
+  let str = String(dataHoraStr).trim();
+
+  // Suporta formato brasileiro DD/MM/YYYY HH:mm ou DD/MM/YYYY
+  const brMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[T\s]+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (brMatch) {
+    const [, d, m, y, h = "09", min = "00", s = "00"] = brMatch;
+    str = `${y}-${m}-${d}T${h}:${min}:${s}-03:00`;
+  } else {
+    // Se contiver espaço separando data e hora (ex: "2026-11-16 18:00")
+    if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(str)) {
+      str = str.replace(/\s+/, "T");
+    }
+    // Se faltar segundos (ex: "2026-11-16T18:00")
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(str)) {
+      str = `${str}:00`;
+    }
+    // Se não tiver indicador de fuso no final (nem Z, nem +HH:MM, nem -HH:MM)
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(str)) {
+      str = `${str}-03:00`;
+    }
+  }
+
+  const parsed = new Date(str);
+  return !isNaN(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
 }
 
 let _cachedStatusAtivo = null;
@@ -136,7 +170,7 @@ export async function registrarExecucaoHeloisa({
     );
     return rows[0] || null;
   } catch (err) {
-    console.warn("[Heloísa] Falha ao registrar log de execução em heloisa_execucoes:", err.message);
+    console.error("[Heloísa] Falha ao registrar log de execução em heloisa_execucoes:", err.message);
     return null;
   }
 }
@@ -715,10 +749,8 @@ export async function executarAgendarCompromisso(
   try {
     let tit = String(titulo || "").trim();
 
-    // Limpeza de nomes alucinados ou genéricos (ex: "Moacir")
-    if (/moacir/i.test(tit)) {
-      tit = tit.replace(/moacir/gi, "").replace(/\bcom\s*$/i, "").replace(/\s*-\s*$/, "").trim();
-    }
+    // Preserva nomes de clientes e participantes solicitados (ex: Moacir).
+    // Apenas aplica o fallback caso o título seja completamente vazio ou termo genérico solto.
     if (
       !tit ||
       /^(reuni[aã]o|alinhamento)(\s+(de\s+)?(alinhamento|reuni[aã]o|diretoria))?$/i.test(tit) ||
@@ -726,19 +758,10 @@ export async function executarAgendarCompromisso(
     ) {
       tit = "Alinhamento Conrado e Caio";
     }
-    let dataIso = new Date().toISOString();
-    try {
-      const parsed = new Date(data_hora);
-      if (!isNaN(parsed.getTime())) dataIso = parsed.toISOString();
-    } catch {
-      // Mantém default
-    }
 
-    // 1. Gera link do Google Meet automaticamente caso não tenha sido enviado link válido
-    let meetUrl = (local_ou_link || "").trim();
-    if (!meetUrl || !/^https?:\/\//i.test(meetUrl) || /google meet/i.test(meetUrl)) {
-      meetUrl = gerarLinkGoogleMeet(tit, dataIso);
-    }
+    // 1. Interpreta data/hora sempre no fuso horário de Brasília (America/Sao_Paulo / -03:00)
+    const dataIso = parseDataHoraBrasilia(data_hora);
+    const slotEnd = new Date(new Date(dataIso).getTime() + 60 * 60 * 1000).toISOString();
 
     // 2. Busca e-mails e telefones das agendas ativas cadastradas no banco
     let agendasAtivas = [];
@@ -765,10 +788,34 @@ export async function executarAgendarCompromisso(
     }
 
     const listaEmails = agendasAtivas.map((a) => a.email).filter(Boolean);
+
+    // 3. Integração Real com Google Calendar (cria evento com Google Meet e convites)
+    let meetUrl = (local_ou_link || "").trim();
+    let calResult = null;
+    try {
+      calResult = await createBriefingCalendarEvent({
+        clienteId: "gd-diretoria",
+        clienteNome: tit,
+        slotStart: dataIso,
+        slotEnd,
+        title: tit,
+        attendees: listaEmails,
+      });
+      if (calResult?.meetUrl) {
+        meetUrl = calResult.meetUrl;
+      }
+    } catch (errCal) {
+      console.warn("[Heloísa] Erro ao criar evento no Google Calendar:", errCal.message);
+    }
+
+    if (!meetUrl || !/^https?:\/\//i.test(meetUrl) || /google meet/i.test(meetUrl)) {
+      meetUrl = gerarLinkGoogleMeet(tit, dataIso);
+    }
+
     const desc = `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${agendasAtivas.map((a) => `${a.nome} (${a.email})`).join(", ")}${participantes_extras ? `\nExtras: ${participantes_extras}` : ""}`;
 
-    // 3. Salva no banco de dados na tabela events
-    let eventoId = null;
+    // 4. Salva no banco de dados na tabela events
+    let eventoId = calResult?.eventId || null;
     let compromissoRow = null;
     if (pool && typeof pool.query === "function") {
       try {
@@ -779,7 +826,7 @@ export async function executarAgendarCompromisso(
           ["geracao-digital", tit, dataIso, meetUrl, desc]
         );
         compromissoRow = rows[0];
-        eventoId = rows[0]?.id;
+        eventoId = rows[0]?.id || eventoId;
       } catch (e) {
         try {
           const { rows } = await pool.query(
@@ -789,7 +836,7 @@ export async function executarAgendarCompromisso(
             [tit, dataIso, meetUrl]
           );
           compromissoRow = rows[0];
-          eventoId = rows[0]?.id;
+          eventoId = rows[0]?.id || eventoId;
         } catch (errEvents) {
           console.warn("[Heloísa] Aviso ao inserir evento em public.events:", errEvents.message);
         }
@@ -849,6 +896,7 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
     return {
       sucesso: true,
       evento_id: eventoId,
+      calendar_event_id: calResult?.eventId || null,
       compromisso: compromissoRow || { id: eventoId, name: tit, date: dataIso, location: meetUrl },
       titulo: tit,
       data_iso: dataIso,

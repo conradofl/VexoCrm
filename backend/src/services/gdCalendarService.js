@@ -626,6 +626,30 @@ export async function createBriefingCalendarEvent({
   }
 
   const attendeesList = Array.from(emailSet).map((email) => ({ email }));
+
+  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_GOOGLE_CALENDAR !== "true") {
+    const deterministicHash = crypto
+      .createHash("md5")
+      .update(`${clienteId || "gd"}-${startIso}`)
+      .digest("hex")
+      .slice(0, 9);
+    const mockMeetCode = `${deterministicHash.slice(0, 3)}-${deterministicHash.slice(3, 7)}-${deterministicHash.slice(7, 9)}z`;
+    const mockMeetUrl = `https://meet.google.com/${mockMeetCode}`;
+    const mockEventId = `briefing_evt_${deterministicHash}`;
+
+    return {
+      success: true,
+      eventId: mockEventId,
+      meetUrl: mockMeetUrl,
+      htmlLink: `https://calendar.google.com/calendar/event?eid=${mockEventId}`,
+      attendees: attendeesList.map((a) => a.email),
+      start: startIso,
+      end: endIso,
+      title: summary,
+      isMock: true,
+    };
+  }
+
   const token = accessToken || (await getGoogleCalendarAccessToken());
 
   if (token) {

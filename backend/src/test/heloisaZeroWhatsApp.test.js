@@ -50,7 +50,7 @@ describe("Blindagem Heloísa: Zero WhatsApp em Testes e Título Preciso de Reuni
     expect(res.waMessageId).toBe("mock-wa-test-id");
   });
 
-  it("3. executarAgendarCompromisso limpa nome alucinado 'Moacir' e define título como 'Alinhamento Conrado e Caio'", async () => {
+  it("3. executarAgendarCompromisso preserva nomes de participantes e clientes (ex: Moacir)", async () => {
     const mockPool = {
       query: vi.fn().mockImplementation(async (sql) => {
         const sqlLower = sql.toLowerCase();
@@ -63,7 +63,7 @@ describe("Blindagem Heloísa: Zero WhatsApp em Testes e Título Preciso de Reuni
           };
         }
         if (sqlLower.includes("events")) {
-          return { rows: [{ id: "evt-test-1", name: "Alinhamento Conrado e Caio" }] };
+          return { rows: [{ id: "evt-test-1", name: "Reunião de Alinhamento com Moacir" }] };
         }
         return { rows: [] };
       }),
@@ -78,8 +78,8 @@ describe("Blindagem Heloísa: Zero WhatsApp em Testes e Título Preciso de Reuni
     );
 
     expect(res.sucesso).toBe(true);
-    expect(res.titulo).toBe("Alinhamento Conrado e Caio");
-    expect(res.titulo).not.toContain("Moacir");
+    expect(res.titulo).toBe("Reunião de Alinhamento com Moacir");
+    expect(res.titulo).toContain("Moacir");
   });
 
   it("4. executarAgendarCompromisso com título genérico ou vazio adota 'Alinhamento Conrado e Caio'", async () => {

@@ -21,6 +21,8 @@ import {
   processarMensagemHeloisa,
   DIRETORES_AUTORIZADOS,
   chamarLlmHeloisa,
+  parseDataHoraBrasilia,
+  registrarExecucaoHeloisa,
 } from "../domains/goclaw/heloisaEngine.js";
 import { sendTextMessageViaEvolution } from "../services/evolution.js";
 import { GROQ_MODELOS_MORTOS, defaultGroqModel } from "../services/llmModels.js";
@@ -335,3 +337,110 @@ describe("chamarLlmHeloisa — degrau da Groq", () => {
     expect(console.warn).toHaveBeenCalledWith("[Heloísa] Groq recusou a chamada, tentando GoClaw runtime:", { status: 404 });
   });
 });
+
+describe("Agendamento, Fuso Horário e Auditoria (Moacir, Timezone -03:00, Google Calendar, Auditoria)", () => {
+    it("1. parseDataHoraBrasilia interpreta string sem fuso como America/Sao_Paulo (-03:00)", () => {
+      // 18:00 no Brasil deve resultar em 21:00 UTC (ou offset -03:00)
+      const iso1 = parseDataHoraBrasilia("2026-11-16 18:00");
+      expect(iso1).toBe("2026-11-16T21:00:00.000Z");
+
+      const iso2 = parseDataHoraBrasilia("2026-11-16T18:00:00");
+      expect(iso2).toBe("2026-11-16T21:00:00.000Z");
+
+      // Se já tiver offset explícito, respeita
+      const iso3 = parseDataHoraBrasilia("2026-11-16T18:00:00-03:00");
+      expect(iso3).toBe("2026-11-16T21:00:00.000Z");
+
+      // Se já for UTC explícito com Z, respeita
+      const iso4 = parseDataHoraBrasilia("2026-11-16T21:00:00Z");
+      expect(iso4).toBe("2026-11-16T21:00:00.000Z");
+    });
+
+    it("2. executarAgendarCompromisso preserva nomes de clientes (ex: Moacir) no título", async () => {
+      const mockPool = {
+        query: vi.fn().mockImplementation(async (sql) => {
+          if (sql.includes("heloisa_agendas")) {
+            return {
+              rows: [
+                { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+                { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              ],
+            };
+          }
+          if (sql.includes("events")) {
+            return { rows: [{ id: "evt-moacir-1", name: "Alinhamento com Moacir", date: "2026-11-16T21:00:00.000Z" }] };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const res = await executarAgendarCompromisso(
+        {
+          titulo: "Alinhamento com Moacir",
+          data_hora: "2026-11-16 18:00",
+        },
+        mockPool
+      );
+
+      expect(res.sucesso).toBe(true);
+      expect(res.titulo).toBe("Alinhamento com Moacir");
+      expect(res.data_iso).toBe("2026-11-16T21:00:00.000Z");
+      expect(res.data_formatada).toContain("18:00");
+    });
+
+    it("3. executarAgendarCompromisso integra com Google Calendar e retorna meet_url e participantes", async () => {
+      const mockPool = {
+        query: vi.fn().mockImplementation(async (sql) => {
+          if (sql.includes("heloisa_agendas")) {
+            return {
+              rows: [
+                { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+                { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              ],
+            };
+          }
+          if (sql.includes("events")) {
+            return { rows: [{ id: "evt-cal-1", name: "Reunião de Diretoria" }] };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const res = await executarAgendarCompromisso(
+        {
+          titulo: "Reunião de Diretoria",
+          data_hora: "2026-11-17 10:00",
+        },
+        mockPool
+      );
+
+      expect(res.sucesso).toBe(true);
+      expect(res.meet_url).toMatch(/^https:\/\/meet\.google\.com\//);
+      expect(res.participantes).toContain("conradofinzi@gmail.com");
+      expect(res.participantes).toContain("caioalmeidmrk@gmail.com");
+    });
+
+    it("4. registrarExecucaoHeloisa utiliza console.error ao invés de ignorar ou warn", async () => {
+      const spyError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const mockBrokenPool = {
+        query: vi.fn().mockRejectedValue(new Error("Connection refused to database")),
+      };
+
+      const res = await registrarExecucaoHeloisa(
+        {
+          canal: "voice_web",
+          solicitanteNome: "Conrado Finzi",
+          textoEntrada: "Agendar reunião com Moacir",
+          status: "sucesso",
+        },
+        mockBrokenPool
+      );
+
+      expect(res).toBeNull();
+      expect(spyError).toHaveBeenCalledWith(
+        "[Heloísa] Falha ao registrar log de execução em heloisa_execucoes:",
+        "Connection refused to database"
+      );
+      spyError.mockRestore();
+    });
+  });
