@@ -116,6 +116,100 @@ export function CampaignsTable({
   const fields = useMemo(() => buildCampaignFields(effectiveDispatches), [effectiveDispatches]);
   const campaignField = (key: string) => fields.find((f) => f.key === key)!;
 
+  const renderChipSelector = (
+    c: Campaign,
+    variant: "inline" | "action" | "compact" | "table-row" = "inline"
+  ) => {
+    if (!evolutionInstanceOptions || evolutionInstanceOptions.length === 0) return null;
+
+    const currentChip = optimisticChips[c.id] || c.chip_name;
+
+    const triggerBtn =
+      variant === "action" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1 rounded-xl text-xs"
+          data-testid={`campaign-change-chip-action-${c.id}`}
+          title="Alterar Chip WhatsApp da campanha"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Smartphone className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>Alterar Chip</span>
+          <ChevronDown className="h-2.5 w-2.5 opacity-50" />
+        </Button>
+      ) : variant === "inline" ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 gap-1 px-2 text-[11px] font-medium rounded-lg text-primary hover:bg-primary/10 border border-primary/20"
+          data-testid={`campaign-change-chip-inline-${c.id}`}
+          title="Alterar Chip WhatsApp"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Smartphone className="h-3 w-3 text-primary" />
+          <span>Alterar Chip</span>
+          <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+        </Button>
+      ) : variant === "table-row" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-xs font-semibold rounded-lg border-slate-300 dark:border-white/10 hover:border-primary text-foreground"
+          data-testid={`campaign-change-chip-table-${c.id}`}
+          title="Alterar Chip"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Smartphone className="h-3 w-3 text-muted-foreground" />
+          <span className="hidden sm:inline">Alterar Chip</span>
+          <ChevronDown className="h-2.5 w-2.5 opacity-50" />
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-6 gap-1 px-2 text-[10px] font-semibold rounded-lg border-slate-300 dark:border-white/10 hover:border-primary text-foreground ml-auto sm:ml-0"
+          data-testid={`campaign-change-chip-card-${c.id}`}
+          title="Alterar Chip"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Smartphone className="h-3 w-3 text-muted-foreground" />
+          <span>Alterar Chip</span>
+          <ChevronDown className="h-2.5 w-2.5 opacity-50" />
+        </Button>
+      );
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          {triggerBtn}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuLabel className="text-xs font-semibold">Selecione o Chip / WhatsApp</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {evolutionInstanceOptions.map((inst) => {
+            const isSelected = currentChip === inst.name;
+            return (
+              <DropdownMenuItem
+                key={inst.id}
+                data-testid={`campaign-chip-option-${inst.id}`}
+                onClick={() => handleSelectChip(c, inst)}
+                className="flex items-center justify-between text-xs cursor-pointer"
+              >
+                <span className={cn("truncate", isSelected && "font-bold text-primary")}>
+                  {inst.name}
+                </span>
+                {inst.isDefault && (
+                  <span className="text-[10px] text-muted-foreground ml-1">(Padrão)</span>
+                )}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
   const renderDetails = (c: Campaign) => (
     <>
       <div className="space-y-1 text-xs text-muted-foreground bg-muted/20 p-2.5 rounded-xl border border-border/40">
@@ -127,10 +221,13 @@ export function CampaignsTable({
           <span className="font-semibold text-foreground">Base:</span>{" "}
           {c.import_id ? "Base importada" : "Geral"}
         </p>
-        <p data-testid={`campaign-last-chip-${c.id}`}>
-          <span className="font-semibold text-foreground">Último chip:</span>{" "}
-          {optimisticChips[c.id] || c.chip_name || "Nenhum lote enviado ainda"}
-        </p>
+        <div data-testid={`campaign-last-chip-${c.id}`} className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="truncate">
+            <span className="font-semibold text-foreground">Último chip:</span>{" "}
+            {optimisticChips[c.id] || c.chip_name || "Nenhum lote enviado ainda"}
+          </p>
+          {renderChipSelector(c, "inline")}
+        </div>
         {c.is_recurring && (
           <p data-testid={`campaign-recurrence-detail-${c.id}`}>
             <span className="font-semibold text-foreground">Repetição:</span>{" "}
@@ -143,7 +240,8 @@ export function CampaignsTable({
       </div>
 
       {/* Ações da campanha */}
-      <div className="flex items-center justify-end gap-1.5 pt-1">
+      <div className="flex items-center justify-end gap-1.5 pt-1 flex-wrap">
+        {renderChipSelector(c, "action")}
         {c.is_recurring && (
           <Button
             size="sm"
@@ -333,45 +431,7 @@ export function CampaignsTable({
                 🔄 {formatRecurrenceBadge(c)}
               </Badge>
             )}
-            {evolutionInstanceOptions && evolutionInstanceOptions.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 gap-1 px-2 text-[10px] font-semibold rounded-lg border-slate-300 dark:border-white/10 hover:border-primary text-foreground ml-auto sm:ml-0"
-                    title="Alterar Chip"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Smartphone className="h-3 w-3 text-muted-foreground" />
-                    <span>Alterar Chip</span>
-                    <ChevronDown className="h-2.5 w-2.5 opacity-50" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56" onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenuLabel className="text-xs font-semibold">Selecione o Chip / WhatsApp</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {evolutionInstanceOptions.map((inst) => {
-                    const currentChip = optimisticChips[c.id] || c.chip_name;
-                    const isSelected = currentChip === inst.name;
-                    return (
-                      <DropdownMenuItem
-                        key={inst.id}
-                        onClick={() => handleSelectChip(c, inst)}
-                        className="flex items-center justify-between text-xs cursor-pointer"
-                      >
-                        <span className={cn("truncate", isSelected && "font-bold text-primary")}>
-                          {inst.name}
-                        </span>
-                        {inst.isDefault && (
-                          <span className="text-[10px] text-muted-foreground ml-1">(Padrão)</span>
-                        )}
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {renderChipSelector(c, "compact")}
           </div>
 
           {/* Linha 3: quantos leads à esquerda e data / próximo disparo à direita */}
@@ -487,6 +547,7 @@ export function CampaignsTable({
               cardsClassName="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
               renderCard={renderCard}
               renderExpanded={renderDetails}
+              renderRowActions={(c) => renderChipSelector(c, "table-row")}
             />
           )}
         </CardContent>

@@ -5537,6 +5537,7 @@ export function registerCampaignsRoutes(app, deps) {
           lastInboundText,
           failureReason,
           dispatchName,
+          sentMessageText: rawStatus === "sent" ? (campaign?.analytics_meta?.message || null) : null,
         });
       }
 
@@ -5574,6 +5575,7 @@ export function registerCampaignsRoutes(app, deps) {
             lastInboundText: replyInfo ? replyInfo.lastInboundText : null,
             failureReason: r.error_message ? translateDispatchErrorMessage(r.error_message) : null,
             dispatchName: r.dispatch_name || (r.dispatch_id ? dispatchMap.get(r.dispatch_id) : null) || null,
+            sentMessageText: r.status === "sent" ? (campaign?.analytics_meta?.message || null) : null,
           });
         }
       }

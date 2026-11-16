@@ -336,6 +336,10 @@ export function LeadImportAuditReport({
     return Math.round((campaignCounts.replied / campaignCounts.sent) * 100);
   }, [campaignCounts]);
 
+  const currentSelectedCampaign = useMemo(() => {
+    return campaigns?.find((c) => c.id === selectedCampaignId) || null;
+  }, [campaigns, selectedCampaignId]);
+
   const handleExportCampaignCsv = (onlySelected: boolean = false) => {
     const recipientsToExport = onlySelected
       ? filteredCampaignRecipients.filter((r) => selectedRecipientIds.has(r.leadId || r.telefone))
@@ -1192,7 +1196,7 @@ export function LeadImportAuditReport({
                           <SortableTableHead sortKey="lote" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Lote</SortableTableHead>
                           <SortableTableHead sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} center>Status</SortableTableHead>
                           <SortableTableHead sortKey="tempo" activeKey={sortKey} dir={sortDir} onSort={handleSort}>Horário de Envio</SortableTableHead>
-                          <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">Resposta / Falha</TableHead>
+                          <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500">MENSAGEM DISPARADA / RESPOSTA / FALHA</TableHead>
                           <TableHead className="h-10 py-0 font-semibold uppercase text-[10px] tracking-wider text-slate-500 text-right pr-4">Ação</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1236,30 +1240,65 @@ export function LeadImportAuditReport({
                               <TableCell className="py-2 font-mono text-[11px] text-muted-foreground">
                                 {formatTime(item.sentAt)}
                               </TableCell>
-                              <TableCell className="py-2 max-w-[240px]">
-                                {item.replied && item.lastInboundText ? (
-                                  <div className="space-y-0.5">
-                                    <p
-                                      className="text-[11px] text-muted-foreground italic flex items-start gap-1 line-clamp-2"
-                                      title={item.lastInboundText}
+                              <TableCell className="py-2 max-w-[280px]">
+                                <div className="space-y-1">
+                                  {/* Balão elegante de mensagem disparada */}
+                                  {(item.status === "sent" || item.sentAt || item.sentMessageText || item.lastMessageText) && (
+                                    <div
+                                      data-testid={`campaign-recipient-sent-msg-${itemKey}`}
+                                      className="rounded-lg bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40 p-1.5 text-[11px] text-emerald-950 dark:text-emerald-200 shadow-xs space-y-0.5"
                                     >
-                                      <MessageSquareQuote className="h-3 w-3 shrink-0 text-indigo-500 mt-0.5" />
-                                      <span>“{item.lastInboundText}”</span>
-                                    </p>
-                                    {item.repliedAt && (
-                                      <span className="text-[9px] text-muted-foreground font-mono">
-                                        às {formatTime(item.repliedAt)}
-                                      </span>
-                                    )}
-                                  </div>
-                                ) : !item.replied && item.failureReason ? (
-                                  <span className="text-rose-500 font-medium flex items-center gap-1.5 text-[11px]" title={item.failureReason}>
-                                    <AlertTriangle className="h-3 w-3 shrink-0" />
-                                    <span className="truncate">{item.failureReason}</span>
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] text-slate-400">—</span>
-                                )}
+                                      <p
+                                        className="line-clamp-2 leading-tight font-normal"
+                                        title={item.sentMessageText || item.lastMessageText || currentSelectedCampaign?.analytics_meta?.message || "Disparo realizado com sucesso."}
+                                      >
+                                        {item.sentMessageText || item.lastMessageText || currentSelectedCampaign?.analytics_meta?.message || "Disparo realizado com sucesso."}
+                                      </p>
+                                      {item.sentAt && (
+                                        <div className="text-[9px] text-emerald-700/80 dark:text-emerald-400 font-mono flex items-center gap-1">
+                                          <span>Enviado às {formatTime(item.sentAt)}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Balão elegante de resposta do lead */}
+                                  {item.replied && item.lastInboundText && (
+                                    <div
+                                      data-testid={`campaign-recipient-reply-${itemKey}`}
+                                      className="rounded-lg bg-indigo-50/80 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-800/40 p-1.5 text-[11px] text-indigo-950 dark:text-indigo-200 shadow-xs space-y-0.5"
+                                    >
+                                      <p
+                                        className="italic flex items-start gap-1 line-clamp-2 leading-tight"
+                                        title={item.lastInboundText}
+                                      >
+                                        <MessageSquareQuote className="h-3 w-3 shrink-0 text-indigo-500 mt-0.5" />
+                                        <span>“{item.lastInboundText}”</span>
+                                      </p>
+                                      {item.repliedAt && (
+                                        <div className="text-[9px] text-indigo-700/80 dark:text-indigo-400 font-mono">
+                                          Respondido às {formatTime(item.repliedAt)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Motivo de falha */}
+                                  {!item.replied && item.failureReason && (
+                                    <span
+                                      data-testid={`campaign-recipient-failure-${itemKey}`}
+                                      className="text-rose-500 font-medium flex items-center gap-1.5 text-[11px]"
+                                      title={item.failureReason}
+                                    >
+                                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                                      <span className="truncate">{item.failureReason}</span>
+                                    </span>
+                                  )}
+
+                                  {item.status !== "sent" && !item.sentAt && !item.sentMessageText && !item.lastMessageText && !item.replied && !item.failureReason && (
+                                    <span className="text-[11px] text-slate-400">—</span>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell className="py-2 text-right pr-4">
                                 {cleanPhone ? (

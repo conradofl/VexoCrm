@@ -1248,6 +1248,8 @@ export interface CampaignRecipientItem {
   lastInboundText: string | null;
   failureReason: string | null;
   dispatchName: string | null;
+  sentMessageText?: string | null;
+  lastMessageText?: string | null;
 }
 
 export interface CampaignRecipientsResponse {
