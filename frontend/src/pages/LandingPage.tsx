@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCrmLoginUrl } from "@/lib/domainRouting";
+import { rememberAdAttribution } from "@/lib/adAttribution";
 import { ContentLayer } from "./LandingPage/ContentLayer";
 import { HeroLayer } from "./LandingPage/HeroLayer";
 import { LandingNavbar } from "./LandingPage/LandingNavbar";
@@ -33,6 +34,11 @@ export default function LandingPage() {
       ? "Abrir portal"
       : "Abrir CRM"
     : "Acessar Plataforma";
+
+  // Guarda os parâmetros de campanha da chegada antes que a URL os perca.
+  useEffect(() => {
+    rememberAdAttribution();
+  }, []);
 
   useEffect(() => {
     function handleScroll() {

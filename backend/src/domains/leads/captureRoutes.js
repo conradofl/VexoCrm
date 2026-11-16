@@ -77,6 +77,7 @@ export function registerLeadCaptureRoutes(app, deps) {
       followupProcess,
       mainPain,
       instanceName,
+      adOrigin,
     } = validation.data;
 
     const pool = pgDatabasePool;
@@ -104,6 +105,7 @@ export function registerLeadCaptureRoutes(app, deps) {
         fullName,
         email,
         answers,
+        adOrigin,
       });
 
       console.log(`[leadCapture] Lead ${fullName} salvo com sucesso para tenant ${clientId} (${maskPhoneForLog(phone)})`);
