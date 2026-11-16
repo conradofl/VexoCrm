@@ -789,6 +789,29 @@ export async function executarAgendarCompromisso(
 
     const listaEmails = agendasAtivas.map((a) => a.email).filter(Boolean);
 
+    // 2. Extrai participantes extras e identifica se a instrução foi exclusiva ("apenas...")
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    const extrasStr = String(participantes_extras || "").trim();
+    const tituloStr = String(titulo || "").trim();
+    const emailsExtras = extrasStr.match(emailRegex) || [];
+    const emailsNoTitulo = tituloStr.match(emailRegex) || [];
+    const todosEmailsSolicitados = Array.from(new Set([...emailsExtras, ...emailsNoTitulo]));
+
+    const isExclusivo =
+      /apenas|somente|só\s+o|exclusive/i.test(extrasStr) ||
+      /apenas|somente|só\s+o|exclusive/i.test(tituloStr);
+
+    let listaParticipantesFinal = [];
+    let strictAttendees = false;
+
+    if (isExclusivo && todosEmailsSolicitados.length > 0) {
+      listaParticipantesFinal = todosEmailsSolicitados;
+      strictAttendees = true;
+    } else {
+      listaParticipantesFinal = Array.from(new Set([...listaEmails, ...todosEmailsSolicitados]));
+      strictAttendees = false;
+    }
+
     // 3. Integração Real com Google Calendar (cria evento com Google Meet e convites)
     let meetUrl = (local_ou_link || "").trim();
     let calResult = null;
@@ -799,7 +822,8 @@ export async function executarAgendarCompromisso(
         slotStart: dataIso,
         slotEnd,
         title: tit,
-        attendees: listaEmails,
+        attendees: listaParticipantesFinal,
+        strictAttendees,
       });
       if (calResult?.meetUrl) {
         meetUrl = calResult.meetUrl;
@@ -812,7 +836,7 @@ export async function executarAgendarCompromisso(
       meetUrl = gerarLinkGoogleMeet(tit, dataIso);
     }
 
-    const desc = `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${agendasAtivas.map((a) => `${a.nome} (${a.email})`).join(", ")}${participantes_extras ? `\nExtras: ${participantes_extras}` : ""}`;
+    const desc = `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`;
 
     // 4. Salva no banco de dados na tabela events
     let eventoId = calResult?.eventId || null;
@@ -893,6 +917,12 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
       }
     }
 
+    const sincronizado = !calResult?.isMock && !calResult?.calendarError;
+    let avisoSincronizacao = "";
+    if (calResult?.calendarError) {
+      avisoSincronizacao = `\n\n⚠️ *Aviso do Google Calendar:* O evento foi salvo no sistema, mas a agenda oficial aguarda permissão de compartilhamento com a service account \`firebase-adminsdk-fbsvc@vexocrm.iam.gserviceaccount.com\` (${calResult.calendarError}).`;
+    }
+
     return {
       sucesso: true,
       evento_id: eventoId,
@@ -902,9 +932,12 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
       data_iso: dataIso,
       data_formatada: dataFormatada,
       meet_url: meetUrl,
-      participantes: listaEmails,
+      attendees: listaParticipantesFinal,
+      participantes: listaParticipantesFinal,
+      googleCalendarSincronizado: sincronizado,
+      calendarError: calResult?.calendarError || null,
       notificacoes_whatsapp: notificacoes,
-      mensagem: `Compromisso "${tit}" agendado com sucesso para ${dataFormatada}. Google Meet: ${meetUrl}. Convites registrados e aviso enviado no WhatsApp!`,
+      mensagem: `Compromisso "${tit}" agendado com sucesso para ${dataFormatada}. Google Meet: ${meetUrl}. Participantes: ${listaParticipantesFinal.join(", ")}. Convites registrados e aviso enviado no WhatsApp!${avisoSincronizacao}`,
     };
   } catch (err) {
     console.error("[Heloísa] Erro ao agendar compromisso:", err);

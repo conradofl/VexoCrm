@@ -398,7 +398,7 @@ export function registerGoclawRoutes(app, {
   });
 
   // ─── Heloísa Voice Chat (Widget de Voz Two-Way do Vexo OS) ────────────────
-  app.post("/api/goclaw/heloisa/voice-chat", requireAuth, async (req, res) => {
+  app.post(["/api/goclaw/heloisa/voice-chat", "/api/goclaw/heloisa/voice"], requireAuth, async (req, res) => {
     try {
       const {
         audioBase64,

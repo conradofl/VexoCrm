@@ -123,6 +123,17 @@ export function getActiveUtterance(): SpeechSynthesisUtterance | null {
 }
 
 /**
+ * Detecta se o dispositivo do usuário é móvel (iOS / Android)
+ */
+export function isMobileDevice(ua?: string): boolean {
+  if (typeof ua === "string") {
+    return /iPhone|iPad|iPod|Android/i.test(ua);
+  }
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent || "");
+}
+
+/**
  * Destravamento de Áudio no Primeiro Gesto do Usuário (Mobile Audio Unlock - iOS Safari & Android Chrome)
  * Executa uma fala muda rápida de 0s e invoca resume() para capturar o User Gesture Token do navegador.
  */
@@ -284,6 +295,8 @@ export function HeloisaVoiceOrb() {
   const [inputText, setInputText] = useState("");
   const [audioLevel, setAudioLevel] = useState<number>(0);
 
+  const isMobile = isMobileDevice();
+
   const [messages, setMessages] = useState<VoiceMessage[]>([
     {
       id: "init-1",
@@ -304,6 +317,8 @@ export function HeloisaVoiceOrb() {
   const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -369,6 +384,13 @@ export function HeloisaVoiceOrb() {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.onstop = null;
+        mediaRecorderRef.current.stop();
+      } catch {}
+      mediaRecorderRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.onend = null;
@@ -425,105 +447,6 @@ export function HeloisaVoiceOrb() {
     }
   }, []);
 
-  // Iniciar escuta via Web Speech API com tolerância a ciclo de vida
-  const startListening = useCallback(() => {
-    destravarAudioMobile();
-    if (typeof window === "undefined") return;
-    if (!isOpenRef.current || isSpeakingRef.current) return;
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      console.warn("[Heloísa] SpeechRecognition não suportado neste navegador.");
-      return;
-    }
-
-    // Se já houver instância, limpa eventos para não disparar onend em cascata
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.onend = null;
-        recognitionRef.current.onerror = null;
-        recognitionRef.current.abort();
-      } catch {}
-      recognitionRef.current = null;
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = "pt-BR";
-      recognition.maxAlternatives = 1;
-
-      recognition.onresult = (event: any) => {
-        // Anti-atropelo: Se a Heloísa estiver falando, não captura áudio
-        if (isSpeakingRef.current) return;
-
-        let interim = "";
-        let finalConcat = "";
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const trans = event.results[i][0].transcript || "";
-          if (event.results[i].isFinal) {
-            finalConcat += trans;
-          } else {
-            interim += trans;
-          }
-        }
-
-        const rawSpoken = (finalConcat || interim).trim();
-        if (!rawSpoken) return;
-
-        // Se o usuário falou apenas a palavra de ativação "Heloísa", enviamos "Olá Heloísa"
-        const isJustWakeWord = /^helo[íi]sa[?!.]*$/i.test(rawSpoken);
-        let cleanOrder = rawSpoken;
-        if (/^helo[íi]sa\b/i.test(rawSpoken)) {
-          cleanOrder = rawSpoken.replace(/^helo[íi]sa[,.:;!?\s]*/i, "").trim() || rawSpoken;
-        }
-        const comandoParaEnviar = isJustWakeWord ? "Olá Heloísa" : cleanOrder;
-
-        setLiveTranscript(comandoParaEnviar);
-        setStatus("ouvindo");
-
-        // Detecção de Silêncio: Timer de 1200ms (1.2s) para resposta rápida, natural e sem corte
-        if (silenceTimerRef.current) {
-          clearTimeout(silenceTimerRef.current);
-        }
-
-        if (comandoParaEnviar && comandoParaEnviar.length >= 2) {
-          silenceTimerRef.current = setTimeout(() => {
-            if (!isSpeakingRef.current && comandoParaEnviar && isOpenRef.current) {
-              enviarParaHeloisa({ text: comandoParaEnviar });
-              setLiveTranscript("");
-            }
-          }, 1200);
-        }
-      };
-
-      recognition.onerror = (e: any) => {
-        if (e.error === "not-allowed") {
-          setErrorMessage(
-            "Microfone bloqueado pelo navegador. Clique no ícone de configurações ao lado do URL para permitir."
-          );
-          setStatus("idle");
-        } else if (e.error !== "no-speech" && e.error !== "aborted") {
-          console.warn("[Heloísa SpeechRecognition] Info:", e.error);
-        }
-      };
-
-      recognition.onend = () => {
-        recognitionRef.current = null;
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-      setStatus("ouvindo");
-    } catch (err) {
-      console.warn("[Heloísa] Falha ao iniciar reconhecimento de voz:", err);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Interromper fala da Heloísa
   const pararFala = useCallback(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -539,34 +462,6 @@ export function HeloisaVoiceOrb() {
     setStatus("idle");
   }, []);
 
-  // Solicita explicitamente o microfone e abre a orbe
-  const toggleOpen = async () => {
-    destravarAudioMobile();
-    const nextState = !isOpen;
-    setIsOpen(nextState);
-
-    if (nextState) {
-      setErrorMessage(null);
-      try {
-        if (navigator.mediaDevices?.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          mediaStreamRef.current = stream;
-          conectarAudioAnalyser(stream);
-        }
-      } catch (err: any) {
-        console.warn("[Heloísa] Permissão de microfone:", err);
-        if (err.name === "NotAllowedError" || err.message?.includes("Permission denied")) {
-          setErrorMessage("Permissão de microfone negada. Clique no ícone de cadeado do navegador para permitir.");
-        }
-      }
-      startListening();
-    } else {
-      stopListeningAndHardware();
-      pararFala();
-      setStatus("idle");
-    }
-  };
-
   // Reprodução de áudio com fallback infalível para síntese nativa gratuita
   const tocarRespostaVoz = useCallback(
     (audioBase64: string | null, responseText: string) => {
@@ -578,14 +473,18 @@ export function HeloisaVoiceOrb() {
       const finalizarFala = () => {
         isSpeakingRef.current = false;
         setStatus("idle");
-        // Trava anti-loop: Heloísa NÃO reativa o microfone automaticamente após responder.
-        // O status permanece 'idle' aguardando novo clique voluntário do usuário.
       };
 
       const iniciarFala = () => {
         isSpeakingRef.current = true;
         setStatus("falando");
-        // Pausa reconhecimento enquanto fala para evitar eco
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          try {
+            mediaRecorderRef.current.onstop = null;
+            mediaRecorderRef.current.stop();
+          } catch {}
+          mediaRecorderRef.current = null;
+        }
         if (recognitionRef.current) {
           try {
             recognitionRef.current.abort();
@@ -593,7 +492,6 @@ export function HeloisaVoiceOrb() {
         }
       };
 
-      // Se houver áudio sintetizado em base64 do backend
       if (audioBase64) {
         try {
           const audio = new Audio(`data:audio/mp3;base64,${audioBase64}`);
@@ -636,23 +534,36 @@ export function HeloisaVoiceOrb() {
         }
       }
 
-      // Fallback nativo gratuito (window.speechSynthesis)
       speakNativeTTS({
         text: responseText,
         onStart: iniciarFala,
         onEnd: finalizarFala,
       });
     },
-    [startListening]
+    []
   );
 
-  // Envio de texto para o backend da Heloísa
+  // Envio de texto ou áudio base64 para o backend da Heloísa
   const enviarParaHeloisa = useCallback(
-    async ({ text }: { text: string }) => {
-      const promptLimpo = text.trim();
-      if (!promptLimpo) return;
+    async ({
+      text,
+      audioBase64,
+      audioMimetype,
+    }: {
+      text?: string;
+      audioBase64?: string;
+      audioMimetype?: string;
+    }) => {
+      const promptLimpo = (text || "").trim();
+      if (!promptLimpo && !audioBase64) return;
 
-      // 1. Imediatamente aborte o reconhecimento de voz e limpe timers de silêncio
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        try {
+          mediaRecorderRef.current.onstop = null;
+          mediaRecorderRef.current.stop();
+        } catch {}
+        mediaRecorderRef.current = null;
+      }
       if (recognitionRef.current) {
         try {
           recognitionRef.current.abort();
@@ -676,15 +587,15 @@ export function HeloisaVoiceOrb() {
       setErrorMessage(null);
       setLiveTranscript("");
 
-      // Registra mensagem do usuário no histórico
+      const userMsgId = `user-${Date.now()}`;
+      const userMsgText = promptLimpo || "🎤 Mensagem de voz (celular)";
       const userMsg: VoiceMessage = {
-        id: `user-${Date.now()}`,
+        id: userMsgId,
         sender: "user",
-        text: promptLimpo,
+        text: userMsgText,
         timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
       };
 
-      // Histórico contextual: últimas 6 mensagens enviadas ao backend
       const historyPayload = messages.slice(-6).map((m) => ({
         sender: m.sender,
         text: m.text,
@@ -701,7 +612,9 @@ export function HeloisaVoiceOrb() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            text: promptLimpo,
+            text: promptLimpo || undefined,
+            audioBase64: audioBase64 || undefined,
+            audioMimetype: audioMimetype || undefined,
             userName: userName || "Conrado",
             currentPage: location.pathname,
             clientId: "geracao-digital",
@@ -724,7 +637,12 @@ export function HeloisaVoiceOrb() {
         const data = await res.json();
         const responseText = data.responseText || "Ação processada com sucesso.";
 
-        // Adiciona resposta da Heloísa ao histórico
+        if (data.userText && !promptLimpo) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === userMsgId ? { ...m, text: `🎤 "${data.userText}"` } : m))
+          );
+        }
+
         const heloisaMsg: VoiceMessage = {
           id: `heloisa-${Date.now()}`,
           sender: "heloisa",
@@ -734,7 +652,6 @@ export function HeloisaVoiceOrb() {
         };
         setMessages((prev) => [...prev, heloisaMsg]);
 
-        // Reprodução de áudio com fallback nativo gratuito
         tocarRespostaVoz(data.audioBase64 || null, responseText);
       } catch (err: any) {
         console.error("[Heloísa] Erro ao enviar solicitação:", err);
@@ -748,8 +665,224 @@ export function HeloisaVoiceOrb() {
         setStatus("idle");
       }
     },
-    [getIdToken, location.pathname, messages, tocarRespostaVoz]
+    [getIdToken, location.pathname, messages, tocarRespostaVoz, userName]
   );
+
+  // Gravação via MediaRecorder para Dispositivos Móveis (iOS Safari / Android Chrome)
+  const iniciarGravacaoMobile = useCallback(async () => {
+    destravarAudioMobile();
+    if (typeof window === "undefined") return;
+    if (isSpeakingRef.current) return;
+
+    try {
+      let stream = mediaStreamRef.current;
+      if (!stream || !stream.active) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = stream;
+      }
+      conectarAudioAnalyser(stream);
+
+      audioChunksRef.current = [];
+      let mimeType = "audio/webm";
+      if (typeof MediaRecorder !== "undefined" && typeof MediaRecorder.isTypeSupported === "function") {
+        if (MediaRecorder.isTypeSupported("audio/mp4")) {
+          mimeType = "audio/mp4";
+        } else if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+          mimeType = "audio/webm;codecs=opus";
+        } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+          mimeType = "audio/webm";
+        } else {
+          mimeType = "";
+        }
+      }
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const chosenType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type: chosenType });
+        audioChunksRef.current = [];
+        if (blob.size < 500) {
+          setStatus("idle");
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const resStr = reader.result as string;
+          const base64Data = resStr ? resStr.split(",")[1] : null;
+          if (base64Data) {
+            enviarParaHeloisa({ audioBase64: base64Data, audioMimetype: chosenType });
+          } else {
+            setStatus("idle");
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      recorder.start(250);
+      setStatus("ouvindo");
+      setErrorMessage(null);
+    } catch (err: any) {
+      console.warn("[Heloísa] Falha ao iniciar gravação mobile:", err);
+      if (err.name === "NotAllowedError" || err.message?.includes("Permission denied")) {
+        setErrorMessage("Permissão de microfone negada. Permita o microfone no navegador.");
+      }
+      setStatus("idle");
+    }
+  }, [conectarAudioAnalyser, enviarParaHeloisa]);
+
+  const pararGravacaoMobile = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        console.warn("[Heloísa] Erro ao parar gravação mobile:", e);
+      }
+    }
+    setStatus("consultando");
+  }, []);
+
+  // Iniciar escuta via Web Speech API (Desktop) com tolerância a ciclo de vida
+  const startListening = useCallback(() => {
+    destravarAudioMobile();
+    if (typeof window === "undefined") return;
+    if (!isOpenRef.current || isSpeakingRef.current) return;
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.warn("[Heloísa] SpeechRecognition não suportado neste navegador.");
+      return;
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try {
+        mediaRecorderRef.current.onstop = null;
+        mediaRecorderRef.current.stop();
+      } catch {}
+      mediaRecorderRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.abort();
+      } catch {}
+      recognitionRef.current = null;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = !isMobile;
+      recognition.interimResults = true;
+      recognition.lang = "pt-BR";
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event: any) => {
+        if (isSpeakingRef.current) return;
+
+        let interim = "";
+        let finalConcat = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const trans = event.results[i][0].transcript || "";
+          if (event.results[i].isFinal) {
+            finalConcat += trans;
+          } else {
+            interim += trans;
+          }
+        }
+
+        const rawSpoken = (finalConcat || interim).trim();
+        if (!rawSpoken) return;
+
+        const isJustWakeWord = /^helo[íi]sa[?!.]*$/i.test(rawSpoken);
+        let cleanOrder = rawSpoken;
+        if (/^helo[íi]sa\b/i.test(rawSpoken)) {
+          cleanOrder = rawSpoken.replace(/^helo[íi]sa[,.:;!?\s]*/i, "").trim() || rawSpoken;
+        }
+        const comandoParaEnviar = isJustWakeWord ? "Olá Heloísa" : cleanOrder;
+
+        setLiveTranscript(comandoParaEnviar);
+        setStatus("ouvindo");
+
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+        }
+
+        if (comandoParaEnviar && comandoParaEnviar.length >= 2) {
+          silenceTimerRef.current = setTimeout(() => {
+            if (!isSpeakingRef.current && comandoParaEnviar && isOpenRef.current) {
+              enviarParaHeloisa({ text: comandoParaEnviar });
+              setLiveTranscript("");
+            }
+          }, 1200);
+        }
+      };
+
+      recognition.onerror = (e: any) => {
+        if (e.error === "not-allowed") {
+          setErrorMessage(
+            "Microfone bloqueado pelo navegador. Clique no ícone de configurações ao lado do URL para permitir."
+          );
+          setStatus("idle");
+        } else if (e.error !== "no-speech" && e.error !== "aborted") {
+          console.warn("[Heloísa SpeechRecognition] Info:", e.error);
+        }
+      };
+
+      recognition.onend = () => {
+        recognitionRef.current = null;
+      };
+
+      recognition.start();
+      recognitionRef.current = recognition;
+      setStatus("ouvindo");
+    } catch (err) {
+      console.warn("[Heloísa] Falha ao iniciar reconhecimento de voz:", err);
+    }
+  }, [enviarParaHeloisa, isMobile]);
+
+  // Solicita explicitamente o microfone e abre a orbe
+  const toggleOpen = async () => {
+    destravarAudioMobile();
+    const nextState = !isOpen;
+    setIsOpen(nextState);
+
+    if (nextState) {
+      setErrorMessage(null);
+      try {
+        if (navigator.mediaDevices?.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaStreamRef.current = stream;
+          conectarAudioAnalyser(stream);
+        }
+      } catch (err: any) {
+        console.warn("[Heloísa] Permissão de microfone:", err);
+        if (err.name === "NotAllowedError" || err.message?.includes("Permission denied")) {
+          setErrorMessage("Permissão de microfone negada. Clique no ícone de cadeado do navegador para permitir.");
+        }
+      }
+      if (isMobile) {
+        iniciarGravacaoMobile();
+      } else {
+        startListening();
+      }
+    } else {
+      stopListeningAndHardware();
+      pararFala();
+      setStatus("idle");
+    }
+  };
 
   // Envio manual de texto via form
   const handleSendText = (e: React.FormEvent) => {
@@ -792,12 +925,19 @@ export function HeloisaVoiceOrb() {
       return;
     }
 
-    if (status === "ouvindo") {
-      // Já está ouvindo
+    if (isMobile) {
+      if (status === "ouvindo") {
+        pararGravacaoMobile();
+      } else {
+        iniciarGravacaoMobile();
+      }
       return;
     }
 
-    // Se estiver idle, reinicia escuta
+    if (status === "ouvindo") {
+      return;
+    }
+
     startListening();
   };
 
@@ -951,7 +1091,9 @@ export function HeloisaVoiceOrb() {
                 >
                   <Radio className="h-3.5 w-3.5 text-cyan-400" />
                   <span>
-                    {liveTranscript
+                    {isMobile
+                      ? "Gravando voz... Toque para enviar ordem"
+                      : liveTranscript
                       ? "Ouvindo... (Pausa envia ou toque para enviar)"
                       : "Microfone ouvindo... Pode falar 'Heloísa' ou sua ordem"}
                   </span>

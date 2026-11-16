@@ -4,7 +4,7 @@ import { API_BASE_URL } from "@/lib/api";
 import { postDispatchTrigger } from "@/lib/dispatchTrigger";
 import type { RecurrenceEndType, RecurrenceOriginKind, RecurrencePattern } from "@/lib/campaignRecurrence";
 
-const CAMPAIGN_REQUEST_TIMEOUT_MS = 15000;
+const CAMPAIGN_REQUEST_TIMEOUT_MS = 45000;
 export const ACTIVE_DISPATCH_REFETCH_INTERVAL_MS = 15000;
 
 export function hasActiveDispatches(dispatches?: { status?: string }[] | null): boolean {
@@ -560,6 +560,12 @@ export async function fetchCampaignsApi(path: string, init: RequestInit) {
   }
 
   console.error("[campaigns-api] request_failed", { path });
+  if (
+    (networkError instanceof DOMException && networkError.name === "AbortError") ||
+    (networkError && typeof networkError === "object" && (networkError as any).name === "AbortError")
+  ) {
+    throw new Error("Tempo limite de resposta excedido ao carregar destinatários. Tente novamente.");
+  }
   throw networkError instanceof Error ? networkError : new Error("Falha de conexao com a API de campanhas.");
 }
 

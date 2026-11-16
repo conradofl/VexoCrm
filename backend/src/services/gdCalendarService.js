@@ -609,13 +609,14 @@ export async function createBriefingCalendarEvent({
   description = null,
   primaryCalendarId = GD_CALENDAR_AGENCIA,
   accessToken = null,
+  strictAttendees = false,
 }) {
   const summary = title || `Briefing Inicial · ${clienteNome}`;
   const startIso = new Date(slotStart).toISOString();
   const endIso = new Date(slotEnd).toISOString();
 
-  // Garante que as contas oficiais estejam sempre incluídas
-  const emailSet = new Set([GD_CALENDAR_AGENCIA, GD_CALENDAR_CAIO]);
+  // Garante que as contas oficiais estejam incluídas a menos que explicitamente restrito
+  const emailSet = new Set(strictAttendees ? [] : [GD_CALENDAR_AGENCIA, GD_CALENDAR_CAIO]);
   if (Array.isArray(attendees)) {
     for (const a of attendees) {
       const email = typeof a === "string" ? a.trim() : a?.email?.trim();
@@ -627,7 +628,7 @@ export async function createBriefingCalendarEvent({
 
   const attendeesList = Array.from(emailSet).map((email) => ({ email }));
 
-  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_GOOGLE_CALENDAR !== "true") {
+  if (!accessToken && (process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_GOOGLE_CALENDAR !== "true") {
     const deterministicHash = crypto
       .createHash("md5")
       .update(`${clienteId || "gd"}-${startIso}`)
@@ -651,6 +652,7 @@ export async function createBriefingCalendarEvent({
   }
 
   const token = accessToken || (await getGoogleCalendarAccessToken());
+  let lastCalendarError = null;
 
   if (token) {
     try {
@@ -676,7 +678,7 @@ export async function createBriefingCalendarEvent({
         },
       };
 
-      const res = await fetch(endpoint, {
+      let res = await fetch(endpoint, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -684,6 +686,25 @@ export async function createBriefingCalendarEvent({
         },
         body: JSON.stringify(requestBody),
       });
+
+      // Se a agenda da agência falhar com erro de permissão (403 ou 404), tenta o calendário 'primary' da service account
+      if (!res.ok && (res.status === 403 || res.status === 404) && primaryCalendarId !== "primary") {
+        const fallbackEndpoint = `https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all`;
+        console.warn(
+          `[gd-calendar] Falha na agenda '${primaryCalendarId}' (HTTP ${res.status}). Tentando fallback na agenda 'primary' da service account...`
+        );
+        const fallbackRes = await fetch(fallbackEndpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        });
+        if (fallbackRes.ok) {
+          res = fallbackRes;
+        }
+      }
 
       if (res.ok) {
         const data = await res.json();
@@ -706,9 +727,11 @@ export async function createBriefingCalendarEvent({
       }
 
       const errText = await res.text();
-      console.warn(`[gd-calendar] Google Calendar API HTTP ${res.status}: ${errText}`);
+      console.error(`[gd-calendar] Google Calendar API HTTP ${res.status}: ${errText}`);
+      lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda (HTTP ${res.status}: ${errText})`;
     } catch (err) {
-      console.warn("[gd-calendar] Erro ao chamar Google Calendar API:", err.message);
+      console.error("[gd-calendar] Erro ao chamar Google Calendar API:", err.message);
+      lastCalendarError = `Google Calendar não sincronizado: ${err.message}`;
     }
   }
 
@@ -732,6 +755,7 @@ export async function createBriefingCalendarEvent({
     end: endIso,
     title: summary,
     isMock: true,
+    calendarError: lastCalendarError || "Google Calendar não sincronizado: permissão pendente na agenda",
   };
 }
 

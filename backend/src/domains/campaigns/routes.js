@@ -5368,24 +5368,11 @@ export function registerCampaignsRoutes(app, deps) {
                 r.error_message,
                 r.created_at,
                 d.name AS dispatch_name,
-                COALESCE(l.nome, 'Sem nome') AS lead_nome
+                COALESCE(l.nome, lii.normalized_data->>'nome', lii.normalized_data->>'name', 'Sem nome') AS lead_nome
               FROM public.campaign_dispatch_runs r
               LEFT JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-              LEFT JOIN LATERAL (
-                SELECT l.nome
-                FROM public.leads l
-                WHERE l.client_id = r.client_id
-                  AND (
-                    l.id = r.lead_id
-                    OR (
-                      r.phone IS NOT NULL AND r.phone <> ''
-                      AND l.telefone IS NOT NULL AND l.telefone <> ''
-                      AND regexp_replace(l.telefone, '\\D', '', 'g') = regexp_replace(r.phone, '\\D', '', 'g')
-                    )
-                  )
-                ORDER BY (l.id = r.lead_id) DESC, l.created_at DESC
-                LIMIT 1
-              ) l ON TRUE
+              LEFT JOIN public.leads l ON l.id = r.lead_id AND l.client_id = r.client_id
+              LEFT JOIN public.lead_import_items lii ON lii.id = r.lead_import_item_id AND lii.client_id = r.client_id
               WHERE r.client_id = $1 AND r.campaign_id = $2
               ORDER BY r.created_at ASC
             `,
