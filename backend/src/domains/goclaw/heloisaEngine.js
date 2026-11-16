@@ -218,6 +218,22 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
   }
 }
 
+function extractBaseUrlFromDispatchUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== "string") return null;
+  try {
+    const u = new URL(urlStr);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
+
+function extractEvolutionSlug(urlStr) {
+  if (!urlStr || typeof urlStr !== "string") return null;
+  const match = urlStr.match(/\/message\/send(?:Text|Media)\/([^/?#]+)/i);
+  return match ? match[1] : null;
+}
+
 /**
  * Envia mensagem no WhatsApp com contingência automática de instâncias.
  * IMPORTANTE: Heloísa pertence à diretoria da Vexo / Geração Digital.
@@ -233,39 +249,93 @@ export async function enviarMensagemWhatsAppComFallback({
   tenantId = "vexo-adm",
   pool = pgDatabasePool,
 }) {
-  const baseUrl =
-    process.env.GD_EVOLUTION_URL ||
-    process.env.EVOLUTION_API_URL ||
+  const defaultBaseUrl =
+    (process.env.EVOLUTION_API_URL || "").trim().replace(/\/+$/, "") ||
     "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const defaultApiKey =
+    process.env.EVOLUTION_API_KEY ||
+    "429683C4C977415CAAFCCE10F7D57E11";
 
-  const primaryInstance =
-    instanceName ||
-    (await obterInstanciaWhatsAppAtiva(pool, tenantId));
+  const candidateMap = new Map();
 
-  // Instâncias estritamente autorizadas para a Heloísa (pertencentes ao número oficial da Vexo: +55 34 9175-1267).
-  // JAMAIS enviar por instâncias de outros clientes/tenants da Evolution API.
-  const authorizedVexoInstances = ["vexo-adm-vexo-atende", "geracao-digital-teste-vexo"];
+  const upsertCandidate = (slug, meta = {}) => {
+    if (!slug) return;
+    const clean = String(slug).trim();
+    if (!clean) return;
+    const existing = candidateMap.get(clean);
+    if (!existing) {
+      candidateMap.set(clean, {
+        slug: clean,
+        baseUrl: meta.baseUrl || defaultBaseUrl,
+        webhookToken: meta.webhookToken || defaultApiKey,
+        connectionState: meta.connectionState || null,
+      });
+    } else {
+      if (meta.baseUrl) existing.baseUrl = meta.baseUrl;
+      if (meta.webhookToken) existing.webhookToken = meta.webhookToken;
+      if (meta.connectionState) existing.connectionState = meta.connectionState;
+    }
+  };
 
-  const candidates = [
-    primaryInstance,
-    ...authorizedVexoInstances,
-  ].filter(Boolean).filter((val, idx, self) => self.indexOf(val) === idx);
+  // 1. Consulta no banco as instâncias autorizadas com suas URLs e credenciais reais
+  if (pool && typeof pool.query === "function") {
+    try {
+      const { rows } = await pool.query(
+        `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url, dispatch_webhook_token
+         FROM public.lead_client_evolution_instances
+         WHERE active = true AND client_id IN ('vexo-adm', 'geracao-digital')
+         ORDER BY (client_id = 'vexo-adm') DESC, (connection_state = 'open') DESC, is_default DESC`
+      ).catch(() => ({ rows: [] }));
+
+      for (const r of rows) {
+        const slug = extractEvolutionSlug(r.dispatch_webhook_url) || r.name;
+        const bUrl = extractBaseUrlFromDispatchUrl(r.dispatch_webhook_url) || defaultBaseUrl;
+        const token = r.dispatch_webhook_token || defaultApiKey;
+        upsertCandidate(slug, {
+          baseUrl: bUrl,
+          webhookToken: token,
+          connectionState: r.connection_state,
+        });
+      }
+    } catch (e) {
+      console.warn("[Heloísa] Falha ao consultar instâncias da Vexo no banco:", e.message);
+    }
+  }
+
+  // 2. Se uma instância explícita foi fornecida (ex: vexo-adm-vexo-atende), adiciona/garante presença
+  if (instanceName) {
+    upsertCandidate(instanceName);
+  }
+
+  // 3. Fallbacks de segurança estritamente autorizados da Vexo (número +55 34 9175-1267)
+  upsertCandidate("vexo-adm-vexo-atende", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
+  upsertCandidate("geracao-digital-teste-vexo", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
+
+  const candidates = Array.from(candidateMap.values());
+  if (instanceName) {
+    const idx = candidates.findIndex((c) => c.slug === instanceName);
+    if (idx > 0) {
+      const [item] = candidates.splice(idx, 1);
+      candidates.unshift(item);
+    }
+  }
 
   let lastError = null;
 
   for (const candidate of candidates) {
     try {
-      console.log(`[Heloísa] Tentando envio de WhatsApp para ${numero} via instância autorizada "${candidate}"...`);
+      console.log(`[Heloísa] Tentando envio de WhatsApp para ${numero} via instância autorizada "${candidate.slug}" (${candidate.baseUrl})...`);
       const envio = await sendTextMessageViaEvolution({
-        instanceName: candidate,
+        instanceName: candidate.slug,
         number: numero,
         text: texto,
-        baseUrl,
+        baseUrl: candidate.baseUrl,
+        webhookToken: candidate.webhookToken,
       });
-      console.log(`[Heloísa] Mensagem enviada com sucesso para ${numero} via instância autorizada "${candidate}"!`);
-      return { envio, instanceName: candidate };
+      console.log(`[Heloísa] Mensagem enviada com sucesso para ${numero} via instância autorizada "${candidate.slug}"!`);
+      return { envio, instanceName: candidate.slug };
     } catch (err) {
-      console.warn(`[Heloísa] Falha ao enviar via instância autorizada "${candidate}": ${err.message}. Tentando contingência autorizada...`);
+      console.warn(`[Heloísa] Falha ao enviar via instância autorizada "${candidate.slug}": ${err.message}. Tentando contingência autorizada...`);
       lastError = err;
     }
   }

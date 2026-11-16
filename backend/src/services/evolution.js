@@ -2276,8 +2276,8 @@ export async function sendTextMessageViaEvolution({
 
   const effectiveBaseUrl =
     normalizeHttpUrl(baseUrl) ||
-    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
+    normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
     "https://vexo-evolution-api.xdvm8y.easypanel.host";
   const apiKey =
     webhookToken ||

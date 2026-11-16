@@ -615,7 +615,7 @@ export function registerIntegrationsRoutes(app, deps) {
 
   app.get("/api/admin/evolution-config", requireFirebaseAuth, requireAdminAccess, async (req, res) => {
     try {
-      const includeRemote = normalizeString(req.query?.remote).toLowerCase() === "true";
+      const includeRemote = normalizeString(req.query?.remote)?.toLowerCase() === "true";
       const inventory = await fetchAdminEvolutionInventory({ includeRemote });
       res.json(inventory);
     } catch (error) {
