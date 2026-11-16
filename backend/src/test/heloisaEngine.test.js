@@ -231,7 +231,7 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     expect(res.responseText).not.toContain("toque de amizade");
   });
 
-  it("enviarMensagemWhatsAppComFallback não inclui a instância legada vexo-adm-vexo-atende em candidates", async () => {
+  it("enviarMensagemWhatsAppComFallback restringe o envio estritamente a instâncias autorizadas da Vexo e nunca usa chips de terceiros", async () => {
     sendTextMessageViaEvolution.mockReset().mockResolvedValue({ key: { id: "msg-123" } });
     const mockPool = {
       query: vi.fn().mockResolvedValue({ rows: [] }),
@@ -244,10 +244,10 @@ describe("Heloísa Engine (heloisaEngine.js)", () => {
     });
 
     expect(res.envio).toBeDefined();
-    expect(res.instanceName).toBe("geracao-digital-teste-vexo");
+    expect(res.instanceName).toBe("vexo-adm-vexo-atende");
     expect(sendTextMessageViaEvolution).toHaveBeenCalledWith(
       expect.objectContaining({
-        instanceName: "geracao-digital-teste-vexo",
+        instanceName: "vexo-adm-vexo-atende",
         number: "5534997817660",
         text: "Teste de envio seguro",
       })

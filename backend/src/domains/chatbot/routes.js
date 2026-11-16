@@ -3240,7 +3240,7 @@ export function registerChatbotRoutes(app, deps) {
         texto: cleanText,
         audioBase64: messageData.mediaBase64 || null,
         audioMimetype: messageData.mimetype || "audio/ogg",
-        instanceName: instanceName || "geracao-digital-teste-vexo",
+        instanceName: instanceName || "vexo-adm-vexo-atende",
         pool: pgDatabasePool,
       }).catch((err) => {
         console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);

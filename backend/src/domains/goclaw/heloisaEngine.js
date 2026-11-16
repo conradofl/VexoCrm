@@ -10,7 +10,11 @@
  */
 
 import { pgDatabasePool } from "../../services/database.js";
-import { sendTextMessageViaEvolution, buildEvolutionAuthHeaders } from "../../services/evolution.js";
+import {
+  sendTextMessageViaEvolution,
+  buildEvolutionAuthHeaders,
+  extractEvolutionInstanceSlug,
+} from "../../services/evolution.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -138,43 +142,44 @@ export async function executarCadastrarCliente({ nome, telefone, empresa, valor,
   }
 }
 
-export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantId = "geracao-digital") {
+export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantId = "vexo-adm") {
   try {
     if (process.env.GD_EVOLUTION_INSTANCE && process.env.GD_EVOLUTION_INSTANCE !== "heloisa") {
       return process.env.GD_EVOLUTION_INSTANCE;
     }
 
     if (pool && typeof pool.query === "function") {
+      const allowedTenants = Array.from(new Set([tenantId, "vexo-adm", "geracao-digital"].filter(Boolean)));
       const { rows } = await pool.query(
         `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url
          FROM public.lead_client_evolution_instances
-         WHERE active = true
+         WHERE client_id = ANY($1::text[])
          ORDER BY (connection_state = 'open') DESC, is_default DESC, id DESC
-         LIMIT 20`
+         LIMIT 10`,
+        [allowedTenants]
       ).catch(() => ({ rows: [] }));
 
       if (rows && rows.length > 0) {
-        const doTenant = rows.find(
-          (r) => r.client_id === tenantId && (r.connection_state === "open" || !r.connection_state)
-        );
-        if (doTenant?.name) return doTenant.name;
-
-        const aberta = rows.find((r) => r.connection_state === "open");
-        if (aberta?.name) return aberta.name;
-
-        if (rows[0]?.name) return rows[0].name;
+        const aberta = rows.find((r) => r.connection_state === "open" || !r.connection_state);
+        const alvo = aberta || rows[0];
+        const slug =
+          extractEvolutionInstanceSlug(alvo.dispatch_webhook_url) ||
+          alvo.instance_name ||
+          alvo.name;
+        if (slug) return slug;
       }
     }
   } catch (err) {
     console.warn("[Heloísa] Falha ao consultar instâncias ativas do banco:", err.message);
   }
 
-  // Fallbacks verificados diretamente na Evolution API
-  return "geracao-digital-teste-vexo";
+  // Fallback padrão seguro para a instância da Vexo
+  return "vexo-adm-vexo-atende";
 }
 
 /**
  * Consulta em tempo real na Evolution API as instâncias que estão com conexão ativa (open).
+ * Restringe estritamente às instâncias oficiais da Vexo / GD para evitar vazamento entre tenants.
  */
 export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
   try {
@@ -202,10 +207,11 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
     if (!res.ok) return [];
     const list = await res.json();
     if (!Array.isArray(list)) return [];
+    const authorizedInstances = new Set(["vexo-adm-vexo-atende", "geracao-digital-teste-vexo"]);
     return list
       .filter((i) => i && (i.connectionStatus === "open" || i.connection_state === "open"))
       .map((i) => i.name)
-      .filter(Boolean);
+      .filter((name) => authorizedInstances.has(name));
   } catch (err) {
     console.warn("[Heloísa] Falha ao consultar fetchInstances na Evolution:", err.message);
     return [];
@@ -214,14 +220,17 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
 
 /**
  * Envia mensagem no WhatsApp com contingência automática de instâncias.
- * Se a instância primária falhar (ex: 404 instance does not exist ou desconectada),
- * tenta automaticamente instâncias alternativas abertas sem interromper o fluxo do usuário.
+ * IMPORTANTE: Heloísa pertence à diretoria da Vexo / Geração Digital.
+ * Suas mensagens DEVEM OBRIGATORIAMENTE ser enviadas pelas instâncias oficiais da Vexo:
+ * - Instância onde o diretor enviou a mensagem (ex: vexo-adm-vexo-atende)
+ * - Contingência oficial: geracao-digital-teste-vexo (que usa o mesmo número da Vexo +55 34 9175-1267)
+ * NUNCA utilizar instâncias dinâmicas de outros clientes/tenants da Evolution API.
  */
 export async function enviarMensagemWhatsAppComFallback({
   numero,
   texto,
   instanceName = null,
-  tenantId = "geracao-digital",
+  tenantId = "vexo-adm",
   pool = pgDatabasePool,
 }) {
   const baseUrl =
@@ -233,51 +242,35 @@ export async function enviarMensagemWhatsAppComFallback({
     instanceName ||
     (await obterInstanciaWhatsAppAtiva(pool, tenantId));
 
-  // Lista priorizada de instâncias conhecidas para contingência automática
+  // Instâncias estritamente autorizadas para a Heloísa (pertencentes ao número oficial da Vexo: +55 34 9175-1267).
+  // JAMAIS enviar por instâncias de outros clientes/tenants da Evolution API.
+  const authorizedVexoInstances = ["vexo-adm-vexo-atende", "geracao-digital-teste-vexo"];
+
   const candidates = [
     primaryInstance,
-    "geracao-digital-teste-vexo",
+    ...authorizedVexoInstances,
   ].filter(Boolean).filter((val, idx, self) => self.indexOf(val) === idx);
 
   let lastError = null;
 
   for (const candidate of candidates) {
     try {
-      console.log(`[Heloísa] Tentando envio de WhatsApp para ${numero} via instância "${candidate}"...`);
+      console.log(`[Heloísa] Tentando envio de WhatsApp para ${numero} via instância autorizada "${candidate}"...`);
       const envio = await sendTextMessageViaEvolution({
         instanceName: candidate,
         number: numero,
         text: texto,
         baseUrl,
       });
-      console.log(`[Heloísa] Mensagem enviada com sucesso para ${numero} via instância "${candidate}"!`);
+      console.log(`[Heloísa] Mensagem enviada com sucesso para ${numero} via instância autorizada "${candidate}"!`);
       return { envio, instanceName: candidate };
     } catch (err) {
-      console.warn(`[Heloísa] Falha ao enviar via instância "${candidate}": ${err.message}. Tentando contingência...`);
+      console.warn(`[Heloísa] Falha ao enviar via instância autorizada "${candidate}": ${err.message}. Tentando contingência autorizada...`);
       lastError = err;
     }
   }
 
-  // Se todas as candidatas pré-configuradas falharem, consulta dinamicamente instâncias ativas na Evolution API
-  try {
-    const abertas = await obterInstanciasEvolutionAbertas(baseUrl);
-    const dinamica = abertas.find((inst) => !candidates.includes(inst));
-    if (dinamica) {
-      console.log(`[Heloísa] Tentando envio de contingência dinâmica via instância aberta "${dinamica}"...`);
-      const envio = await sendTextMessageViaEvolution({
-        instanceName: dinamica,
-        number: numero,
-        text: texto,
-        baseUrl,
-      });
-      console.log(`[Heloísa] Mensagem entregue com sucesso via contingência dinâmica "${dinamica}"!`);
-      return { envio, instanceName: dinamica };
-    }
-  } catch (dinErr) {
-    console.warn(`[Heloísa] Falha na contingência dinâmica de instâncias: ${dinErr.message}`);
-  }
-
-  throw lastError || new Error("Nenhuma instância de WhatsApp disponível para envio.");
+  throw lastError || new Error("Nenhuma instância autorizada da Vexo disponível para envio.");
 }
 
 export async function executarEnviarMensagemWhatsApp(
