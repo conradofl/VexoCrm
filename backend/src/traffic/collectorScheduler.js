@@ -95,11 +95,10 @@ export function createTrafficCollectorScheduler({
       const outcome = await withCollectorLock(pool, () => runner({ pool, now }));
       if (!outcome.locked) return { ran: false, reason: "CONCURRENT_LOCK_HELD", slotKey: slot.slotKey };
 
-      const meta = outcome.result?.meta;
+      const describe = (platform) =>
+        platform?.connected ? `${platform.ok} conta(s) ok, ${platform.failed} com falha` : "não conectada";
       console.log(
-        `[traffic-collector] Slot ${slot.slotKey}: Meta ${
-          meta?.connected ? `${meta.ok} conta(s) ok, ${meta.failed} com falha` : "não conectada"
-        }.`
+        `[traffic-collector] Slot ${slot.slotKey}: Meta ${describe(outcome.result?.meta)}; Google ${describe(outcome.result?.google)}.`
       );
       return { ran: true, slotKey: slot.slotKey, summary: outcome.result };
     } catch (err) {

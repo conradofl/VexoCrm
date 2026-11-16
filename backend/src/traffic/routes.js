@@ -13,6 +13,7 @@ import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { evaluateTrafficAccess } from "./access.js";
 import { isTrafficCollectorEnabled, SCHEDULED_HOURS } from "./collectorScheduler.js";
 import { publicKpiCatalog } from "./kpis.js";
+import { isGoogleAdsConnected } from "./googleAdsClient.js";
 import { isMetaConnected } from "./metaAdsClient.js";
 import {
   ALLOWED_WINDOWS,
@@ -85,10 +86,10 @@ export function registerTrafficRoutes(app) {
     try {
       res.json({
         success: true,
-        // Só "tem token ou não". O token nunca sai do servidor.
+        // Só "tem credencial ou não". Token e chave nunca saem do servidor.
         platforms: {
           meta: { available: true, connected: isMetaConnected() },
-          google: { available: false, connected: false },
+          google: { available: true, connected: isGoogleAdsConnected() },
         },
         collector: { enabled: isTrafficCollectorEnabled(), hours: SCHEDULED_HOURS.map((h) => `${h}:00`) },
         accounts: await listAccounts(pool, clientId),

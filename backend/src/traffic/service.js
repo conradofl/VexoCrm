@@ -7,6 +7,7 @@ import { decidir, piorDecisao, DEFAULT_KILL_AT, DEFAULT_MIN_SPEND_FACTOR, DEFAUL
 import { resolveCollectionWindow } from "./collector.js";
 import { computeKpis, getKpiDefinition, publicKpiCatalog, sumMetrics } from "./kpis.js";
 import { normalizeMetaAccountId } from "./metaAdsClient.js";
+import { normalizeGoogleCustomerId } from "./googleAdsClient.js";
 
 export const ALLOWED_WINDOWS = [4, 7, 14, 30];
 export const AUTONOMY_LEVELS = ["relatorio", "sugere", "aplica_com_limites"];
@@ -59,16 +60,19 @@ export async function listAccounts(pool, clientId) {
 
 export async function createAccount(pool, clientId, input = {}) {
   const platform = String(input.platform || "").trim().toLowerCase();
-  if (platform === "google") {
-    throw rule("PLATFORM_NOT_AVAILABLE", "A coleta do Google Ads ainda não está disponível. Por enquanto só a Meta.");
-  }
-  if (platform !== "meta") throw rule("INVALID_PLATFORM", "Plataforma inválida.");
+  if (platform !== "meta" && platform !== "google") throw rule("INVALID_PLATFORM", "Plataforma inválida.");
 
   let externalAccountId;
   try {
-    externalAccountId = normalizeMetaAccountId(input.externalAccountId);
+    externalAccountId =
+      platform === "meta" ? normalizeMetaAccountId(input.externalAccountId) : normalizeGoogleCustomerId(input.externalAccountId);
   } catch {
-    throw rule("INVALID_ACCOUNT_ID", "Informe o número da conta de anúncios da Meta (só dígitos, com ou sem act_).");
+    throw rule(
+      "INVALID_ACCOUNT_ID",
+      platform === "meta"
+        ? "Informe o número da conta de anúncios da Meta (só dígitos, com ou sem act_)."
+        : "Informe o número da conta do Google Ads (10 dígitos, com ou sem hífens)."
+    );
   }
 
   const displayName = typeof input.displayName === "string" ? input.displayName.trim().slice(0, 120) || null : null;
