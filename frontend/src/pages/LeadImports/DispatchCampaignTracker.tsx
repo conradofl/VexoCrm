@@ -53,6 +53,7 @@ import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
 import { OutsideSendWindowError, type OutsideSendWindowDetails } from "@/lib/dispatchTrigger";
 import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
+import { DispatchStopNotice, QueueBlockNotice, describeDispatchStop } from "@/components/campaigns/DispatchStopReason";
 import {
   useDispatchSummary,
   useCampaignDispatchBulkAction,
@@ -361,10 +362,13 @@ function CampaignCard({
 
   // "Aguardando disparo" é justamente quem mais precisa do botão: nada roda sem clique.
   const isScheduled = campaign.status === "agendada" || campaign.status === "aguardando_disparo";
+  // Mesmo critério do detalhe aberto: lote 'interrupted' ou 'failed' também é o próximo a disparar. Antes ele era pulado e o
+  // botão "Lote 1" disparava o lote 2 com o rótulo do 1.
   const batch1 =
     campaign.batches.find(
-      (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused"
+      (b) => b.status === "scheduled" || b.status === "draft" || b.status === "paused" || b.status === "interrupted" || b.status === "failed"
     ) || campaign.batches[0];
+  const batch1Number = batch1 ? campaign.batches.indexOf(batch1) + 1 : 1;
 
   const handleTriggerBatch1 = () => {
     if (!batch1) return;
@@ -374,7 +378,7 @@ function CampaignCard({
         qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
         qc.invalidateQueries({ queryKey: ["all-dispatches"] });
         toast({
-          title: "Lote 1 disparado",
+          title: `Lote ${batch1Number} disparado`,
           description: "Disparo iniciado e previsão de término recalculada a partir de agora.",
         });
       },
@@ -562,9 +566,24 @@ function CampaignCard({
             {triggerDispatch.isPending ? (
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
             ) : null}
-            ⚡ Disparar Lote 1 Agora
+            ⚡ Disparar Lote {batch1Number} Agora
           </Button>
         </div>
+      )}
+
+      {/* Por que parou: o motivo gravado pelo motor do lote que o botão dispara, e a fila de resposta parada por chip. */}
+      {!isExpanded && (
+        <>
+          {batch1 && describeDispatchStop(batch1.status, batch1.errorMessage) && (
+            <DispatchStopNotice
+              status={batch1.status}
+              errorMessage={`Lote ${batch1Number}: ${batch1.errorMessage || describeDispatchStop(batch1.status, batch1.errorMessage)}`}
+              className="mt-2"
+              testId={`dispatch-stop-notice-${campaign.campaignId}`}
+            />
+          )}
+          <QueueBlockNotice block={campaign.queueBlock} className="mt-2" />
+        </>
       )}
 
       {/* 
@@ -844,7 +863,7 @@ export function CampaignDetails({
                   key={b.id}
                   type="button"
                   onClick={() => onOpenDispatch(b.id)}
-                  title={`Lote ${i + 1} — ${DISPATCH_SQUARE_STATE_LABELS[state]} · ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}`}
+                  title={`Lote ${i + 1} — ${DISPATCH_SQUARE_STATE_LABELS[state]} · ${b.sentCount} enviados, ${b.failedCount} falhas, ${b.targetCount} alvo${b.scheduledAt ? ` — agendado ${formatDateTime(b.scheduledAt)}` : ""}${describeDispatchStop(b.status, b.errorMessage) ? ` — ${describeDispatchStop(b.status, b.errorMessage)}` : ""}`}
                   className={cn(
                     "h-7 w-7 shrink-0 rounded-[4px] flex items-center justify-center text-[10px] font-bold leading-none hover:ring-2 hover:ring-indigo-400 hover:scale-105 transition-all",
                     DISPATCH_SQUARE_STYLES[state]
@@ -855,8 +874,34 @@ export function CampaignDetails({
               );
             })}
           </div>
+          {/* Motivo de cada lote parado, em texto (o title do quadrado não aparece no celular). */}
+          {(() => {
+            const parados = campaign.batches
+              .map((b, i) => ({ b, i, motivo: describeDispatchStop(b.status, b.errorMessage) }))
+              .filter((x) => x.motivo);
+            if (parados.length === 0) return null;
+            return (
+              <div className="mt-2 space-y-1.5" data-testid={`dispatch-stop-list-${campaign.campaignId}`}>
+                {parados.slice(0, 3).map(({ b, i, motivo }) => (
+                  <DispatchStopNotice
+                    key={b.id}
+                    status={b.status}
+                    errorMessage={`Lote ${i + 1}: ${motivo}`}
+                    testId={`dispatch-stop-notice-batch-${b.id}`}
+                  />
+                ))}
+                {parados.length > 3 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Mais {parados.length - 3} lote(s) parado(s): passe o mouse ou clique no quadrado para ver o motivo.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
+
+      <QueueBlockNotice block={campaign.queueBlock} className="mt-2" />
 
       {outsideWindowDialog}
     </>

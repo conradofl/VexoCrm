@@ -11,6 +11,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { OptOutSkipNotice } from "@/components/leads/OptOutSkipNotice";
+import { DispatchStopNotice, describePendingRecipient } from "@/components/campaigns/DispatchStopReason";
+import { OutsideSendWindowError } from "@/lib/dispatchTrigger";
+import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
 
 interface DispatchRecipientsDialogProps {
   dispatchId: string | null;
@@ -30,6 +33,7 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
   const { data, isLoading, refetch, isFetching } = useDispatchRecipients(dispatchId, statusFilter);
   const retryFailedMutation = useRetryFailedDispatchLeads();
   const runPendingMutation = useRunPendingDispatchLeads();
+  const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
 
   const handleDownloadCsv = async () => {
     if (!dispatchId) return;
@@ -88,7 +92,22 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
   const handleRunPending = async () => {
     if (!dispatchId) return;
     try {
-      const res = await runPendingMutation.mutateAsync(dispatchId);
+      let res;
+      try {
+        res = await runPendingMutation.mutateAsync({ dispatchId });
+      } catch (err) {
+        // Fora da janela: mesma confirmação do "Disparar Agora". Antes a rota aceitava e o lote pausava calado.
+        if (!(err instanceof OutsideSendWindowError)) throw err;
+        const force = await askToForce(err.details);
+        if (!force) {
+          toast({
+            title: "Não processados não disparados",
+            description: `Fora da janela de envio (${err.details.start}–${err.details.end}). Nada foi enviado e o lote continua como estava. A janela abre ${err.details.nextOpeningLocal}.`,
+          });
+          return;
+        }
+        res = await runPendingMutation.mutateAsync({ dispatchId, forceOutsideWindow: true });
+      }
       toast({
         title: "Disparo iniciado",
         description: res.message || `${res.pendingCount || data?.pendingCount || 0} lead(s) não processado(s) agendado(s) para envio.`,
@@ -258,6 +277,8 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
           </div>
         </DialogHeader>
 
+        <DispatchStopNotice status={data?.dispatchStatus} errorMessage={data?.dispatchErrorMessage} className="mt-3" />
+
         <OptOutSkipNotice count={data?.optedOutPendingCount} context="lote" className="mt-3 rounded-md px-2.5 py-1.5" />
 
         {/* Filtros e Busca */}
@@ -395,7 +416,17 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
                       ) : item.status === "skipped" ? (
                         <span className="text-xs text-amber-600 font-medium">Interrompido antes do envio</span>
                       ) : (
-                        <span className="text-xs text-muted-foreground">Pendente na fila</span>
+                        <span
+                          data-testid="pending-recipient-reason"
+                          className={cn(
+                            "text-xs",
+                            describePendingRecipient(data?.dispatchStatus, data?.dispatchErrorMessage) === "Pendente na fila"
+                              ? "text-muted-foreground"
+                              : "text-amber-700 dark:text-amber-400 font-medium"
+                          )}
+                        >
+                          {describePendingRecipient(data?.dispatchStatus, data?.dispatchErrorMessage)}
+                        </span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -427,6 +458,7 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
           </div>
         </DialogFooter>
       </DialogContent>
+      {outsideWindowDialog}
     </Dialog>
   );
 }

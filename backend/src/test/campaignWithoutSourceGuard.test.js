@@ -83,7 +83,8 @@ async function setup(tables, { webhookUrl = null } = {}) {
     normalizeString: (s) => String(s ?? "").trim(),
     pgDatabasePool: pool,
     parseOptionalUuid: (v) => ({ value: v || null }),
-    getLeadClientN8nSettings: async () => ({}),
+    // Janela desligada: este arquivo prova a origem do lote, não a janela (desde 16/11/2026 o run-pending também a checa).
+    getLeadClientN8nSettings: async () => ({ send_window_enabled: false }),
     internalErrorPayloadDetails: () => ({}),
   });
   return { routes, pool, buildDispatchLeads, runCampaignDispatch: registered.runCampaignDispatch };

@@ -243,7 +243,8 @@ describe("SPEC 13 — fechamento pelo agendador usa o alvo gravado, e só ele", 
     expect(enviados).toHaveLength(5);
     const fim = await w.estado(d.id);
     expect(fim.status).toBe("interrupted");
-    expect(fim.error_message).toBe("Interrompido: 2 lead(s) pendente(s) de envio.");
+    // Desde 16/11/2026 o motivo diz também por que ficaram pendentes (describeInterruptedPending).
+    expect(fim.error_message).toMatch(/^Interrompido: 2 lead\(s\) pendente\(s\) de envio\. 2 não entrou\(aram\) na fila desta rodada/);
   }, SLOW);
 });
 
@@ -266,13 +267,16 @@ describe("SPEC 13 — fechamento do lote: 7 de 7 enviados", () => {
     expect((await w.estado(d.id)).status).toBe("done");
   }, SLOW);
 
-  it("contagem de runs que falha nas duas tentativas NÃO fabrica 'interrupted: 7 pendentes' e não mexe no status", async () => {
+  // Mudou em 16/11/2026 (PR do lote calado): ficar 'running' até o boot deixava todo botão em 409 e a tela em "em execução"
+  // sem motivo. Continua sem fabricar "interrupted: N pendentes"; sai 'failed' com o motivo, e o lote volta a ser disparável.
+  it("contagem de runs que falha nas duas tentativas NÃO fabrica 'interrupted: 7 pendentes'; sai 'failed' com o motivo", async () => {
     const w = await mundo({ falharContagem: true });
     const d = await w.lote({ status: "running", enviadosAntes: 7 });
     await w.rodar(d);
     const fim = await w.estado(d.id);
     expect(fim.status).not.toBe("interrupted");
-    expect(fim.status).toBe("running");
+    expect(fim.status).toBe("failed");
+    expect(fim.error_message).toContain("não foi possível contar no banco o que este lote já enviou");
     expect(fim.error_message || "").not.toMatch(/pendente/);
   }, SLOW);
 });
