@@ -58,8 +58,8 @@ export function maskEvolutionInstance(row) {
     connectionStatus: ["open", "connected", "online"].includes(connState)
       ? "open"
       : row.active !== false
-        ? "active"
-        : "disconnected",
+      ? "active"
+      : "disconnected",
     daily_limit_override: row.daily_limit_override != null ? Number(row.daily_limit_override) : null,
     owner_uid: row.owner_uid || null,
     sent_count_today: row.sent_count_today != null ? Number(row.sent_count_today) : 0,
@@ -102,7 +102,7 @@ export async function ensureLeadClientEvolutionInstancesTable(pool = null) {
         name TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
-    `).catch(() => { });
+    `).catch(() => {});
 
     await db.query(`
       CREATE TABLE IF NOT EXISTS public.lead_client_evolution_instances (
@@ -129,28 +129,28 @@ export async function ensureLeadClientEvolutionInstancesTable(pool = null) {
     await db.query(`
       ALTER TABLE public.lead_client_evolution_instances
         ADD COLUMN IF NOT EXISTS connection_state TEXT NOT NULL DEFAULT 'unknown'
-    `).catch(() => { });
+    `).catch(() => {});
 
     await db.query(`
       ALTER TABLE public.lead_client_evolution_instances
         ADD COLUMN IF NOT EXISTS owner_uid TEXT NULL
-    `).catch(() => { });
+    `).catch(() => {});
 
     await db.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_client_evolution_default
         ON public.lead_client_evolution_instances (client_id)
         WHERE is_default = true
-    `).catch(() => { });
+    `).catch(() => {});
 
     await db.query(`
       CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_client
         ON public.lead_client_evolution_instances (client_id, active)
-    `).catch(() => { });
+    `).catch(() => {});
 
     await db.query(`
       CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_owner_uid
         ON public.lead_client_evolution_instances (client_id, owner_uid)
-    `).catch(() => { });
+    `).catch(() => {});
 
     // A tabela de uso diário tem UM criador só (services/chipQuota.js), com instance_id TEXT. Antes era criada
     // aqui como UUID e lá como TEXT — cada leitor assumia um tipo e um dos dois quebrava.
@@ -169,12 +169,12 @@ export async function ensureLeadClientEvolutionInstancesTable(pool = null) {
         changed_by_email TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
-    `).catch(() => { });
+    `).catch(() => {});
 
     await db.query(`
       CREATE INDEX IF NOT EXISTS idx_evolution_instance_daily_limit_audit_instance
         ON public.evolution_instance_daily_limit_audit (instance_id, created_at DESC)
-    `).catch(() => { });
+    `).catch(() => {});
 
     if (db === pgDatabasePool) {
       _evolutionInstancesSchemaEnsured = true;
@@ -449,7 +449,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
         [clientId, dispatchWebhookUrl]
       );
       if (rows[0]?.id) instanceId = rows[0].id;
-    } catch { }
+    } catch {}
   }
   const effectiveInstanceId = instanceId || instanceName;
   const lockKey = `${clientId}:${effectiveInstanceId}`;
@@ -492,7 +492,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
              blocked_by_campaign = EXCLUDED.blocked_by_campaign,
              updated_at = now()`,
           [clientId, effectiveInstanceId, instanceName, campaignName]
-        ).catch(() => { });
+        ).catch(() => {});
 
         return {
           instanceName,
@@ -546,7 +546,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
              error_message = EXCLUDED.error_message,
              updated_at = now()`,
           [clientId, effectiveInstanceId, instanceName, `HTTP ${chatsResponse.status}`]
-        ).catch(() => { });
+        ).catch(() => {});
       }
       return { instanceName, chats: 0, synced: 0, messages: 0, error: `HTTP ${chatsResponse.status}` };
     }
@@ -618,7 +618,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
            started_at = COALESCE(public.whatsapp_instance_sync_progress.started_at, now()),
            updated_at = now()`,
         [clientId, effectiveInstanceId, instanceName, chats.length, startIndex, syncedChats, insertedMessages, totalBatches, Math.floor(startIndex / batchSize) + 1]
-      ).catch(() => { });
+      ).catch(() => {});
     }
 
     console.info(
@@ -663,12 +663,12 @@ export async function syncEvolutionInstanceChatsAndMessages(
             contact_name TEXT,
             first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          )`).catch(() => { });
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ALTER COLUMN phone DROP NOT NULL`).catch(() => { });
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_pic TEXT`).catch(() => { });
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS description TEXT`).catch(() => { });
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS website TEXT`).catch(() => { });
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_checked BOOLEAN DEFAULT false`).catch(() => { });
+          )`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ALTER COLUMN phone DROP NOT NULL`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_pic TEXT`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS description TEXT`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS website TEXT`).catch(() => {});
+        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_checked BOOLEAN DEFAULT false`).catch(() => {});
         const { rows: lidRows } = await db.query(
           "SELECT lid, phone, contact_name, profile_pic, profile_checked FROM public.whatsapp_lid_map"
         );
@@ -691,7 +691,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
            contact_name = COALESCE(NULLIF(EXCLUDED.contact_name, ''), public.whatsapp_lid_map.contact_name),
            updated_at = now()`,
         [lid, ph, nm || null]
-      ).catch(() => { });
+      ).catch(() => {});
     };
 
     // Processamento de TODOS os chats em lotes de batchSize (padrão 15)
@@ -751,7 +751,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
                 try {
                   const host = new URL(site.startsWith("http") ? site : `https://${site}`).hostname;
                   derived = host.replace(/^www\./, "").split(".")[0];
-                } catch { }
+                } catch {}
               }
               if (derived) chatName = derived;
               if (db) {
@@ -766,11 +766,11 @@ export async function syncEvolutionInstanceChatsAndMessages(
                      profile_checked = true,
                      updated_at = now()`,
                   [remoteJid, derived || null, prof?.picture || null, desc || null, site || null]
-                ).catch(() => { });
+                ).catch(() => {});
               }
               lidMap.set(remoteJid, { ...(knownEntry || {}), name: derived || knownEntry?.name || null, checked: true });
             }
-          } catch (e) { }
+          } catch (e) {}
         }
         if (!isGroup && phone && remoteJid.includes("@lid")) {
           await rememberLid(remoteJid, phone, chatName);
@@ -989,10 +989,10 @@ export async function syncEvolutionInstanceChatsAndMessages(
                       chatName || null,
                       isGroup,
                     ]
-                  ).catch(() => { });
+                  ).catch(() => {});
                   insertedMessages++;
                 }
-              } catch (fallbackErr) { }
+              } catch (fallbackErr) {}
             }
 
             // Classificação semântica automática para mensagens inbound
@@ -1040,7 +1040,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
                updated_at = now()
            WHERE client_id = $6 AND instance_id = $7`,
           [processedCount, syncedChats, insertedMessages, batchNumber, lastRemoteJid, clientId, effectiveInstanceId]
-        ).catch(() => { });
+        ).catch(() => {});
       }
 
       // Pausa controlada (padrão 1.2s) entre lotes para não sobrecarregar a Evolution
@@ -1061,7 +1061,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
              updated_at = now()
          WHERE client_id = $3 AND instance_id = $4`,
         [syncedChats, insertedMessages, clientId, effectiveInstanceId]
-      ).catch(() => { });
+      ).catch(() => {});
     }
 
     console.info(`[sync-evolution] Instance ${instanceName}: ${syncedChats} conversas processadas, ${insertedMessages} mensagens novas.`);
@@ -1076,7 +1076,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
              updated_at = now()
          WHERE client_id = $2 AND instance_id = $3`,
         [err?.message || "erro no sync", clientId, effectiveInstanceId]
-      ).catch(() => { });
+      ).catch(() => {});
     }
     return { instanceName: null, chats: 0, synced: 0, messages: 0, error: err?.message || "erro no sync" };
   } finally {
@@ -1187,8 +1187,8 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
   const ownerUid = Object.prototype.hasOwnProperty.call(body, "ownerUid")
     ? (normalizeString(body.ownerUid) || null)
     : Object.prototype.hasOwnProperty.call(body, "owner_uid")
-      ? (normalizeString(body.owner_uid) || null)
-      : (existing?.owner_uid || null);
+    ? (normalizeString(body.owner_uid) || null)
+    : (existing?.owner_uid || null);
 
   const webhookEnabled = Object.prototype.hasOwnProperty.call(body, "webhookEnabled")
     ? body.webhookEnabled === true
@@ -1376,7 +1376,7 @@ export async function upsertLeadClientEvolutionInstance(clientId, input, authAcc
 
     return result.rows[0] || null;
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => { });
+    await client.query("ROLLBACK").catch(() => {});
     throw error;
   } finally {
     client.release();
@@ -1430,9 +1430,9 @@ export function maskEvolutionProvisionResponse(data) {
     status: normalizeString(data.status) || normalizeString(instance.status) || null,
     qrcode: qrcode
       ? {
-        code: normalizeString(qrcode.code) || null,
-        base64: normalizeString(qrcode.base64) || null,
-      }
+          code: normalizeString(qrcode.code) || null,
+          base64: normalizeString(qrcode.base64) || null,
+        }
       : null,
   };
 }
@@ -1881,6 +1881,9 @@ export async function checkEvolutionInstanceHealth({ webhookUrl, webhookToken, c
       );
       error.statusCode = 502;
       error.code = "EVOLUTION_HEALTH_CHECK_FAILED";
+      // Quem chama precisa distinguir token recusado (401/403) e instância inexistente (404) de chip desconectado.
+      error.httpStatus = response.status;
+      error.instanceName = endpoint.instance;
       throw error;
     }
 
@@ -1890,6 +1893,8 @@ export async function checkEvolutionInstanceHealth({ webhookUrl, webhookToken, c
       const error = new Error(`Instancia Evolution "${endpoint.instance}" nao esta conectada (${state}).`);
       error.statusCode = 409;
       error.code = "EVOLUTION_INSTANCE_NOT_OPEN";
+      error.instanceName = endpoint.instance;
+      error.connectionState = state;
       throw error;
     }
 
