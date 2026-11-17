@@ -269,37 +269,37 @@ export function buildImportAuditSql() {
           SELECT DISTINCT ON (cp)
             cp,
             message_text AS last_sent_message,
-            ${lmTimestamp} AS last_sent_message_at
+            msg_at AS last_sent_message_at
           FROM (
             SELECT
               ${CP("lm.phone")} AS cp,
               lm.message_text,
-              ${lmTimestamp}
+              ${lmTimestamp} AS msg_at
             FROM public.lead_messages lm
             WHERE lm.client_id = $1
               AND lm.direction = 'outbound'
               AND COALESCE(btrim(lm.message_text), '') <> ''
               AND ${CP("lm.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
-            ORDER BY ${CP("lm.phone")}, ${lmTimestamp} DESC
           ) sub
+          ORDER BY cp, msg_at DESC
         ),
         last_reply_msg AS (
           SELECT DISTINCT ON (cp)
             cp,
             message_text AS last_reply_message,
-            ${lmTimestamp} AS last_reply_message_at
+            msg_at AS last_reply_message_at
           FROM (
             SELECT
               ${CP("lm.phone")} AS cp,
               lm.message_text,
-              ${lmTimestamp}
+              ${lmTimestamp} AS msg_at
             FROM public.lead_messages lm
             WHERE lm.client_id = $1
               AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
               AND COALESCE(btrim(lm.message_text), '') <> ''
               AND ${CP("lm.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
-            ORDER BY ${CP("lm.phone")}, ${lmTimestamp} DESC
           ) sub
+          ORDER BY cp, msg_at DESC
         )
         SELECT
           i.id AS lead_import_item_id,

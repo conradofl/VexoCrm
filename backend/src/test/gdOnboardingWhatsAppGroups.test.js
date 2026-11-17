@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import http from "http";
 import { readFileSync } from "fs";
@@ -468,6 +468,16 @@ describe("Onboarding GD · Criação de Grupos de WhatsApp", () => {
 });
 
 describe("Evolution Service Group Helpers (createEvolutionGroup / getEvolutionGroupInviteCode)", () => {
+  // A blindagem do evolution.js devolve resposta falsa em teste e nem chama o fetchFn.
+  // Aqui o fetchFn é de mentira e o baseUrl é de teste, então liberamos só neste bloco
+  // para o código real formatar participantes e montar a URL que o teste confere.
+  beforeEach(() => {
+    vi.stubEnv("ALLOW_LIVE_WHATSAPP", "true");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("formata participantes adicionando DDI 55 e montando JIDs corretamente", async () => {
     const fakeFetch = vi.fn().mockResolvedValue({
       ok: true,
