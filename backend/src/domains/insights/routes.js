@@ -24,6 +24,7 @@ import {
 import { parseDashboardPeriodRequest } from "../../services/dashboardPeriod.js";
 import { redactQueueListForViewer } from "../../services/dashboardOverview.js";
 import { canAccessAppView } from "../../accessGuards.js";
+import { listChipDiary } from "../../services/chipDiary.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -1199,6 +1200,23 @@ export function registerInsightsRoutes(app, deps) {
       res.json({ days, items: rows });
     } catch (err) {
       sendError(res, 500, "EVOLUTION_USAGE_REPORT_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
+  // GET /api/reports/chip-diary — Diário do chip (services/chipDiary.js): quedas e voltas de cada chip da empresa, com
+  // o motivo que a Evolution informou e o que o sistema enviou pelo chip antes da queda. Mesmo escopo de tenant e o
+  // mesmo portão da aba "Saúde" de Canais & Chips (conexoes). available: false = migration ainda não aplicada.
+  app.get("/api/reports/chip-diary", requireFirebaseAuth, requireInternalPageAccess(["conexoes"]), async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Database unavailable");
+    const requestedClientId = normalizeString(req.query.clientId);
+    if (!requestedClientId) return sendError(res, 400, "MISSING_CLIENT_ID", "Missing clientId");
+    const authorizedClientId = resolveAuthorizedClientId(req, res, requestedClientId);
+    if (!authorizedClientId) return;
+    try {
+      res.json(await listChipDiary(pgDatabasePool, authorizedClientId, { limit: req.query.limit }));
+    } catch (err) {
+      sendError(res, 500, "CHIP_DIARY_FAILED", err instanceof Error ? err.message : "Failed");
     }
   });
 }
