@@ -100,13 +100,15 @@ export function normalizeDispatchPhone(phone, lead = null) {
   const raw = phone || lead?.telefone || lead?.phone || "";
   const canonical = toCanonicalPhone(raw);
   if (canonical) return canonical;
-  return normalizeString(raw).replace(/\D/g, "");
+  // Era normalizeString(raw): normalizeString só existe dentro de registerCampaignsRoutes, e aqui virava ReferenceError
+  // (telefone sem dígito no claim do lote derrubava o lote inteiro).
+  return String(raw ?? "").trim().replace(/\D/g, "");
 }
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
 import { isPhoneOptedOut } from "../../campaign/queueOptOut.js";
 import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
 import { countOptedOutPhones } from "../../services/optOut.js";
-import { resumeDeferredQueues } from "../../campaign/queueResume.js";
+import { getQueueBlock, resumeDeferredQueues } from "../../campaign/queueResume.js";
 import {
   QUOTA_PAUSE_MARKER,
   buildQuotaGateForWebhook as buildQuotaGateForWebhookShared,
@@ -451,6 +453,43 @@ export function describeSendWindowRefusal(now, sendWindowConfig) {
       nextOpeningLocal: nextOpeningStr,
     },
   };
+}
+
+// Regra única da janela para os botões que disparam na hora ("Disparar Agora" e "Disparar não processados"). Até 16/11/2026
+// o run-pending não olhava a janela: respondia "N pendentes em execução", marcava o lote 'running' e o motor pausava no
+// primeiro lead (caso Nous, 20:22, janela até 20:00). allowed=false: a rota devolve 422 OUTSIDE_SEND_WINDOW e não toca no
+// lote. forced=true só com o booleano true confirmado na tela, e vira ignoreSendWindow no motor.
+export function evaluateManualSendWindow({ now = new Date(), settings, forceOutsideWindow }) {
+  const sendWindowConfig = resolveSendWindowConfig(settings || {});
+  if (isWithinSendWindow(now, sendWindowConfig)) return { allowed: true, forced: false, refusal: null };
+  const refusal = describeSendWindowRefusal(now, sendWindowConfig);
+  if (forceOutsideWindow !== true) return { allowed: false, forced: false, refusal };
+  return { allowed: true, forced: true, refusal };
+}
+
+// Texto gravado em error_message quando o motor lança no meio do lote. Mensagem que já explica a parada (os "Disparo
+// interrompido: ..." do link de agenda) vai como está; o resto ganha o prefixo "Falhou:".
+export function describeDispatchCrash(err) {
+  // normalizeString vem das deps (dentro de registerCampaignsRoutes); aqui, no nível do módulo, não existe.
+  const raw = String(err?.userMessage || err?.message || (typeof err === "string" ? err : "") || "").trim();
+  const msg = raw || "erro sem mensagem no motor de disparo";
+  return /^disparo interrompido/i.test(msg) ? msg : `Falhou: ${msg}`;
+}
+
+// "Interrompido: N pendentes" sozinho não diz o que fazer. claimedCount = reservados sem confirmação de envio (execução que
+// caiu no meio); o resto do alvo não entrou na fila desta rodada.
+export function describeInterruptedPending({ pendingCount, claimedCount = 0 }) {
+  const pend = Math.max(0, Number(pendingCount) || 0);
+  const reservados = Math.min(pend, Math.max(0, Number(claimedCount) || 0));
+  const foraDaFila = pend - reservados;
+  const partes = [];
+  if (reservados > 0) {
+    partes.push(`${reservados} reservado(s) por uma execução que não terminou, sem confirmação de envio`);
+  }
+  if (foraDaFila > 0) {
+    partes.push(`${foraDaFila} não entrou(aram) na fila desta rodada (saiu do público da planilha ou já tem a sequência em andamento)`);
+  }
+  return `Interrompido: ${pend} lead(s) pendente(s) de envio.${partes.length ? ` ${partes.join("; ")}.` : ""}`;
 }
 
 /**
@@ -3306,6 +3345,72 @@ export function registerCampaignsRoutes(app, deps) {
   }
   // ────────────────────────────────────────────────────────────────────────────
 
+  // Janela dos botões que disparam na hora. null = a rota já respondeu 422 (não mexe no lote); senão { forced }.
+  async function checkManualSendWindowOrRefuse(req, res, { clientId, campaignId, dispatchId, route }) {
+    const decision = evaluateManualSendWindow({
+      now: new Date(),
+      settings: (await getLeadClientN8nSettings(clientId)) || {},
+      forceOutsideWindow: req.body?.forceOutsideWindow,
+    });
+    if (!decision.allowed) {
+      sendError(res, 422, "OUTSIDE_SEND_WINDOW", decision.refusal.message, decision.refusal.details);
+      return null;
+    }
+    if (decision.forced) {
+      // Sem tabela de auditoria de disparo (dívida anotada no PR do Disparar Agora fora da janela): o registro do forçamento é este log.
+      console.warn("[campaign-dispatch] disparo_forcado_fora_da_janela", {
+        route,
+        clientId,
+        campaignId,
+        dispatchId,
+        uid: req.authAccess?.uid || null,
+        email: req.authAccess?.email || null,
+        localTime: decision.refusal.details.localTime,
+        sendWindow: decision.refusal.details.sendWindow,
+        nextOpening: decision.refusal.details.nextOpening,
+      });
+    }
+    return { forced: decision.forced };
+  }
+
+  // O motor rodou em segundo plano e lançou. Antes (até 16/11/2026) o .catch montava o update SEM await nem then: o
+  // construtor de consulta só executa quando alguém espera por ele, então o update nunca ia ao banco, o lote ficava
+  // 'running' até o próximo boot e todo botão devolvia 409. Só sai de 'running': se o motor já tinha pausado, fica.
+  async function markDispatchCrashed(dispatchId, err, origem) {
+    const motivo = describeDispatchCrash(err);
+    console.error("[campaign-dispatch] lote_falhou", { origem, dispatchId, motivo });
+    try {
+      const { error } = await supabase
+        .from("campaign_dispatches")
+        .update({
+          status: "failed",
+          error_message: motivo,
+          finished_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", dispatchId)
+        .eq("status", "running");
+      if (error) console.error("[campaign-dispatch] falha ao gravar lote_falhou:", { dispatchId, error: error.message || error });
+    } catch (writeErr) {
+      console.error("[campaign-dispatch] falha ao gravar lote_falhou:", { dispatchId, error: writeErr?.message || writeErr });
+    }
+  }
+
+  const COUNT_UNAVAILABLE_MESSAGE =
+    "Falhou: não foi possível contar no banco o que este lote já enviou. Abra os destinatários para conferir e dispare os não processados.";
+  async function markDispatchCountUnavailable(db, dispatchId) {
+    try {
+      await db.from("campaign_dispatches").update({
+        status: "failed",
+        error_message: COUNT_UNAVAILABLE_MESSAGE,
+        finished_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", dispatchId).eq("status", "running");
+    } catch (err) {
+      console.error("[campaign-dispatch] falha ao gravar contagem_indisponivel:", { dispatchId, error: err?.message || err });
+    }
+  }
+
   async function getDispatchRunCounts(pool, dispatchId) {
     if (!pool) return null;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -3315,7 +3420,8 @@ export function registerCampaignsRoutes(app, deps) {
              COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
              COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
              COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
-             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped
+             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped,
+             COUNT(*) FILTER (WHERE status = 'claimed')::int as claimed
            FROM public.campaign_dispatch_runs
            WHERE dispatch_id = $1`,
           [dispatchId]
@@ -3326,6 +3432,7 @@ export function registerCampaignsRoutes(app, deps) {
             failed: Number(countsRes.rows[0].failed || 0),
             invalid: Number(countsRes.rows[0].invalid || 0),
             skipped: Number(countsRes.rows[0].skipped || 0),
+            claimed: Number(countsRes.rows[0].claimed || 0),
           };
         }
       } catch (err) {
@@ -3482,10 +3589,10 @@ export function registerCampaignsRoutes(app, deps) {
     if (cycleLeads.length === 0) {
       const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
       if (!counts) {
-        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Status do lote NÃO será alterado para evitar fabricação de dados.`);
-        // Comportamento real: o lote foi reivindicado como 'running' e fica 'running' até o próximo boot, quando
-        // recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe. Até lá a trava de uma ocorrência rodando por
-        // campanha segue ocupada e a tela mostra "em execução".
+        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Contadores NÃO são gravados para evitar fabricação de dados.`);
+        // Até 16/11/2026 o lote ficava 'running' até o próximo boot (todo botão devolvia 409, a tela mostrava "em
+        // execução"). Agora sai como 'failed' com o motivo; os contadores ficam como estavam.
+        await markDispatchCountUnavailable(db, dispatchId);
         return;
       }
       const totalSent = counts.sent;
@@ -3497,7 +3604,7 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (targetCount > 0 && totalProcessed < targetCount) {
         const pendingCount = targetCount - totalProcessed;
-        const finalMsg = `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`;
+        const finalMsg = describeInterruptedPending({ pendingCount, claimedCount: counts.claimed });
         await db.from("campaign_dispatches").update({
           status: "interrupted",
           sent_count: totalSent,
@@ -3587,17 +3694,19 @@ export function registerCampaignsRoutes(app, deps) {
         }
       } catch (valErr) {
         console.warn("[campaign-dispatch] erro na pré-validação de números (disparo continuará sem travar):", valErr?.message || valErr);
-        validLeads = leads;
+        // Era validLeads = leads: a lista ANTES da exclusão por ciclo e da trava de sequência em andamento. Uma falha na
+        // pré-validação devolvia ao envio quem já tinha recebido em outro lote deste ciclo.
+        validLeads = cycleLeads;
       }
     }
 
     if (validLeads.length === 0) {
       const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
       if (!counts) {
-        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Status do lote NÃO será alterado para evitar fabricação de dados.`);
-        // Comportamento real: o lote foi reivindicado como 'running' e fica 'running' até o próximo boot, quando
-        // recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe. Até lá a trava de uma ocorrência rodando por
-        // campanha segue ocupada e a tela mostra "em execução".
+        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Contadores NÃO são gravados para evitar fabricação de dados.`);
+        // Até 16/11/2026 o lote ficava 'running' até o próximo boot (todo botão devolvia 409, a tela mostrava "em
+        // execução"). Agora sai como 'failed' com o motivo; os contadores ficam como estavam.
+        await markDispatchCountUnavailable(db, dispatchId);
         return;
       }
       const totalSent = counts.sent;
@@ -3613,7 +3722,7 @@ export function registerCampaignsRoutes(app, deps) {
           status: "interrupted",
           sent_count: totalSent,
           failed_count: totalFailed,
-          error_message: `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`,
+          error_message: describeInterruptedPending({ pendingCount, claimedCount: counts.claimed }),
           updated_at: new Date().toISOString(),
         }).eq("id", dispatchId);
       } else {
@@ -4574,7 +4683,7 @@ export function registerCampaignsRoutes(app, deps) {
     // Mas se a contagem do banco falhou, NUNCA marca 'interrupted' por falta de dados.
     if (counts && targetCount > 0 && totalProcessed < targetCount) {
       const pendingCount = targetCount - totalProcessed;
-      const finalMsg = `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`;
+      const finalMsg = describeInterruptedPending({ pendingCount, claimedCount: counts.claimed });
       await db.from("campaign_dispatches").update({
         status: "interrupted",
         sent_count: totalSent,
@@ -4585,14 +4694,15 @@ export function registerCampaignsRoutes(app, deps) {
       return;
     }
 
-    // Contagem falhou nas duas tentativas: grava só os números deste envio e NÃO decide o status. Comportamento real:
-    // o lote fica 'running' até o próximo boot, quando recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe.
+    // Contagem falhou nas duas tentativas: grava só os números deste envio (o que o motor viu) e sai de 'running' com o
+    // motivo. Até 16/11/2026 o lote ficava 'running' até o próximo boot.
     if (!counts) {
       await db.from("campaign_dispatches").update({
         sent_count: totalSent,
         failed_count: totalFailed,
         updated_at: new Date().toISOString(),
       }).eq("id", dispatchId);
+      await markDispatchCountUnavailable(db, dispatchId);
       return;
     }
 
@@ -4863,7 +4973,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (pageCampaignIds.length > 0) {
         const { rows: batchRows } = await pgDatabasePool.query(
           `
-            SELECT id, campaign_id, status, sent_count, failed_count, target_count, scheduled_at, created_at
+            SELECT id, campaign_id, status, sent_count, failed_count, target_count, scheduled_at, created_at, error_message
             FROM public.campaign_dispatches
             WHERE client_id = $1 AND campaign_id = ANY($2::uuid[])
             ORDER BY created_at ASC
@@ -4909,6 +5019,8 @@ export function registerCampaignsRoutes(app, deps) {
           statusLabel,
           nextScheduledAt: row.next_scheduled_at,
           eta,
+          // Fila de resposta parada por chip fora do ar (campaign/queueResume.js). null = sem bloqueio conhecido.
+          queueBlock: getQueueBlock(row.campaign_id),
           leadsActionable: {
             pause: row.leads_pause_target || 0,
             resume: row.leads_resume_target || 0,
@@ -4922,6 +5034,8 @@ export function registerCampaignsRoutes(app, deps) {
             targetCount: b.target_count,
             scheduledAt: b.scheduled_at,
             createdAt: b.created_at,
+            // Motivo gravado pelo motor/agendador (janela, chip, cota, falha). A tela mostra no cartão do lote.
+            errorMessage: b.error_message || null,
           })),
         };
       };
@@ -5160,7 +5274,7 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       const { data: dispatch, error: dispatchErr } = await supabase
         .from("campaign_dispatches")
-        .select("id, client_id, campaign_id, name, limit_per_run, offset, steps, status, target_count")
+        .select("id, client_id, campaign_id, name, limit_per_run, offset, steps, status, target_count, error_message")
         .eq("id", dispatchId)
         .maybeSingle();
 
@@ -5303,6 +5417,9 @@ export function registerCampaignsRoutes(app, deps) {
         dispatchId: dispatch.id,
         dispatchName: dispatch.name,
         campaignName: campaign.name,
+        // Estado e motivo do lote: a tela diz por que os não processados estão parados, em vez de "Pendente na fila".
+        dispatchStatus: dispatch.status || null,
+        dispatchErrorMessage: dispatch.error_message || null,
         total: recipients.length,
         sentCount,
         failedCount,
@@ -5844,6 +5961,16 @@ export function registerCampaignsRoutes(app, deps) {
         return refuseCampaignWithoutSource(res, sendError, { campaignId: campaign.id, clientId: authorizedClientId, dispatchId });
       }
 
+      // Janela: mesma regra do "Disparar Agora". Antes fora da janela esta rota respondia "N pendentes em execução", o
+      // lote virava 'running' e o motor pausava no primeiro lead.
+      const janela = await checkManualSendWindowOrRefuse(req, res, {
+        clientId: authorizedClientId,
+        campaignId: campaign.id,
+        dispatchId,
+        route: "run-pending",
+      });
+      if (!janela) return;
+
       // 1. Calcula quantos leads pendentes restam (ocorrencia recorrente: publico inteiro, sem limite — igual ao envio)
       const occurrence = pgDatabasePool
         ? await readOccurrenceInfo(pgDatabasePool, dispatchId)
@@ -5889,17 +6016,12 @@ export function registerCampaignsRoutes(app, deps) {
         message: `${pendingLeads.length} lead(s) pendente(s) em execução.`,
         pendingCount: pendingLeads.length,
         dispatchId,
+        ...(janela.forced ? { forcedOutsideWindow: true } : {}),
       });
 
-      runCampaignDispatch({ dispatch, campaign, supabase }).catch((err) => {
-        console.error("[campaign-dispatch] run_pending_failed", { dispatchId, error: err.message });
-        supabase.from("campaign_dispatches").update({
-          status: "failed",
-          error_message: err.message,
-          finished_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq("id", dispatchId);
-      });
+      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: janela.forced }).catch((err) =>
+        markDispatchCrashed(dispatchId, err, "run-pending")
+      );
     } catch (err) {
       console.error("[run-pending] error:", err);
       sendError(res, 500, "RUN_PENDING_ERROR", err instanceof Error ? err.message : "Failed to run pending leads");
@@ -6765,27 +6887,14 @@ export function registerCampaignsRoutes(app, deps) {
 
       // Janela de envio: o botão obedece a mesma regra do agendador. Fora dela, 422 — a não ser que a tela tenha
       // pedido confirmação e mandado forceOutsideWindow: true (só o booleano true vale; "true", 1 e afins não).
-      const sendWindowConfig = resolveSendWindowConfig((await getLeadClientN8nSettings(authorizedClientId)) || {});
-      const now = new Date();
-      let forcedOutsideWindow = false;
-      if (!isWithinSendWindow(now, sendWindowConfig)) {
-        const refusal = describeSendWindowRefusal(now, sendWindowConfig);
-        if (req.body?.forceOutsideWindow !== true) {
-          return sendError(res, 422, "OUTSIDE_SEND_WINDOW", refusal.message, refusal.details);
-        }
-        forcedOutsideWindow = true;
-        // Sem tabela de auditoria de disparo (dívida anotada no PR): o registro do forçamento é este log.
-        console.warn("[campaign-dispatch] disparo_forcado_fora_da_janela", {
-          clientId: authorizedClientId,
-          campaignId: campaign.id,
-          dispatchId,
-          uid: req.authAccess?.uid || null,
-          email: req.authAccess?.email || null,
-          localTime: refusal.details.localTime,
-          sendWindow: refusal.details.sendWindow,
-          nextOpening: refusal.details.nextOpening,
-        });
-      }
+      const janela = await checkManualSendWindowOrRefuse(req, res, {
+        clientId: authorizedClientId,
+        campaignId: campaign.id,
+        dispatchId,
+        route: "trigger",
+      });
+      if (!janela) return;
+      const forcedOutsideWindow = janela.forced;
 
       // Claim atomico tambem no gatilho manual: `.neq("status","running")` impede que
       // dois cliques no botao — ou um clique concorrente com o ciclo do scheduler —
@@ -6850,10 +6959,9 @@ export function registerCampaignsRoutes(app, deps) {
 
       // Executa o disparo em background (fire-and-forget da resposta HTTP). Dentro da janela o motor segue checando
       // e pausa o lote se ela fechar no meio; só o forçamento confirmado desliga essa checagem.
-      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: forcedOutsideWindow }).catch((err) => {
-        console.error("[campaign-dispatch] dispatch_run_failed", { dispatchId, error: err.message });
-        supabase.from("campaign_dispatches").update({ status: "failed", error_message: err.message, finished_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", dispatchId);
-      });
+      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: forcedOutsideWindow }).catch((err) =>
+        markDispatchCrashed(dispatchId, err, "trigger")
+      );
     } catch (err) {
       sendError(res, 500, "DISPATCH_TRIGGER_FAILED", err instanceof Error ? err.message : "Failed");
     }

@@ -143,6 +143,8 @@ describe("Correção: contagem de não processados no disparo manual (run-pendin
       supabase,
       buildDispatchLeads,
       resolveAuthorizedClientId: () => TENANT,
+      // Janela desligada: aqui se prova a contagem de pendentes; a janela do run-pending está em campaignLoteCaladoMotivo.test.js.
+      getLeadClientN8nSettings: async () => ({ send_window_enabled: false }),
       resolveCampaignDispatchSettings: async () => ({ webhookUrl: null }),
       ensureDb: () => true,
       sendError: (res, status, code, msg) => res.status(status).json({ error: { code, message: msg } }),
@@ -307,6 +309,8 @@ describe("Correção: contagem de não processados no disparo manual (run-pendin
       supabase,
       buildDispatchLeads,
       resolveAuthorizedClientId: () => TENANT,
+      // Janela desligada: aqui se prova a contagem de pendentes; a janela do run-pending está em campaignLoteCaladoMotivo.test.js.
+      getLeadClientN8nSettings: async () => ({ send_window_enabled: false }),
       ensureDb: () => true,
       sendError: (res, status, code, msg) => res.status(status).json({ error: { code, message: msg } }),
       requireAppViewAccess: () => (_req, _res, next) => next(),

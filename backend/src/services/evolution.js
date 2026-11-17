@@ -1890,6 +1890,8 @@ export async function checkEvolutionInstanceHealth({ webhookUrl, webhookToken, c
       const error = new Error(`Instancia Evolution "${endpoint.instance}" nao esta conectada (${state}).`);
       error.statusCode = 409;
       error.code = "EVOLUTION_INSTANCE_NOT_OPEN";
+      error.instanceName = endpoint.instance;
+      error.connectionState = state;
       throw error;
     }
 

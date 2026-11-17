@@ -20,7 +20,7 @@ import { createPgliteDb } from "./helpers/pgliteDb.js";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { ensureEvolutionInstanceDailyUsageTable, reserveChipDailyQuota, resetChipQuotaStateForTest } from "../services/chipQuota.js";
 
-const estado = vi.hoisted(() => ({ settings: { send_window_enabled: false }, instances: [] }));
+const estado = vi.hoisted(() => ({ settings: { send_window_enabled: false }, instances: [], healthReal: false, chipState: "open" }));
 
 vi.mock("../campaign/settings.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -30,12 +30,16 @@ vi.mock("../campaign/settings.js", async (importOriginal) => ({
     source: "teste",
   }),
 }));
-vi.mock("../services/evolution.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  checkEvolutionInstanceHealth: async () => ({ state: "open" }),
+vi.mock("../services/evolution.js", async (importOriginal) => {
+  const real = await importOriginal();
+  return {
+  ...real,
+  // healthReal: a checagem REAL (services/evolution.js), com o fetch dublado respondendo estado.chipState.
+  checkEvolutionInstanceHealth: async (args) => (estado.healthReal ? real.checkEvolutionInstanceHealth(args) : { state: "open" }),
   getLeadClientEvolutionInstances: async () => estado.instances,
   resolveInstanceIdentifier: async ({ identifier }) => ({ canonicalName: identifier || null }),
-}));
+  };
+});
 vi.mock("../services/n8nSettings.js", async (importOriginal) => ({
   ...(await importOriginal()),
   getLeadClientN8nSettings: async () => estado.settings,
@@ -115,9 +119,15 @@ beforeEach(() => {
       await new Promise((r) => timeoutOriginal(r, 10));
       return { ok: true, status: 201, text: async () => '{"key":{"id":"wa"}}' };
     }
+    if (/connectionState/.test(String(url))) {
+      const body = JSON.stringify({ instance: { state: estado.chipState } });
+      return { ok: true, status: 200, text: async () => body, json: async () => JSON.parse(body) };
+    }
     return { ok: true, status: 200, text: async () => "[]", json: async () => [] };
   });
   spies = ["log", "info", "warn", "error"].map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+  estado.healthReal = false;
+  estado.chipState = "open";
 });
 afterEach(() => {
   globalThis.fetch = fetchOriginal;
@@ -376,5 +386,56 @@ describe("opt-out — leitura única das duas fontes", () => {
     expect(await isPhoneOptedOut(pool, { clientId: T, phone: "5534990000003" })).toBe(true); // metadata.opt_out
     expect(await isPhoneOptedOut(pool, { clientId: T, phone: "5534990000004" })).toBe(false);
     expect(await isPhoneOptedOut(pool, { clientId: "outro-tenant", phone: "5534990000001" })).toBe(false); // outro tenant
+  });
+});
+
+// Item 5 do PR do lote calado (16/11/2026): campanha 2501b93d da Nous, chip nous-gestao-chip-4-nous em "close". A retomada
+// lançava na checagem de conexão e virava "falha ao retomar fila adiada" no log a cada concessão, sem nada na tela.
+describe("agendador retoma a fila adiada — chip desconectado", () => {
+  it("[OBRIGATÓRIO] chip 'close': não envia, não registra erro, adia de 5 em 5 → 10 → 20 → 30 min e expõe o motivo para a tela", async () => {
+    const w = await mundo();
+    estado.healthReal = true;
+    estado.chipState = "close";
+    await db.query("INSERT INTO public.campaign_queue_deferrals (campaign_id, client_id, reason, retry_after) VALUES ($1, $2, 'send_window', now() - interval '1 minute')", [CAMP, T]);
+    const { resumeDeferredQueues, getQueueBlock, resetQueueBlocksForTest } = await import("../campaign/queueResume.js");
+    resetQueueBlocksForTest();
+    const pool = { query: (s, p) => db.query(s, p) };
+    const esperas = [];
+    for (let i = 0; i < 5; i += 1) {
+      const antes = Date.now();
+      const out = await resumeDeferredQueues({ pool });
+      expect(out).toMatchObject({ resumed: 0, postponed: 1, examined: 1 });
+      const ad = await w.adiamento();
+      esperas.push(Math.round((new Date(ad.retry_after).getTime() - antes) / 60_000));
+      await db.query("UPDATE public.campaign_queue_deferrals SET retry_after = now() - interval '1 second' WHERE campaign_id = $1", [CAMP]);
+    }
+    expect(esperas).toEqual([5, 10, 20, 30, 30]);
+    expect(enviados).toHaveLength(0);
+    expect(await w.progressoDe(1)).toBeNull(); // ninguém reivindicado
+    expect((await w.adiamento()).reason).toBe("send_window"); // o motivo gravado não é trocado (CHECK da coluna)
+    const erros = spies[3].mock.calls.filter((c) => String(c[0]).includes("falha ao retomar fila adiada"));
+    expect(erros).toHaveLength(0);
+    const bloqueio = getQueueBlock(CAMP);
+    expect(bloqueio).toMatchObject({ reason: "chip_unavailable", chipName: "chip-teste", connectionState: "close", attempts: 5 });
+    expect(bloqueio.message).toBe("Fila de resposta parada: chip chip-teste desconectado (close). Reconecte em Conexões; o sistema tenta de novo sozinho.");
+  });
+
+  it("chip volta: a fila retoma, envia e o motivo some da tela", async () => {
+    const w = await mundo();
+    estado.healthReal = true;
+    estado.chipState = "close";
+    await db.query("INSERT INTO public.campaign_queue_deferrals (campaign_id, client_id, reason, retry_after) VALUES ($1, $2, 'send_window', now() - interval '1 minute')", [CAMP, T]);
+    const { resumeDeferredQueues, getQueueBlock, resetQueueBlocksForTest } = await import("../campaign/queueResume.js");
+    resetQueueBlocksForTest();
+    const pool = { query: (s, p) => db.query(s, p) };
+    await resumeDeferredQueues({ pool });
+    expect(getQueueBlock(CAMP)).not.toBeNull();
+    estado.chipState = "open";
+    await db.query("UPDATE public.campaign_queue_deferrals SET retry_after = now() - interval '1 second' WHERE campaign_id = $1", [CAMP]);
+    const out = await resumeDeferredQueues({ pool });
+    expect(out.resumed).toBe(1);
+    expect(enviados).toEqual([FONE(1)]);
+    expect(getQueueBlock(CAMP)).toBeNull();
+    expect(await w.adiamento()).toBeNull();
   });
 });

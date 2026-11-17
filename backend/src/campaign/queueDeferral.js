@@ -85,12 +85,30 @@ export async function leaseDueQueueDeferrals(pool, { limit = 10, leaseSeconds = 
            LIMIT $1
            FOR UPDATE SKIP LOCKED
         )
-        RETURNING d.campaign_id, d.client_id, d.reason`,
+        RETURNING d.campaign_id, d.client_id, d.reason, d.attempts`,
       [limit, leaseSeconds]
     );
     return rows;
   } catch (err) {
     relatarFalha(err, "leaseDueQueueDeferrals");
     return [];
+  }
+}
+
+/**
+ * Empurra só o retry_after (o motivo gravado fica como está). Usado quando a retomada esbarra num bloqueio que a tabela
+ * não sabe nomear (chip desconectado: o CHECK de reason só aceita send_window e chip_quota, e este PR não tem migration).
+ */
+export async function postponeQueueDeferral(pool, campaignId, retryAfter) {
+  if (!pool || !campaignId) return { ok: false };
+  try {
+    await pool.query(
+      `UPDATE public.campaign_queue_deferrals SET retry_after = $2, updated_at = now() WHERE campaign_id = $1`,
+      [campaignId, retryAfter instanceof Date ? retryAfter.toISOString() : retryAfter]
+    );
+    return { ok: true };
+  } catch (err) {
+    relatarFalha(err, "postponeQueueDeferral");
+    return { ok: false };
   }
 }

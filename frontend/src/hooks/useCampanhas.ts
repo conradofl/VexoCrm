@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
-import { postDispatchTrigger } from "@/lib/dispatchTrigger";
+import { postDispatchRunPending, postDispatchTrigger } from "@/lib/dispatchTrigger";
 import type { RecurrenceEndType, RecurrenceOriginKind, RecurrencePattern } from "@/lib/campaignRecurrence";
 
 const CAMPAIGN_REQUEST_TIMEOUT_MS = 45000;
@@ -1212,6 +1212,9 @@ export interface DispatchRecipientsResponse {
   pendingCount: number;
   /** Dos não processados, quantos pediram para sair e serão pulados no envio. null = o servidor não soube contar. */
   optedOutPendingCount?: number | null;
+  /** Estado do lote e o motivo gravado pelo motor (janela, chip, cota, falha). Mostrado no lugar de "Pendente na fila". */
+  dispatchStatus?: CampaignDispatch["status"] | null;
+  dispatchErrorMessage?: string | null;
   items: DispatchRecipientItem[];
 }
 
@@ -1323,17 +1326,15 @@ export function useRunPendingDispatchLeads() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (dispatchId: string) => {
+    // Fora da janela a rota recusa com OutsideSendWindowError (igual ao "Disparar Agora"); quem chama confirma e repete.
+    mutationFn: async (input: string | { dispatchId: string; forceOutsideWindow?: boolean }) => {
+      const { dispatchId, forceOutsideWindow = false } = typeof input === "string" ? { dispatchId: input } : input;
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
-      const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/run-pending`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao disparar não processados"));
-      return res.json();
+      return postDispatchRunPending(token, dispatchId, { forceOutsideWindow });
     },
-    onSuccess: (_, dispatchId) => {
+    onSuccess: (_, input) => {
+      const dispatchId = typeof input === "string" ? input : input.dispatchId;
       qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
       qc.invalidateQueries({ queryKey: ["all-dispatches"] });
       qc.invalidateQueries({ queryKey: ["dispatch-recipients", dispatchId] });
@@ -1419,6 +1420,19 @@ export interface DispatchSummaryBatch {
   targetCount: number;
   scheduledAt: string | null;
   createdAt: string;
+  /** Motivo gravado pelo motor/agendador quando o lote parou ou está esperando (null = nada a dizer). */
+  errorMessage?: string | null;
+}
+
+/** Fila de resposta parada por chip fora do ar (backend campaign/queueResume.js). */
+export interface DispatchQueueBlock {
+  reason: string;
+  message: string;
+  chipName: string | null;
+  connectionState: string | null;
+  since: string;
+  retryAfter: string;
+  attempts: number;
 }
 
 export interface DispatchSummaryEta {
@@ -1444,6 +1458,7 @@ export interface DispatchSummaryCampaign {
   eta: DispatchSummaryEta | null;
   leadsActionable: { pause: number; resume: number; cancel: number };
   batches: DispatchSummaryBatch[];
+  queueBlock?: DispatchQueueBlock | null;
 }
 
 export interface DispatchSummaryKpis {

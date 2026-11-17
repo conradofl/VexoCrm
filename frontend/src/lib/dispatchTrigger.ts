@@ -25,13 +25,14 @@ export class OutsideSendWindowError extends Error {
   }
 }
 
-/** POST /api/campaigns/dispatches/:id/trigger. Lança OutsideSendWindowError no 422 da janela e Error nos outros. */
-export async function postDispatchTrigger(
+async function postDispatchAction(
+  action: "trigger" | "run-pending",
   token: string | null | undefined,
   dispatchId: string,
-  { forceOutsideWindow = false }: { forceOutsideWindow?: boolean } = {}
+  { forceOutsideWindow = false }: { forceOutsideWindow?: boolean },
+  fallbackMessage: string
 ) {
-  const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/trigger`, {
+  const res = await fetch(`${API_BASE_URL}/api/campaigns/dispatches/${dispatchId}/${action}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(forceOutsideWindow ? { forceOutsideWindow: true } : {}),
@@ -42,8 +43,29 @@ export async function postDispatchTrigger(
       throw new OutsideSendWindowError(data.error.message || "Fora da janela de envio", data.error.details);
     }
   }
-  if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao disparar"));
+  if (!res.ok) throw new Error(await readApiErrorMessage(res, fallbackMessage));
   return res.json();
+}
+
+/** POST /api/campaigns/dispatches/:id/trigger. Lança OutsideSendWindowError no 422 da janela e Error nos outros. */
+export function postDispatchTrigger(
+  token: string | null | undefined,
+  dispatchId: string,
+  options: { forceOutsideWindow?: boolean } = {}
+) {
+  return postDispatchAction("trigger", token, dispatchId, options, "Erro ao disparar");
+}
+
+/**
+ * POST /api/campaigns/dispatches/:id/run-pending ("Disparar não processados"). Mesma regra de janela do "Disparar Agora"
+ * desde 16/11/2026: antes a rota aceitava fora da janela e o lote pausava calado no primeiro lead.
+ */
+export function postDispatchRunPending(
+  token: string | null | undefined,
+  dispatchId: string,
+  options: { forceOutsideWindow?: boolean } = {}
+) {
+  return postDispatchAction("run-pending", token, dispatchId, options, "Erro ao disparar não processados");
 }
 
 export type DispatchTriggerOutcome =
