@@ -85,6 +85,13 @@ import {
   resolveMessageId,
 } from "../../services/inboundGuard.js";
 import {
+  finalizarEntradas,
+  liberarConversa,
+  marcarConversaEmAndamento,
+  registrarEntrada,
+  registrarHandlerDeEntrada,
+} from "../../services/agentInboundRecovery.js";
+import {
   resolveInboundScope,
   shouldEngageInbound,
   shouldCampaignKindChipEngage,
@@ -3057,9 +3064,26 @@ export function registerChatbotRoutes(app, deps) {
    * Webhook para receber mensagens do WhatsApp via Evolution API
    * Integração com chatbot hardcoded
    */
-  app.post("/api/hardcoded-chat-webhook", async (req, res) => {
+  // Referência guardada para a varredura de órfãs (services/agentInboundRecovery.js), que reprocessa por este handler.
+  let hardcodedChatWebhook = null;
+  app.post("/api/hardcoded-chat-webhook", (hardcodedChatWebhook = async (req, res) => {
     const startTime = Date.now();
     const body = req.body && typeof req.body === "object" ? req.body : {};
+
+    // Modo reprocessamento (services/agentInboundRecovery.js): a varredura de órfãs devolve aqui uma mensagem do lead que
+    // já foi gravada e cujo processamento morreu no meio (restart do contêiner entre o 200 "buffering" e a resposta). Pula
+    // o que já aconteceu na primeira passagem (deduplicação, gravação, Heloísa, follow-up, captura de opt-out,
+    // classificação, reativação) e passa por TODOS os portões até o buffer, como uma mensagem nova.
+    const reprocesso = req.__vexoReprocessamento || null;
+    // Desfecho por mensagem do lead: toda saída sem resposta grava 'descartada' com o motivo; o buffer grava o resto.
+    let entradaAtual = null; // { clientId, msgKey, phone }
+    const gravarDesfecho = (status, motivo) => {
+      if (!entradaAtual) return;
+      const e = entradaAtual;
+      entradaAtual = null;
+      finalizarEntradas({ pool: pgDatabasePool, clientId: e.clientId, chaves: [e.msgKey], status, motivo }).catch(() => {});
+      if (reprocesso) liberarConversa(e.clientId, e.phone);
+    };
 
     const responder = (statusPayload, logExtra = {}) => {
       const duracaoMs = Date.now() - startTime;
@@ -3068,6 +3092,15 @@ export function registerChatbotRoutes(app, deps) {
         ...logExtra,
       });
       res.json({ success: true, ...statusPayload });
+      // 'buffering' e o passo de campanha seguem processando depois da resposta HTTP: não são desfecho.
+      const st = String(statusPayload?.status || "");
+      if (st === "buffering") return;
+      if (st.startsWith("campaign")) {
+        if (reprocesso && entradaAtual) liberarConversa(entradaAtual.clientId, entradaAtual.phone);
+        entradaAtual = null;
+        return;
+      }
+      gravarDesfecho("descartada", statusPayload?.motivo || st || statusPayload?.ignored || (statusPayload?.handled ? `handled_${statusPayload.handled}` : null));
     };
 
     // Guarda de loop. Roda ANTES de qualquer buffering, chamada de LLM ou envio.
@@ -3082,10 +3115,13 @@ export function registerChatbotRoutes(app, deps) {
       const duracaoMs = Date.now() - startTime;
       console.log(`[chatbot-webhook] descartado (${duracaoMs}ms)`, { motivo, ...extra });
       res.json({ success: true, ignored: motivo });
+      gravarDesfecho("descartada", motivo);
     };
 
     const eventoBruto = body?.event ?? body?.Event ?? body?.eventName ?? null;
-    const guarda = shouldIgnoreInboundEvent(body);
+    // Reprocessamento: a mensagem já passou por aqui uma vez (o id já está na memória de deduplicação, se o processo é o
+    // mesmo), e só mensagem do lead chega pela varredura.
+    const guarda = reprocesso ? { ignore: false, reason: null } : shouldIgnoreInboundEvent(body);
     console.log("[chatbot-webhook] entrada", {
       evento: eventoBruto,
       eventoNormalizado: resolveInboundEventName(body) || null,
@@ -3189,7 +3225,7 @@ export function registerChatbotRoutes(app, deps) {
     // Se fromMe = true: gravada como direction "outbound" e senderType "device".
     // Se fromMe = false: gravada como direction "inbound" e senderType "lead".
     // Idempotência garantida via wa_message_id.
-    try {
+    if (!reprocesso) try {
       await appendLeadMessage({
         clientId,
         phone,
@@ -3216,6 +3252,16 @@ export function registerChatbotRoutes(app, deps) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);
     }
 
+    // Desfecho por mensagem do lead (services/agentInboundRecovery.js): 'processando' até o fim, com este processo como
+    // dono. Se o processo cair no meio, a varredura de órfãs acha a conversa sem resposta e reprocessa.
+    const msgKeyDaEntrada = reprocesso?.msgKey || messageData.waMessageId || resolveMessageId(body) || null;
+    if (!fromMe && explicitClientId && msgKeyDaEntrada) {
+      entradaAtual = { clientId, msgKey: msgKeyDaEntrada, phone };
+      if (!reprocesso) {
+        await registrarEntrada({ pool: pgDatabasePool, clientId, phone, msgKey: msgKeyDaEntrada, recebidaEm: new Date(startTime) });
+      }
+    }
+
     // ── INTERCEPTADOR HELOÍSA (COPILOTO EXECUTIVO WHATSAPP) ──
     const isHeloisaTarget =
       (instanceName && instanceName.toLowerCase().includes("heloisa")) ||
@@ -3229,6 +3275,10 @@ export function registerChatbotRoutes(app, deps) {
     // para a Heloísa, sem exigir prefixo "heloísa". Se for terceiro/lead, só se o alvo explícito for heloisa.
     // Chips pessoais não são interceptados para manter comunicação humana livre de robôs.
     // CONFIGURAÇÃO LIGA/DESLIGA: Se a Heloísa estiver desativada pelo administrador, não intercepta.
+    if (reprocesso && !fromMe && !isPersonal && (isDirector || isHeloisaTarget)) {
+      descartar("heloisa_fora_da_varredura", { clientId, phone: maskPhoneForLog(phone) });
+      return;
+    }
     if (!fromMe && !isPersonal && (isDirector || isHeloisaTarget)) {
       const heloisaAtiva = await isHeloisaActive(pgDatabasePool);
       if (!heloisaAtiva) {
@@ -3256,7 +3306,7 @@ export function registerChatbotRoutes(app, deps) {
 
     // Resposta do lead para a cadência de follow-up. Só mensagem do lead (não fromMe)
     // e só com tenant explícito: o fallback "outlier" acima não pode cancelar nada.
-    if (!fromMe && explicitClientId && pgDatabasePool) {
+    if (!reprocesso && !fromMe && explicitClientId && pgDatabasePool) {
       await registerFollowupReply({
         tenantId: explicitClientId,
         phone,
@@ -3271,7 +3321,7 @@ export function registerChatbotRoutes(app, deps) {
     // Só mensagem DIGITADA pelo lead, com empresa explícita (o fallback "outlier" não grava nada). Áudio transcrito e
     // imagem descrita ficam de fora: o texto é da máquina, não do lead. Roda ANTES do portão de opt-out, mais abaixo,
     // para que a própria mensagem do pedido já não receba próximo passo nem resposta do agente. Nunca lança.
-    if (!fromMe && explicitClientId && pgDatabasePool && messageData?.text && messageData.transcribed !== true && messageData.described !== true) {
+    if (!reprocesso && !fromMe && explicitClientId && pgDatabasePool && messageData?.text && messageData.transcribed !== true && messageData.described !== true) {
       await captureOptOutFromInbound(pgDatabasePool, {
         clientId: explicitClientId,
         phone,
@@ -3282,7 +3332,7 @@ export function registerChatbotRoutes(app, deps) {
     }
 
     // Classificação semântica automática para mensagens inbound
-    if (!fromMe && messageData?.text && pgDatabasePool) {
+    if (!reprocesso && !fromMe && messageData?.text && pgDatabasePool) {
       reclassifyLeadFromMessages({
         pool: pgDatabasePool,
         clientId,
@@ -3306,7 +3356,7 @@ export function registerChatbotRoutes(app, deps) {
     // 2. Automação + mensagem que casa com padrão -> PERMANECE em automacao
     // 3. Automação + mensagem livre (não casa) ou resposta no celular (fromMe) -> volta para ativa
     try {
-      if (pgDatabasePool && phone) {
+      if (pgDatabasePool && phone && !reprocesso) {
         // 1. Desarquiva se estava arquivada
         await pgDatabasePool.query(
           `UPDATE public.whatsapp_chat_states
@@ -3870,6 +3920,12 @@ export function registerChatbotRoutes(app, deps) {
 
     // Responde imediatamente ao Evolution (evita timeout)
     responder({ status: "buffering" }, { clientId, phone: maskPhoneForLog(phone) });
+    // Daqui em diante o desfecho é do buffer (lote inteiro), e a conversa fica "em andamento": a varredura não pega.
+    messageData.__msgKey = entradaAtual?.msgKey || null;
+    messageData.__recebidaEm = reprocesso?.recebidaEm || startTime;
+    messageData.__origem = reprocesso ? "varredura" : "webhook";
+    entradaAtual = null;
+    marcarConversaEmAndamento(clientId, phone, messageData.__origem);
 
     console.log("[chatbot-webhook] Buffering", {
       clientId,
@@ -3879,6 +3935,11 @@ export function registerChatbotRoutes(app, deps) {
     });
 
     bufferMessage(clientId, phone, messageData, async (messages) => {
+      const chavesDoLote = messages.map((m) => m?.__msgKey).filter(Boolean);
+      const recebidaEm = Math.min(...messages.map((m) => Number(m?.__recebidaEm) || Date.now()));
+      const origemDoLote = messages.some((m) => m?.__origem === "varredura") ? "varredura" : "webhook";
+      const desfecho = { status: "descartada", motivo: "sem_envio" };
+      const diagnosticoIa = {};
       try {
 
           const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model;
@@ -3897,6 +3958,7 @@ export function registerChatbotRoutes(app, deps) {
             instanceName,
             companyId: inboundConfig?.companyId || null,
             instructionsConsolidated: inboundConfig?.instructionsConsolidated || false,
+            diagnostico: diagnosticoIa,
           });
 
           // Verificação de intenção não-comercial com as 5 travas de segurança
@@ -3921,6 +3983,7 @@ export function registerChatbotRoutes(app, deps) {
                 reason: aiResponse.motivo_nao_comercial || "Conversa não-comercial",
               });
               // Aborta o envio da resposta: o robô não qualifica nem responde a conversa pessoal/engano
+              desfecho.motivo = "nao_comercial";
               return;
             } else {
               console.warn("[chatbot-webhook] IA detectou conversa nao_comercial, mas trava de seguranca bloqueou silenciamento:", {
@@ -3936,7 +3999,13 @@ export function registerChatbotRoutes(app, deps) {
             console.warn("[chatbot-webhook] Resposta ausente ou vazia — nenhum envio realizado.", {
               clientId,
               phone: maskPhoneForLog(phone),
+              motivo: diagnosticoIa.motivo || null,
             });
+            // IA que falhou em todas as tentativas (ou devolveu vazio) NÃO some: fica 'falhou' e a varredura tenta de novo.
+            if (diagnosticoIa.motivo === "falha_ia" || diagnosticoIa.motivo === "resposta_vazia") {
+              desfecho.status = "falhou";
+            }
+            desfecho.motivo = diagnosticoIa.motivo || "resposta_ausente";
             return;
           }
 
@@ -3964,6 +4033,7 @@ export function registerChatbotRoutes(app, deps) {
                 timezone: sendWindowConfig.timezone,
               },
             });
+            desfecho.motivo = "fora_da_janela";
             return;
           }
 
@@ -4140,6 +4210,21 @@ export function registerChatbotRoutes(app, deps) {
             instanceName: targetInstance,
             waMessageId: outboundWaId,
             messageTimestamp: new Date().toISOString(),
+          });
+          const entregue = textDelivered || sentViaVoice;
+          desfecho.status = entregue ? "respondida" : "falhou";
+          desfecho.motivo = entregue ? null : "envio_evolution_falhou";
+          // Uma linha por resposta: hora de entrada, hora do envio e o tempo total. A próxima reclamação de demora se mede
+          // por aqui (grep "tempo_resposta").
+          console.log("[chatbot-webhook] tempo_resposta", {
+            clientId,
+            phone: maskPhoneForLog(phone),
+            origem: origemDoLote,
+            mensagens: messages.length,
+            recebidaEm: new Date(recebidaEm).toISOString(),
+            enviadaEm: new Date().toISOString(),
+            ms: Date.now() - recebidaEm,
+            entregue,
           });
 
           // Áudio da biblioteca: só DEPOIS do texto entregue (texto antes do
@@ -4347,11 +4432,24 @@ export function registerChatbotRoutes(app, deps) {
           }
         } catch (err) {
           console.error("[chatbot-webhook] processBatch error:", err.message);
+          desfecho.status = "falhou";
+          desfecho.motivo = `erro: ${err?.message || err}`.slice(0, 200);
+        } finally {
+          liberarConversa(clientId, phone);
+          await finalizarEntradas({
+            pool: pgDatabasePool,
+            clientId,
+            chaves: chavesDoLote,
+            status: desfecho.status,
+            motivo: desfecho.motivo,
+            totalMs: Date.now() - recebidaEm,
+          });
         }
       },
       resolvedInstanceName || "sem-instancia"
     );
-    });
+    }));
+  registrarHandlerDeEntrada(hardcodedChatWebhook);
   /**
    * POST /api/chatbot-test — endpoint síncrono para simulador de conversa no painel
    * Processa a mensagem diretamente (sem buffer, sem Evolution) e retorna a resposta da IA.
