@@ -1881,6 +1881,9 @@ export async function checkEvolutionInstanceHealth({ webhookUrl, webhookToken, c
       );
       error.statusCode = 502;
       error.code = "EVOLUTION_HEALTH_CHECK_FAILED";
+      // Quem chama precisa distinguir token recusado (401/403) e instância inexistente (404) de chip desconectado.
+      error.httpStatus = response.status;
+      error.instanceName = endpoint.instance;
       throw error;
     }
 

@@ -448,3 +448,160 @@ describe("item 4: todo caminho de saída sem envio grava o motivo (um caso por c
     expect(dest.body).toMatchObject({ dispatchStatus: "done", dispatchErrorMessage: null, pendingCount: 0 });
   }, SLOW);
 });
+
+// Nous, 17/11/2026 05:01Z: Chip 2 - NOUS conectado na Evolution e na tela de chips, mas o motor pausava o lote com
+// "chip desconectado". Leitura em produção: GET /instance/connectionState/nous-gestao-chip-2-nous com o
+// dispatch_webhook_token do próprio chip devolvia HTTP 401 (token velho). A tela usa a chave global e via "open".
+// Regra: o lote continua pausando quando a checagem falha, mas o motivo gravado diz o que falhou de verdade.
+// A checagem é a REAL (services/evolution.js); só o HTTP da Evolution é dublado.
+describe("checagem do chip antes do envio: o motivo diz o que falhou (não chama tudo de 'desconectado')", () => {
+  const CHIP_B = {
+    id: "cccccccc-0000-4000-8000-0000000000c4",
+    name: "Chip 4-NOUS",
+    active: true,
+    dispatch_webhook_url: "https://evo.teste/message/sendText/chip-4-nous",
+    dispatch_webhook_token: "t4",
+  };
+  const json = (status, corpo) => {
+    const body = corpo === undefined ? "" : JSON.stringify(corpo);
+    return { ok: status >= 200 && status < 300, status, json: async () => JSON.parse(body || "null"), text: async () => body };
+  };
+  // responder(instancia, url, init) devolve a resposta da Evolution para aquela instância, ou undefined para o padrão.
+  const evolution = (responder) => {
+    const base = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url, init) => {
+      const u = String(url);
+      const inst = decodeURIComponent(u.split("/").pop() || "");
+      const r = await responder(inst, u, init);
+      return r === undefined ? base(url, init) : r;
+    });
+  };
+  const disparaEEspera = async (opts) => {
+    vi.setSystemTime(new Date(SEGUNDA_15H_SP));
+    const w = await mundo(opts);
+    const out = await w.disparar();
+    expect(out.status).toBe(200);
+    return { w, fim: await w.esperarFim() };
+  };
+
+  it("[OBRIGATÓRIO] o caso Nous de 17/11: token recusado (HTTP 401) → 'paused' dizendo que a Evolution recusou o token, não 'desconectado'", async () => {
+    // Token velho: a Evolution recusa TODA chamada desse chip (estado, pré-validação e envio).
+    evolution((inst) => (inst === "chip-2-nous" ? json(401, { status: 401, error: "Unauthorized", response: { message: "Unauthorized" } }) : undefined));
+    const { w, fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — a Evolution recusou o token do chip (Chip 2-NOUS, HTTP 401). O chip pode estar conectado: atualize o token de disparo dele em Chips WhatsApp para retomar."
+    );
+    expect(fim.error_message).not.toMatch(/desconectado/);
+    expect(enviados).toHaveLength(0);
+    const dest = await w.destinatarios();
+    expect(dest.body).toMatchObject({ dispatchStatus: "paused", dispatchErrorMessage: fim.error_message });
+  }, SLOW);
+
+  it("403 também é token recusado", async () => {
+    evolution((inst, u) => (/connectionState/.test(u) ? json(403, { status: 403, error: "Forbidden" }) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toMatch(/^Pausado — a Evolution recusou o token do chip \(Chip 2-NOUS, HTTP 403\)\./);
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("instância não existe na Evolution (HTTP 404) → diz que não encontrou a instância e qual nome procurou", async () => {
+    evolution((inst, u) => (/connectionState/.test(u) ? json(404, { status: 404, error: "Not Found", response: { message: ["The \"chip-2-nous\" instance does not exist"] } }) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — a Evolution não encontrou a instância do chip (Chip 2-NOUS, HTTP 404, instância \"chip-2-nous\"). Confira o nome da instância na URL de disparo do chip em Chips WhatsApp."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("Evolution com erro (HTTP 500) → diz que a Evolution respondeu erro, com o código", async () => {
+    evolution((inst, u) => (/connectionState/.test(u) ? json(500, { error: "Internal Server Error" }) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — a Evolution respondeu erro ao conferir o chip (Chip 2-NOUS, HTTP 500). Tente de novo em alguns minutos; se continuar, confira a Evolution."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("Evolution não responde (timeout da checagem) → diz que não respondeu a tempo", async () => {
+    // A checagem real aborta pelo próprio timer (encurtado no beforeEach); o fetch só obedece o sinal.
+    evolution((inst, u, init) =>
+      /connectionState/.test(u)
+        ? new Promise((_, reject) => {
+            init.signal.addEventListener("abort", () => reject(Object.assign(new Error("This operation was aborted"), { name: "AbortError" })));
+          })
+        : undefined
+    );
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — a Evolution não respondeu a tempo ao conferir o chip (Chip 2-NOUS). Tente de novo em alguns minutos; se continuar, confira a Evolution."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("Evolution fora do ar (erro de rede) → diz que não conseguiu falar com a Evolution", async () => {
+    evolution((inst, u) => (/connectionState/.test(u) ? Promise.reject(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } })) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — não foi possível falar com a Evolution ao conferir o chip (Chip 2-NOUS). Tente de novo em alguns minutos; se continuar, confira a Evolution."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("resposta 200 sem campo de estado → pausa como hoje, mas diz que veio sem estado", async () => {
+    evolution((inst, u) => (/connectionState/.test(u) ? json(200, { instance: { instanceName: "chip-2-nous" } }) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — a Evolution respondeu sem o estado de conexão do chip (Chip 2-NOUS). Confira o chip em Conexões e tente de novo."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("URL de disparo do chip inválida → diz que a URL é inválida (o motor nem consulta a Evolution)", async () => {
+    const chipUrlRuim = { ...CHIP, dispatch_webhook_url: "https://evo.teste/qualquer-coisa" };
+    const { fim } = await disparaEEspera({ instancias: () => [chipUrlRuim], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — URL de disparo do chip inválida (Chip 2-NOUS). Corrija em Chips WhatsApp no formato https://host/message/sendText/NOME_DA_INSTANCIA."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("chip desconectado de verdade ('connecting') continua com o texto de sempre", async () => {
+    estadoDoChip = "connecting";
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP], chipDoLote: CHIP_ID });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe("Pausado — chip desconectado (Chip 2-NOUS). Reconecte o chip em Conexões para retomar.");
+  }, SLOW);
+
+  it("dois chips no lote, os dois fechados → texto de sempre, com o último chip (como hoje)", async () => {
+    estadoDoChip = "close";
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP, CHIP_B], chipDoLote: null });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe("Pausado — chip desconectado (Chip 4-NOUS). Reconecte o chip em Conexões para retomar.");
+  }, SLOW);
+
+  it("dois chips no lote, um com token recusado e outro fechado → lista o motivo de cada chip", async () => {
+    estadoDoChip = "close";
+    evolution((inst, u) => (inst === "chip-2-nous" && /connectionState/.test(u) ? json(401, { status: 401, error: "Unauthorized" }) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP, CHIP_B], chipDoLote: null });
+    expect(fim.status).toBe("paused");
+    expect(fim.error_message).toBe(
+      "Pausado — nenhum chip do lote passou na checagem com a Evolution. Chip 2-NOUS: token recusado (HTTP 401); Chip 4-NOUS: desconectado (close)."
+    );
+    expect(enviados).toHaveLength(0);
+  }, SLOW);
+
+  it("dois chips no lote, um com token recusado e outro aberto → envia pelo aberto (regressão)", async () => {
+    evolution((inst, u) => (inst === "chip-2-nous" && /connectionState/.test(u) ? json(401, { status: 401, error: "Unauthorized" }) : undefined));
+    const { fim } = await disparaEEspera({ instancias: () => [CHIP, CHIP_B], chipDoLote: null });
+    expect(fim.status).toBe("done");
+    expect(fim.error_message).toBeNull();
+  }, SLOW);
+});

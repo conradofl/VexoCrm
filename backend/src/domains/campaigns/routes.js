@@ -476,6 +476,76 @@ export function describeDispatchCrash(err) {
   return /^disparo interrompido/i.test(msg) ? msg : `Falhou: ${msg}`;
 }
 
+// Checagem do chip antes do envio (GET /instance/connectionState com o token de disparo do próprio chip). Antes, qualquer
+// falha virava "chip desconectado": Nous, 17/11/2026, Chip 2 conectado na Evolution e na tela de chips (que usa a chave
+// global), mas o token gravado no chip era recusado (HTTP 401) e o lote pausava dizendo "Reconecte o chip".
+// Cada falha devolve { chipName, kind, longo, curto }; só kind "fechado" é chip desconectado de verdade.
+const CHIP_TENTE_DE_NOVO = "Tente de novo em alguns minutos; se continuar, confira a Evolution.";
+export function describeChipHealthFailure({ chipName, error = null, state = null } = {}) {
+  const nome = String(chipName || "").trim() || "WhatsApp";
+  const falha = (kind, longo, curto) => ({ chipName: nome, kind, longo: `Pausado — ${longo}`, curto });
+  if (!error) {
+    const estado = String(state || "").trim().toLowerCase();
+    if (estado && estado !== "unknown") {
+      return falha("fechado", `chip desconectado (${nome}). Reconecte o chip em Conexões para retomar.`, `desconectado (${estado})`);
+    }
+    return falha(
+      "sem_estado",
+      `a Evolution respondeu sem o estado de conexão do chip (${nome}). Confira o chip em Conexões e tente de novo.`,
+      "resposta sem estado de conexão"
+    );
+  }
+  const code = error?.code;
+  if (code === "EVOLUTION_INSTANCE_NOT_OPEN") {
+    const estado = String(error.connectionState || "").trim().toLowerCase() || "fechado";
+    return falha("fechado", `chip desconectado (${nome}). Reconecte o chip em Conexões para retomar.`, `desconectado (${estado})`);
+  }
+  if (code === "EVOLUTION_ENDPOINT_INVALID") {
+    return falha(
+      "url_invalida",
+      `URL de disparo do chip inválida (${nome}). Corrija em Chips WhatsApp no formato https://host/message/sendText/NOME_DA_INSTANCIA.`,
+      "URL de disparo inválida"
+    );
+  }
+  if (code === "EVOLUTION_HEALTH_CHECK_TIMEOUT") {
+    return falha("timeout", `a Evolution não respondeu a tempo ao conferir o chip (${nome}). ${CHIP_TENTE_DE_NOVO}`, "sem resposta a tempo");
+  }
+  if (code === "EVOLUTION_HEALTH_CHECK_FAILED") {
+    const http = Number(error.httpStatus) || null;
+    if (http === 401 || http === 403) {
+      return falha(
+        "token_recusado",
+        `a Evolution recusou o token do chip (${nome}, HTTP ${http}). O chip pode estar conectado: atualize o token de disparo dele em Chips WhatsApp para retomar.`,
+        `token recusado (HTTP ${http})`
+      );
+    }
+    if (http === 404) {
+      const inst = String(error.instanceName || "").trim();
+      return falha(
+        "instancia_inexistente",
+        `a Evolution não encontrou a instância do chip (${nome}, HTTP 404${inst ? `, instância "${inst}"` : ""}). Confira o nome da instância na URL de disparo do chip em Chips WhatsApp.`,
+        "instância não encontrada (HTTP 404)"
+      );
+    }
+    return falha(
+      "http",
+      `a Evolution respondeu erro ao conferir o chip (${nome}${http ? `, HTTP ${http}` : ""}). ${CHIP_TENTE_DE_NOVO}`,
+      http ? `erro HTTP ${http}` : "erro na Evolution"
+    );
+  }
+  return falha("rede", `não foi possível falar com a Evolution ao conferir o chip (${nome}). ${CHIP_TENTE_DE_NOVO}`, "sem conexão com a Evolution");
+}
+
+// Nenhum chip do lote passou na checagem. Todos fechados de verdade: o texto de sempre, com o último chip (a tela e os
+// testes já dependem dele). Um chip só: o motivo dele. Vários com motivos diferentes: o motivo de cada um.
+export function buildChipHealthPauseMessage(falhas = []) {
+  const lista = Array.isArray(falhas) ? falhas.filter(Boolean) : [];
+  if (lista.length === 0) return "Pausado — chip desconectado (WhatsApp). Reconecte o chip em Conexões para retomar.";
+  if (lista.every((f) => f.kind === "fechado")) return lista[lista.length - 1].longo;
+  if (lista.length === 1) return lista[0].longo;
+  return `Pausado — nenhum chip do lote passou na checagem com a Evolution. ${lista.map((f) => `${f.chipName}: ${f.curto}`).join("; ")}.`;
+}
+
 // "Interrompido: N pendentes" sozinho não diz o que fazer. claimedCount = reservados sem confirmação de envio (execução que
 // caiu no meio); o resto do alvo não entrou na fila desta rodada.
 export function describeInterruptedPending({ pendingCount, claimedCount = 0 }) {
@@ -4039,7 +4109,7 @@ export function registerCampaignsRoutes(app, deps) {
 
     if (rotationPool.length > 0) {
       let anyOpen = false;
-      let lastClosedName = null;
+      const falhasDeChip = [];
       for (const inst of rotationPool) {
         try {
           const health = await checkEvolutionInstanceHealth({
@@ -4050,19 +4120,21 @@ export function registerCampaignsRoutes(app, deps) {
           if (health?.state && isEvolutionOpenState(health.state)) {
             anyOpen = true;
           } else {
-            lastClosedName = inst.name || inst.id;
+            falhasDeChip.push(describeChipHealthFailure({ chipName: inst.name || inst.id, state: health?.state }));
           }
         } catch (healthErr) {
-          lastClosedName = inst.name || inst.id;
+          const falha = describeChipHealthFailure({ chipName: inst.name || inst.id, error: healthErr });
+          falhasDeChip.push(falha);
           console.warn("[campaign-dispatch] chip health check falhou:", {
             chip: inst.name,
+            motivo: falha.kind,
             error: healthErr?.message || healthErr,
           });
         }
       }
 
       if (!anyOpen) {
-        const errorMsg = `Pausado — chip desconectado (${lastClosedName || "WhatsApp"}). Reconecte o chip em Conexões para retomar.`;
+        const errorMsg = buildChipHealthPauseMessage(falhasDeChip);
         console.warn("[campaign-dispatch] Nenhum chip conectado para este disparo. Pausando lote imediatamente:", {
           dispatchId,
           campaignId: campaign.id,
