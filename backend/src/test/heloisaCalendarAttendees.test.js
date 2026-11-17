@@ -50,14 +50,14 @@ describe("Google Calendar & Participantes Extras da Heloísa", () => {
       "fetch",
       vi.fn().mockImplementation(async (url, init) => {
         fetchCalls.push({ url, init });
-        // Primeira chamada para a agenda da agência falha com 403/404 de permissão
-        if (url.includes("mrkgeracaodigital%40gmail.com")) {
+        // Chamadas para agendas específicas falham com 403/404 de permissão
+        if (!url.includes("/calendars/primary/events")) {
           return new Response(JSON.stringify({ error: { message: "Not Found or Forbidden", code: 404 } }), {
             status: 404,
             headers: { "Content-Type": "application/json" },
           });
         }
-        // Segunda chamada para a agenda 'primary' da service account tem sucesso
+        // Chamada para a agenda 'primary' da service account tem sucesso
         if (url.includes("/calendars/primary/events")) {
           return new Response(
             JSON.stringify({
@@ -85,10 +85,10 @@ describe("Google Calendar & Participantes Extras da Heloísa", () => {
     expect(event.success).toBe(true);
     expect(event.eventId).toBe("evt-primary-456");
     expect(event.meetUrl).toBe("https://meet.google.com/vex-prim-ary");
-    expect(fetchCalls.length).toBe(2);
+    expect(fetchCalls.length).toBeGreaterThanOrEqual(2);
     expect(fetchCalls[0].url).toContain("mrkgeracaodigital%40gmail.com");
-    expect(fetchCalls[1].url).toContain("/calendars/primary/events");
-    expect(fetchCalls[1].url).toContain("sendUpdates=all");
+    expect(fetchCalls[fetchCalls.length - 1].url).toContain("/calendars/primary/events");
+    expect(fetchCalls[fetchCalls.length - 1].url).toContain("sendUpdates=all");
   });
 
   it("quando a sincronização real com o Google Calendar falha, não mascara o erro e retorna calendarError", async () => {

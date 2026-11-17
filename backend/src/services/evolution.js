@@ -2578,7 +2578,11 @@ export async function createEvolutionGroup({
   }
 
   // Blindagem em ambiente de testes / CI contra criação real de grupos
-  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+  if (
+    (process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) &&
+    process.env.ALLOW_LIVE_WHATSAPP !== "true" &&
+    fetchFn === fetch
+  ) {
     console.log(`[TEST-MOCK] Criação real de grupo WhatsApp suprimida em ambiente de teste (${cleanSubject}).`);
     return {
       success: true,
@@ -2694,8 +2698,12 @@ export async function getEvolutionGroupInviteCode({
     throw new Error("instanceName e groupJid são obrigatórios para buscar link de convite.");
   }
 
-  // Blindagem em testes contra chamadas de convite na Evolution
-  if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
+  // Blindagem em testes contra chamadas de convite na Evolution (a menos que fetchFn customizado tenha sido injetado para teste unitário)
+  if (
+    (process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) &&
+    process.env.ALLOW_LIVE_WHATSAPP !== "true" &&
+    fetchFn === fetch
+  ) {
     return {
       success: true,
       mock: true,

@@ -24,7 +24,8 @@ import crypto from "node:crypto";
 
 export const GD_CALENDAR_AGENCIA = "mrkgeracaodigital@gmail.com";
 export const GD_CALENDAR_CAIO = "caioalmeidmrk@gmail.com";
-export const GD_CALENDARS = [GD_CALENDAR_AGENCIA, GD_CALENDAR_CAIO];
+export const GD_CALENDAR_CONRADO = process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com";
+export const GD_CALENDARS = [GD_CALENDAR_AGENCIA, GD_CALENDAR_CAIO, GD_CALENDAR_CONRADO];
 
 export const TIMEZONE_SAO_PAULO = "America/Sao_Paulo";
 
@@ -654,46 +655,43 @@ export async function createBriefingCalendarEvent({
   const token = accessToken || (await getGoogleCalendarAccessToken());
   let lastCalendarError = null;
 
+  const candidateCalendars = Array.from(
+    new Set(
+      [
+        primaryCalendarId,
+        process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com",
+        ...attendeesList.map((a) => a.email),
+        "primary",
+      ].filter(Boolean)
+    )
+  );
+
   if (token) {
-    try {
-      const endpoint = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
-        primaryCalendarId
-      )}/events?conferenceDataVersion=1&sendUpdates=all`;
+    for (const calId of candidateCalendars) {
+      try {
+        const endpoint = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+          calId
+        )}/events?conferenceDataVersion=1&sendUpdates=all`;
 
-      const requestBody = {
-        summary,
-        description:
-          description ||
-          `Reunião de Briefing e Alinhamento Estratégico com a equipe da Geração Digital.\n\nCliente: ${clienteNome}\nParticipantes: ${attendeesList
-            .map((a) => a.email)
-            .join(", ")}`,
-        start: { dateTime: startIso, timeZone: TIMEZONE_SAO_PAULO },
-        end: { dateTime: endIso, timeZone: TIMEZONE_SAO_PAULO },
-        attendees: attendeesList,
-        conferenceData: {
-          createRequest: {
-            requestId: `meet-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            conferenceSolutionKey: { type: "hangoutsMeet" },
+        const requestBody = {
+          summary,
+          description:
+            description ||
+            `Reunião de Briefing e Alinhamento Estratégico com a equipe da Geração Digital.\n\nCliente: ${clienteNome}\nParticipantes: ${attendeesList
+              .map((a) => a.email)
+              .join(", ")}`,
+          start: { dateTime: startIso, timeZone: TIMEZONE_SAO_PAULO },
+          end: { dateTime: endIso, timeZone: TIMEZONE_SAO_PAULO },
+          attendees: attendeesList,
+          conferenceData: {
+            createRequest: {
+              requestId: `meet-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              conferenceSolutionKey: { type: "hangoutsMeet" },
+            },
           },
-        },
-      };
+        };
 
-      let res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      // Se a agenda da agência falhar com erro de permissão (403 ou 404), tenta o calendário 'primary' da service account
-      if (!res.ok && (res.status === 403 || res.status === 404) && primaryCalendarId !== "primary") {
-        const fallbackEndpoint = `https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=all`;
-        console.warn(
-          `[gd-calendar] Falha na agenda '${primaryCalendarId}' (HTTP ${res.status}). Tentando fallback na agenda 'primary' da service account...`
-        );
-        const fallbackRes = await fetch(fallbackEndpoint, {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -701,37 +699,34 @@ export async function createBriefingCalendarEvent({
           },
           body: JSON.stringify(requestBody),
         });
-        if (fallbackRes.ok) {
-          res = fallbackRes;
+
+        if (res.ok) {
+          const data = await res.json();
+          const meetUrl =
+            data.hangoutLink ||
+            data.conferenceData?.entryPoints?.find((ep) => ep.entryPointType === "video")?.uri ||
+            `https://meet.google.com/vexo-${(clienteId || "briefing").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}`;
+
+          return {
+            success: true,
+            eventId: data.id,
+            meetUrl,
+            htmlLink: data.htmlLink,
+            attendees: attendeesList.map((a) => a.email),
+            start: startIso,
+            end: endIso,
+            title: summary,
+            isMock: false,
+          };
         }
+
+        const errText = await res.text();
+        console.warn(`[gd-calendar] Falha na agenda '${calId}' (HTTP ${res.status}): ${errText}`);
+        lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda '${calId}' (HTTP ${res.status}: ${errText})`;
+      } catch (err) {
+        console.warn(`[gd-calendar] Erro ao chamar agenda '${calId}':`, err.message);
+        lastCalendarError = `Google Calendar não sincronizado: ${err.message}`;
       }
-
-      if (res.ok) {
-        const data = await res.json();
-        const meetUrl =
-          data.hangoutLink ||
-          data.conferenceData?.entryPoints?.find((ep) => ep.entryPointType === "video")?.uri ||
-          `https://meet.google.com/vexo-${(clienteId || "briefing").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}`;
-
-        return {
-          success: true,
-          eventId: data.id,
-          meetUrl,
-          htmlLink: data.htmlLink,
-          attendees: attendeesList.map((a) => a.email),
-          start: startIso,
-          end: endIso,
-          title: summary,
-          isMock: false,
-        };
-      }
-
-      const errText = await res.text();
-      console.error(`[gd-calendar] Google Calendar API HTTP ${res.status}: ${errText}`);
-      lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda (HTTP ${res.status}: ${errText})`;
-    } catch (err) {
-      console.error("[gd-calendar] Erro ao chamar Google Calendar API:", err.message);
-      lastCalendarError = `Google Calendar não sincronizado: ${err.message}`;
     }
   }
 

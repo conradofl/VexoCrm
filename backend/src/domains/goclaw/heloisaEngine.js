@@ -239,14 +239,14 @@ export async function ensureHeloisaTables(pool = pgDatabasePool) {
 
       INSERT INTO public.heloisa_agendas (nome, email, telefone, papel, ativo, notificar_whatsapp)
       VALUES 
-        ('Conrado Finzi', 'conradofinzi@gmail.com', '5534997817660', 'Sócio Diretor Executivo', true, true),
+        ('Conrado Finzi', 'conradofl@gmail.com', '5534997817660', 'Sócio Diretor Executivo', true, true),
         ('Caio Almeida', 'caioalmeidmrk@gmail.com', '5534997719779', 'Sócio Diretor Comercial', true, true),
         ('Geração Digital', 'mrkgeracaodigital@gmail.com', NULL, 'Agência Oficial', true, false)
       ON CONFLICT (email) DO NOTHING;
 
       INSERT INTO public.heloisa_usuarios_autorizados (client_id, nome, telefone, email, papel, ativo)
       VALUES
-        ('geracao-digital', 'Conrado Finzi', '5534997817660', 'conradofinzi@gmail.com', 'Diretor Executivo / Sócio', true),
+        ('geracao-digital', 'Conrado Finzi', '5534997817660', 'conradofl@gmail.com', 'Diretor Executivo / Sócio', true),
         ('geracao-digital', 'Caio Almeida', '5534997719779', 'caioalmeidmrk@gmail.com', 'Diretor Comercial / Sócio', true)
       ON CONFLICT (telefone) DO NOTHING;
     `);
@@ -744,7 +744,8 @@ export async function executarCobrarColaborador({ colaborador, mensagem }, pool 
 export async function executarAgendarCompromisso(
   { titulo, data_hora, local_ou_link, participantes_extras },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende"
+  instanceName = "vexo-adm-vexo-atende",
+  diretorSolicitante = null
 ) {
   try {
     let tit = String(titulo || "").trim();
@@ -781,7 +782,7 @@ export async function executarAgendarCompromisso(
 
     if (agendasAtivas.length === 0) {
       agendasAtivas = [
-        { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+        { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
         { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
         { nome: "Geração Digital", email: "mrkgeracaodigital@gmail.com", telefone: null, notificar_whatsapp: false },
       ];
@@ -883,14 +884,30 @@ export async function executarAgendarCompromisso(
 
     // 4. Já nos avisar também (Dispara WhatsApp para os participantes cadastrados)
     const notificacoes = [];
-    const destinatariosNotif = agendasAtivas.filter((a) => a.notificar_whatsapp && a.telefone);
+    const telSolicitanteNorm = String(diretorSolicitante?.telefone || "").replace(/\D/g, "");
+    const destinatariosNotif = agendasAtivas.filter((a) => {
+      if (!a.notificar_whatsapp || !a.telefone) return false;
+      const telDestNorm = String(a.telefone).replace(/\D/g, "");
+      // O solicitante jamais deve receber a notificação de broadcast, pois ele recebe a resposta final da Heloísa
+      if (telSolicitanteNorm && telDestNorm === telSolicitanteNorm) return false;
+      // Notifica apenas se o email da pessoa estiver na lista final de participantes
+      return listaParticipantesFinal.some((emailPart) =>
+        String(emailPart || "").trim().toLowerCase() === String(a.email || "").trim().toLowerCase()
+      );
+    });
+
+    const participantesFormatados = listaParticipantesFinal.map((email) => {
+      const agenda = agendasAtivas.find((a) => String(a.email || "").trim().toLowerCase() === String(email || "").trim().toLowerCase());
+      return agenda ? `• ${agenda.nome} (${agenda.email})` : `• ${email}`;
+    }).join("\n");
+
     const msgNotif = `📅 *Novo Compromisso Agendado pela Heloísa!*
 
 📌 *Título:* ${tit}
 ⏰ *Data/Hora:* ${dataFormatada}
 🔗 *Google Meet:* ${meetUrl}
 👥 *Participantes Cadastrados:*
-${agendasAtivas.map((a) => `• ${a.nome} (${a.email})`).join("\n")}
+${participantesFormatados}
 
 _Reunião registrada no Vexo OS e link gerado automaticamente._`;
 
@@ -936,6 +953,7 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
       participantes: listaParticipantesFinal,
       googleCalendarSincronizado: sincronizado,
       calendarError: calResult?.calendarError || null,
+      mensagem_notificacao_broadcast: msgNotif,
       notificacoes_whatsapp: notificacoes,
       mensagem: `Compromisso "${tit}" agendado com sucesso para ${dataFormatada}. Google Meet: ${meetUrl}. Participantes: ${listaParticipantesFinal.join(", ")}. Convites registrados e aviso enviado no WhatsApp!${avisoSincronizacao}`,
     };
@@ -1808,7 +1826,7 @@ export async function processarMensagemHeloisa({
     } else if (fnName === "cobrar_colaborador") {
       resultado = await executarCobrarColaborador(args, pool, instanceName);
     } else if (fnName === "agendar_compromisso") {
-      resultado = await executarAgendarCompromisso(args, pool, instanceName);
+      resultado = await executarAgendarCompromisso(args, pool, instanceName, diretor);
     } else if (fnName === "criar_followup") {
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
@@ -2147,6 +2165,7 @@ ${compromissosTexto}
 
   const toolCalls = assistantMessage?.tool_calls || [];
   const toolResults = [];
+  const diretorVoz = { nome: userName || "Conrado Finzi", papel: userRole || "Diretor Executivo", telefone: "5534997817660" };
 
   for (const tc of toolCalls) {
     const fnName = tc.function?.name;
@@ -2161,8 +2180,7 @@ ${compromissosTexto}
     let resultado = null;
 
     if (fnName === "executar_onboarding_cliente") {
-      const diretor = { nome: userName || "Conrado Finzi", papel: userRole || "Diretor Executivo" };
-      resultado = await executarOnboardingCliente(args, pool, instanceName, diretor);
+      resultado = await executarOnboardingCliente(args, pool, instanceName, diretorVoz);
     } else if (fnName === "cadastrar_cliente") {
       resultado = await executarCadastrarCliente(args, pool);
     } else if (fnName === "enviar_mensagem_whatsapp") {
@@ -2170,7 +2188,7 @@ ${compromissosTexto}
     } else if (fnName === "cobrar_colaborador") {
       resultado = await executarCobrarColaborador(args, pool);
     } else if (fnName === "agendar_compromisso") {
-      resultado = await executarAgendarCompromisso(args, pool, instanceName);
+      resultado = await executarAgendarCompromisso(args, pool, instanceName, diretorVoz);
     } else if (fnName === "criar_followup") {
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
