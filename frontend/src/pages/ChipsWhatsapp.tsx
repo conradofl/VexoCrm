@@ -6,6 +6,7 @@ import Conexoes from "./Conexoes";
 import Aquecimento from "./Aquecimento";
 import EvolutionAdmin from "./EvolutionAdmin";
 import { ChipsHealthReport } from "@/components/chips/ChipsHealthReport";
+import { ChipDiary } from "@/components/chips/ChipDiary";
 import { SendWindowSettings } from "@/components/chips/SendWindowSettings";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -150,7 +151,10 @@ export default function ChipsWhatsapp() {
               <TabsContent value="saude" className="mt-4 focus-visible:outline-none focus-visible:ring-0">
                 <ErrorBoundary>
                   {crmClient?.selectedClient ? (
-                    <ChipsHealthReport tenant={crmClient.selectedClient} />
+                    <div className="space-y-6">
+                      <ChipsHealthReport tenant={crmClient.selectedClient} />
+                      <ChipDiary clientId={crmClient.selectedClient.id} />
+                    </div>
                   ) : (
                     <div className="p-8 text-center text-muted-foreground text-sm">
                       Selecione uma empresa para visualizar o relatório de saúde dos chips.

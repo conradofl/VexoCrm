@@ -3796,26 +3796,30 @@ export function registerCampaignsRoutes(app, deps) {
           );
 
           if (pgDatabasePool) {
+            // O chip que fez a pré-validação (dono do webhook do lote). Sem ele, o diário do chip não conta quantos
+            // números inexistentes passaram por cada chip antes de uma queda. null = não identificado, como no 'sent'.
+            const chipDaValidacao = chipIdFromDispatchSettings(dispatchSettings);
             for (const invLead of invalidLeads) {
               const cleanPhone = normalizeString(invLead.telefone).replace(/\D/g, "");
               if (invLead.id) {
                 await pgDatabasePool.query(
                   `INSERT INTO public.campaign_dispatch_runs
-                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
-                   VALUES ($1, $2, $3, $4, $5, 'invalid_number', 'Número não existe no WhatsApp', now(), $6)
+                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id, evolution_instance_id)
+                   VALUES ($1, $2, $3, $4, $5, 'invalid_number', 'Número não existe no WhatsApp', now(), $6, $7)
                    ON CONFLICT (dispatch_id, lead_id) DO UPDATE
                      SET status = 'invalid_number',
-                         error_message = 'Número não existe no WhatsApp'`,
-                  [dispatchId, campaign.id, clientId, invLead.id, cleanPhone, importItemIdOf(invLead)]
+                         error_message = 'Número não existe no WhatsApp',
+                         evolution_instance_id = COALESCE(EXCLUDED.evolution_instance_id, public.campaign_dispatch_runs.evolution_instance_id)`,
+                  [dispatchId, campaign.id, clientId, invLead.id, cleanPhone, importItemIdOf(invLead), chipDaValidacao]
                 ).catch((err) => {
                   console.warn("[campaign-dispatch] falha ao registrar lead inválido:", err?.message || err);
                 });
               } else if (cleanPhone) {
                 await pgDatabasePool.query(
                   `INSERT INTO public.campaign_dispatch_runs
-                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at)
-                   VALUES ($1, $2, $3, NULL, $4, 'invalid_number', 'Número não existe no WhatsApp', now())`,
-                  [dispatchId, campaign.id, clientId, cleanPhone]
+                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, evolution_instance_id)
+                   VALUES ($1, $2, $3, NULL, $4, 'invalid_number', 'Número não existe no WhatsApp', now(), $5)`,
+                  [dispatchId, campaign.id, clientId, cleanPhone, chipDaValidacao]
                 ).catch((err) => {
                   console.warn("[campaign-dispatch] falha ao registrar lead inválido por fone:", err?.message || err);
                 });

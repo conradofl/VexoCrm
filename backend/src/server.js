@@ -315,6 +315,7 @@ import {
   stopCampaignScheduler,
 } from "./campaign/scheduler.js";
 import { recoverOrphanDispatches } from "./campaign/orphanRecovery.js";
+import { startChipDiarySampler } from "./services/chipDiary.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -777,6 +778,11 @@ function startBackgroundServices() {
   startGdVigiaScheduler();
   startGdBriefingReminderScheduler();
   startTrafficCollectorScheduler();
+  // Diário do chip (services/chipDiary.js): lê na Evolution a última queda de cada chip e grava em
+  // evolution_instance_events. CHIP_DIARY_DISABLED=1 desliga sem deploy de código.
+  if (pgDatabasePool && process.env.CHIP_DIARY_DISABLED !== "1") {
+    startChipDiarySampler({ pool: pgDatabasePool });
+  }
   if (supabase) {
     setSupabaseClient(supabase);
   }
