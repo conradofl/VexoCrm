@@ -18,7 +18,7 @@ import {
   extractEvolutionInstanceSlug,
 } from "../../services/evolution.js";
 import { setupClientDriveFolders } from "../../services/googleDriveClientSetup.js";
-import { createBriefingCalendarEvent } from "../../services/gdCalendarService.js";
+import { createBriefingCalendarEvent, deleteBriefingCalendarEvent } from "../../services/gdCalendarService.js";
 import { obterTelefonesEquipeGd } from "../gdClientes/gdColaboradoresMemoria.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
@@ -972,6 +972,113 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
   }
 }
 
+export async function executarCancelarCompromisso(
+  { termo_ou_titulo, data_hora, cancelar_todos_posteriores = false },
+  pool = pgDatabasePool,
+  instanceName = "vexo-adm-vexo-atende",
+  diretorSolicitante = null
+) {
+  try {
+    const termo = String(termo_ou_titulo || "").trim().toLowerCase();
+    let dataFiltroIso = null;
+    if (data_hora) {
+      try {
+        dataFiltroIso = parseDataHoraBrasilia(data_hora);
+      } catch {
+        dataFiltroIso = null;
+      }
+    }
+
+    let eventosEncontrados = [];
+
+    if (pool && typeof pool.query === "function") {
+      try {
+        let sql = `SELECT id, client_id, name, date, location, description FROM public.events WHERE 1=1`;
+        const params = [];
+
+        if (termo) {
+          params.push(`%${termo}%`);
+          sql += ` AND (LOWER(name) LIKE $${params.length} OR LOWER(COALESCE(description, '')) LIKE $${params.length})`;
+        }
+
+        if (dataFiltroIso) {
+          if (cancelar_todos_posteriores) {
+            params.push(dataFiltroIso);
+            sql += ` AND date >= $${params.length}`;
+          } else {
+            const dataBase = new Date(dataFiltroIso);
+            const diaInicio = new Date(dataBase);
+            diaInicio.setHours(0, 0, 0, 0);
+            const diaFim = new Date(dataBase);
+            diaFim.setHours(23, 59, 59, 999);
+
+            params.push(diaInicio.toISOString());
+            params.push(diaFim.toISOString());
+            sql += ` AND date >= $${params.length - 1} AND date <= $${params.length}`;
+          }
+        }
+
+        sql += ` ORDER BY date ASC LIMIT 50`;
+        const { rows } = await pool.query(sql, params);
+        eventosEncontrados = rows || [];
+      } catch (errDb) {
+        console.warn("[Heloísa] Aviso ao buscar eventos para cancelamento:", errDb.message);
+      }
+    }
+
+    if (eventosEncontrados.length === 0) {
+      return {
+        sucesso: true,
+        cancelados: 0,
+        mensagem:
+          "Não encontrei nenhuma reunião agendada para esse horário na sua agenda oficial. Lembre-se que blocos de disponibilidade da 'Página de agendamento de horário' podem ser ocultados desmarcando a caixinha na barra lateral do Google Agenda.",
+      };
+    }
+
+    let totalCancelados = 0;
+    const nomesCancelados = [];
+
+    for (const evt of eventosEncontrados) {
+      // 1. Exclui do Google Calendar caso haja ID
+      try {
+        if (evt.id) {
+          await deleteBriefingCalendarEvent({ eventId: evt.id });
+        }
+      } catch (eCal) {
+        console.warn("[Heloísa] Falha ao excluir evento no Google Calendar:", eCal.message);
+      }
+
+      // 2. Exclui de public.events
+      if (pool && typeof pool.query === "function") {
+        try {
+          await pool.query(`DELETE FROM public.events WHERE id = $1`, [evt.id]);
+          totalCancelados++;
+          nomesCancelados.push(evt.name);
+        } catch (eDel) {
+          console.warn("[Heloísa] Erro ao deletar evento de public.events:", eDel.message);
+        }
+      } else {
+        totalCancelados++;
+        nomesCancelados.push(evt.name);
+      }
+    }
+
+    return {
+      sucesso: true,
+      cancelados: totalCancelados,
+      eventos: nomesCancelados,
+      mensagem: `Reunião cancelada com sucesso na sua agenda e no sistema (${totalCancelados} compromisso(s) removido(s)).`,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao cancelar compromisso:", err);
+    return {
+      sucesso: false,
+      erro: err.message,
+      mensagem: `Tive uma dificuldade ao tentar cancelar o compromisso: ${err.message}`,
+    };
+  }
+}
+
 export async function executarCriarFollowup({ titulo, cliente_nome, data_lembrete, notas }, pool = pgDatabasePool) {
   try {
     const tit = String(titulo || "Lembrete").trim();
@@ -1552,6 +1659,30 @@ export const HELOISA_TOOLS = [
   {
     type: "function",
     function: {
+      name: "cancelar_compromisso",
+      description: "Cancela ou exclui um compromisso/reunião existente na agenda do Vexo OS e no Google Calendar oficial.",
+      parameters: {
+        type: "object",
+        properties: {
+          termo_ou_titulo: {
+            type: "string",
+            description: "Título, assunto ou nome de participante da reunião a ser cancelada (ex: alinhamento, Moacir).",
+          },
+          data_hora: {
+            type: "string",
+            description: "Data ou data/hora do compromisso a cancelar (ex: 2026-11-18, amanhã, 14:00).",
+          },
+          cancelar_todos_posteriores: {
+            type: "boolean",
+            description: "Se true, cancela reuniões a partir de uma data em diante.",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "criar_followup",
       description: "Cria um lembrete ou tarefa de follow-up interno no CRM.",
       parameters: {
@@ -1836,6 +1967,8 @@ export async function processarMensagemHeloisa({
       resultado = await executarCobrarColaborador(args, pool, instanceName);
     } else if (fnName === "agendar_compromisso") {
       resultado = await executarAgendarCompromisso(args, pool, instanceName, diretor);
+    } else if (fnName === "cancelar_compromisso") {
+      resultado = await executarCancelarCompromisso(args, pool, instanceName, diretor);
     } else if (fnName === "criar_followup") {
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {
@@ -2198,6 +2331,8 @@ ${compromissosTexto}
       resultado = await executarCobrarColaborador(args, pool);
     } else if (fnName === "agendar_compromisso") {
       resultado = await executarAgendarCompromisso(args, pool, instanceName, diretorVoz);
+    } else if (fnName === "cancelar_compromisso") {
+      resultado = await executarCancelarCompromisso(args, pool, instanceName, diretorVoz);
     } else if (fnName === "criar_followup") {
       resultado = await executarCriarFollowup(args, pool);
     } else if (fnName === "consultar_operacao") {

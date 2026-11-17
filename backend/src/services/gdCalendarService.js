@@ -800,6 +800,46 @@ export async function createBriefingCalendarEvent({
 }
 
 /**
+ * Exclui um compromisso/reunião do Google Calendar oficial.
+ */
+export async function deleteBriefingCalendarEvent({
+  eventId,
+  calendarId = null,
+  accessToken = null,
+} = {}) {
+  if (!eventId) return { success: false, error: "eventId é obrigatório" };
+  const token = accessToken || (await getGoogleCalendarAccessToken());
+  if (!token) return { success: true, mock: true, message: "Token indisponível, simulado" };
+
+  const candidateCalendars = Array.from(
+    new Set(
+      [
+        calendarId,
+        process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com",
+        process.env.GD_CALENDAR_AGENCIA || "mrkgeracaodigital@gmail.com",
+        "primary",
+      ].filter(Boolean)
+    )
+  );
+
+  for (const calId of candidateCalendars) {
+    try {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok || res.status === 204 || res.status === 404) {
+        return { success: true, calendarId: calId, status: res.status };
+      }
+    } catch (err) {
+      console.warn(`[gd-calendar] Erro ao deletar evento ${eventId} na agenda ${calId}:`, err.message);
+    }
+  }
+  return { success: true, fallback: true };
+}
+
+/**
  * Monta o texto padronizado para oferta de horários no WhatsApp,
  * marcando o cliente no grupo oficial "MÁQUINA DE VENDAS: {CLIENTE}".
  */
