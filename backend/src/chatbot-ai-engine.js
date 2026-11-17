@@ -679,23 +679,64 @@ export function bufferMessage(clientId, phone, messageData, onProcess, instanceN
 
   existing.messages.push(messageData);
   existing.token++;
+  existing.onProcess = onProcess; // o da mensagem mais nova processa o lote inteiro
   const currentToken = existing.token;
 
-  existing.timer = setTimeout(async () => {
-    const current = messageBuffers.get(key);
-    if (!current || current.token !== currentToken) return; // mensagem mais nova chegou
+  existing.timer = setTimeout(() => {
+    executarBuffer(key, currentToken);
+  }, BUFFER_DELAY_MS);
 
-    const messages = [...current.messages];
-    messageBuffers.delete(key);
+  messageBuffers.set(key, existing);
+}
 
+// Lotes que já saíram do buffer e estão na IA/envio. O desligamento limpo espera por eles (com prazo).
+const lotesEmProcessamento = new Set();
+
+async function executarBuffer(key, token = null) {
+  const current = messageBuffers.get(key);
+  if (!current) return;
+  if (token !== null && current.token !== token) return; // mensagem mais nova chegou
+  const messages = [...current.messages];
+  const onProcess = current.onProcess;
+  messageBuffers.delete(key);
+  const lote = (async () => {
     try {
       await onProcess(messages);
     } catch (err) {
       console.error("[chatbot-buffer] Process error:", err.message);
     }
-  }, BUFFER_DELAY_MS);
+  })();
+  lotesEmProcessamento.add(lote);
+  try {
+    await lote;
+  } finally {
+    lotesEmProcessamento.delete(lote);
+  }
+}
 
-  messageBuffers.set(key, existing);
+/**
+ * Desligamento limpo (SIGTERM): processa AGORA o que está esperando no buffer (sem os 3 s) e espera as respostas em
+ * andamento até timeoutMs. O que não terminar no prazo fica 'processando' na concessão e a varredura de órfãs pega
+ * depois do boot (services/agentInboundRecovery.js).
+ */
+export async function drenarBuffersDoAgente({ timeoutMs = 4500 } = {}) {
+  const chaves = [...messageBuffers.keys()];
+  for (const key of chaves) {
+    const b = messageBuffers.get(key);
+    if (b?.timer) clearTimeout(b.timer);
+    executarBuffer(key);
+  }
+  const pendentes = [...lotesEmProcessamento];
+  if (pendentes.length === 0) return { buffers: chaves.length, emAndamento: 0, terminou: true };
+  let timer = null;
+  const terminou = await Promise.race([
+    Promise.allSettled(pendentes).then(() => true),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return { buffers: chaves.length, emAndamento: pendentes.length, terminou };
 }
 
 // ─── Detecção e extração de mídia ────────────────────────────────────────────
@@ -2057,7 +2098,13 @@ export async function processBatch({
   isSimulation = false,
   noPersist = false,
   simulationState = null,
+  // Saída opcional: por que veio null. "falha_ia" e "resposta_vazia" são falha (a varredura de órfãs tenta de novo);
+  // "lote_vazio" e "prompt_ausente" são descarte.
+  diagnostico = null,
 }) {
+  const diagnosticar = (motivo) => {
+    if (diagnostico && typeof diagnostico === "object") diagnostico.motivo = motivo;
+  };
   // Simulador ("Testar antes de soltar"): a memória da conversa vem do
   // chamador ({ historico, dados }) e nada é lido nem gravado na tabela leads.
   // Antes o teste vivia no lead de telefone fixo 5500000000000 (fantasma no
@@ -2199,6 +2246,7 @@ export async function processBatch({
 
   if (!combinedText) {
     console.log("[chatbot-ai] Empty batch, skipping");
+    diagnosticar("lote_vazio");
     return null;
   }
 
@@ -2351,6 +2399,7 @@ export async function processBatch({
 
   if (!basePromptText) {
     console.error("[chatbot-ai] PROMPT NOT FOUND in DB — chatbot silenciado", { clientId, promptType, isRecontact: isPrimeiroRecontato });
+    diagnosticar("prompt_ausente");
     return null;
   }
   if (!template && !instructionsConsolidated) {
@@ -2508,6 +2557,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
         _falhaDetalhe: err?.message || String(err),
       };
     }
+    diagnosticar("falha_ia");
     return null;
   }
 
@@ -2527,6 +2577,7 @@ Continue de onde parou, coletando apenas o que ainda falta.`;
         _credencialInvalida: aiResponse?._credencialInvalida || null,
       };
     }
+    diagnosticar("resposta_vazia");
     return null;
   }
 

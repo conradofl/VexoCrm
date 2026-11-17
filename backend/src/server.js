@@ -316,6 +316,8 @@ import {
 } from "./campaign/scheduler.js";
 import { recoverOrphanDispatches } from "./campaign/orphanRecovery.js";
 import { startChipDiarySampler } from "./services/chipDiary.js";
+import { startAgentRecoverySweeper, stopAgentRecoverySweeper } from "./services/agentInboundRecovery.js";
+import { drenarBuffersDoAgente } from "./chatbot-ai-engine.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
@@ -783,6 +785,11 @@ function startBackgroundServices() {
   if (pgDatabasePool && process.env.CHIP_DIARY_DISABLED !== "1") {
     startChipDiarySampler({ pool: pgDatabasePool });
   }
+  // Varredura de mensagens de lead sem resposta do agente (restart no meio do buffer ou da IA). No boot e a cada minuto.
+  // AGENT_ORPHAN_SWEEP_DISABLED=1 desliga sem deploy de código.
+  if (pgDatabasePool && process.env.AGENT_ORPHAN_SWEEP_DISABLED !== "1") {
+    startAgentRecoverySweeper({ pool: pgDatabasePool });
+  }
   if (supabase) {
     setSupabaseClient(supabase);
   }
@@ -874,6 +881,7 @@ async function gracefulShutdown(signal) {
       stopCampaignScheduler();
       stopDueDispatchScheduler();
       stopAutomationEngine();
+      stopAgentRecoverySweeper();
       await Promise.allSettled([
         pauseFollowupWorker(),
         pauseRagWorker(),
@@ -919,6 +927,17 @@ async function gracefulShutdown(signal) {
           done();
         });
       });
+    }
+
+    // ── ETAPA 3b: Agente de IA — processa o que está no buffer e espera as respostas em andamento ──
+    // Antes o buffer (3 s) e a chamada da IA morriam com o processo e a mensagem do lead ficava sem resposta (Container
+    // LED, 17/11/2026). O que não couber no prazo a varredura de órfãs pega depois do boot.
+    const t3b = Date.now();
+    try {
+      const drenagem = await drenarBuffersDoAgente({ timeoutMs: 4500 });
+      console.log(`[server] [etapa 3b] agente: ${drenagem.buffers} buffer(s) adiantado(s), ${drenagem.emAndamento} resposta(s) em andamento, terminou no prazo: ${drenagem.terminou} (${Date.now() - t3b}ms).`);
+    } catch (err) {
+      console.warn(`[server] [etapa 3b] drenagem do agente falhou (${Date.now() - t3b}ms):`, err?.message || err);
     }
 
     // ── ETAPA 4: Fechar workers BullMQ, filas BullMQ, conexões Redis e pool Postgres ──
