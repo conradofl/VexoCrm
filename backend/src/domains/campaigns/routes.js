@@ -94,6 +94,11 @@ import {
   readOccurrenceInfo,
 } from "../../services/campaignRecurrenceOccurrences.js";
 import { getDateKey } from "../../services/analytics.js";
+import {
+  createChipDispatchLock,
+  describeChipBusyForButton,
+  describeChipBusyForScheduler,
+} from "../../campaign/chipDispatchLock.js";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID, toCanonicalPhone } from "../../services/canonicalPhone.js";
 
 export function normalizeDispatchPhone(phone, lead = null) {
@@ -3066,40 +3071,73 @@ export function registerCampaignsRoutes(app, deps) {
             continue;
           }
 
-          // CLAIM ATOMICO DO DISPARO
-          const { data: claimed, error: claimErr } = await supabase
-            .from("campaign_dispatches")
-            .update({
-              status: "running",
-              error_message: null,
-              triggered_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", dispatch.id)
-            .in("status", ["scheduled", "paused"])
-            .select("id");
-
-          // 23505 = uq_campaign_dispatches_one_running_occurrence: outra ocorrencia da campanha ganhou a corrida entre a
-          // checagem acima e este UPDATE. Nao e falha do lote: continua 'scheduled' e tenta no proximo tick.
-          if (claimErr && String(claimErr.code) === "23505") {
-            const reason = "Outra ocorrência da campanha ganhou a corrida no claim (uq_campaign_dispatches_one_running_occurrence)";
+          // TRAVA POR CHIP: com outro lote enviando pelo mesmo chip (deste agendador, de um tick concorrente ou de um
+          // botão), este espera e tenta no próximo tick. Só grava o motivo em lote 'scheduled': o 'paused' que chegou
+          // aqui é retomável justamente pelo texto do error_message (janela/cota), e sobrescrever tiraria isso dele.
+          const reservaDeChip = reservarChipDoLote(campaign, dispatch);
+          if (!reservaDeChip.ok) {
+            const bloqueador = reservaDeChip.bloqueadoPor;
+            const reason = `Chip ocupado por outro lote (lote bloqueador: ${bloqueador.dispatchId})`;
             console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
-            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign" });
-            skipped.push({ id: dispatch.id, campaignId: dispatch.campaign_id, name: dispatch.name, status: dispatch.status, reason, code: "RACE_CONDITION_CLAIM" });
+            const dbReason = describeChipBusyForScheduler(bloqueador.nome);
+            if (!reservaDeChip.mesmoLote && dispatch.status === "scheduled" && dispatch.error_message !== dbReason) {
+              await supabase
+                .from("campaign_dispatches")
+                .update({ error_message: dbReason, updated_at: new Date().toISOString() })
+                .eq("id", dispatch.id)
+                .eq("status", "scheduled");
+            }
+            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_chip", blockingDispatchId: bloqueador.dispatchId });
+            skipped.push({
+              id: dispatch.id,
+              campaignId: dispatch.campaign_id,
+              name: dispatch.name,
+              status: dispatch.status,
+              reason,
+              code: "BLOCKED_SAME_CHIP",
+              blockingDispatchId: bloqueador.dispatchId,
+            });
             continue;
           }
-          if (claimErr) throw claimErr;
-          if (!claimed || claimed.length === 0) {
-            const reason = "Disparo já reivindicado por outro ciclo ou processo";
-            console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
-            results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "already_claimed" });
-            skipped.push({ id: dispatch.id, campaignId: dispatch.campaign_id, name: dispatch.name, status: dispatch.status, reason, code: "ALREADY_CLAIMED" });
-            continue;
+
+          try {
+            // CLAIM ATOMICO DO DISPARO
+            const { data: claimed, error: claimErr } = await supabase
+              .from("campaign_dispatches")
+              .update({
+                status: "running",
+                error_message: null,
+                triggered_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", dispatch.id)
+              .in("status", ["scheduled", "paused"])
+              .select("id");
+
+            // 23505 = uq_campaign_dispatches_one_running_occurrence: outra ocorrencia da campanha ganhou a corrida entre a
+            // checagem acima e este UPDATE. Nao e falha do lote: continua 'scheduled' e tenta no proximo tick.
+            if (claimErr && String(claimErr.code) === "23505") {
+              const reason = "Outra ocorrência da campanha ganhou a corrida no claim (uq_campaign_dispatches_one_running_occurrence)";
+              console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+              results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "blocked_same_campaign" });
+              skipped.push({ id: dispatch.id, campaignId: dispatch.campaign_id, name: dispatch.name, status: dispatch.status, reason, code: "RACE_CONDITION_CLAIM" });
+              continue;
+            }
+            if (claimErr) throw claimErr;
+            if (!claimed || claimed.length === 0) {
+              const reason = "Disparo já reivindicado por outro ciclo ou processo";
+              console.log(`[campaign-dispatch-scheduler] pulando lote ${dispatch.id} (${dispatch.name || "sem nome"}): ${reason}`);
+              results.push({ id: dispatch.id, campaignId: dispatch.campaign_id, status: "already_claimed" });
+              skipped.push({ id: dispatch.id, campaignId: dispatch.campaign_id, name: dispatch.name, status: dispatch.status, reason, code: "ALREADY_CLAIMED" });
+              continue;
+            }
+
+            await runCampaignDispatch({ dispatch, campaign, supabase });
+
+            results.push({ id: dispatch.id, campaignId: campaign.id, status: "success" });
+          } finally {
+            travaDeChip.liberar(dispatch.id);
           }
-
-          await runCampaignDispatch({ dispatch, campaign, supabase });
-
-          results.push({ id: dispatch.id, campaignId: campaign.id, status: "success" });
         } catch (err) {
           console.error(`[campaign-dispatch-scheduler] failed to run dispatch ${dispatch.id}:`, err);
           const isDisconnected = Boolean(err?.isConnectionClosed || err?.code === "EVOLUTION_INSTANCE_NOT_OPEN");
@@ -3264,6 +3302,29 @@ export function registerCampaignsRoutes(app, deps) {
       ...campaignMeta,
       dispatchOptions,
     };
+  }
+
+  // Trava por chip (ver campaign/chipDispatchLock.js): um chip nunca dispara dois lotes ao mesmo tempo. Um registro por
+  // registro de rotas; em produção as rotas são registradas uma vez, então o agendador e os botões dividem o mesmo.
+  const travaDeChip = createChipDispatchLock();
+
+  // Chips por onde o lote pode sair, com a mesma prioridade do motor (runCampaignDispatch): rodízio configurado
+  // (dispatchChipIds) > chip do lote/campanha (evolutionInstanceId) > nenhum (qualquer chip da empresa: trava a empresa).
+  function chipsDoLote(campaign, dispatch) {
+    const opcoes = buildDispatchCampaignMeta(campaign, dispatch).dispatchOptions || {};
+    const rodizio = Array.isArray(opcoes.dispatchChipIds) ? opcoes.dispatchChipIds.filter(Boolean) : [];
+    if (rodizio.length > 0) return rodizio;
+    const unico = normalizeString(opcoes.evolutionInstanceId);
+    return unico ? [unico] : null;
+  }
+
+  function reservarChipDoLote(campaign, dispatch) {
+    return travaDeChip.reservar({
+      dispatchId: dispatch.id,
+      clientId: dispatch.client_id || campaign.client_id,
+      chips: chipsDoLote(campaign, dispatch),
+      nome: dispatch.name,
+    });
   }
 
   // A linha da instância dona do webhook com que este lote envia (ou null se o webhook não é de instância cadastrada).
@@ -5935,6 +5996,7 @@ export function registerCampaignsRoutes(app, deps) {
     if (!ensureDb(res)) return;
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+    let chipReservado = false; // reserva de chip feita por esta rota e ainda não entregue ao motor
 
     try {
       const { data: dispatch, error: dispatchErr } = await supabase
@@ -5992,6 +6054,16 @@ export function registerCampaignsRoutes(app, deps) {
         });
       }
 
+      // Trava por chip: com outro lote enviando pelo mesmo chip, recusa sem mexer no lote (a tela mostra a mensagem).
+      const reservaDeChip = reservarChipDoLote(campaign, dispatch);
+      if (!reservaDeChip.ok) {
+        if (reservaDeChip.mesmoLote) return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
+        return sendError(res, 409, "CHIP_BUSY", describeChipBusyForButton(reservaDeChip.bloqueadoPor.nome), {
+          blockingDispatchId: reservaDeChip.bloqueadoPor.dispatchId,
+        });
+      }
+      chipReservado = true;
+
       // 2. Coloca o lote em 'running' e dispara em background
       const { data: claimed, error: claimErr } = await supabase
         .from("campaign_dispatches")
@@ -6006,6 +6078,7 @@ export function registerCampaignsRoutes(app, deps) {
         .select("id");
 
       if (claimErr || !claimed || claimed.length === 0) {
+        travaDeChip.liberar(dispatchId);
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
 
@@ -6019,10 +6092,12 @@ export function registerCampaignsRoutes(app, deps) {
         ...(janela.forced ? { forcedOutsideWindow: true } : {}),
       });
 
-      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: janela.forced }).catch((err) =>
-        markDispatchCrashed(dispatchId, err, "run-pending")
-      );
+      chipReservado = false; // daqui em diante quem solta é o .finally do motor
+      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: janela.forced })
+        .catch((err) => markDispatchCrashed(dispatchId, err, "run-pending"))
+        .finally(() => travaDeChip.liberar(dispatchId));
     } catch (err) {
+      if (chipReservado) travaDeChip.liberar(dispatchId);
       console.error("[run-pending] error:", err);
       sendError(res, 500, "RUN_PENDING_ERROR", err instanceof Error ? err.message : "Failed to run pending leads");
     }
@@ -6859,6 +6934,7 @@ export function registerCampaignsRoutes(app, deps) {
     if (!ensureDb(res)) return;
     const dispatchId = normalizeString(req.params.dispatchId);
     if (!dispatchId) return sendError(res, 400, "MISSING_ID", "Missing dispatch id");
+    let chipReservado = false; // reserva de chip feita por esta rota e ainda não entregue ao motor
     try {
       await ensureCampaignDispatchEvolutionInstanceColumn();
       const { data: dispatch, error: fetchErr } = await supabase
@@ -6899,6 +6975,16 @@ export function registerCampaignsRoutes(app, deps) {
       // Claim atomico tambem no gatilho manual: `.neq("status","running")` impede que
       // dois cliques no botao — ou um clique concorrente com o ciclo do scheduler —
       // iniciem duas execucoes do mesmo disparo. Sem isso o mesmo passo sai duas vezes.
+      // Trava por chip: com outro lote enviando pelo mesmo chip, recusa sem mexer no lote (a tela mostra a mensagem).
+      const reservaDeChip = reservarChipDoLote(campaign, dispatch);
+      if (!reservaDeChip.ok) {
+        if (reservaDeChip.mesmoLote) return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
+        return sendError(res, 409, "CHIP_BUSY", describeChipBusyForButton(reservaDeChip.bloqueadoPor.nome), {
+          blockingDispatchId: reservaDeChip.bloqueadoPor.dispatchId,
+        });
+      }
+      chipReservado = true;
+
       const { data: claimedManual, error: claimManualErr } = await supabase
         .from("campaign_dispatches")
         .update({ status: "running", triggered_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -6907,9 +6993,11 @@ export function registerCampaignsRoutes(app, deps) {
         .select("id");
 
       if (claimManualErr) {
+        travaDeChip.liberar(dispatchId);
         return sendError(res, 500, "DISPATCH_CLAIM_FAILED", "Falha ao reivindicar o disparo", claimManualErr.message);
       }
       if (!claimedManual || claimedManual.length === 0) {
+        travaDeChip.liberar(dispatchId);
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
 
@@ -6959,10 +7047,12 @@ export function registerCampaignsRoutes(app, deps) {
 
       // Executa o disparo em background (fire-and-forget da resposta HTTP). Dentro da janela o motor segue checando
       // e pausa o lote se ela fechar no meio; só o forçamento confirmado desliga essa checagem.
-      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: forcedOutsideWindow }).catch((err) =>
-        markDispatchCrashed(dispatchId, err, "trigger")
-      );
+      chipReservado = false; // daqui em diante quem solta é o .finally do motor
+      runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: forcedOutsideWindow })
+        .catch((err) => markDispatchCrashed(dispatchId, err, "trigger"))
+        .finally(() => travaDeChip.liberar(dispatchId));
     } catch (err) {
+      if (chipReservado) travaDeChip.liberar(dispatchId);
       sendError(res, 500, "DISPATCH_TRIGGER_FAILED", err instanceof Error ? err.message : "Failed");
     }
   });

@@ -1,9 +1,11 @@
 // backend/src/test/campaignAmontoadoPosJanela.test.js
 //
-// PROVA (não conserto) do risco anotado em 17/11/2026 sobre a campanha da Nous "Evento Mesa de Negocios 2 - Planilha 1":
+// Risco anotado em 17/11/2026 sobre a campanha da Nous "Evento Mesa de Negocios 2 - Planilha 1", provado em teste na
+// madrugada e ACONTECIDO em produção às 09:27 SP do mesmo dia (lotes 5, 6, 7 e 8 intercalados no Chip 2 entre 09:27 e
+// 09:29; log "Lote 8/50 e 11/50: já reivindicado por outro ciclo"). Conserto: trava por chip no agendador e nos botões.
 // 50 lotes de 10, um por hora, todos no Chip 2. Os lotes que vencem depois que a janela fecha (21:00) são empurrados
 // pelo agendador para a próxima abertura (08:00). Pergunta: às 08:00, eles rodam um depois do outro, ou ao mesmo tempo
-// no mesmo chip?
+// no mesmo chip? Regra desde a trava por chip: um depois do outro.
 //
 // O que se usa de verdade: Postgres (pglite), rotas reais, motor real (runCampaignDispatch), checagem de conexão real e
 // o PRÓPRIO callback do setInterval de 30 s que o agendador arma em produção. Só o HTTP da Evolution é dublado. O
@@ -94,6 +96,8 @@ let spies;
 let db;
 let campanhaId;
 let tentativas; // { url, number } no momento em que o envio CHEGA à Evolution
+let emVoo = 0; // envios esperando resposta da Evolution agora
+let maxEmVoo = 0;
 let abrirPortao;
 let portao;
 
@@ -115,7 +119,10 @@ beforeAll(async () => {
     const u = String(url);
     if (/sendText/.test(u)) {
       tentativas.push({ url: u, number: String(JSON.parse(init?.body || "{}").number || "") });
+      emVoo += 1;
+      maxEmVoo = Math.max(maxEmVoo, emVoo);
       await portao; // o lote "ainda está enviando"
+      emVoo -= 1;
       return { ok: true, status: 200, json: async () => ({ key: { id: "wa" } }), text: async () => '{"key":{"id":"wa"}}' };
     }
     if (/connectionState/.test(u)) {
@@ -192,7 +199,7 @@ const lotes = async () =>
 const loteDoNumero = async (numero) =>
   (await db.query("SELECT dispatch_id FROM campaign_dispatch_runs WHERE phone = $1 LIMIT 1", [numero])).rows[0]?.dispatch_id || null;
 
-describe("PROVA: lotes adiados pela janela vencem juntos às 08:00 e rodam AO MESMO TEMPO no mesmo chip", () => {
+describe("[OBRIGATÓRIO] trava por chip: lotes adiados pela janela vencem juntos às 08:00 e rodam UM DE CADA VEZ no chip", () => {
   it("o agendador armou o intervalo de 30 s (o callback testado abaixo é o de produção)", () => {
     expect(typeof callbackDoIntervalo).toBe("function");
   });
@@ -208,39 +215,34 @@ describe("PROVA: lotes adiados pela janela vencem juntos às 08:00 e rodam AO ME
     expect(tentativas).toHaveLength(0);
   }, SLOW);
 
-  it("terça 08:00: o 1º tick prende num lote que ainda está enviando; 30 s depois o 2º tick começa OUTRO lote no mesmo chip, e o 3º mais um", async () => {
+  it("terça 08:00: o 1º tick prende num lote que ainda está enviando; o 2º e o 3º tick NÃO começam outro lote no mesmo chip", async () => {
     vi.setSystemTime(new Date("2026-11-17T11:00:10Z"));
     const tick1 = callbackDoIntervalo(); // não termina enquanto o lote dele estiver enviando
     await ate(() => tentativas.length === 1);
     const loteA = await loteDoNumero(tentativas[0].number);
     expect(loteA).toBeTruthy();
 
+    // 30 s e 60 s depois: os ticks seguintes terminam sem começar nada (antes: cada um começava outro lote no Chip 2).
     vi.setSystemTime(new Date("2026-11-17T11:00:40Z"));
-    const tick2 = callbackDoIntervalo();
-    await ate(() => tentativas.length === 2);
-    const loteB = await loteDoNumero(tentativas[1].number);
-    expect(loteB).toBeTruthy();
-    expect(loteB).not.toBe(loteA);
-
+    await callbackDoIntervalo();
     vi.setSystemTime(new Date("2026-11-17T11:01:10Z"));
-    const tick3 = callbackDoIntervalo();
-    await ate(() => tentativas.length === 3);
-    const loteC = await loteDoNumero(tentativas[2].number);
-    expect(new Set([loteA, loteB, loteC]).size).toBe(3);
-
-    // Neste instante: 3 lotes da mesma campanha 'running', todos no mesmo chip, cada um com um envio em voo na Evolution.
+    await callbackDoIntervalo();
+    expect(tentativas).toHaveLength(1);
     const agora = await lotes();
-    expect(agora.filter((x) => x.status === "running")).toHaveLength(3);
-    expect(new Set(agora.map((x) => x.evolution_instance_id))).toEqual(new Set([CHIP_ID]));
-    expect(new Set(tentativas.map((t) => t.url))).toEqual(new Set([CHIP.dispatch_webhook_url]));
+    expect(agora.filter((x) => x.status === "running").map((x) => x.id)).toEqual([loteA]);
+    const esperando = agora.filter((x) => x.id !== loteA);
+    expect(esperando.map((x) => x.status)).toEqual(["scheduled", "scheduled"]);
+    const motivos = (await db.query("SELECT error_message FROM campaign_dispatches WHERE id = ANY($1::uuid[])", [esperando.map((x) => x.id)])).rows;
+    for (const m of motivos) expect(m.error_message).toMatch(/^Aguardando o chip terminar outro lote \(".+"\)\. Começa logo em seguida, sem precisar clicar\.$/);
 
-    // Solta o chip: tudo termina, e ninguém recebe duas vezes (a sobreposição é de ritmo, não de público).
+    // Solta o chip: o tick 1 segue a fila dele e roda os outros dois, um depois do outro.
     abrirPortao();
-    await Promise.all([tick1, tick2, tick3]);
+    await tick1;
     await ate(async () => (await lotes()).every((x) => x.status !== "running"));
     const fim = await lotes();
     expect(fim.map((x) => x.status)).toEqual(["done", "done", "done"]);
     expect(tentativas).toHaveLength(POR_LOTE * LOTES.length);
     expect(new Set(tentativas.map((t) => t.number)).size).toBe(POR_LOTE * LOTES.length);
+    expect(maxEmVoo).toBe(1); // nunca dois envios do mesmo chip esperando a Evolution ao mesmo tempo
   }, SLOW);
 });
