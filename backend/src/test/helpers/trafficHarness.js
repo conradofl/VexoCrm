@@ -20,7 +20,7 @@ export const TRAFFIC_MIGRATION = readFileSync(
 
 // Fase 2: verba, plano do dia e aprovação dupla.
 export const TRAFFIC_PLANS_MIGRATION = readFileSync(
-  resolve(BACKEND_ROOT, "supabase/migrations/20261116180000_create_traffic_plans.sql"),
+  resolve(BACKEND_ROOT, "supabase/migrations/20261117200000_create_traffic_plans.sql"),
   "utf8"
 );
 
