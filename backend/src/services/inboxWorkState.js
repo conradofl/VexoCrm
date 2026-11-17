@@ -132,6 +132,12 @@ export function buildWorkConvCte({ hasChipScope = false, pauseExpiredSql = "fals
         cs.agent_muted_reason,
         ${pauseExpiredSql} AS agent_mute_expired,
         CASE
+          -- O robô NÃO respondeu a esta mensagem por um motivo gravado nela (meta.agente_barrado: mensagem que chegou
+          -- atrasada, envio sem confirmação). Vai para "Esperam você" mesmo em chip com robô, sem pausar o agente:
+          -- a próxima mensagem do lead volta a ser do robô. Atendida depois dela, ou com mais de 7 dias: regra de sempre.
+          WHEN m.direction = 'inbound' AND m.meta ? 'agente_barrado'
+            AND NOT (cs.attended_at IS NOT NULL AND cs.attended_at >= m.effective_timestamp)
+            AND m.effective_timestamp >= $2::timestamptz - make_interval(days => ${AWAITING_WINDOW_DAYS}) THEN 'esperam'
           WHEN li.lead_chip = ANY($3) AND (cs.agent_muted_at IS NULL OR ${pauseExpiredSql}) THEN 'robo'
           WHEN m.direction = 'inbound' AND cs.attended_at IS NOT NULL AND cs.attended_at >= m.effective_timestamp THEN 'com_lead'
           WHEN m.direction = 'inbound' AND m.effective_timestamp >= $2::timestamptz - make_interval(days => ${AWAITING_WINDOW_DAYS}) THEN 'esperam'

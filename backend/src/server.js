@@ -932,9 +932,12 @@ async function gracefulShutdown(signal) {
     // ── ETAPA 3b: Agente de IA — processa o que está no buffer e espera as respostas em andamento ──
     // Antes o buffer (3 s) e a chamada da IA morriam com o processo e a mensagem do lead ficava sem resposta (Container
     // LED, 17/11/2026). O que não couber no prazo a varredura de órfãs pega depois do boot.
+    // Prazo: o que sobra dos SHUTDOWN_FORCE_MS (10 s) menos 2,5 s de reserva para a etapa 4 (workers, Redis, pool).
+    // Com o HTTP no teto de 4 s: 10 - 4 - 2,5 = 3,5 s de drenagem. Nunca menos de 0,5 s.
     const t3b = Date.now();
     try {
-      const drenagem = await drenarBuffersDoAgente({ timeoutMs: 4500 });
+      const prazoDrenagem = Math.max(500, SHUTDOWN_FORCE_MS - (t3b - shutdownStart) - 2500);
+      const drenagem = await drenarBuffersDoAgente({ timeoutMs: prazoDrenagem });
       console.log(`[server] [etapa 3b] agente: ${drenagem.buffers} buffer(s) adiantado(s), ${drenagem.emAndamento} resposta(s) em andamento, terminou no prazo: ${drenagem.terminou} (${Date.now() - t3b}ms).`);
     } catch (err) {
       console.warn(`[server] [etapa 3b] drenagem do agente falhou (${Date.now() - t3b}ms):`, err?.message || err);

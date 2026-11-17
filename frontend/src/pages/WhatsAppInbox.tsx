@@ -1,3 +1,4 @@
+import { motivoAgenteBarrado } from "@/lib/agentBarred";
 import { describeMessageLabel } from "@/lib/inbox/messageLabel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -2508,6 +2509,9 @@ export default function WhatsAppInbox({
                   const motivoAtencao = String(
                     lead?.dados?.motivo_atencao_humana || (lead as any)?.motivo_atencao_humana || "Atenção humana solicitada"
                   );
+                  // O robô não respondeu à última mensagem do lead (chegou atrasada, envio sem confirmação): borda de
+                  // atenção e selo com o motivo. O robô segue ativo nas próximas mensagens.
+                  const barrado = chat.lastMessage && !chat.lastMessage.fromMe ? motivoAgenteBarrado(chat.lastMessage.meta) : null;
                   const isAttended = Boolean(
                     chat.attendedAt && (!chat.timestamp || new Date(chat.attendedAt).getTime() >= chat.timestamp * 1000)
                   );
@@ -2554,7 +2558,8 @@ export default function WhatsAppInbox({
                       now={nowTick}
                       flags={{
                         unreadCount: chat.unreadCount,
-                        attentionReason: precisaAtencao ? motivoAtencao : null,
+                        attentionReason: precisaAtencao ? motivoAtencao : barrado ? `Robô não respondeu: ${barrado.longo}` : null,
+                        agentBarred: barrado,
                         isNumberChange: chat.isNumberChange,
                         isAgentMuted: Boolean(chat.agentMutedAt),
                         agentMutedReason: chat.agentMutedReason,
