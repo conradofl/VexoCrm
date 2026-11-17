@@ -18,9 +18,16 @@ export const TRAFFIC_MIGRATION = readFileSync(
   "utf8"
 );
 
-export async function createTrafficDb() {
+// Fase 2: verba, plano do dia e aprovação dupla.
+export const TRAFFIC_PLANS_MIGRATION = readFileSync(
+  resolve(BACKEND_ROOT, "supabase/migrations/20261116180000_create_traffic_plans.sql"),
+  "utf8"
+);
+
+export async function createTrafficDb({ withPlans = true } = {}) {
   const db = await createPgliteDb();
   await db.exec(TRAFFIC_MIGRATION);
+  if (withPlans) await db.exec(TRAFFIC_PLANS_MIGRATION);
   return db;
 }
 
@@ -110,7 +117,7 @@ export function insightRow({
 
 /**
  * Handler padrão: uma conta responde info, insights e estados conforme o mapa
- * `accounts[accountId] = { info, insights, ads }`.
+ * `accounts[accountId] = { info, insights, ads, campaigns, adsets }`.
  */
 export function metaHandlerFor(accounts) {
   return ({ path }) => {
@@ -122,6 +129,8 @@ export function metaHandlerFor(accounts) {
     if (!resource) return { body: account.info || { name: "Conta", currency: "BRL", timezone_name: "America/Sao_Paulo" } };
     if (resource === "insights") return { body: { data: account.insights || [] } };
     if (resource === "ads") return { body: { data: account.ads || [] } };
+    if (resource === "campaigns") return { body: { data: account.campaigns || [] } };
+    if (resource === "adsets") return { body: { data: account.adsets || [] } };
     return { status: 404, body: { error: { message: "desconhecido", code: 803 } } };
   };
 }

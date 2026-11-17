@@ -316,7 +316,48 @@ export function createGoogleAdsClient({
       assertDate(until);
       return searchAll(id, buildAdConversionsQuery({ since, until }));
     },
+
+    /** Verba atual de cada campanha (Fase 2, só leitura). */
+    async fetchBudgets(accountId) {
+      const id = normalizeGoogleCustomerId(accountId);
+      return searchAll(id, CAMPAIGN_BUDGETS_QUERY);
+    },
   };
+}
+
+export const CAMPAIGN_BUDGETS_QUERY =
+  "SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, " +
+  "campaign_budget.total_amount_micros, campaign_budget.explicitly_shared " +
+  "FROM campaign WHERE campaign.status != 'REMOVED'";
+
+function googleMoney(micros) {
+  if (micros === null || micros === undefined || micros === "") return null;
+  const n = Number(micros);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round((n / 1_000_000) * 100) / 100;
+}
+
+/** Converte a leitura de verba do Google Ads em linhas de traffic_budgets (sempre nível campanha). */
+export function mapGoogleBudgets(rows = []) {
+  const out = [];
+  for (const row of rows) {
+    const id = row?.campaign?.id;
+    if (!id) continue;
+    const daily = googleMoney(row.campaignBudget?.amountMicros);
+    const lifetime = googleMoney(row.campaignBudget?.totalAmountMicros);
+    if (daily === null && lifetime === null) continue;
+    out.push({
+      level: "campaign",
+      entity_id: String(id),
+      campaign_id: String(id),
+      name: row.campaign?.name || null,
+      daily_budget: daily,
+      lifetime_budget: lifetime,
+      shared: row.campaignBudget?.explicitlyShared === true,
+      status: STATUS_MAP[row.campaign?.status] || row.campaign?.status || null,
+    });
+  }
+  return out;
 }
 
 function toNumber(value) {

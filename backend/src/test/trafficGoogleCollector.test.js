@@ -74,6 +74,7 @@ function createGoogleFetch(accounts, { tokenResponse, onSearch } = {}) {
       return respond(200, { results: [{ customer: account.info || { descriptiveName: "Conta Google", currencyCode: "BRL", timeZone: "America/Sao_Paulo" } }] });
     }
     if (query.includes("conversion_action_category")) return respond(200, { results: account.conversions || [] });
+    if (query.includes("FROM campaign ")) return respond(200, { results: account.budgets || [] });
     return respond(200, { results: account.metrics || [], fieldMask: "x" });
   };
   return { fetchImpl, calls };
@@ -146,7 +147,8 @@ describe("coletor de tráfego do Google Ads", () => {
     ]);
 
     const search = calls.filter((c) => c.kind === "search");
-    expect(search.map((c) => c.version)).toEqual(["v26", "v26", "v26"]);
+    // Conta, métricas, conversões e verba (Fase 2).
+    expect(search.map((c) => c.version)).toEqual(["v26", "v26", "v26", "v26"]);
     const metricsQuery = search.find((c) => c.json.query.includes("metrics.cost_micros")).json.query;
     expect(metricsQuery).toContain("FROM ad_group_ad");
     expect(metricsQuery).toContain("segments.date BETWEEN '2026-10-17' AND '2026-11-15'");
@@ -174,7 +176,7 @@ describe("coletor de tráfego do Google Ads", () => {
     });
 
     const search = calls.filter((c) => c.kind === "search");
-    expect(search.length).toBe(6);
+    expect(search.length).toBe(8);
     for (const call of search) {
       expect(call.init.headers.Authorization).toBe(`Bearer ${ACCESS}`);
       expect(call.init.headers["login-customer-id"]).toBe("9998887777");
