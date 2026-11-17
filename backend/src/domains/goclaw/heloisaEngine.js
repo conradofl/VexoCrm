@@ -233,6 +233,10 @@ export async function ensureHeloisaTables(pool = pgDatabasePool) {
       CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_status ON public.heloisa_execucoes (status);
       CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_canal ON public.heloisa_execucoes (canal);
 
+      -- Unificação do Conrado Finzi com seu e-mail oficial (conradofl@gmail.com)
+      DELETE FROM public.heloisa_agendas WHERE email = 'conradofinzi@gmail.com';
+      DELETE FROM public.heloisa_usuarios_autorizados WHERE email = 'conradofinzi@gmail.com';
+
       INSERT INTO public.heloisa_config (chave, valor)
       VALUES ('status_ativo', '{"ativo": true}')
       ON CONFLICT (chave) DO NOTHING;
@@ -750,14 +754,10 @@ export async function executarAgendarCompromisso(
   try {
     let tit = String(titulo || "").trim();
 
-    // Preserva nomes de clientes e participantes solicitados (ex: Moacir).
-    // Apenas aplica o fallback caso o título seja completamente vazio ou termo genérico solto.
-    if (
-      !tit ||
-      /^(reuni[aã]o|alinhamento)(\s+(de\s+)?(alinhamento|reuni[aã]o|diretoria))?$/i.test(tit) ||
-      /^compromisso(\s+agendado)?$/i.test(tit)
-    ) {
-      tit = "Alinhamento Conrado e Caio";
+    // Preserva nomes de clientes e o assunto solicitado pelo usuário (ex: "Reunião de alinhamento", "Moacir").
+    // Apenas aplica fallback padrão se o título for completamente vazio ou termo genérico vago.
+    if (!tit || /^compromisso(\s+agendado)?$/i.test(tit)) {
+      tit = "Reunião de Alinhamento";
     }
 
     // 1. Interpreta data/hora sempre no fuso horário de Brasília (America/Sao_Paulo / -03:00)
@@ -771,7 +771,7 @@ export async function executarAgendarCompromisso(
         const { rows } = await pool.query(
           `SELECT nome, email, telefone, papel, notificar_whatsapp
            FROM public.heloisa_agendas
-           WHERE ativo = true
+           WHERE ativo = true AND email <> 'conradofinzi@gmail.com'
            ORDER BY created_at ASC`
         );
         agendasAtivas = rows || [];
@@ -790,7 +790,7 @@ export async function executarAgendarCompromisso(
 
     const listaEmails = agendasAtivas.map((a) => a.email).filter(Boolean);
 
-    // 2. Extrai participantes extras e identifica se a instrução foi exclusiva ("apenas...")
+    // 2. Extrai participantes extras e identifica se a instrução foi exclusiva ("só comigo", "apenas...", etc)
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const extrasStr = String(participantes_extras || "").trim();
     const tituloStr = String(titulo || "").trim();
@@ -798,14 +798,23 @@ export async function executarAgendarCompromisso(
     const emailsNoTitulo = tituloStr.match(emailRegex) || [];
     const todosEmailsSolicitados = Array.from(new Set([...emailsExtras, ...emailsNoTitulo]));
 
+    const ehApenasComigo =
+      /s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal/i.test(extrasStr) ||
+      /s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal/i.test(tituloStr);
+
     const isExclusivo =
+      ehApenasComigo ||
       /apenas|somente|só\s+o|exclusive/i.test(extrasStr) ||
       /apenas|somente|só\s+o|exclusive/i.test(tituloStr);
 
     let listaParticipantesFinal = [];
     let strictAttendees = false;
 
-    if (isExclusivo && todosEmailsSolicitados.length > 0) {
+    if (ehApenasComigo) {
+      const emailSolicitante = diretorSolicitante?.email || "conradofl@gmail.com";
+      listaParticipantesFinal = [emailSolicitante];
+      strictAttendees = true;
+    } else if (isExclusivo && todosEmailsSolicitados.length > 0) {
       listaParticipantesFinal = todosEmailsSolicitados;
       strictAttendees = true;
     } else {

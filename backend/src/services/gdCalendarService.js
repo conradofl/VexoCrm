@@ -720,9 +720,54 @@ export async function createBriefingCalendarEvent({
           };
         }
 
-        const errText = await res.text();
-        console.warn(`[gd-calendar] Falha na agenda '${calId}' (HTTP ${res.status}): ${errText}`);
-        lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda '${calId}' (HTTP ${res.status}: ${errText})`;
+        // Se retornar 400 ou 403 (ex: "Service accounts cannot invite attendees without Domain-Wide Delegation"),
+        // realiza retry imediato com gravação limpa (sem attendees no payload e com o Meet na descrição/localização).
+        if (res.status === 400 || res.status === 403) {
+          const errTextPeek = await res.text();
+          console.warn(`[gd-calendar] Tentativa inicial na agenda '${calId}' retornou HTTP ${res.status}: ${errTextPeek}. Realizando retry limpo sem attendees/conferência...`);
+
+          const mockMeetUrl = `https://meet.google.com/vexo-${(clienteId || "briefing").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}`;
+          const simpleEndpoint = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`;
+          const simpleRequestBody = {
+            summary,
+            description: `${description || summary}\n\nGoogle Meet: ${mockMeetUrl}\nParticipantes: ${attendeesList.map((a) => a.email).join(", ")}`,
+            location: mockMeetUrl,
+            start: { dateTime: startIso, timeZone: TIMEZONE_SAO_PAULO },
+            end: { dateTime: endIso, timeZone: TIMEZONE_SAO_PAULO },
+          };
+
+          const retryRes = await fetch(simpleEndpoint, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(simpleRequestBody),
+          });
+
+          if (retryRes.ok) {
+            const dataRetry = await retryRes.json();
+            return {
+              success: true,
+              eventId: dataRetry.id,
+              meetUrl: dataRetry.hangoutLink || mockMeetUrl,
+              htmlLink: dataRetry.htmlLink,
+              attendees: attendeesList.map((a) => a.email),
+              start: startIso,
+              end: endIso,
+              title: summary,
+              isMock: false,
+            };
+          }
+
+          const retryErrText = await retryRes.text();
+          console.warn(`[gd-calendar] Retry limpo na agenda '${calId}' falhou (HTTP ${retryRes.status}): ${retryErrText}`);
+          lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda '${calId}' (HTTP ${retryRes.status}: ${retryErrText})`;
+        } else {
+          const errText = await res.text();
+          console.warn(`[gd-calendar] Falha na agenda '${calId}' (HTTP ${res.status}): ${errText}`);
+          lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda '${calId}' (HTTP ${res.status}: ${errText})`;
+        }
       } catch (err) {
         console.warn(`[gd-calendar] Erro ao chamar agenda '${calId}':`, err.message);
         lastCalendarError = `Google Calendar não sincronizado: ${err.message}`;

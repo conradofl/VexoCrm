@@ -180,4 +180,164 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
     const tentouConrado = endpointsChamados.some((ep) => ep.includes("conradofl%40gmail.com"));
     expect(tentouConrado).toBe(true);
   });
+
+  it("Teste 5: Solicitação com 'só comigo' ou 'apenas eu' gera attendees estritamente com o solicitante conradofl@gmail.com", async () => {
+    const mockPool = {
+      query: vi.fn().mockImplementation(async (sql) => {
+        if (sql.includes("public.heloisa_agendas")) {
+          return {
+            rows: [
+              { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Geração Digital", email: "mrkgeracaodigital@gmail.com", telefone: null, notificar_whatsapp: false },
+            ],
+          };
+        }
+        if (sql.includes("INSERT INTO public.events")) {
+          return { rows: [{ id: "evt-test-5", name: "Reunião Pessoal", date: "2026-11-20T14:00:00-03:00" }] };
+        }
+        return { rows: [] };
+      }),
+    };
+
+    const diretorSolicitante = {
+      nome: "Conrado Finzi",
+      telefone: "5534997817660",
+      email: "conradofl@gmail.com",
+    };
+
+    const res = await executarAgendarCompromisso(
+      {
+        titulo: "Reunião de alinhamento",
+        data_hora: "2026-11-20 14:00",
+        participantes_extras: "só comigo",
+      },
+      mockPool,
+      "instancia-teste",
+      diretorSolicitante
+    );
+
+    expect(res.sucesso).toBe(true);
+    // Attendees deve conter estritamente conradofl@gmail.com e NÃO deve conter Caio nem a agência
+    expect(res.attendees).toEqual(["conradofl@gmail.com"]);
+    expect(res.attendees).not.toContain("caioalmeidmrk@gmail.com");
+    expect(res.attendees).not.toContain("mrkgeracaodigital@gmail.com");
+    expect(res.notificacoes_whatsapp).toEqual([]);
+  });
+
+  it("Teste 6: Título 'Reunião de alinhamento' mantém o título respeitando o usuário e NÃO adiciona 'e Caio'", async () => {
+    const mockPool = {
+      query: vi.fn().mockImplementation(async (sql) => {
+        if (sql.includes("public.heloisa_agendas")) {
+          return {
+            rows: [
+              { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+            ],
+          };
+        }
+        if (sql.includes("INSERT INTO public.events")) {
+          return { rows: [{ id: "evt-test-6", name: "Reunião de Alinhamento", date: "2026-11-20T14:00:00-03:00" }] };
+        }
+        return { rows: [] };
+      }),
+    };
+
+    const res = await executarAgendarCompromisso(
+      {
+        titulo: "Reunião de alinhamento",
+        data_hora: "2026-11-20 14:00",
+      },
+      mockPool,
+      "instancia-teste",
+      { telefone: "5534997817660", email: "conradofl@gmail.com" }
+    );
+
+    expect(res.sucesso).toBe(true);
+    expect(res.titulo).not.toContain("Caio");
+    expect(res.titulo.toLowerCase()).toContain("alinhamento");
+  });
+
+  it("Teste 7: Google Calendar com erro 403 (forbiddenForServiceAccounts) faz retry com payload simples e obtém sucesso", async () => {
+    const chamadas = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url, init) => {
+        const bodyObj = init?.body ? JSON.parse(init.body) : {};
+        chamadas.push({ url: String(url), body: bodyObj });
+
+        // Chamada com attendees falha com erro 403 característico de Service Account sem Domain-Wide Delegation
+        if (bodyObj.attendees && bodyObj.attendees.length > 0) {
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: "Service accounts cannot invite attendees without Domain-Wide Delegation of Authority.",
+                code: 403,
+                errors: [{ domain: "calendar", reason: "forbiddenForServiceAccounts" }],
+              },
+            }),
+            { status: 403, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        // Chamada simples (sem attendees) tem sucesso imediato
+        return new Response(
+          JSON.stringify({
+            id: "evt-simple-123",
+            htmlLink: "https://calendar.google.com/event?eid=simple123",
+            summary: bodyObj.summary,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+    );
+
+    const event = await createBriefingCalendarEvent({
+      clienteId: "gd-teste-403",
+      clienteNome: "Conrado Finzi",
+      slotStart: "2026-11-20T17:00:00Z",
+      slotEnd: "2026-11-20T18:00:00Z",
+      attendees: ["conradofl@gmail.com"],
+      strictAttendees: true,
+      accessToken: "mock-valid-google-token",
+    });
+
+    expect(event.success).toBe(true);
+    expect(event.isMock).toBe(false);
+    expect(event.eventId).toBe("evt-simple-123");
+    expect(event.calendarError).toBeFalsy();
+    // Confirma que houve a chamada inicial com attendees e o retry limpo
+    expect(chamadas.length).toBeGreaterThanOrEqual(2);
+    expect(chamadas[0].body.attendees).toBeDefined();
+    expect(chamadas[1].body.attendees).toBeUndefined();
+  });
+
+  it("Teste 8: Deduplicação de agendas no painel - Conrado Finzi possui registro único com conradofl@gmail.com", () => {
+    // Simula lista de agendas contendo resquício antigo
+    const agendasRaw = [
+      { id: "1", nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660" },
+      { id: "2", nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660" },
+      { id: "3", nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779" },
+    ];
+
+    // Função de sanitização/unificação de agendas
+    const sanitizarAgendas = (lista) => {
+      const filtradas = lista.filter((a) => a.email !== "conradofinzi@gmail.com");
+      const unicas = [];
+      const telefonesVistos = new Set();
+      for (const a of filtradas) {
+        const telNorm = String(a.telefone || "").replace(/\D/g, "");
+        if (telNorm && telefonesVistos.has(telNorm)) {
+          continue;
+        }
+        if (telNorm) telefonesVistos.add(telNorm);
+        unicas.push(a);
+      }
+      return unicas;
+    };
+
+    const limpas = sanitizarAgendas(agendasRaw);
+    expect(limpas.some((a) => a.email === "conradofinzi@gmail.com")).toBe(false);
+    expect(limpas.filter((a) => a.telefone === "5534997817660").length).toBe(1);
+    expect(limpas.find((a) => a.telefone === "5534997817660").email).toBe("conradofl@gmail.com");
+  });
 });

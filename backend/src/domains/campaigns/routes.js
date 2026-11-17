@@ -105,15 +105,13 @@ export function normalizeDispatchPhone(phone, lead = null) {
   const raw = phone || lead?.telefone || lead?.phone || "";
   const canonical = toCanonicalPhone(raw);
   if (canonical) return canonical;
-  // Era normalizeString(raw): normalizeString só existe dentro de registerCampaignsRoutes, e aqui virava ReferenceError
-  // (telefone sem dígito no claim do lote derrubava o lote inteiro).
-  return String(raw ?? "").trim().replace(/\D/g, "");
+  return normalizeString(raw).replace(/\D/g, "");
 }
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../../services/dispatchRunChip.js";
 import { isPhoneOptedOut } from "../../campaign/queueOptOut.js";
 import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
 import { countOptedOutPhones } from "../../services/optOut.js";
-import { getQueueBlock, resumeDeferredQueues } from "../../campaign/queueResume.js";
+import { resumeDeferredQueues } from "../../campaign/queueResume.js";
 import {
   QUOTA_PAUSE_MARKER,
   buildQuotaGateForWebhook as buildQuotaGateForWebhookShared,
@@ -287,8 +285,8 @@ export function buildImportAuditSql() {
               AND lm.direction = 'outbound'
               AND COALESCE(btrim(lm.message_text), '') <> ''
               AND ${CP("lm.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
+            ORDER BY ${CP("lm.phone")}, ${lmTimestamp} DESC
           ) sub
-          ORDER BY cp, msg_at DESC
         ),
         last_reply_msg AS (
           SELECT DISTINCT ON (cp)
@@ -305,8 +303,8 @@ export function buildImportAuditSql() {
               AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
               AND COALESCE(btrim(lm.message_text), '') <> ''
               AND ${CP("lm.phone")} IN (SELECT cp FROM items WHERE cp IS NOT NULL)
+            ORDER BY ${CP("lm.phone")}, ${lmTimestamp} DESC
           ) sub
-          ORDER BY cp, msg_at DESC
         )
         SELECT
           i.id AS lead_import_item_id,
@@ -460,113 +458,6 @@ export function describeSendWindowRefusal(now, sendWindowConfig) {
   };
 }
 
-// Regra única da janela para os botões que disparam na hora ("Disparar Agora" e "Disparar não processados"). Até 16/11/2026
-// o run-pending não olhava a janela: respondia "N pendentes em execução", marcava o lote 'running' e o motor pausava no
-// primeiro lead (caso Nous, 20:22, janela até 20:00). allowed=false: a rota devolve 422 OUTSIDE_SEND_WINDOW e não toca no
-// lote. forced=true só com o booleano true confirmado na tela, e vira ignoreSendWindow no motor.
-export function evaluateManualSendWindow({ now = new Date(), settings, forceOutsideWindow }) {
-  const sendWindowConfig = resolveSendWindowConfig(settings || {});
-  if (isWithinSendWindow(now, sendWindowConfig)) return { allowed: true, forced: false, refusal: null };
-  const refusal = describeSendWindowRefusal(now, sendWindowConfig);
-  if (forceOutsideWindow !== true) return { allowed: false, forced: false, refusal };
-  return { allowed: true, forced: true, refusal };
-}
-
-// Texto gravado em error_message quando o motor lança no meio do lote. Mensagem que já explica a parada (os "Disparo
-// interrompido: ..." do link de agenda) vai como está; o resto ganha o prefixo "Falhou:".
-export function describeDispatchCrash(err) {
-  // normalizeString vem das deps (dentro de registerCampaignsRoutes); aqui, no nível do módulo, não existe.
-  const raw = String(err?.userMessage || err?.message || (typeof err === "string" ? err : "") || "").trim();
-  const msg = raw || "erro sem mensagem no motor de disparo";
-  return /^disparo interrompido/i.test(msg) ? msg : `Falhou: ${msg}`;
-}
-
-// Checagem do chip antes do envio (GET /instance/connectionState com o token de disparo do próprio chip). Antes, qualquer
-// falha virava "chip desconectado": Nous, 17/11/2026, Chip 2 conectado na Evolution e na tela de chips (que usa a chave
-// global), mas o token gravado no chip era recusado (HTTP 401) e o lote pausava dizendo "Reconecte o chip".
-// Cada falha devolve { chipName, kind, longo, curto }; só kind "fechado" é chip desconectado de verdade.
-const CHIP_TENTE_DE_NOVO = "Tente de novo em alguns minutos; se continuar, confira a Evolution.";
-export function describeChipHealthFailure({ chipName, error = null, state = null } = {}) {
-  const nome = String(chipName || "").trim() || "WhatsApp";
-  const falha = (kind, longo, curto) => ({ chipName: nome, kind, longo: `Pausado — ${longo}`, curto });
-  if (!error) {
-    const estado = String(state || "").trim().toLowerCase();
-    if (estado && estado !== "unknown") {
-      return falha("fechado", `chip desconectado (${nome}). Reconecte o chip em Conexões para retomar.`, `desconectado (${estado})`);
-    }
-    return falha(
-      "sem_estado",
-      `a Evolution respondeu sem o estado de conexão do chip (${nome}). Confira o chip em Conexões e tente de novo.`,
-      "resposta sem estado de conexão"
-    );
-  }
-  const code = error?.code;
-  if (code === "EVOLUTION_INSTANCE_NOT_OPEN") {
-    const estado = String(error.connectionState || "").trim().toLowerCase() || "fechado";
-    return falha("fechado", `chip desconectado (${nome}). Reconecte o chip em Conexões para retomar.`, `desconectado (${estado})`);
-  }
-  if (code === "EVOLUTION_ENDPOINT_INVALID") {
-    return falha(
-      "url_invalida",
-      `URL de disparo do chip inválida (${nome}). Corrija em Chips WhatsApp no formato https://host/message/sendText/NOME_DA_INSTANCIA.`,
-      "URL de disparo inválida"
-    );
-  }
-  if (code === "EVOLUTION_HEALTH_CHECK_TIMEOUT") {
-    return falha("timeout", `a Evolution não respondeu a tempo ao conferir o chip (${nome}). ${CHIP_TENTE_DE_NOVO}`, "sem resposta a tempo");
-  }
-  if (code === "EVOLUTION_HEALTH_CHECK_FAILED") {
-    const http = Number(error.httpStatus) || null;
-    if (http === 401 || http === 403) {
-      return falha(
-        "token_recusado",
-        `a Evolution recusou o token do chip (${nome}, HTTP ${http}). O chip pode estar conectado: atualize o token de disparo dele em Chips WhatsApp para retomar.`,
-        `token recusado (HTTP ${http})`
-      );
-    }
-    if (http === 404) {
-      const inst = String(error.instanceName || "").trim();
-      return falha(
-        "instancia_inexistente",
-        `a Evolution não encontrou a instância do chip (${nome}, HTTP 404${inst ? `, instância "${inst}"` : ""}). Confira o nome da instância na URL de disparo do chip em Chips WhatsApp.`,
-        "instância não encontrada (HTTP 404)"
-      );
-    }
-    return falha(
-      "http",
-      `a Evolution respondeu erro ao conferir o chip (${nome}${http ? `, HTTP ${http}` : ""}). ${CHIP_TENTE_DE_NOVO}`,
-      http ? `erro HTTP ${http}` : "erro na Evolution"
-    );
-  }
-  return falha("rede", `não foi possível falar com a Evolution ao conferir o chip (${nome}). ${CHIP_TENTE_DE_NOVO}`, "sem conexão com a Evolution");
-}
-
-// Nenhum chip do lote passou na checagem. Todos fechados de verdade: o texto de sempre, com o último chip (a tela e os
-// testes já dependem dele). Um chip só: o motivo dele. Vários com motivos diferentes: o motivo de cada um.
-export function buildChipHealthPauseMessage(falhas = []) {
-  const lista = Array.isArray(falhas) ? falhas.filter(Boolean) : [];
-  if (lista.length === 0) return "Pausado — chip desconectado (WhatsApp). Reconecte o chip em Conexões para retomar.";
-  if (lista.every((f) => f.kind === "fechado")) return lista[lista.length - 1].longo;
-  if (lista.length === 1) return lista[0].longo;
-  return `Pausado — nenhum chip do lote passou na checagem com a Evolution. ${lista.map((f) => `${f.chipName}: ${f.curto}`).join("; ")}.`;
-}
-
-// "Interrompido: N pendentes" sozinho não diz o que fazer. claimedCount = reservados sem confirmação de envio (execução que
-// caiu no meio); o resto do alvo não entrou na fila desta rodada.
-export function describeInterruptedPending({ pendingCount, claimedCount = 0 }) {
-  const pend = Math.max(0, Number(pendingCount) || 0);
-  const reservados = Math.min(pend, Math.max(0, Number(claimedCount) || 0));
-  const foraDaFila = pend - reservados;
-  const partes = [];
-  if (reservados > 0) {
-    partes.push(`${reservados} reservado(s) por uma execução que não terminou, sem confirmação de envio`);
-  }
-  if (foraDaFila > 0) {
-    partes.push(`${foraDaFila} não entrou(aram) na fila desta rodada (saiu do público da planilha ou já tem a sequência em andamento)`);
-  }
-  return `Interrompido: ${pend} lead(s) pendente(s) de envio.${partes.length ? ` ${partes.join("; ")}.` : ""}`;
-}
-
 /**
  * Bloco de contexto com as opcoes de resposta que o lead recebeu escritas na
  * mensagem. Vai anexado ao roteiro copiado para o disparo.
@@ -712,147 +603,147 @@ export function registerCampaignsRoutes(app, deps) {
     requireFirebaseAuth,
     requireAppViewAccess("planilhas"),
     async (req, res) => {
-    if (!ensureDb(res)) return;
+      if (!ensureDb(res)) return;
 
-    const requestedClientId = normalizeString(req.body?.clientId);
-    const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
-    if (!clientId) return;
-    const importId = normalizeString(req.body?.importId);
-    const scheduledAt = normalizeString(req.body?.scheduledAt);
-    const campaignName = normalizeString(req.body?.campaignName);
-    const channel = normalizeString(req.body?.channel);
-    const rawLimit = Number.parseInt(String(req.body?.limit ?? ""), 10);
-    const limit = Number.isNaN(rawLimit) ? null : rawLimit;
-    const validation = validateCampaignAnalyticsMeta(
-      req.body?.analyticsMeta ||
+      const requestedClientId = normalizeString(req.body?.clientId);
+      const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
+      if (!clientId) return;
+      const importId = normalizeString(req.body?.importId);
+      const scheduledAt = normalizeString(req.body?.scheduledAt);
+      const campaignName = normalizeString(req.body?.campaignName);
+      const channel = normalizeString(req.body?.channel);
+      const rawLimit = Number.parseInt(String(req.body?.limit ?? ""), 10);
+      const limit = Number.isNaN(rawLimit) ? null : rawLimit;
+      const validation = validateCampaignAnalyticsMeta(
+        req.body?.analyticsMeta ||
         {
           message: req.body?.message,
           image: req.body?.image,
           sequence: req.body?.sequence,
           dispatchOptions: req.body?.dispatchOptions,
         }
-    );
+      );
 
-    try {
-      const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
-      const { webhookUrl, webhookToken } = dispatchSettings;
-      if (!webhookUrl) {
-        sendError(
-          res,
-          400,
-          "EVOLUTION_SETTINGS_MISSING",
-          "Configure uma URL ativa de disparo Evolution para esta empresa"
-        );
-        return;
-      }
-      await checkEvolutionInstanceHealth({
-        webhookUrl,
-        webhookToken,
-        context: {
+      try {
+        const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
+        const { webhookUrl, webhookToken } = dispatchSettings;
+        if (!webhookUrl) {
+          sendError(
+            res,
+            400,
+            "EVOLUTION_SETTINGS_MISSING",
+            "Configure uma URL ativa de disparo Evolution para esta empresa"
+          );
+          return;
+        }
+        await checkEvolutionInstanceHealth({
+          webhookUrl,
+          webhookToken,
+          context: {
+            clientId,
+            mode: "legacy_manual_dispatch",
+            campaignName: campaignName || null,
+          },
+        });
+
+        if (!validation.valid) {
+          sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
+          return;
+        }
+
+        const leads = await buildDispatchLeads({
           clientId,
-          mode: "legacy_manual_dispatch",
-          campaignName: campaignName || null,
-        },
-      });
+          importId,
+          limit,
+          segmentation: validation.analyticsMeta.segmentation || null,
+        });
 
-      if (!validation.valid) {
-        sendError(res, 400, "INVALID_CAMPAIGN_CONTENT", validation.message);
-        return;
-      }
+        if (leads.length === 0) {
+          sendError(res, 404, "NO_DISPATCH_LEADS", "No leads found for dispatch");
+          return;
+        }
 
-      const leads = await buildDispatchLeads({
-        clientId,
-        importId,
-        limit,
-        segmentation: validation.analyticsMeta.segmentation || null,
-      });
-
-      if (leads.length === 0) {
-        sendError(res, 404, "NO_DISPATCH_LEADS", "No leads found for dispatch");
-        return;
-      }
-
-      const clientName = await getClientName(clientId);
-      const quotaGate = await buildQuotaGateForWebhook(clientId, webhookUrl);
-      const { summary } = await dispatchCampaignSequence({
-        webhookUrl,
-        webhookToken,
-        quotaGate,
-        leads,
-        analyticsMeta: validation.analyticsMeta,
-        context: {
-          campaign: {
-            id: null,
-            name: campaignName || null,
-            importId,
-            scheduledAt: scheduledAt || null,
-            channel: channel || null,
-            requestedBy: {
-              uid: req.authAccess?.uid || null,
-              email: req.authAccess?.email || null,
+        const clientName = await getClientName(clientId);
+        const quotaGate = await buildQuotaGateForWebhook(clientId, webhookUrl);
+        const { summary } = await dispatchCampaignSequence({
+          webhookUrl,
+          webhookToken,
+          quotaGate,
+          leads,
+          analyticsMeta: validation.analyticsMeta,
+          context: {
+            campaign: {
+              id: null,
+              name: campaignName || null,
+              importId,
+              scheduledAt: scheduledAt || null,
+              channel: channel || null,
+              requestedBy: {
+                uid: req.authAccess?.uid || null,
+                email: req.authAccess?.email || null,
+              },
+            },
+            client: {
+              id: clientId,
+              name: clientName,
             },
           },
-          client: {
-            id: clientId,
-            name: clientName,
-          },
-        },
-      });
-
-      if (quotaGate.unidentifiedMessages > 0) {
-        console.warn("[campaign-quota] mensagens enviadas sem cota (chip não identificado):", {
-          clientId,
-          mode: "legacy_manual_dispatch",
-          mensagens: quotaGate.unidentifiedMessages,
-          origemDoWebhook: dispatchSettings.source || null,
         });
-      }
 
-      if (quotaGate.unavailableMessages > 0) {
-        console.error("[campaign-quota] mensagens enviadas sem cota (cota indisponível — erro de infraestrutura):", {
-          clientId,
-          mode: "legacy_manual_dispatch",
-          mensagens: quotaGate.unavailableMessages,
+        if (quotaGate.unidentifiedMessages > 0) {
+          console.warn("[campaign-quota] mensagens enviadas sem cota (chip não identificado):", {
+            clientId,
+            mode: "legacy_manual_dispatch",
+            mensagens: quotaGate.unidentifiedMessages,
+            origemDoWebhook: dispatchSettings.source || null,
+          });
+        }
+
+        if (quotaGate.unavailableMessages > 0) {
+          console.error("[campaign-quota] mensagens enviadas sem cota (cota indisponível — erro de infraestrutura):", {
+            clientId,
+            mode: "legacy_manual_dispatch",
+            mensagens: quotaGate.unavailableMessages,
+          });
+        }
+
+        if (summary.allChipsExhausted) {
+          sendError(
+            res,
+            429,
+            "CHIP_QUOTA_EXHAUSTED",
+            summary.exhaustedQuotaMessage || "Cota diária do chip atingida. Retoma amanhã.",
+            {
+              total: leads.length,
+              successCount: summary.successCount,
+              failureCount: summary.failureCount,
+              successPhones: summary.successPhones,
+              failures: summary.failures,
+            }
+          );
+          return;
+        }
+
+        res.json({
+          success: true,
+          provider: "evolution",
+          campaignName: campaignName || null,
+          total: leads.length,
+          successCount: summary.successCount,
+          failureCount: summary.failureCount,
+          successPhones: summary.successPhones,
+          failures: summary.failures,
+          completedCampaign: summary.completedCampaign,
         });
-      }
-
-      if (summary.allChipsExhausted) {
+      } catch (error) {
+        console.error("legacy manual evolution dispatch error:", error);
         sendError(
           res,
-          429,
-          "CHIP_QUOTA_EXHAUSTED",
-          summary.exhaustedQuotaMessage || "Cota diária do chip atingida. Retoma amanhã.",
-          {
-            total: leads.length,
-            successCount: summary.successCount,
-            failureCount: summary.failureCount,
-            successPhones: summary.successPhones,
-            failures: summary.failures,
-          }
+          500,
+          "EVOLUTION_DISPATCH_FAILED",
+          error instanceof Error ? error.message : "Failed to send leads through Evolution"
         );
-        return;
       }
-
-      res.json({
-        success: true,
-        provider: "evolution",
-        campaignName: campaignName || null,
-        total: leads.length,
-        successCount: summary.successCount,
-        failureCount: summary.failureCount,
-        successPhones: summary.successPhones,
-        failures: summary.failures,
-        completedCampaign: summary.completedCampaign,
-      });
-    } catch (error) {
-      console.error("legacy manual evolution dispatch error:", error);
-      sendError(
-        res,
-        500,
-        "EVOLUTION_DISPATCH_FAILED",
-        error instanceof Error ? error.message : "Failed to send leads through Evolution"
-      );
-    }
     }
   );
   // ─────────────────────────────────────────────────────────────
@@ -1681,7 +1572,7 @@ export function registerCampaignsRoutes(app, deps) {
             created_by_email: req.authAccess?.email || null,
             mode: campaignMode,
           })
-            .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, mode")
+          .select("id, name, client_id, import_id, limit_per_run, webhook_url, status, scheduled_for, last_triggered_at, archived_at, created_by_uid, created_by_email, created_at, mode")
           .single();
         data = fallback.data;
         error = fallback.error;
@@ -1894,19 +1785,19 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       if (isCrmSourceUpdate || isAllSourceUpdate || updatedImportIds !== null || ("importId" in req.body && updates.import_id !== null)) {
-         const currentMeta = updates.analytics_meta || current.analytics_meta || {};
-         if (isCrmSourceUpdate) {
-            currentMeta.importSource = "__crm__";
-            delete currentMeta.importIds;
-         } else {
-            if (isAllSourceUpdate && !updates.import_id && !(updatedImportIds?.length > 0)) currentMeta.importSource = "__all__";
-            else delete currentMeta.importSource;
-            if (updatedImportIds !== null) {
-              if (updatedImportIds.length > 0) currentMeta.importIds = updatedImportIds;
-              else delete currentMeta.importIds;
-            }
-         }
-         updates.analytics_meta = currentMeta;
+        const currentMeta = updates.analytics_meta || current.analytics_meta || {};
+        if (isCrmSourceUpdate) {
+          currentMeta.importSource = "__crm__";
+          delete currentMeta.importIds;
+        } else {
+          if (isAllSourceUpdate && !updates.import_id && !(updatedImportIds?.length > 0)) currentMeta.importSource = "__all__";
+          else delete currentMeta.importSource;
+          if (updatedImportIds !== null) {
+            if (updatedImportIds.length > 0) currentMeta.importIds = updatedImportIds;
+            else delete currentMeta.importIds;
+          }
+        }
+        updates.analytics_meta = currentMeta;
       }
 
       // Edicao que deixaria campanha de publico do Banco sem origem e recusada (so quando o pedido mexe na origem ou
@@ -2713,10 +2604,10 @@ export function registerCampaignsRoutes(app, deps) {
       const audience = isPendingSpreadsheet
         ? { total: pendingRows, toSend: pendingRows, limitPerRun: null }
         : await countCampaignAudience({
-            client_id: clientId,
-            import_id: isCrmSource ? null : importIds[0] || reqImportId,
-            analytics_meta: analyticsMeta,
-          });
+          client_id: clientId,
+          import_id: isCrmSource ? null : importIds[0] || reqImportId,
+          analytics_meta: analyticsMeta,
+        });
       const originKind = isCrmSource
         ? "crm"
         : !isPendingSpreadsheet && importIds.length === 0 && !reqImportId
@@ -2787,11 +2678,11 @@ export function registerCampaignsRoutes(app, deps) {
 
       const description = campaign.is_recurring
         ? describeRecurrence({
-            pattern: campaign.recurrence_pattern,
-            dayOfMonth: campaign.recurrence_day_of_month,
-            dayOfWeek: campaign.recurrence_day_of_week,
-            time: campaign.recurrence_time,
-          })
+          pattern: campaign.recurrence_pattern,
+          dayOfMonth: campaign.recurrence_day_of_month,
+          dayOfWeek: campaign.recurrence_day_of_week,
+          time: campaign.recurrence_time,
+        })
         : null;
       const isCrmSource = normalizeString(campaign.analytics_meta?.importSource) === "__crm__";
       const selection = resolveCampaignImportSelection(campaign);
@@ -3476,72 +3367,6 @@ export function registerCampaignsRoutes(app, deps) {
   }
   // ────────────────────────────────────────────────────────────────────────────
 
-  // Janela dos botões que disparam na hora. null = a rota já respondeu 422 (não mexe no lote); senão { forced }.
-  async function checkManualSendWindowOrRefuse(req, res, { clientId, campaignId, dispatchId, route }) {
-    const decision = evaluateManualSendWindow({
-      now: new Date(),
-      settings: (await getLeadClientN8nSettings(clientId)) || {},
-      forceOutsideWindow: req.body?.forceOutsideWindow,
-    });
-    if (!decision.allowed) {
-      sendError(res, 422, "OUTSIDE_SEND_WINDOW", decision.refusal.message, decision.refusal.details);
-      return null;
-    }
-    if (decision.forced) {
-      // Sem tabela de auditoria de disparo (dívida anotada no PR do Disparar Agora fora da janela): o registro do forçamento é este log.
-      console.warn("[campaign-dispatch] disparo_forcado_fora_da_janela", {
-        route,
-        clientId,
-        campaignId,
-        dispatchId,
-        uid: req.authAccess?.uid || null,
-        email: req.authAccess?.email || null,
-        localTime: decision.refusal.details.localTime,
-        sendWindow: decision.refusal.details.sendWindow,
-        nextOpening: decision.refusal.details.nextOpening,
-      });
-    }
-    return { forced: decision.forced };
-  }
-
-  // O motor rodou em segundo plano e lançou. Antes (até 16/11/2026) o .catch montava o update SEM await nem then: o
-  // construtor de consulta só executa quando alguém espera por ele, então o update nunca ia ao banco, o lote ficava
-  // 'running' até o próximo boot e todo botão devolvia 409. Só sai de 'running': se o motor já tinha pausado, fica.
-  async function markDispatchCrashed(dispatchId, err, origem) {
-    const motivo = describeDispatchCrash(err);
-    console.error("[campaign-dispatch] lote_falhou", { origem, dispatchId, motivo });
-    try {
-      const { error } = await supabase
-        .from("campaign_dispatches")
-        .update({
-          status: "failed",
-          error_message: motivo,
-          finished_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", dispatchId)
-        .eq("status", "running");
-      if (error) console.error("[campaign-dispatch] falha ao gravar lote_falhou:", { dispatchId, error: error.message || error });
-    } catch (writeErr) {
-      console.error("[campaign-dispatch] falha ao gravar lote_falhou:", { dispatchId, error: writeErr?.message || writeErr });
-    }
-  }
-
-  const COUNT_UNAVAILABLE_MESSAGE =
-    "Falhou: não foi possível contar no banco o que este lote já enviou. Abra os destinatários para conferir e dispare os não processados.";
-  async function markDispatchCountUnavailable(db, dispatchId) {
-    try {
-      await db.from("campaign_dispatches").update({
-        status: "failed",
-        error_message: COUNT_UNAVAILABLE_MESSAGE,
-        finished_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq("id", dispatchId).eq("status", "running");
-    } catch (err) {
-      console.error("[campaign-dispatch] falha ao gravar contagem_indisponivel:", { dispatchId, error: err?.message || err });
-    }
-  }
-
   async function getDispatchRunCounts(pool, dispatchId) {
     if (!pool) return null;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -3551,8 +3376,7 @@ export function registerCampaignsRoutes(app, deps) {
              COUNT(*) FILTER (WHERE status = 'sent')::int as sent,
              COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
              COUNT(*) FILTER (WHERE status = 'invalid_number')::int as invalid,
-             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped,
-             COUNT(*) FILTER (WHERE status = 'claimed')::int as claimed
+             COUNT(*) FILTER (WHERE status = 'skipped')::int as skipped
            FROM public.campaign_dispatch_runs
            WHERE dispatch_id = $1`,
           [dispatchId]
@@ -3563,7 +3387,6 @@ export function registerCampaignsRoutes(app, deps) {
             failed: Number(countsRes.rows[0].failed || 0),
             invalid: Number(countsRes.rows[0].invalid || 0),
             skipped: Number(countsRes.rows[0].skipped || 0),
-            claimed: Number(countsRes.rows[0].claimed || 0),
           };
         }
       } catch (err) {
@@ -3720,10 +3543,10 @@ export function registerCampaignsRoutes(app, deps) {
     if (cycleLeads.length === 0) {
       const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
       if (!counts) {
-        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Contadores NÃO são gravados para evitar fabricação de dados.`);
-        // Até 16/11/2026 o lote ficava 'running' até o próximo boot (todo botão devolvia 409, a tela mostrava "em
-        // execução"). Agora sai como 'failed' com o motivo; os contadores ficam como estavam.
-        await markDispatchCountUnavailable(db, dispatchId);
+        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Status do lote NÃO será alterado para evitar fabricação de dados.`);
+        // Comportamento real: o lote foi reivindicado como 'running' e fica 'running' até o próximo boot, quando
+        // recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe. Até lá a trava de uma ocorrência rodando por
+        // campanha segue ocupada e a tela mostra "em execução".
         return;
       }
       const totalSent = counts.sent;
@@ -3735,7 +3558,7 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (targetCount > 0 && totalProcessed < targetCount) {
         const pendingCount = targetCount - totalProcessed;
-        const finalMsg = describeInterruptedPending({ pendingCount, claimedCount: counts.claimed });
+        const finalMsg = `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`;
         await db.from("campaign_dispatches").update({
           status: "interrupted",
           sent_count: totalSent,
@@ -3825,19 +3648,17 @@ export function registerCampaignsRoutes(app, deps) {
         }
       } catch (valErr) {
         console.warn("[campaign-dispatch] erro na pré-validação de números (disparo continuará sem travar):", valErr?.message || valErr);
-        // Era validLeads = leads: a lista ANTES da exclusão por ciclo e da trava de sequência em andamento. Uma falha na
-        // pré-validação devolvia ao envio quem já tinha recebido em outro lote deste ciclo.
-        validLeads = cycleLeads;
+        validLeads = leads;
       }
     }
 
     if (validLeads.length === 0) {
       const counts = await getDispatchRunCounts(pgDatabasePool, dispatchId);
       if (!counts) {
-        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Contadores NÃO são gravados para evitar fabricação de dados.`);
-        // Até 16/11/2026 o lote ficava 'running' até o próximo boot (todo botão devolvia 409, a tela mostrava "em
-        // execução"). Agora sai como 'failed' com o motivo; os contadores ficam como estavam.
-        await markDispatchCountUnavailable(db, dispatchId);
+        console.error(`[campaign-dispatch] contagem de runs falhou para lote ${dispatchId}. Status do lote NÃO será alterado para evitar fabricação de dados.`);
+        // Comportamento real: o lote foi reivindicado como 'running' e fica 'running' até o próximo boot, quando
+        // recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe. Até lá a trava de uma ocorrência rodando por
+        // campanha segue ocupada e a tela mostra "em execução".
         return;
       }
       const totalSent = counts.sent;
@@ -3853,7 +3674,7 @@ export function registerCampaignsRoutes(app, deps) {
           status: "interrupted",
           sent_count: totalSent,
           failed_count: totalFailed,
-          error_message: describeInterruptedPending({ pendingCount, claimedCount: counts.claimed }),
+          error_message: `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`,
           updated_at: new Date().toISOString(),
         }).eq("id", dispatchId);
       } else {
@@ -3941,8 +3762,8 @@ export function registerCampaignsRoutes(app, deps) {
       Array.isArray(dispatchCampaignMeta.dispatchOptions?.dispatchChipIds) && dispatchCampaignMeta.dispatchOptions.dispatchChipIds.length > 0
         ? dispatchCampaignMeta.dispatchOptions.dispatchChipIds
         : (Array.isArray(dispatch.dispatch_options?.dispatchChipIds) && dispatch.dispatch_options.dispatchChipIds.length > 0
-            ? dispatch.dispatch_options.dispatchChipIds
-            : [])
+          ? dispatch.dispatch_options.dispatchChipIds
+          : [])
     ).filter(Boolean);
 
     const attemptChipAutoHealing = async (configuredIds) => {
@@ -4170,7 +3991,7 @@ export function registerCampaignsRoutes(app, deps) {
 
     if (rotationPool.length > 0) {
       let anyOpen = false;
-      const falhasDeChip = [];
+      let lastClosedName = null;
       for (const inst of rotationPool) {
         try {
           const health = await checkEvolutionInstanceHealth({
@@ -4181,21 +4002,19 @@ export function registerCampaignsRoutes(app, deps) {
           if (health?.state && isEvolutionOpenState(health.state)) {
             anyOpen = true;
           } else {
-            falhasDeChip.push(describeChipHealthFailure({ chipName: inst.name || inst.id, state: health?.state }));
+            lastClosedName = inst.name || inst.id;
           }
         } catch (healthErr) {
-          const falha = describeChipHealthFailure({ chipName: inst.name || inst.id, error: healthErr });
-          falhasDeChip.push(falha);
+          lastClosedName = inst.name || inst.id;
           console.warn("[campaign-dispatch] chip health check falhou:", {
             chip: inst.name,
-            motivo: falha.kind,
             error: healthErr?.message || healthErr,
           });
         }
       }
 
       if (!anyOpen) {
-        const errorMsg = buildChipHealthPauseMessage(falhasDeChip);
+        const errorMsg = `Pausado — chip desconectado (${lastClosedName || "WhatsApp"}). Reconecte o chip em Conexões para retomar.`;
         console.warn("[campaign-dispatch] Nenhum chip conectado para este disparo. Pausando lote imediatamente:", {
           dispatchId,
           campaignId: campaign.id,
@@ -4224,75 +4043,75 @@ export function registerCampaignsRoutes(app, deps) {
     const chipProvider =
       isMultiChip && rotationPool.length > 0
         ? async ({ leadIndex, burst = 1 } = {}) => {
-            const count = Number.isInteger(burst) && burst > 0 ? burst : 1;
-            let lastExhausted = null;
-            for (let attempt = 0; attempt < rotationPool.length; attempt += 1) {
-              const inst = rotationPool[(rotationCursor + attempt) % rotationPool.length];
-              const limit = resolveEvolutionInstanceDailyLimit(inst);
-              let reserved;
-              try {
-                reserved = await reserveEvolutionInstanceDailyQuota(inst.id, todayDateKey, pgDatabasePool, count);
-                if (reserved === null) throw new Error("contador de cota indisponível");
-              } catch (err) {
-                if (!quotaUnavailableWarned) {
-                  quotaUnavailableWarned = true;
-                  console.error("[campaign-quota] cota indisponível no rodízio: o envio segue sem cota para os chips deste lote:", err?.message || err);
-                }
-                rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
-                return {
-                  webhookUrl: normalizeString(inst.dispatch_webhook_url),
-                  webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
-                  instanceId: inst.id,
-                  instanceName: inst.name || inst.id,
-                  sequence: null,
-                  release: () => {},
-                  limitQuota: limit,
-                  usedQuota: 0,
-                };
+          const count = Number.isInteger(burst) && burst > 0 ? burst : 1;
+          let lastExhausted = null;
+          for (let attempt = 0; attempt < rotationPool.length; attempt += 1) {
+            const inst = rotationPool[(rotationCursor + attempt) % rotationPool.length];
+            const limit = resolveEvolutionInstanceDailyLimit(inst);
+            let reserved;
+            try {
+              reserved = await reserveEvolutionInstanceDailyQuota(inst.id, todayDateKey, pgDatabasePool, count);
+              if (reserved === null) throw new Error("contador de cota indisponível");
+            } catch (err) {
+              if (!quotaUnavailableWarned) {
+                quotaUnavailableWarned = true;
+                console.error("[campaign-quota] cota indisponível no rodízio: o envio segue sem cota para os chips deste lote:", err?.message || err);
               }
-
-              if (reserved > limit) {
-                try {
-                  await releaseEvolutionInstanceDailyQuota(inst.id, todayDateKey, pgDatabasePool, count);
-                } catch {
-                  /* best-effort */
-                }
-                lastExhausted = {
-                  exhausted: true,
-                  chipName: inst.name || inst.id,
-                  limitQuota: limit,
-                  usedQuota: Math.min(Math.max(reserved - count, 0), limit),
-                  exhaustedQuotaMessage: `Pausado — cota diária do chip atingida (${limit}/${limit}). Retoma amanhã.`,
-                };
-                continue;
-              }
-
               rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
               return {
                 webhookUrl: normalizeString(inst.dispatch_webhook_url),
                 webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
                 instanceId: inst.id,
                 instanceName: inst.name || inst.id,
-                sequence: reserved,
-                release: (unused) =>
-                  releaseEvolutionInstanceDailyQuota(
-                    inst.id,
-                    todayDateKey,
-                    pgDatabasePool,
-                    Number.isInteger(unused) && unused > 0 ? unused : count
-                  ).catch(() => {}),
+                sequence: null,
+                release: () => { },
                 limitQuota: limit,
-                usedQuota: reserved,
+                usedQuota: 0,
               };
             }
-            return lastExhausted || {
-              exhausted: true,
-              chipName: rotationPool[0]?.name || "WhatsApp",
-              limitQuota: resolveEvolutionInstanceDailyLimit(rotationPool[0]),
-              usedQuota: resolveEvolutionInstanceDailyLimit(rotationPool[0]),
-              exhaustedQuotaMessage: `Pausado — cota diária do chip atingida (${resolveEvolutionInstanceDailyLimit(rotationPool[0])}/${resolveEvolutionInstanceDailyLimit(rotationPool[0])}). Retoma amanhã.`,
+
+            if (reserved > limit) {
+              try {
+                await releaseEvolutionInstanceDailyQuota(inst.id, todayDateKey, pgDatabasePool, count);
+              } catch {
+                /* best-effort */
+              }
+              lastExhausted = {
+                exhausted: true,
+                chipName: inst.name || inst.id,
+                limitQuota: limit,
+                usedQuota: Math.min(Math.max(reserved - count, 0), limit),
+                exhaustedQuotaMessage: `Pausado — cota diária do chip atingida (${limit}/${limit}). Retoma amanhã.`,
+              };
+              continue;
+            }
+
+            rotationCursor = (rotationCursor + attempt + 1) % rotationPool.length;
+            return {
+              webhookUrl: normalizeString(inst.dispatch_webhook_url),
+              webhookToken: normalizeString(inst.dispatch_webhook_token) || null,
+              instanceId: inst.id,
+              instanceName: inst.name || inst.id,
+              sequence: reserved,
+              release: (unused) =>
+                releaseEvolutionInstanceDailyQuota(
+                  inst.id,
+                  todayDateKey,
+                  pgDatabasePool,
+                  Number.isInteger(unused) && unused > 0 ? unused : count
+                ).catch(() => { }),
+              limitQuota: limit,
+              usedQuota: reserved,
             };
           }
+          return lastExhausted || {
+            exhausted: true,
+            chipName: rotationPool[0]?.name || "WhatsApp",
+            limitQuota: resolveEvolutionInstanceDailyLimit(rotationPool[0]),
+            usedQuota: resolveEvolutionInstanceDailyLimit(rotationPool[0]),
+            exhaustedQuotaMessage: `Pausado — cota diária do chip atingida (${resolveEvolutionInstanceDailyLimit(rotationPool[0])}/${resolveEvolutionInstanceDailyLimit(rotationPool[0])}). Retoma amanhã.`,
+          };
+        }
         : null;
 
     // Opt-out do lote. ATÉ 29/10/2026 esta função existia, lia lead_optouts e NUNCA foi passada ao envio (onLeadCheckOptout):
@@ -4478,14 +4297,14 @@ export function registerCampaignsRoutes(app, deps) {
             .from("campaign_dispatches")
             .update({ error_message: errorMsg, updated_at: new Date().toISOString() })
             .eq("id", dispatchId)
-            .catch(() => {});
+            .catch(() => { });
         } else if (pgDatabasePool) {
           await pgDatabasePool
             .query(
               `UPDATE public.campaign_dispatches SET error_message = $1, updated_at = now() WHERE id = $2`,
               [errorMsg, dispatchId]
             )
-            .catch(() => {});
+            .catch(() => { });
         }
       }
     };
@@ -4530,7 +4349,7 @@ export function registerCampaignsRoutes(app, deps) {
            VALUES ($1, false, now())
            ON CONFLICT (phone) DO UPDATE SET exists_whatsapp = false, validated_at = now()`,
           [cleanPhone]
-        ).catch(() => {});
+        ).catch(() => { });
       }
     };
 
@@ -4540,12 +4359,12 @@ export function registerCampaignsRoutes(app, deps) {
         await pgDatabasePool.query(
           `DELETE FROM public.campaign_dispatch_runs WHERE dispatch_id = $1 AND lead_id = $2 AND status = 'claimed'`,
           [dispatchId, lead.id]
-        ).catch(() => {});
+        ).catch(() => { });
       } else if (phone) {
         await pgDatabasePool.query(
           `DELETE FROM public.campaign_dispatch_runs WHERE dispatch_id = $1 AND phone = $2 AND status = 'claimed'`,
           [dispatchId, normalizeString(phone)]
-        ).catch(() => {});
+        ).catch(() => { });
       }
     };
 
@@ -4620,10 +4439,10 @@ export function registerCampaignsRoutes(app, deps) {
       leads: validLeads,
       analyticsMeta: usaFluxoDeResposta
         ? {
-            ...analyticsMeta,
-            sequence: passosDoEnvio,
-            dispatchOptions: { ...analyticsMeta.dispatchOptions, waitForReply: false },
-          }
+          ...analyticsMeta,
+          sequence: passosDoEnvio,
+          dispatchOptions: { ...analyticsMeta.dispatchOptions, waitForReply: false },
+        }
         : analyticsMeta,
       context: {
         campaign: {
@@ -4816,7 +4635,7 @@ export function registerCampaignsRoutes(app, deps) {
     // Mas se a contagem do banco falhou, NUNCA marca 'interrupted' por falta de dados.
     if (counts && targetCount > 0 && totalProcessed < targetCount) {
       const pendingCount = targetCount - totalProcessed;
-      const finalMsg = describeInterruptedPending({ pendingCount, claimedCount: counts.claimed });
+      const finalMsg = `Interrompido: ${pendingCount} lead(s) pendente(s) de envio.`;
       await db.from("campaign_dispatches").update({
         status: "interrupted",
         sent_count: totalSent,
@@ -4827,15 +4646,14 @@ export function registerCampaignsRoutes(app, deps) {
       return;
     }
 
-    // Contagem falhou nas duas tentativas: grava só os números deste envio (o que o motor viu) e sai de 'running' com o
-    // motivo. Até 16/11/2026 o lote ficava 'running' até o próximo boot.
+    // Contagem falhou nas duas tentativas: grava só os números deste envio e NÃO decide o status. Comportamento real:
+    // o lote fica 'running' até o próximo boot, quando recoverOrphanDispatches (campaign/orphanRecovery.js) o recolhe.
     if (!counts) {
       await db.from("campaign_dispatches").update({
         sent_count: totalSent,
         failed_count: totalFailed,
         updated_at: new Date().toISOString(),
       }).eq("id", dispatchId);
-      await markDispatchCountUnavailable(db, dispatchId);
       return;
     }
 
@@ -5080,7 +4898,7 @@ export function registerCampaignsRoutes(app, deps) {
             try {
               await client.query("SET statement_timeout = 3000");
               const { rows: repliedRows } = await client.query(repliedSql, [authorizedClientId, campaignIds]);
-              await client.query("RESET statement_timeout").catch(() => {});
+              await client.query("RESET statement_timeout").catch(() => { });
               repliedMap = Object.fromEntries(repliedRows.map((r) => [r.campaign_id, r.replied_count]));
             } finally {
               client.release();
@@ -5106,7 +4924,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (pageCampaignIds.length > 0) {
         const { rows: batchRows } = await pgDatabasePool.query(
           `
-            SELECT id, campaign_id, status, sent_count, failed_count, target_count, scheduled_at, created_at, error_message
+            SELECT id, campaign_id, status, sent_count, failed_count, target_count, scheduled_at, created_at
             FROM public.campaign_dispatches
             WHERE client_id = $1 AND campaign_id = ANY($2::uuid[])
             ORDER BY created_at ASC
@@ -5152,8 +4970,6 @@ export function registerCampaignsRoutes(app, deps) {
           statusLabel,
           nextScheduledAt: row.next_scheduled_at,
           eta,
-          // Fila de resposta parada por chip fora do ar (campaign/queueResume.js). null = sem bloqueio conhecido.
-          queueBlock: getQueueBlock(row.campaign_id),
           leadsActionable: {
             pause: row.leads_pause_target || 0,
             resume: row.leads_resume_target || 0,
@@ -5167,8 +4983,6 @@ export function registerCampaignsRoutes(app, deps) {
             targetCount: b.target_count,
             scheduledAt: b.scheduled_at,
             createdAt: b.created_at,
-            // Motivo gravado pelo motor/agendador (janela, chip, cota, falha). A tela mostra no cartão do lote.
-            errorMessage: b.error_message || null,
           })),
         };
       };
@@ -5407,7 +5221,7 @@ export function registerCampaignsRoutes(app, deps) {
     try {
       const { data: dispatch, error: dispatchErr } = await supabase
         .from("campaign_dispatches")
-        .select("id, client_id, campaign_id, name, limit_per_run, offset, steps, status, target_count, error_message")
+        .select("id, client_id, campaign_id, name, limit_per_run, offset, steps, status, target_count")
         .eq("id", dispatchId)
         .maybeSingle();
 
@@ -5462,12 +5276,12 @@ export function registerCampaignsRoutes(app, deps) {
           rawStatus === "sent"
             ? "Enviado"
             : rawStatus === "invalid_number"
-            ? "Número inválido"
-            : rawStatus === "failed"
-            ? "Falhou"
-            : rawStatus === "skipped"
-            ? "Pulado"
-            : "Não processado";
+              ? "Número inválido"
+              : rawStatus === "failed"
+                ? "Falhou"
+                : rawStatus === "skipped"
+                  ? "Pulado"
+                  : "Não processado";
 
         const failureReason = run?.error_message ? translateDispatchErrorMessage(run.error_message) : null;
         const sentAt = run?.sent_at || null;
@@ -5550,9 +5364,6 @@ export function registerCampaignsRoutes(app, deps) {
         dispatchId: dispatch.id,
         dispatchName: dispatch.name,
         campaignName: campaign.name,
-        // Estado e motivo do lote: a tela diz por que os não processados estão parados, em vez de "Pendente na fila".
-        dispatchStatus: dispatch.status || null,
-        dispatchErrorMessage: dispatch.error_message || null,
         total: recipients.length,
         sentCount,
         failedCount,
@@ -5754,14 +5565,14 @@ export function registerCampaignsRoutes(app, deps) {
           rawStatus === "sent"
             ? "Enviado"
             : rawStatus === "invalid_number"
-            ? "Número inválido"
-            : rawStatus === "failed"
-            ? "Falhou"
-            : rawStatus === "skipped"
-            ? "Pulado"
-            : rawStatus === "claimed"
-            ? "Em processamento"
-            : "Na fila";
+              ? "Número inválido"
+              : rawStatus === "failed"
+                ? "Falhou"
+                : rawStatus === "skipped"
+                  ? "Pulado"
+                  : rawStatus === "claimed"
+                    ? "Em processamento"
+                    : "Na fila";
 
         const replyInfo =
           rawStatus === "sent"
@@ -5804,14 +5615,14 @@ export function registerCampaignsRoutes(app, deps) {
             r.status === "sent"
               ? "Enviado"
               : r.status === "invalid_number"
-              ? "Número inválido"
-              : r.status === "failed"
-              ? "Falhou"
-              : r.status === "skipped"
-              ? "Pulado"
-              : r.status === "claimed"
-              ? "Em processamento"
-              : "Na fila";
+                ? "Número inválido"
+                : r.status === "failed"
+                  ? "Falhou"
+                  : r.status === "skipped"
+                    ? "Pulado"
+                    : r.status === "claimed"
+                      ? "Em processamento"
+                      : "Na fila";
 
           recipients.push({
             leadId: r.lead_id || null,
@@ -6095,16 +5906,6 @@ export function registerCampaignsRoutes(app, deps) {
         return refuseCampaignWithoutSource(res, sendError, { campaignId: campaign.id, clientId: authorizedClientId, dispatchId });
       }
 
-      // Janela: mesma regra do "Disparar Agora". Antes fora da janela esta rota respondia "N pendentes em execução", o
-      // lote virava 'running' e o motor pausava no primeiro lead.
-      const janela = await checkManualSendWindowOrRefuse(req, res, {
-        clientId: authorizedClientId,
-        campaignId: campaign.id,
-        dispatchId,
-        route: "run-pending",
-      });
-      if (!janela) return;
-
       // 1. Calcula quantos leads pendentes restam (ocorrencia recorrente: publico inteiro, sem limite — igual ao envio)
       const occurrence = pgDatabasePool
         ? await readOccurrenceInfo(pgDatabasePool, dispatchId)
@@ -6161,7 +5962,6 @@ export function registerCampaignsRoutes(app, deps) {
         message: `${pendingLeads.length} lead(s) pendente(s) em execução.`,
         pendingCount: pendingLeads.length,
         dispatchId,
-        ...(janela.forced ? { forcedOutsideWindow: true } : {}),
       });
 
       chipReservado = false; // daqui em diante quem solta é o .finally do motor
@@ -6220,7 +6020,7 @@ export function registerCampaignsRoutes(app, deps) {
               if (clean) nameMap.set(clean, l.nome || "Sem nome");
             }
           }
-        } catch {}
+        } catch { }
       }
 
       const formattedRows = rows.map((r) => {
@@ -6871,7 +6671,7 @@ export function registerCampaignsRoutes(app, deps) {
         ...(body.dispatch_options || body.dispatchOptions || {}),
       };
     }
-    if (body.status != null && ["draft","scheduled","paused","cancelled"].includes(body.status)) patch.status = body.status;
+    if (body.status != null && ["draft", "scheduled", "paused", "cancelled"].includes(body.status)) patch.status = body.status;
     patch.updated_at = new Date().toISOString();
 
     try {
@@ -7035,14 +6835,27 @@ export function registerCampaignsRoutes(app, deps) {
 
       // Janela de envio: o botão obedece a mesma regra do agendador. Fora dela, 422 — a não ser que a tela tenha
       // pedido confirmação e mandado forceOutsideWindow: true (só o booleano true vale; "true", 1 e afins não).
-      const janela = await checkManualSendWindowOrRefuse(req, res, {
-        clientId: authorizedClientId,
-        campaignId: campaign.id,
-        dispatchId,
-        route: "trigger",
-      });
-      if (!janela) return;
-      const forcedOutsideWindow = janela.forced;
+      const sendWindowConfig = resolveSendWindowConfig((await getLeadClientN8nSettings(authorizedClientId)) || {});
+      const now = new Date();
+      let forcedOutsideWindow = false;
+      if (!isWithinSendWindow(now, sendWindowConfig)) {
+        const refusal = describeSendWindowRefusal(now, sendWindowConfig);
+        if (req.body?.forceOutsideWindow !== true) {
+          return sendError(res, 422, "OUTSIDE_SEND_WINDOW", refusal.message, refusal.details);
+        }
+        forcedOutsideWindow = true;
+        // Sem tabela de auditoria de disparo (dívida anotada no PR): o registro do forçamento é este log.
+        console.warn("[campaign-dispatch] disparo_forcado_fora_da_janela", {
+          clientId: authorizedClientId,
+          campaignId: campaign.id,
+          dispatchId,
+          uid: req.authAccess?.uid || null,
+          email: req.authAccess?.email || null,
+          localTime: refusal.details.localTime,
+          sendWindow: refusal.details.sendWindow,
+          nextOpening: refusal.details.nextOpening,
+        });
+      }
 
       // Claim atomico tambem no gatilho manual: `.neq("status","running")` impede que
       // dois cliques no botao — ou um clique concorrente com o ciclo do scheduler —
@@ -7419,7 +7232,7 @@ export function registerCampaignsRoutes(app, deps) {
               ? "lead_in_wait_for_reply_campaign"
               : campaignReplyContext.matches.length > 0
                 ? "lead_in_campaign"
-                  : "lead_not_in_campaign",
+                : "lead_not_in_campaign",
           importIds: campaignReplyContext.importIds,
           matchedCampaigns: campaignReplyContext.matches,
         },

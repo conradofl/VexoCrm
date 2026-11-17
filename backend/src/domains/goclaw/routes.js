@@ -676,7 +676,7 @@ export function registerGoclawRoutes(app, {
           {
             id: "default-conrado",
             nome: "Conrado Finzi",
-            email: "conradofinzi@gmail.com",
+            email: "conradofl@gmail.com",
             telefone: "5534997817660",
             papel: "Sócio Diretor Executivo",
             ativo: true,
@@ -701,6 +701,16 @@ export function registerGoclawRoutes(app, {
             notificar_whatsapp: false,
           },
         ];
+      } else {
+        // Remove resquício antigo 'conradofinzi@gmail.com' e deduplica por telefone garantindo unicidade
+        rows = rows.filter((r) => r.email !== "conradofinzi@gmail.com");
+        const telefonesVistos = new Set();
+        rows = rows.filter((r) => {
+          const telNorm = String(r.telefone || "").replace(/\D/g, "");
+          if (telNorm && telefonesVistos.has(telNorm)) return false;
+          if (telNorm) telefonesVistos.add(telNorm);
+          return true;
+        });
       }
 
       return res.json({ ok: true, data: rows });

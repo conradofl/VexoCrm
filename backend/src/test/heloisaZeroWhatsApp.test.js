@@ -82,9 +82,9 @@ describe("Blindagem Heloísa: Zero WhatsApp em Testes e Título Preciso de Reuni
     expect(res.titulo).toContain("Moacir");
   });
 
-  it("4. executarAgendarCompromisso com título genérico ou vazio adota 'Alinhamento Conrado e Caio'", async () => {
+  it("4. executarAgendarCompromisso com título genérico ou vago adota 'Reunião de Alinhamento' sem injetar Caio", async () => {
     const mockPool = {
-      query: vi.fn().mockResolvedValue({ rows: [{ id: "evt-test-2", name: "Alinhamento Conrado e Caio" }] }),
+      query: vi.fn().mockResolvedValue({ rows: [{ id: "evt-test-2", name: "Reunião de Alinhamento" }] }),
     };
 
     const res = await executarAgendarCompromisso(
@@ -96,6 +96,7 @@ describe("Blindagem Heloísa: Zero WhatsApp em Testes e Título Preciso de Reuni
     );
 
     expect(res.sucesso).toBe(true);
-    expect(res.titulo).toBe("Alinhamento Conrado e Caio");
+    expect(res.titulo).toBe("Reunião de Alinhamento");
+    expect(res.titulo).not.toContain("Caio");
   });
 });
