@@ -532,19 +532,23 @@ describe("[OBRIGATÓRIO] trava por campanha no agendador: duas ocorrências da m
   beforeEach(() => { logSpy = vi.spyOn(console, "log").mockImplementation(() => {}); });
   afterEach(() => logSpy.mockRestore());
 
-  async function duasOcorrenciasVencidas(db, { ocorrencia = true } = {}) {
+  // chips: um id de chip por lote (null = lote sem chip definido, que trava a empresa inteira na trava por chip).
+  async function duasOcorrenciasVencidas(db, { ocorrencia = true, chips = [null, null] } = {}) {
     // campanha recorrente com o próximo envio no futuro: o tick não materializa nada, só dispara os lotes já criados
     const id = await campanhaRecorrente(db, { nextRunAt: "2099-01-01T12:00:00Z" });
+    // Em produção a coluna existe (ensureCampaignDispatchEvolutionInstanceColumn); o schema deste teste não a traz.
+    await db.query("ALTER TABLE public.campaign_dispatches ADD COLUMN IF NOT EXISTS evolution_instance_id UUID");
     const occ = ocorrencia ? ["2026-10-15T12:00:00Z", "2026-11-15T12:00:00Z"] : [null, null];
     for (const [i, at] of occ.entries()) {
       await db.query(
-        `INSERT INTO campaign_dispatches (campaign_id, client_id, name, steps, trigger_type, status, scheduled_at, recurrence_occurrence_at, created_at)
-         VALUES ($1, $2, $3, $4::jsonb, 'scheduled', 'scheduled', $5, $6, $7)`,
-        [id, T, `Lote ${i + 1}`, JSON.stringify(SEQUENCIA), `2026-10-0${i + 1}T00:00:00Z`, at, `2026-10-0${i + 1}T00:00:00Z`]
+        `INSERT INTO campaign_dispatches (campaign_id, client_id, name, steps, trigger_type, status, scheduled_at, recurrence_occurrence_at, created_at, evolution_instance_id)
+         VALUES ($1, $2, $3, $4::jsonb, 'scheduled', 'scheduled', $5, $6, $7, $8)`,
+        [id, T, `Lote ${i + 1}`, JSON.stringify(SEQUENCIA), `2026-10-0${i + 1}T00:00:00Z`, at, `2026-10-0${i + 1}T00:00:00Z`, chips[i]]
       );
     }
     return id;
   }
+  const CHIPS_DIFERENTES = ["aaaaaaaa-0000-4000-8000-000000000001", "aaaaaaaa-0000-4000-8000-000000000002"];
 
   it("tick 2 concorrente encontra a ocorrência 1 rodando: NÃO começa a 2 (fica 'scheduled', status blocked_same_campaign)", async () => {
     const { db, pool } = await banco();
@@ -568,7 +572,8 @@ describe("[OBRIGATÓRIO] trava por campanha no agendador: duas ocorrências da m
 
   it("se a checagem deixar passar (corrida), o índice único segura: a 2 fica 'scheduled', não 'failed'", async () => {
     const { db, pool } = await banco();
-    const id = await duasOcorrenciasVencidas(db);
+    // Chips diferentes: a trava por chip não se mete, e o que se prova aqui é só o índice único.
+    const id = await duasOcorrenciasVencidas(db, { chips: CHIPS_DIFERENTES });
     const checagem = vi.fn(async () => null);
     const w = await agendador(pool, { findConcurrentOverride: checagem });
 
@@ -586,9 +591,27 @@ describe("[OBRIGATÓRIO] trava por campanha no agendador: duas ocorrências da m
     await tick1;
   }, SLOW);
 
-  it("lotes manuais fatiados da mesma campanha seguem rodando em paralelo, como hoje", async () => {
+  // Até 17/11/2026 este teste dizia "seguem rodando em paralelo, como hoje". Mudou por decisão do dono (trava por chip,
+  // depois do amontoado da Nous): no mesmo chip, um lote espera o outro; em chips diferentes, seguem em paralelo.
+  it("lotes manuais fatiados da mesma campanha no MESMO chip (ou sem chip definido) não rodam juntos: o 2º espera", async () => {
     const { db, pool } = await banco();
-    await duasOcorrenciasVencidas(db, { ocorrencia: false });
+    const id = await duasOcorrenciasVencidas(db, { ocorrencia: false });
+    const w = await agendador(pool);
+
+    const tick1 = w.routes.runDueIndependentDispatches({ limit: 10 });
+    await ate(() => w.entradas.length === 1);
+    const r2 = await w.routes.runDueIndependentDispatches({ limit: 10 });
+
+    expect(w.entradas).toHaveLength(1);
+    expect(r2.items.map((i) => i.status)).toEqual(["blocked_same_chip"]);
+    expect((await lotes(db, id)).map((x) => x.status)).toEqual(["running", "scheduled"]);
+    w.abrir();
+    await tick1;
+  }, SLOW);
+
+  it("lotes manuais fatiados da mesma campanha em chips DIFERENTES seguem rodando em paralelo", async () => {
+    const { db, pool } = await banco();
+    await duasOcorrenciasVencidas(db, { ocorrencia: false, chips: CHIPS_DIFERENTES });
     const w = await agendador(pool);
 
     const tick1 = w.routes.runDueIndependentDispatches({ limit: 10 });
