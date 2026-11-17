@@ -195,7 +195,7 @@ describe("webhook de entrada (/api/hardcoded-chat-webhook)", () => {
   const inbound = (id, text = "Oi, pode me explicar melhor?") => ({
     body: {
       event: "messages.upsert", phone: LEAD_PHONE, instance: "Chip 1", clientId: TENANT,
-      data: { key: { remoteJid: `${LEAD_PHONE}@s.whatsapp.net`, fromMe: false, id }, message: { conversation: text }, messageTimestamp: 1788212600 },
+      data: { key: { remoteJid: `${LEAD_PHONE}@s.whatsapp.net`, fromMe: false, id }, message: { conversation: text }, messageTimestamp: Math.floor(Date.now() / 1000) - 300 },
     },
     query: {},
   });

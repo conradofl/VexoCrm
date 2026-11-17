@@ -11,7 +11,7 @@
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, onTestFinished } from "vitest";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
 
 let db = null;
@@ -397,6 +397,10 @@ describe("[OBRIGATÓRIO] portão de idade no reply-webhook de campanhas (avança
   }
 
   it("resposta de 2 h atrás não anda a campanha; resposta nova anda", async () => {
+    // O passo respeita a janela de envio do tenant: relógio fixo às 14h de Brasília para o teste não depender da hora em que roda.
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-18T17:00:00Z"));
+    onTestFinished(() => vi.useRealTimers());
     await montarBanco();
     const seqCampanha = [
       { id: "s1", type: "text", text: "Oi", order: 1, enabled: true, triggerMode: "immediate" },
@@ -549,6 +553,11 @@ describe("[OBRIGATÓRIO] caminho normal consulta a concessão; tomada só por pr
   }, SLOW);
 
   it("passo de campanha grava desfecho (não fica 'processando' para ser andado de novo)", async () => {
+    // Passo respeita a janela de envio: relógio fixo às 16h de Brasília (outro instante que o do teste do reply-webhook,
+    // senão a trava em memória de continueCampaignLeadFromReply, por lead e campanha, ainda vale).
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-11-18T19:00:00Z"));
+    onTestFinished(() => vi.useRealTimers());
     await montarBanco();
     boot();
     const seqCampanha = [

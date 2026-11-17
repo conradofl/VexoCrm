@@ -67,7 +67,7 @@ function mensagemDeTexto(phone, texto) {
       pushName: "Maria",
       message: { conversation: texto },
       messageType: "conversation",
-      messageTimestamp: 1728591234 + messageSeq,
+      messageTimestamp: Math.floor(Date.now() / 1000) - 300 + messageSeq,
       owner: INSTANCIA,
       source: "android",
     },

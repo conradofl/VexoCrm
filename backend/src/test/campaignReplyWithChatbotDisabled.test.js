@@ -224,7 +224,7 @@ describe("Cenário Sonhare: Campanha com passo após resposta e Agente IA deslig
           message: {
             conversation: "Oi, tenho interesse sim! Como funciona?",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -286,7 +286,7 @@ describe("Cenário Sonhare: Campanha com passo após resposta e Agente IA deslig
           message: {
             conversation: "Gostaria de falar com um atendente humano por favor.",
           },
-          messageTimestamp: 1788212700,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 200,
         },
       },
       query: {},
@@ -338,7 +338,7 @@ describe("Cenário Sonhare: Campanha com passo após resposta e Agente IA deslig
           message: {
             conversation: "Quero saber o valor!",
           },
-          messageTimestamp: 1788212800,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 100,
         },
       },
       query: {},

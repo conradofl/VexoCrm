@@ -231,7 +231,7 @@ describe("com banco: captureOptOutFromInbound e o webhook de entrada", () => {
   const inbound = (id, text, { fromMe = false, clientId = TENANT } = {}) => {
     const body = {
       event: "messages.upsert", phone: LEAD_PHONE, instance: "Chip 1",
-      data: { key: { remoteJid: `${LEAD_PHONE}@s.whatsapp.net`, fromMe, id }, message: { conversation: text }, messageTimestamp: 1788212600 },
+      data: { key: { remoteJid: `${LEAD_PHONE}@s.whatsapp.net`, fromMe, id }, message: { conversation: text }, messageTimestamp: Math.floor(Date.now() / 1000) - 300 },
     };
     if (clientId) body.clientId = clientId;
     return { body, query: {} };

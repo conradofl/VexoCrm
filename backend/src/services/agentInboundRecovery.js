@@ -115,7 +115,12 @@ export async function registrarEntrada({ pool, clientId, phone, msgKey, recebida
       );
       if (rows.length === 1) return { concedida: true, attempts: rows[0].attempts };
       const atual = (await pool.query("SELECT status, motivo, attempts FROM public.agent_inbound_claims WHERE client_id = $1 AND msg_key = $2", [clientId, msgKey])).rows[0];
-      return { concedida: false, status: atual?.status || null, motivo: atual?.motivo || null, attempts: atual?.attempts ?? null };
+      if (!atual) {
+        // Nem inseriu nem achou a linha (apagada no meio, banco devolvendo vazio): o registro nunca para o webhook.
+        console.warn("[agente-orfas] concessão sem linha depois do registro; seguindo", { clientId });
+        return { concedida: true };
+      }
+      return { concedida: false, status: atual.status, motivo: atual.motivo || null, attempts: atual.attempts ?? null };
     } catch (err) {
       if (!isMissingTable(err)) {
         console.warn("[agente-orfas] falha ao registrar entrada", { clientId, erro: err?.message });
