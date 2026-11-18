@@ -10,6 +10,7 @@
 // invocação da factory para as rotas de campaigns que ficam lá) — sem duplicar a função.
 
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
+import { exigirTokenDoWebhook } from "../../services/webhookAuth.js";
 import { processarRespostaBriefingNoWhatsApp } from "../../services/gdBriefingReminderService.js";
 import { summarizeChatWithAI } from "../leads/chatInsight.js";
 import { saveLeadAgreement } from "../../services/leadAgreement.js";
@@ -3072,7 +3073,9 @@ export function registerChatbotRoutes(app, deps) {
    */
   // Referência guardada para a varredura de órfãs (services/agentInboundRecovery.js), que reprocessa por este handler.
   let hardcodedChatWebhook = null;
-  app.post("/api/hardcoded-chat-webhook", (hardcodedChatWebhook = async (req, res) => {
+  // exigirTokenDoWebhook (services/webhookAuth.js) confere o token antes do handler. A varredura de órfãs chama o handler
+  // direto (hardcodedChatWebhook), sem passar por aqui: é chamada interna, não vem da rede.
+  app.post("/api/hardcoded-chat-webhook", exigirTokenDoWebhook, (hardcodedChatWebhook = async (req, res) => {
     const startTime = Date.now();
     const body = req.body && typeof req.body === "object" ? req.body : {};
 

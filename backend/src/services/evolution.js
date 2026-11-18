@@ -28,6 +28,8 @@ import { upsertLeadByPhone } from "./leadUpsert.js";
 import { ensureEvolutionInstanceDailyUsageTable } from "./chipQuota.js";
 import { getDateKey } from "./analytics.js";
 import { resolveSendWindowConfig } from "./sendWindow.js";
+import { cabecalhoDoWebhook } from "./webhookAuth.js";
+import { mascararSegredos } from "./logRedaction.js";
 import { reclassifyLeadFromMessages } from "./funnelService.js";
 import { cancelFollowupCadenceOnReply } from "./followupExitGuard.js";
 
@@ -1110,10 +1112,12 @@ export async function configureEvolutionInstanceWebhook(clientId, dispatchWebhoo
     throw new Error("WEBHOOK_BASE_URL_UNDEFINED");
   }
 
-  // Previne duplicação de /api/api/... na URL do webhook
+  // URL sem token. O token vai no cabeçalho (services/webhookAuth.js), que a Evolution manda em toda entrega. Antes ia
+  // um token fixo na URL, escrito aqui no código (repositório público) e que ninguém conferia.
   const webhookUrl =
     `${base}/api/hardcoded-chat-webhook` +
-    `?token=master_secret_2026&client_id=${encodeURIComponent(clientId)}&clientId=${encodeURIComponent(clientId)}&instanceName=${encodeURIComponent(instanceName)}`;
+    `?client_id=${encodeURIComponent(clientId)}&clientId=${encodeURIComponent(clientId)}&instanceName=${encodeURIComponent(instanceName)}`;
+  const headers = cabecalhoDoWebhook();
 
   // Evolution API v2 exige o payload ANINHADO em { webhook: {...} } e usa
   // webhookByEvents (não byEvents). No formato antigo (plano) a v2 responde
@@ -1122,6 +1126,7 @@ export async function configureEvolutionInstanceWebhook(clientId, dispatchWebhoo
     webhook: {
       enabled: Boolean(enabled),
       url: webhookUrl,
+      ...(Object.keys(headers).length ? { headers } : {}),
       webhookByEvents: false,
       events: enabled ? ["MESSAGES_UPSERT", "SEND_MESSAGE"] : [],
     },
@@ -1138,7 +1143,9 @@ export async function configureEvolutionInstanceWebhook(clientId, dispatchWebhoo
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Evolution Webhook set returned HTTP ${response.status}: ${text}`);
+    // A resposta de erro da Evolution pode ecoar o pedido (cabeçalho com o token): mascara antes de virar mensagem,
+    // que vai para o log e para a tela do chip.
+    throw new Error(mascararSegredos(`Evolution Webhook set returned HTTP ${response.status}: ${String(text).slice(0, 500)}`));
   }
 
   // Sincronização de histórico desacoplada: NÃO roda como efeito colateral de salvar webhook.
@@ -1393,7 +1400,8 @@ export function getEvolutionAdminConfig() {
   const apiKey =
     normalizeString(process.env.EVOLUTION_API_KEY) ||
     normalizeString(process.env.EVOLUTION_GLOBAL_KEY) ||
-    "429683C4C977415CAAFCCE10F7D57E11";
+    // Sem valor fixo: a chave que ficava aqui estava no repositório público (18/11/2026). Sem variável, configured = false.
+    "";
 
   return {
     baseUrl,
