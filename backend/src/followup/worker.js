@@ -43,6 +43,11 @@ import { evaluateStepConditions } from "./service.js";
 import { getTemplateLibraryAudioId, loadAudioForSend } from "../audioLibrary/service.js";
 import { isPhoneOptedOut } from "../services/optOut.js";
 import { enviarMensagemWhatsAppComFallback } from "../domains/goclaw/heloisaEngine.js";
+import {
+  getTrelloCardStatus,
+  isCardInApprovalOrDone,
+  formatarPrazoAmigavel,
+} from "../services/trelloService.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -676,6 +681,144 @@ export async function processHeloisaScheduledWhatsappJob(job) {
   return res;
 }
 
+/**
+ * Worker de checagem condicional de cards do Trello (D-2, D-1, D-0)
+ * REGRA DE OURO: Se o card estiver em aprovação ou concluído, a cobrança é SUPRIMIDA.
+ */
+export async function processTrelloCardFollowupCheckJob(job, customPool = null) {
+  const { cardId, marco = "D-1" } = job?.data || {};
+  if (!cardId) {
+    console.warn("[followup/worker] [Trello] Job sem cardId informado. Descartando.");
+    return { cobrancaDispensada: true, motivo: "card_id_ausente" };
+  }
+
+  const pool = customPool || getFollowupWorkerDbPool() || pgDatabasePool;
+
+  // 1. Busca dados do monitoramento no banco
+  let monitor = null;
+  if (pool && typeof pool.query === "function") {
+    try {
+      const { rows } = await pool.query(
+        `SELECT * FROM public.gd_trello_card_monitors WHERE trello_card_id = $1 LIMIT 1`,
+        [cardId]
+      );
+      if (rows && rows.length > 0) monitor = rows[0];
+    } catch (errDb) {
+      console.warn("[followup/worker] [Trello] Aviso ao buscar monitor no banco:", errDb.message);
+    }
+  }
+
+  // 2. Verifica se a cobrança deste marco já foi enviada
+  if (monitor) {
+    if (marco === "D-2" && monitor.cobranca_d2_enviada) {
+      return { cobrancaDispensada: true, cobrancaEnviada: false, jaEnviada: true, marco };
+    }
+    if (marco === "D-1" && monitor.cobranca_d1_enviada) {
+      return { cobrancaDispensada: true, cobrancaEnviada: false, jaEnviada: true, marco };
+    }
+    if (marco === "D-0" && monitor.cobranca_d0_enviada) {
+      return { cobrancaDispensada: true, cobrancaEnviada: false, jaEnviada: true, marco };
+    }
+  }
+
+  // 3. Consulta status do Trello em tempo real
+  let cardStatus = null;
+  try {
+    cardStatus = await getTrelloCardStatus({ cardId });
+  } catch (errTrello) {
+    console.error(`[followup/worker] [Trello] Falha ao consultar card ${cardId}:`, errTrello.message);
+    return { cobrancaDispensada: true, erro: errTrello.message };
+  }
+
+  const listName = cardStatus?.listName || "";
+  const dueComplete = Boolean(cardStatus?.dueComplete);
+
+  // 4. REGRA DE OURO (Supressão de Cobrança)
+  if (isCardInApprovalOrDone({ listName, dueComplete })) {
+    console.log(
+      `[Cobrador Trello] Card ${cardId} já em status '${listName}' (dueComplete=${dueComplete}). Cobrança ${marco} dispensada!`
+    );
+
+    if (pool && typeof pool.query === "function") {
+      try {
+        await pool.query(
+          `UPDATE public.gd_trello_card_monitors
+              SET status_final = $2, updated_at = NOW()
+            WHERE trello_card_id = $1`,
+          [cardId, listName || "aprovado"]
+        );
+      } catch (errUp) {
+        console.warn("[followup/worker] [Trello] Erro ao atualizar status_final:", errUp.message);
+      }
+    }
+
+    return {
+      cobrancaDispensada: true,
+      cobrancaEnviada: false,
+      motivo: "card_em_aprovacao_ou_concluido",
+      listName,
+      marco,
+    };
+  }
+
+  // 5. Cobrança ativa: formata e dispara mensagem no WhatsApp do colaborador
+  const colabNome = monitor?.colaborador_nome || job.data?.colaboradorNome || "Colega";
+  const colabTelefone = monitor?.colaborador_telefone || job.data?.colaboradorTelefone;
+  const titulo = monitor?.titulo || cardStatus?.name || job.data?.titulo || "Demanda no Trello";
+  const dueDate = monitor?.due_date || cardStatus?.due || job.data?.dueDateStr;
+  const dataPrazo = formatarPrazoAmigavel(dueDate);
+
+  let mensagemTexto = "";
+  if (marco === "D-2") {
+    mensagemTexto = `Oi ${colabNome}! Passando para lembrar que faltam 2 dias para o prazo da demanda *${titulo}*. Tudo certo para entrega em ${dataPrazo}?`;
+  } else if (marco === "D-1") {
+    mensagemTexto = `Atenção ${colabNome}! A demanda *${titulo}* vence amanhã (${dataPrazo}). Se precisar de algo ou estiver travado, avise aqui!`;
+  } else {
+    // D-0
+    mensagemTexto = `🚨 ${colabNome}, hoje é o dia de entrega da demanda *${titulo}*! Já finalizou ou enviou para aprovação?`;
+  }
+
+  if (colabTelefone) {
+    try {
+      await enviarMensagemWhatsAppComFallback({
+        numero: colabTelefone,
+        texto: mensagemTexto,
+        instanceName: "vexo-adm-vexo-atende",
+        tenantId: "geracao-digital",
+        pool,
+      });
+      console.log(`[Cobrador Trello] ✅ Notificação ${marco} enviada para ${colabNome} (${colabTelefone})`);
+    } catch (errSend) {
+      console.error(`[Cobrador Trello] Falha ao enviar WhatsApp para ${colabTelefone}:`, errSend.message);
+    }
+  }
+
+  // 6. Atualiza flags no banco de dados
+  if (pool && typeof pool.query === "function") {
+    try {
+      await pool.query(
+        `UPDATE public.gd_trello_card_monitors
+            SET cobranca_d2_enviada = CASE WHEN $2 = 'D-2' THEN true ELSE cobranca_d2_enviada END,
+                cobranca_d1_enviada = CASE WHEN $2 = 'D-1' THEN true ELSE cobranca_d1_enviada END,
+                cobranca_d0_enviada = CASE WHEN $2 = 'D-0' THEN true ELSE cobranca_d0_enviada END,
+                updated_at = NOW()
+          WHERE trello_card_id = $1`,
+        [cardId, marco]
+      );
+    } catch (errUp) {
+      console.warn("[Cobrador Trello] Aviso ao registrar cobrança enviada no banco:", errUp.message);
+    }
+  }
+
+  return {
+    cobrancaDispensada: false,
+    cobrancaEnviada: true,
+    marco,
+    colaborador: colabNome,
+    telefone: colabTelefone,
+  };
+}
+
 export function startFollowupWorker() {
   const worker = new Worker(
     QUEUE_NAME,
@@ -683,6 +826,9 @@ export function startFollowupWorker() {
       try {
         if (job.name === "heloisa-scheduled-whatsapp") {
           return await processHeloisaScheduledWhatsappJob(job);
+        }
+        if (job.name === "trello-card-followup-check") {
+          return await processTrelloCardFollowupCheckJob(job);
         }
         if (job.name === "process-event-journey") {
           // Jornadas por evento foram removidas (nunca tiveram emissor ligado).

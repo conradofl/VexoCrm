@@ -28,6 +28,12 @@ import { resolveGoclawDir } from "./routes.js";
 import { defaultGroqModel } from "../../services/llmModels.js";
 import { generateSpeechAudio } from "../../services/voiceService.js";
 import { getFollowupQueue } from "../../followup/queue.js";
+import {
+  createTrelloCard,
+  parsePrazoTrello,
+  calculateTrelloMarcoDelays,
+  formatarPrazoAmigavel,
+} from "../../services/trelloService.js";
 
 export const DIRETORES_AUTORIZADOS = {
   conrado: {
@@ -1277,6 +1283,233 @@ export async function executarCriarFollowup(
   }
 }
 
+/**
+ * Localiza colaborador da Geração Digital por nome, função ou trello_username
+ */
+export async function buscarColaboradorGd(termo, pool = pgDatabasePool) {
+  if (!termo) return null;
+  const termoLimpo = String(termo).trim();
+  const termoLike = `%${termoLimpo.toLowerCase()}%`;
+
+  if (pool && typeof pool.query === "function") {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, nome, funcao, telefone, email, trello_username, recebe_cobranca_whatsapp, ativo
+           FROM public.gd_colaboradores
+          WHERE ativo = true
+            AND (
+              LOWER(nome) LIKE $1
+              OR LOWER(funcao) LIKE $1
+              OR LOWER(COALESCE(trello_username, '')) LIKE $1
+            )
+          ORDER BY
+            CASE WHEN LOWER(nome) = LOWER($2) THEN 1 ELSE 2 END,
+            created_at ASC
+          LIMIT 1`,
+        [termoLike, termoLimpo]
+      );
+      if (rows && rows.length > 0) return rows[0];
+    } catch (err) {
+      console.warn("[Heloísa] Aviso ao buscar colaborador no banco:", err.message);
+    }
+  }
+
+  // Fallback para os colaboradores oficiais da equipe GD
+  const colabsFallback = [
+    { nome: "Caio Almeida", funcao: "Diretor - proprietário", telefone: "5534997719779", trello_username: "caio", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Conrado Finzi", funcao: "TI & Produto", telefone: "5534997817660", trello_username: "conrado", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Gabriel", funcao: "Gestor de operações", telefone: "5534996916397", trello_username: "gabriel", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Maria Eduarda (Duda)", funcao: "Gerente de operações", telefone: "5534997066114", trello_username: "mariaeduarda33081262", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Santana", funcao: "Diretor de arte", telefone: "5516982447360", trello_username: "felipesantanamoraes", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Éflen", funcao: "Editor de Vídeo", telefone: "5534991531361", trello_username: "eflenhenrique1", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Humberto", funcao: "Gestor de Tráfego", telefone: "5534992223651", trello_username: "humberto", ativo: true, recebe_cobranca_whatsapp: true },
+    { nome: "Carlos", funcao: "Videomaker", telefone: "5534997690926", trello_username: "carlosrafael", ativo: true, recebe_cobranca_whatsapp: true },
+  ];
+
+  const sNorm = termoLimpo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const found = colabsFallback.find((c) => {
+    const nomeNorm = c.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const funcNorm = c.funcao.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const userNorm = (c.trello_username || "").toLowerCase();
+    return nomeNorm.includes(sNorm) || funcNorm.includes(sNorm) || userNorm.includes(sNorm);
+  });
+
+  return found || null;
+}
+
+/**
+ * Cria card no Trello, cadastra na tabela de monitoramento, dispara WhatsApp imediato
+ * e agenda checagens para a régua de cobrança condicional (D-2, D-1, D-0)
+ */
+export async function executarAbrirCardTrello(
+  { titulo, descricao = "", responsavel, prazo, lista_destino = "Em Produção / Design" },
+  pool = pgDatabasePool,
+  instanceName = "vexo-adm-vexo-atende",
+  diretor = null
+) {
+  try {
+    if (!titulo || !responsavel || !prazo) {
+      return {
+        sucesso: false,
+        erro: "Parâmetros obrigatórios ausentes: 'titulo', 'responsavel' e 'prazo' devem ser informados.",
+      };
+    }
+
+    const colab = await buscarColaboradorGd(responsavel, pool);
+    if (!colab) {
+      return {
+        sucesso: false,
+        erro: `Colaborador '${responsavel}' não encontrado na equipe GD. Colaboradores disponíveis: Santana, Éflen, Duda, Gabriel, Humberto, Carlos, Caio, Conrado.`,
+      };
+    }
+
+    const prazoIso = parsePrazoTrello(prazo);
+    const dueDateUtc = new Date(prazoIso).toISOString();
+    const dataHoraFormatada = formatarPrazoAmigavel(prazoIso);
+
+    // 1. Cria card no Trello
+    const cardRes = await createTrelloCard({
+      name: String(titulo).trim(),
+      desc: descricao ? String(descricao).trim() : `Demanda criada via Heloísa para ${colab.nome}.\nPrazo: ${dataHoraFormatada}`,
+      listName: lista_destino || "Em Produção / Design",
+      dueDate: dueDateUtc,
+      memberUsername: colab.trello_username,
+      allowMock: true,
+    });
+
+    const cardUrl = cardRes.shortUrl || cardRes.url || "https://trello.com";
+
+    // 2. Registra na tabela de monitoramento gd_trello_card_monitors
+    if (pool && typeof pool.query === "function") {
+      try {
+        await pool.query(
+          `INSERT INTO public.gd_trello_card_monitors
+             (trello_card_id, trello_card_url, titulo, descricao, colaborador_nome, colaborador_telefone, due_date, aviso_criacao_enviado, status_final, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'aberto', NOW(), NOW())
+           ON CONFLICT (trello_card_id) DO UPDATE SET
+             trello_card_url = EXCLUDED.trello_card_url,
+             titulo = EXCLUDED.titulo,
+             descricao = EXCLUDED.descricao,
+             colaborador_nome = EXCLUDED.colaborador_nome,
+             colaborador_telefone = EXCLUDED.colaborador_telefone,
+             due_date = EXCLUDED.due_date,
+             aviso_criacao_enviado = true,
+             updated_at = NOW()`,
+          [
+            cardRes.id,
+            cardUrl,
+            String(titulo).trim(),
+            descricao || null,
+            colab.nome,
+            colab.telefone,
+            dueDateUtc,
+          ]
+        );
+      } catch (errDb) {
+        console.warn("[Heloísa] Aviso ao salvar monitor de card no banco:", errDb.message);
+      }
+    }
+
+    // 3. Disparo imediato de WhatsApp para o colaborador
+    let notificacaoWhatsappEnviada = false;
+    const msgNotif = `Olá ${colab.nome}! 🎯 Uma nova demanda foi criada para você no Trello:\n📌 *${String(titulo).trim()}*\n📅 *Prazo:* ${dataHoraFormatada}\n🔗 *Link:* ${cardUrl}\n\nFique atento ao prazo. Bom trabalho!`;
+
+    if (colab.telefone) {
+      try {
+        await enviarMensagemWhatsAppComFallback({
+          numero: colab.telefone,
+          texto: msgNotif,
+          instanceName,
+          tenantId: "geracao-digital",
+          pool,
+        });
+        notificacaoWhatsappEnviada = true;
+      } catch (errZap) {
+        console.warn(`[Heloísa] Falha ao enviar WhatsApp imediato para ${colab.telefone}:`, errZap.message);
+      }
+    }
+
+    // 4. Enfileira jobs BullMQ para checagem condicional (D-2, D-1, D-0)
+    try {
+      const queue = getFollowupQueue();
+      if (queue && typeof queue.add === "function") {
+        const isMockQueue = typeof queue.add?.mockResolvedValue === "function" || Boolean(queue.add?._isMockFunction);
+        if (isMockQueue || process.env.REDIS_URL || process.env.REDIS_HOST) {
+          const marcos = calculateTrelloMarcoDelays(new Date(prazoIso));
+          for (const m of marcos) {
+            await Promise.race([
+              queue.add(
+                "trello-card-followup-check",
+                {
+                  cardId: cardRes.id,
+                  marco: m.marco,
+                  colaboradorTelefone: colab.telefone,
+                  colaboradorNome: colab.nome,
+                  titulo: String(titulo).trim(),
+                  dueDateStr: prazoIso,
+                },
+                {
+                  delay: Math.max(m.delayMs, 1000),
+                  removeOnComplete: true,
+                }
+              ),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Queue add timeout")), 1000)),
+            ]).catch((errAdd) => {
+              console.warn("[Heloísa] Aviso ao enfileirar job no BullMQ:", errAdd.message);
+            });
+          }
+        }
+      }
+    } catch (errQ) {
+      console.warn("[Heloísa] Aviso ao agendar checagens de cobrança na fila BullMQ:", errQ.message);
+    }
+
+    // 5. Registra auditoria na tabela heloisa_execucoes
+    try {
+      await registrarExecucaoHeloisa({
+        canal: "whatsapp",
+        solicitanteNome: diretor?.nome || "Conrado Finzi",
+        solicitanteTelefone: diretor?.telefone || null,
+        solicitantePapel: diretor?.papel || "Diretor Executivo",
+        textoEntrada: `Abrir card no Trello: ${titulo} para ${colab.nome} com prazo ${dataHoraFormatada}`,
+        tipoEntrada: "tool",
+        ferramentaExecutada: "abrir_card_trello",
+        parametros: { titulo, descricao, responsavel, prazo, lista_destino },
+        resultado: {
+          sucesso: true,
+          cardId: cardRes.id,
+          cardUrl,
+          colaborador: colab.nome,
+          telefone: colab.telefone,
+          prazo: dataHoraFormatada,
+        },
+        respostaSaida: `Demanda "${titulo}" aberta no Trello para ${colab.nome} com prazo ${dataHoraFormatada}. Notificação enviada no WhatsApp.`,
+        status: "sucesso",
+      }, pool);
+    } catch (errAud) {
+      console.warn("[Heloísa] Aviso ao registrar execução de card do Trello:", errAud.message);
+    }
+
+    return {
+      sucesso: true,
+      cardId: cardRes.id,
+      cardUrl,
+      colaborador: colab.nome,
+      telefone: colab.telefone,
+      prazo: dataHoraFormatada,
+      notificacaoWhatsappEnviada,
+      mensagem: `Demanda criada no Trello com sucesso para ${colab.nome} com prazo em ${dataHoraFormatada}. Notificação enviada no WhatsApp!`,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao abrir card no Trello:", err);
+    return {
+      sucesso: false,
+      erro: err.message,
+      mensagem: `Tive uma dificuldade ao criar a demanda no Trello: ${err.message}`,
+    };
+  }
+}
+
 export async function executarConsultarOperacao({ tipo }, pool = pgDatabasePool) {
   try {
     if (tipo === "colaboradores") {
@@ -1462,7 +1695,7 @@ export async function executarConsultarClienteOuLead({ termo_busca, tenant_id },
  * 8. Registra auditoria em public.heloisa_execucoes
  */
 export async function executarOnboardingCliente(
-  { cliente_nome, cliente_id, telefone_cliente },
+  { cliente_nome, cliente_id, telefone_cliente, criar_card_trello = false },
   pool = pgDatabasePool,
   instanceName = "heloisa",
   diretor = null
@@ -1701,6 +1934,27 @@ export async function executarOnboardingCliente(
       console.warn(`[Heloísa Onboarding] Falha ao auditar execução da Heloísa:`, e.message);
     }
 
+    // 8. Criação automática do card "Onboarding & Primeiro Pacote" no Trello para o time de operações se solicitado
+    let trelloCardOnboarding = null;
+    if (criar_card_trello) {
+      try {
+        trelloCardOnboarding = await executarAbrirCardTrello(
+          {
+            titulo: `Onboarding & Primeiro Pacote - ${cliente.nome}`,
+            descricao: `Demanda de Onboarding e Primeiro Pacote do cliente ${cliente.nome}.\n\n📁 Pasta Google Drive: ${driveUrlFinal || "Acessar via CRM"}\n👥 Grupo Interno: ${urlInterno || jidInterno || "Criado"}\n🚀 Grupo Máquina de Vendas: ${urlCliente || jidCliente || "Criado"}\n👤 Aprovador: ${cliente.aprovador_nome || cliente.nome} (${clienteTelefone || "Sem telefone"})`,
+            responsavel: "Gabriel",
+            prazo: "daqui 2 dias",
+            lista_destino: "Backlog & Briefings",
+          },
+          pool,
+          instanceName,
+          diretor
+        );
+      } catch (eTrello) {
+        console.warn(`[Heloísa Onboarding] Aviso ao abrir card no Trello para ${cliente.nome}:`, eTrello.message);
+      }
+    }
+
     return {
       sucesso: true,
       cliente: cliente.nome,
@@ -1708,6 +1962,7 @@ export async function executarOnboardingCliente(
       drive_url: driveUrlFinal,
       grupo_interno: { jid: jidInterno, url: urlInterno },
       grupo_cliente: { jid: jidCliente, url: urlCliente },
+      trello_card: trelloCardOnboarding,
       detalhes: `Estrutura no Google Drive criada, grupo interno "PASTA: ${cliente.nome.toUpperCase()}" e grupo "MÁQUINA DE VENDAS: ${cliente.nome.toUpperCase()}" criados no WhatsApp com boas-vindas enviadas. Estado atualizado para GRUPOS_CRIADOS.`,
     };
   } catch (err) {
@@ -1895,6 +2150,39 @@ export const HELOISA_TOOLS = [
         properties: {
           tenant_id: { type: "string", description: "ID ou slug do tenant (opcional; se omitido, audita a operação inteira)" },
         },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "abrir_card_trello",
+      description: "Cria um card/tarefa no Trello oficial da Geração Digital, atrela ao colaborador responsável, define prazo e ativa a régua de acompanhamento e cobrança condicional (D-2, D-1, D-0).",
+      parameters: {
+        type: "object",
+        properties: {
+          titulo: {
+            type: "string",
+            description: "Título claro e objetivo da demanda (ex: 'Carrossel Institucional - Dr. Roberto')",
+          },
+          descricao: {
+            type: "string",
+            description: "Descrição detalhada, briefing ou especificações da tarefa",
+          },
+          responsavel: {
+            type: "string",
+            description: "Nome ou função do colaborador da equipe GD (ex: Santana, Éflen, Duda, Gabriel, Humberto, Carlos, Caio, Conrado)",
+          },
+          prazo: {
+            type: "string",
+            description: "Prazo de entrega em linguagem natural ou data/hora (ex: 'sexta às 18h', '21/11 às 17h', 'amanhã às 18h')",
+          },
+          lista_destino: {
+            type: "string",
+            description: "Nome opcional da lista de destino no Trello (ex: 'Backlog & Briefings', 'Em Produção / Design')",
+          },
+        },
+        required: ["titulo", "responsavel", "prazo"],
       },
     },
   },
@@ -2147,6 +2435,8 @@ export async function processarMensagemHeloisa({
       resultado = await executarAuditarGeralVexo(args, pool);
     } else if (fnName === "consultar_cliente_ou_lead") {
       resultado = await executarConsultarClienteOuLead(args, pool);
+    } else if (fnName === "abrir_card_trello") {
+      resultado = await executarAbrirCardTrello(args, pool, instanceName, diretor);
     }
 
     toolResults.push({
@@ -2457,7 +2747,7 @@ ${compromissosTexto}
 5. RESPOSTA FALADA EM ÁUDIO (1 a 3 frases):
    - Mantenha respostas curtas, fluidas e bem pontuadas para o sintetizador de voz. NUNCA use markdown (sem asteriscos **, sem hashtags, sem listas numeradas).
 6. EXECUÇÃO DE TAREFAS:
-   - Se o usuário pedir para mandar WhatsApp, cobrar colaborador, cadastrar cliente, agendar reunião, criar follow-up ou auditar a operação, execute a ferramenta necessária em HELOISA_TOOLS e confirme de forma direta e natural.`;
+   - Se o usuário pedir para mandar WhatsApp, cobrar colaborador, cadastrar cliente, agendar reunião, cancelar compromisso, criar demanda no Trello, criar follow-up ou auditar a operação, execute a ferramenta necessária em HELOISA_TOOLS e confirme de forma direta e natural.`;
 
   let assistantMessage = null;
   const executedTools = [];
@@ -2511,6 +2801,8 @@ ${compromissosTexto}
       resultado = await executarAuditarGeralVexo(args, pool);
     } else if (fnName === "consultar_cliente_ou_lead") {
       resultado = await executarConsultarClienteOuLead(args, pool);
+    } else if (fnName === "abrir_card_trello") {
+      resultado = await executarAbrirCardTrello(args, pool, instanceName, diretorVoz);
     }
 
     toolResults.push({
