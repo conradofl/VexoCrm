@@ -88,9 +88,15 @@ import {
   finalizarEntradas,
   liberarConversa,
   marcarConversaEmAndamento,
+  marcarEnviando,
+  motivoDeRecusa,
   registrarEntrada,
   registrarHandlerDeEntrada,
 } from "../../services/agentInboundRecovery.js";
+import { idadeRealMs, marcarMensagemBarrada, mensagemAtrasada } from "../../services/inboundAge.js";
+
+// Tempo limite do envio pela Evolution. Sem ele, um fetch pendurado segurava o lote (e a conversa) para sempre.
+const ENVIO_EVOLUTION_TIMEOUT_MS = 20_000;
 import {
   resolveInboundScope,
   shouldEngageInbound,
@@ -3077,6 +3083,18 @@ export function registerChatbotRoutes(app, deps) {
     const reprocesso = req.__vexoReprocessamento || null;
     // Desfecho por mensagem do lead: toda saída sem resposta grava 'descartada' com o motivo; o buffer grava o resto.
     let entradaAtual = null; // { clientId, msgKey, phone }
+    let entradaDaCampanha = null;
+    // Passo de campanha (CAMINHO 1 e o desvio com chatbot desligado): o avanço NÃO é idempotente por mensagem
+    // (continueCampaignLeadFromReply só tem trava em memória com prazo e anda o progresso depois de enviar). Por isso a
+    // concessão não pode ficar em 'processando': uma reentrega depois do prazo andaria a campanha de novo.
+    const finalizarEntradaDaCampanha = async (progression, erro = null) => {
+      const e = entradaDaCampanha;
+      entradaDaCampanha = null;
+      if (!e) return;
+      const status = erro ? "falhou" : progression?.continued ? "respondida" : "descartada";
+      const motivo = erro ? `campanha: ${erro?.message || erro}`.slice(0, 200) : progression?.continued ? "passo_de_campanha" : `campanha: ${progression?.reason || "sem_avanco"}`;
+      await finalizarEntradas({ pool: pgDatabasePool, clientId: e.clientId, chaves: [e.msgKey], status, motivo }).catch(() => {});
+    };
     const gravarDesfecho = (status, motivo) => {
       if (!entradaAtual) return;
       const e = entradaAtual;
@@ -3097,6 +3115,8 @@ export function registerChatbotRoutes(app, deps) {
       if (st === "buffering") return;
       if (st.startsWith("campaign")) {
         if (reprocesso && entradaAtual) liberarConversa(entradaAtual.clientId, entradaAtual.phone);
+        // O passo de campanha roda depois da resposta HTTP: o desfecho vem dele (finalizarEntradaDaCampanha).
+        entradaDaCampanha = entradaAtual;
         entradaAtual = null;
         return;
       }
@@ -3221,6 +3241,21 @@ export function registerChatbotRoutes(app, deps) {
       messageData.text = messageData.type === "image" ? "[Imagem]" : describeUnrecognizedMessage(body?.data?.message || body?.message);
     }
 
+    // Atraso de entrega (Evolution -> Vexo), por instância: chegada menos a hora real da mensagem. Em 17/11/2026 quatro
+    // instâncias entregavam com horas de atraso e nada no log mostrava isso (grep "atraso_entrega").
+    if (!fromMe && !reprocesso) {
+      const atrasoEntregaMs = idadeRealMs(messageData.messageTimestamp, startTime);
+      if (atrasoEntregaMs !== null) {
+        console.log("[chatbot-webhook] atraso_entrega", {
+          clientId,
+          instancia: instanceName || rawInstanceName || null,
+          ms: atrasoEntregaMs,
+          horaReal: messageData.messageTimestamp,
+          chegada: new Date(startTime).toISOString(),
+        });
+      }
+    }
+
     // ── ETAPA 3: GRAVAÇÃO DA MENSAGEM (SEMPRE, INBOUND OU OUTBOUND/FROM_ME) ──
     // Se fromMe = true: gravada como direction "outbound" e senderType "device".
     // Se fromMe = false: gravada como direction "inbound" e senderType "lead".
@@ -3256,10 +3291,18 @@ export function registerChatbotRoutes(app, deps) {
     // dono. Se o processo cair no meio, a varredura de órfãs acha a conversa sem resposta e reprocessa.
     const msgKeyDaEntrada = reprocesso?.msgKey || messageData.waMessageId || resolveMessageId(body) || null;
     if (!fromMe && explicitClientId && msgKeyDaEntrada) {
-      entradaAtual = { clientId, msgKey: msgKeyDaEntrada, phone };
       if (!reprocesso) {
-        await registrarEntrada({ pool: pgDatabasePool, clientId, phone, msgKey: msgKeyDaEntrada, recebidaEm: new Date(startTime) });
+        // O caminho normal CONSULTA a concessão: mensagem já respondida, sendo enviada, sendo processada (pela varredura
+        // ou por outro processo) ou no teto de tentativas não é processada de novo. Caso real: sincronização grava a
+        // mensagem, a varredura responde, e o webhook atrasado da Evolution chega depois.
+        const concessao = await registrarEntrada({ pool: pgDatabasePool, clientId, phone, msgKey: msgKeyDaEntrada, recebidaEm: new Date(startTime) });
+        if (!concessao.concedida) {
+          // entradaAtual fica vazio: o desfecho que a mensagem já tem (respondida, enviando...) não é sobrescrito.
+          descartar(motivoDeRecusa(concessao.status, concessao.motivo), { clientId, phone: maskPhoneForLog(phone), estado: concessao.status, tentativas: concessao.attempts });
+          return;
+        }
       }
+      entradaAtual = { clientId, msgKey: msgKeyDaEntrada, phone };
     }
 
     // ── INTERCEPTADOR HELOÍSA (COPILOTO EXECUTIVO WHATSAPP) ──
@@ -3306,7 +3349,8 @@ export function registerChatbotRoutes(app, deps) {
 
     // Resposta do lead para a cadência de follow-up. Só mensagem do lead (não fromMe)
     // e só com tenant explícito: o fallback "outlier" acima não pode cancelar nada.
-    if (!reprocesso && !fromMe && explicitClientId && pgDatabasePool) {
+    // Também no reprocessamento: se a primeira passagem morreu antes daqui, a resposta do lead nunca cancelou a cadência.
+    if (!fromMe && explicitClientId && pgDatabasePool) {
       await registerFollowupReply({
         tenantId: explicitClientId,
         phone,
@@ -3321,7 +3365,8 @@ export function registerChatbotRoutes(app, deps) {
     // Só mensagem DIGITADA pelo lead, com empresa explícita (o fallback "outlier" não grava nada). Áudio transcrito e
     // imagem descrita ficam de fora: o texto é da máquina, não do lead. Roda ANTES do portão de opt-out, mais abaixo,
     // para que a própria mensagem do pedido já não receba próximo passo nem resposta do agente. Nunca lança.
-    if (!reprocesso && !fromMe && explicitClientId && pgDatabasePool && messageData?.text && messageData.transcribed !== true && messageData.described !== true) {
+    // Também no reprocessamento: "sair" nunca recebe resposta do agente, nem quando a varredura devolve a mensagem.
+    if (!fromMe && explicitClientId && pgDatabasePool && messageData?.text && messageData.transcribed !== true && messageData.described !== true) {
       await captureOptOutFromInbound(pgDatabasePool, {
         clientId: explicitClientId,
         phone,
@@ -3455,6 +3500,18 @@ export function registerChatbotRoutes(app, deps) {
         responder({ status: "skipped_opt_out" }, { clientId, phone: maskPhoneForLog(phone) });
         return;
       }
+    }
+
+    // ── PORTÃO DE IDADE (services/inboundAge.js) ──
+    // A Evolution chegou a entregar lotes com horas de atraso (17/11/2026: Tinge Brasil 44 h, Container LED 4,7 h de
+    // mediana) e eles eram respondidos como novos. Mensagem com mais de 30 min de idade REAL não recebe resposta do
+    // agente nem passo de campanha: fica marcada e aparece em "Esperam você" com o motivo, sem pausar o agente. Tudo que
+    // rodou antes (gravação, concessão, follow-up, captura de opt-out) continua valendo. Sem hora na mensagem: passa.
+    const atrasada = mensagemAtrasada(messageData.messageTimestamp);
+    if (atrasada) {
+      await marcarMensagemBarrada(pgDatabasePool, { clientId, waMessageId: msgKeyDaEntrada, motivo: "mensagem_atrasada" });
+      descartar("mensagem_atrasada", { clientId, phone: maskPhoneForLog(phone), idadeMin: atrasada.idadeMin, instancia: instanceName || null });
+      return;
     }
 
     // ── ETAPA 4: CAMPAIGN ROUTING (AVANÇA PASSO DE CAMPANHA, SE HOUVER) ──
@@ -3703,7 +3760,9 @@ export function registerChatbotRoutes(app, deps) {
             campaignFinalized: progression.campaignFinalized,
             reason: progression.reason,
           });
+          await finalizarEntradaDaCampanha(progression);
         } catch (err) {
+          await finalizarEntradaDaCampanha(null, err);
           console.error("[campaign-routing] ERRO CRÍTICO no avanço de passo de campanha:", {
             clientId,
             phone: maskPhoneForLog(phone),
@@ -3813,7 +3872,7 @@ export function registerChatbotRoutes(app, deps) {
           // Executa avanço da campanha em background
           (async () => {
             try {
-              await continueCampaignLeadFromReply({
+              const progressionDesvio = await continueCampaignLeadFromReply({
                 clientId,
                 phone,
                 repliedAt: new Date().toISOString(),
@@ -3824,7 +3883,9 @@ export function registerChatbotRoutes(app, deps) {
                   message: messageData?.text || "",
                 },
               });
+              await finalizarEntradaDaCampanha(progressionDesvio);
             } catch (err) {
+              await finalizarEntradaDaCampanha(null, err);
               console.error("[campaign-routing] ERRO no avanço de passo por bypass de chatbot_disabled:", err);
             }
           })();
@@ -3922,7 +3983,8 @@ export function registerChatbotRoutes(app, deps) {
     responder({ status: "buffering" }, { clientId, phone: maskPhoneForLog(phone) });
     // Daqui em diante o desfecho é do buffer (lote inteiro), e a conversa fica "em andamento": a varredura não pega.
     messageData.__msgKey = entradaAtual?.msgKey || null;
-    messageData.__recebidaEm = reprocesso?.recebidaEm || startTime;
+    // Medição da resposta conta da HORA REAL da mensagem (não da chegada ao Vexo): é o que o lead sente.
+    messageData.__recebidaEm = reprocesso?.horaReal || Date.parse(messageData.messageTimestamp || "") || startTime;
     messageData.__origem = reprocesso ? "varredura" : "webhook";
     entradaAtual = null;
     marcarConversaEmAndamento(clientId, phone, messageData.__origem);
@@ -4101,6 +4163,11 @@ export function registerChatbotRoutes(app, deps) {
             return;
           }
 
+          // Daqui em diante o lead pode receber. 'enviando' fica gravado ANTES do fetch: se o processo cair ou o envio
+          // lançar no meio, a mensagem NÃO é reenviada sozinha (vai para "Esperam você" com o motivo).
+          await marcarEnviando({ pool: pgDatabasePool, clientId, chaves: chavesDoLote });
+          desfecho.status = "enviando";
+          desfecho.motivo = "envio_sem_confirmacao";
           let sentViaVoice = false;
           let textDelivered = false;
           let outboundWaId = null;
@@ -4156,6 +4223,7 @@ export function registerChatbotRoutes(app, deps) {
             const evolutionResponse = await fetch(evolutionUrl, {
               method: "POST",
               headers: evolutionHeaders,
+              signal: AbortSignal.timeout(ENVIO_EVOLUTION_TIMEOUT_MS),
               body: JSON.stringify({
                 number: phone,
                 text: aiResponse.mensagem,
@@ -4432,10 +4500,21 @@ export function registerChatbotRoutes(app, deps) {
           }
         } catch (err) {
           console.error("[chatbot-webhook] processBatch error:", err.message);
-          desfecho.status = "falhou";
-          desfecho.motivo = `erro: ${err?.message || err}`.slice(0, 200);
+          // Exceção DEPOIS de 'enviando' (fetch com erro ou tempo limite): o lead pode ter recebido. Não vira 'falhou'
+          // (que a varredura reenviaria): fica como envio sem confirmação, logo abaixo.
+          if (desfecho.status !== "enviando") {
+            desfecho.status = "falhou";
+            desfecho.motivo = `erro: ${err?.message || err}`.slice(0, 200);
+          }
         } finally {
           liberarConversa(clientId, phone);
+          if (desfecho.status === "enviando") {
+            desfecho.status = "descartada";
+            desfecho.motivo = "envio_sem_confirmacao";
+            for (const chave of chavesDoLote) {
+              await marcarMensagemBarrada(pgDatabasePool, { clientId, waMessageId: chave, motivo: "envio_sem_confirmacao" });
+            }
+          }
           await finalizarEntradas({
             pool: pgDatabasePool,
             clientId,

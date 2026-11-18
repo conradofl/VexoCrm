@@ -195,7 +195,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "Olá, gostaria de conhecer a plataforma.",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -241,7 +241,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "Oi, alguém aí?",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -292,7 +292,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "Olá!",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -343,7 +343,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "Oi, vi o anúncio e chamei você",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -386,7 +386,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "Oi",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -434,7 +434,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "E aí, tudo bem?",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},
@@ -474,7 +474,7 @@ describe("Precedência Inbound: Regras de Ativação do Robô por Chip vs Tenant
           message: {
             conversation: "Opa, recebi sua mensagem",
           },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},

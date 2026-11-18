@@ -151,7 +151,7 @@ async function respostaDoLead(webhook, waId) {
         data: {
           key: { remoteJid: `${PHONE}@s.whatsapp.net`, fromMe: false, id: waId },
           message: { conversation: "Tenho interesse, me conta mais" },
-          messageTimestamp: 1788212600,
+          messageTimestamp: Math.floor(Date.now() / 1000) - 300,
         },
       },
       query: {},

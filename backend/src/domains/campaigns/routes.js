@@ -68,6 +68,7 @@ import {
   isFirstCampaignReply,
 } from "../../chatbot-ai-engine.js";
 import { resolveMessageId } from "../../services/inboundGuard.js";
+import { mensagemAtrasada } from "../../services/inboundAge.js";
 import {
   isWithinSendWindow,
   getNextSendWindowOpening,
@@ -7194,6 +7195,19 @@ export function registerCampaignsRoutes(app, deps) {
           waMessageId: rawMessageId,
           getTenantSettings: getLeadClientN8nSettings,
         });
+      }
+
+      // Portão de idade (services/inboundAge.js), o mesmo do webhook do chatbot: resposta entregue com mais de 30 min de
+      // idade real não avança a campanha (o passo sairia fora de hora). Sem hora na mensagem: passa.
+      const atrasada = mensagemAtrasada(body.data?.messageTimestamp ?? body.messageTimestamp ?? null);
+      if (atrasada) {
+        logCampaignReplyFlow("warn", "reply_ignored_late_message", {
+          clientId,
+          phone: maskPhoneForLog(phone),
+          idadeMin: atrasada.idadeMin,
+        });
+        res.json({ success: true, ignored: "mensagem_atrasada", idadeMin: atrasada.idadeMin });
+        return;
       }
 
       const campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });

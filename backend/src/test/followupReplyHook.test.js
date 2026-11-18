@@ -188,7 +188,7 @@ describe("webhook /api/hardcoded-chat-webhook → follow-up", () => {
       event,
       phone: LEAD_PHONE,
       instance: "Chip 1",
-      data: { key: { remoteJid, fromMe, id }, message: { conversation: text }, messageTimestamp: 1788212600 },
+      data: { key: { remoteJid, fromMe, id }, message: { conversation: text }, messageTimestamp: Math.floor(Date.now() / 1000) - 300 },
     };
     if (clientId) body.clientId = clientId;
     return { body, query: {} };

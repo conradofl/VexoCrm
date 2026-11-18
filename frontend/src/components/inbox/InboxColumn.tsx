@@ -356,6 +356,8 @@ export interface ConversationFlags {
   isNumberChange?: boolean;
   agentMutedReason?: string | null;
   isAgentMuted?: boolean;
+  /** O robô não respondeu à última mensagem do lead por este motivo (ex.: "Chegou atrasada"). Robô segue ativo. */
+  agentBarred?: { curto: string; longo: string } | null;
   isAutomation?: boolean;
   automationReason?: string | null;
   isArchived?: boolean;
@@ -585,6 +587,11 @@ export function ConversationListItem({
               <FlagIcon title="Conversa arquivada" className="text-slate-600 dark:text-slate-400">
                 <Archive className={icon} />
               </FlagIcon>
+            )}
+            {flags.agentBarred && (
+              <Tag tone="amber" title={`O robô não respondeu: ${flags.agentBarred.longo}. Responda pela equipe; o robô segue ativo nas próximas mensagens.`}>
+                {flags.agentBarred.curto}
+              </Tag>
             )}
             {flags.isAgentMuted && (
               <Tag tone="amber" title={`Robô pausado nesta conversa: ${flags.agentMutedReason || "atendimento humano"}`}>

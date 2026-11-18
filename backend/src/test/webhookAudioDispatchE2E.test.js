@@ -297,6 +297,8 @@ describe("Webhook Audio Dispatch E2E — Caminho Real de Transcrição, Síntese
 
     // 2. Dispara webhook com fixture de áudio real ajustado para lead de teste
     const reqBody = JSON.parse(JSON.stringify(fixture));
+    // Fixture gravado da Evolution real em 10/2024: hora trazida para agora, senão o portão de idade (30 min) barra.
+    if (reqBody.data) reqBody.data.messageTimestamp = Math.floor(Date.now() / 1000);
     if (reqBody.data?.key) reqBody.data.key.remoteJid = "5511988887777@s.whatsapp.net";
     if (reqBody.sender) reqBody.sender = "5511988887777@s.whatsapp.net";
 

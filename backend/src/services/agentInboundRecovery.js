@@ -2,29 +2,38 @@
 //
 // Por quê (Container LED, 17/11/2026): o webhook responde 200 "buffering" à Evolution e só depois processa (buffer em
 // memória de 3 s + chamada da IA + envio). Restart do contêiner nesse intervalo perdia a mensagem para sempre: a
-// Evolution não reenvia. Nesse dia o main teve cerca de dez deploys entre 08:48 e 15:16.
+// Evolution não reenvia.
 //
-// O que este módulo faz:
-// - Concessão por mensagem (msg_key = wa_message_id), com dono (o processo) e prazo. Tabela agent_inbound_claims quando
-//   ela existe; sem a tabela (runner de migration travado), em memória — o backend é um processo só. Reservar é atômico
-//   nos dois casos: INSERT ... ON CONFLICT condicional no banco, conferir-e-gravar síncrono em memória.
-// - Desfecho de cada mensagem: 'respondida', 'descartada' (barrada por portão), 'falhou' (IA ou envio).
-// - Varredura de órfãs (no boot e a cada minuto): conversa de empresa com agente ligado cuja ÚLTIMA mensagem é do lead,
-//   com mais de 60 s e menos de 30 min, sem nenhuma mensagem nossa depois. Ela volta pelo MESMO handler do webhook, em
-//   modo reprocessamento, e passa por todos os portões que já existem. Acima de 30 min não responde: a conversa
-//   continua aparecendo como esperando resposta.
-// - Conversa em andamento no processo (buffer ou IA rodando) nunca é pega pela varredura.
+// Revisão do #269 (17/11/2026), regras que valem agora:
+// - Concessão por mensagem (msg_key = wa_message_id) em agent_inbound_claims, com dono (o processo), prazo e tentativas.
+//   Estados: processando -> enviando -> respondida | descartada | falhou.
+// - Tomada só com PRAZO VENCIDO (PRAZO_MS, maior que o tempo máximo de uma resposta). Antes outro processo tomava em 60 s
+//   mesmo com o dono vivo e podia responder em dobro.
+// - Teto de MAX_TENTATIVAS por mensagem em qualquer caminho (webhook, reentrega da Evolution, varredura).
+// - 'enviando' é gravado ANTES do fetch do envio. Parado em 'enviando' (SIGTERM ou exceção no meio do envio: o lead pode
+//   ter recebido) NUNCA é reenviado sozinho: vira 'descartada' com motivo e a conversa vai para "Esperam você".
+// - O caminho normal consulta a concessão: mensagem já respondida (ou sendo enviada/processada) não é processada de
+//   novo (webhook atrasado depois da varredura, reentrega da Evolution).
+// - SEM a tabela (runner de migration travado), a concessão do webhook fica em memória e a VARREDURA NÃO RODA: depois de
+//   um restart a memória some, e reprocessar sem saber se houve envio podia dobrar a resposta.
+// - Varredura: conversa de empresa com agente ligado cuja ÚLTIMA mensagem é do lead, entre 60 s e 30 min, sem mensagem
+//   nossa depois. Volta pelo MESMO handler do webhook (modo reprocessamento) e passa por todos os portões. Envios
+//   espaçados; concessões com mais de 7 dias são apagadas.
 
 import { randomUUID } from "crypto";
+import { marcarMensagemBarrada } from "./inboundAge.js";
 
 export const BOOT_ID = `boot-${process.pid}-${randomUUID().slice(0, 8)}`;
 export const MIN_IDADE_MS = 60 * 1000;
 export const MAX_IDADE_MS = 30 * 60 * 1000;
-export const PRAZO_MS = 3 * 60 * 1000;
+// Tempo máximo de uma resposta: buffer (3 s) + IA (cada modelo da escada tem tempo limite) + envio (20 s de tempo
+// limite). Bem abaixo de 2 min; o prazo de 5 min só vence se o dono morreu.
+export const PRAZO_MS = 5 * 60 * 1000;
 export const MAX_TENTATIVAS = 3;
+export const ESPACO_ENTRE_REPROCESSOS_MS = 2000;
+export const RETENCAO_DIAS = 7;
 const SEM_TABELA_POR_MS = 5 * 60 * 1000;
-
-const FINAIS = new Set(["respondida", "descartada"]);
+const LIMPEZA_A_CADA_MS = 60 * 60 * 1000;
 
 /** Conversa = empresa + últimos 8 dígitos do telefone (mesma regra da medição). */
 export function chaveConversa(clientId, phone) {
@@ -45,7 +54,7 @@ export function conversaEmAndamento(clientId, phone) {
 }
 
 // ── Concessão em memória (sem a tabela) ──────────────────────────────────────────────────────────────────────────────
-const concessoesEmMemoria = new Map(); // `${clientId}|${msgKey}` -> { status, attempts, owner, leaseUntil }
+const concessoesEmMemoria = new Map(); // `${clientId}|${msgKey}` -> { status, attempts, owner, leaseUntil, criadaEm }
 let semTabelaAte = 0;
 
 function isMissingTable(err) {
@@ -56,86 +65,143 @@ function usarBanco(pool) {
 }
 function marcarSemTabela(err) {
   if (!semTabelaAte || Date.now() >= semTabelaAte) {
-    console.warn("[agente-orfas] tabela agent_inbound_claims ausente: concessão em memória (um processo só)", { erro: err?.message });
+    console.warn("[agente-orfas] tabela agent_inbound_claims ausente: concessão em memória e varredura desligada", { erro: err?.message });
   }
   semTabelaAte = Date.now() + SEM_TABELA_POR_MS;
 }
 
-function podeReservarEmMemoria(atual, agora) {
+/** Quando o webhook NÃO pode processar: o motivo, pelo estado que a mensagem já tem. */
+export function motivoDeRecusa(status, motivo = null) {
+  if (status === "respondida") return "ja_respondida";
+  if (status === "enviando" || motivo === "enviando") return "envio_em_andamento";
+  if (status === "processando") return "em_processamento";
+  return "teto_de_tentativas";
+}
+
+function podeTomarEmMemoria(atual, agora) {
   if (!atual) return true;
-  if (FINAIS.has(atual.status)) return false;
-  if (atual.status === "falhou") return atual.attempts < MAX_TENTATIVAS;
-  // processando: só com prazo vencido (o dono, neste mesmo processo, sumiu sem gravar desfecho)
-  return atual.leaseUntil < agora;
+  if (atual.attempts >= MAX_TENTATIVAS) return false;
+  if (atual.status === "falhou") return true;
+  if (atual.status === "descartada") return atual.motivo !== "envio_sem_confirmacao";
+  if (atual.status === "processando") return atual.leaseUntil < agora;
+  return false; // respondida, enviando
 }
 
-/**
- * O webhook recebeu a mensagem e vai processar: grava 'processando' com este processo como dono.
- * Mensagem já com desfecho (reentrega da Evolution) não é rebaixada. Nunca lança.
- */
-export async function registrarEntrada({ pool, clientId, phone, msgKey, recebidaEm = new Date() }) {
-  if (!clientId || !msgKey) return;
-  const agora = Date.now();
-  if (usarBanco(pool)) {
-    try {
-      await pool.query(
-        `INSERT INTO public.agent_inbound_claims (client_id, msg_key, phone, status, origem, attempts, owner, lease_until, received_at)
-         VALUES ($1, $2, $3, 'processando', 'webhook', 1, $4, $5::timestamptz, $6::timestamptz)
-         ON CONFLICT (client_id, msg_key) DO NOTHING`,
-        [clientId, msgKey, phone || null, BOOT_ID, new Date(agora + PRAZO_MS).toISOString(), new Date(recebidaEm).toISOString()]
-      );
-      return;
-    } catch (err) {
-      if (!isMissingTable(err)) {
-        console.warn("[agente-orfas] falha ao registrar entrada", { clientId, erro: err?.message });
-        return;
-      }
-      marcarSemTabela(err);
-    }
-  }
-  const k = `${clientId}|${msgKey}`;
-  if (!concessoesEmMemoria.has(k)) {
-    concessoesEmMemoria.set(k, { status: "processando", attempts: 1, owner: BOOT_ID, leaseUntil: agora + PRAZO_MS, criadaEm: agora });
-  }
-}
+const SQL_PODE_TOMAR = (t) => `(${t}.attempts < $max AND (
+      ${t}.status = 'falhou'
+   OR (${t}.status = 'descartada' AND ${t}.motivo IS DISTINCT FROM 'envio_sem_confirmacao')
+   OR (${t}.status = 'processando' AND ${t}.lease_until < now())))`;
 
 /**
- * A varredura quer reprocessar a mensagem. Atômico: devolve true para UMA execução só.
- * Pega: sem linha; 'processando' de outro processo (morto no restart) parada há mais de 60 s ou com prazo vencido;
- * 'falhou' com menos de MAX_TENTATIVAS. Nunca pega desfecho final.
+ * O webhook recebeu a mensagem e quer processar. Atômico.
+ * Devolve { concedida: true } (linha nova, ou tomada de 'falhou'/'descartada'/'processando' com prazo vencido, dentro do
+ * teto) ou { concedida: false, status, attempts } (já respondida, sendo enviada, sendo processada, ou no teto).
+ * Erro de banco que não seja tabela ausente: concede (o webhook nunca para por causa do registro) e loga.
  */
-export async function reservarParaVarredura({ pool, clientId, phone, msgKey }) {
-  if (!clientId || !msgKey) return false;
+export async function registrarEntrada({ pool, clientId, phone, msgKey, recebidaEm = new Date(), owner = BOOT_ID }) {
+  if (!clientId || !msgKey) return { concedida: true };
   const agora = Date.now();
   if (usarBanco(pool)) {
     try {
       const { rows } = await pool.query(
-        `INSERT INTO public.agent_inbound_claims (client_id, msg_key, phone, status, origem, attempts, owner, lease_until)
-         VALUES ($1, $2, $3, 'processando', 'varredura', 1, $4, $5::timestamptz)
+        `INSERT INTO public.agent_inbound_claims (client_id, msg_key, phone, status, origem, attempts, owner, lease_until, received_at)
+         VALUES ($1, $2, $3, 'processando', 'webhook', 1, $4, $5::timestamptz, $6::timestamptz)
          ON CONFLICT (client_id, msg_key) DO UPDATE
-           SET status = 'processando', origem = 'varredura', attempts = public.agent_inbound_claims.attempts + 1,
+           SET status = 'processando', origem = 'webhook', attempts = public.agent_inbound_claims.attempts + 1,
                owner = EXCLUDED.owner, lease_until = EXCLUDED.lease_until, updated_at = now(), motivo = NULL
-         WHERE (public.agent_inbound_claims.status = 'falhou' AND public.agent_inbound_claims.attempts < $6)
-            OR (public.agent_inbound_claims.status = 'processando' AND (
-                  public.agent_inbound_claims.lease_until < now()
-               OR (public.agent_inbound_claims.owner IS DISTINCT FROM $4 AND public.agent_inbound_claims.updated_at < now() - interval '60 seconds')))
+         WHERE ${SQL_PODE_TOMAR("public.agent_inbound_claims").replace("$max", "$7")}
          RETURNING attempts`,
-        [clientId, msgKey, phone || null, BOOT_ID, new Date(agora + PRAZO_MS).toISOString(), MAX_TENTATIVAS]
+        [clientId, msgKey, phone || null, owner, new Date(agora + PRAZO_MS).toISOString(), new Date(recebidaEm).toISOString(), MAX_TENTATIVAS]
       );
-      return rows.length === 1;
+      if (rows.length === 1) return { concedida: true, attempts: rows[0].attempts };
+      const atual = (await pool.query("SELECT status, motivo, attempts FROM public.agent_inbound_claims WHERE client_id = $1 AND msg_key = $2", [clientId, msgKey])).rows[0];
+      if (!atual) {
+        // Nem inseriu nem achou a linha (apagada no meio, banco devolvendo vazio): o registro nunca para o webhook.
+        console.warn("[agente-orfas] concessão sem linha depois do registro; seguindo", { clientId });
+        return { concedida: true };
+      }
+      return { concedida: false, status: atual.status, motivo: atual.motivo || null, attempts: atual.attempts ?? null };
     } catch (err) {
       if (!isMissingTable(err)) {
-        console.warn("[agente-orfas] falha ao reservar", { clientId, erro: err?.message });
-        return false;
+        console.warn("[agente-orfas] falha ao registrar entrada", { clientId, erro: err?.message });
+        return { concedida: true };
       }
       marcarSemTabela(err);
     }
   }
   const k = `${clientId}|${msgKey}`;
   const atual = concessoesEmMemoria.get(k);
-  if (!podeReservarEmMemoria(atual, agora)) return false;
-  concessoesEmMemoria.set(k, { status: "processando", attempts: (atual?.attempts || 0) + 1, owner: BOOT_ID, leaseUntil: agora + PRAZO_MS, criadaEm: atual?.criadaEm || agora });
-  return true;
+  if (!podeTomarEmMemoria(atual, agora)) return { concedida: false, status: atual.status, attempts: atual.attempts };
+  concessoesEmMemoria.set(k, { status: "processando", attempts: (atual?.attempts || 0) + 1, owner, leaseUntil: agora + PRAZO_MS, criadaEm: atual?.criadaEm || agora });
+  return { concedida: true };
+}
+
+/**
+ * A varredura quer reprocessar a mensagem. Atômico: devolve true para UMA execução só.
+ * Pega: sem linha; 'falhou' abaixo de MAX_TENTATIVAS; 'processando' com prazo vencido (dono morto), abaixo do teto.
+ * Nunca 'enviando', 'respondida' nem 'descartada' (desfecho de portão ou envio sem confirmação).
+ */
+export async function reservarParaVarredura({ pool, clientId, phone, msgKey, owner = BOOT_ID }) {
+  if (!clientId || !msgKey || !pool) return false;
+  const { rows } = await pool.query(
+    `INSERT INTO public.agent_inbound_claims (client_id, msg_key, phone, status, origem, attempts, owner, lease_until)
+     VALUES ($1, $2, $3, 'processando', 'varredura', 1, $4, $5::timestamptz)
+     ON CONFLICT (client_id, msg_key) DO UPDATE
+       SET status = 'processando', origem = 'varredura', attempts = public.agent_inbound_claims.attempts + 1,
+           owner = EXCLUDED.owner, lease_until = EXCLUDED.lease_until, updated_at = now(), motivo = NULL
+     WHERE public.agent_inbound_claims.attempts < $6
+       AND (public.agent_inbound_claims.status = 'falhou'
+         OR (public.agent_inbound_claims.status = 'processando' AND public.agent_inbound_claims.lease_until < now()))
+     RETURNING attempts`,
+    [clientId, msgKey, phone || null, owner, new Date(Date.now() + PRAZO_MS).toISOString(), MAX_TENTATIVAS]
+  );
+  return rows.length === 1;
+}
+
+// Antes da migration 20261118090000 o CHECK de status não aceita 'enviando'. O mesmo significado vai então como
+// 'processando' + motivo 'enviando' + prazo que nunca vence (ninguém toma); a varredura lê os dois formatos.
+const PRAZO_DISTANTE = "9999-12-31T00:00:00Z";
+function isCheckViolation(err) {
+  return err?.code === "23514" || /agent_inbound_claims_status_check/.test(String(err?.message || ""));
+}
+
+/** Grava 'enviando' ANTES do fetch do envio. Nunca lança. */
+export async function marcarEnviando({ pool, clientId, chaves }) {
+  const lista = [...new Set((chaves || []).filter(Boolean))];
+  if (!clientId || lista.length === 0) return;
+  if (usarBanco(pool)) {
+    try {
+      await pool.query(
+        `UPDATE public.agent_inbound_claims SET status = 'enviando', motivo = 'enviando', lease_until = NULL, updated_at = now()
+          WHERE client_id = $1 AND msg_key = ANY($2::text[])`,
+        [clientId, lista]
+      );
+      return;
+    } catch (err) {
+      if (isCheckViolation(err)) {
+        try {
+          await pool.query(
+            `UPDATE public.agent_inbound_claims SET status = 'processando', motivo = 'enviando', lease_until = $3::timestamptz, updated_at = now()
+              WHERE client_id = $1 AND msg_key = ANY($2::text[])`,
+            [clientId, lista, PRAZO_DISTANTE]
+          );
+        } catch (err2) {
+          console.warn("[agente-orfas] falha ao marcar enviando (formato antigo)", { clientId, erro: err2?.message });
+        }
+        return;
+      }
+      if (!isMissingTable(err)) {
+        console.warn("[agente-orfas] falha ao marcar enviando", { clientId, erro: err?.message });
+        return;
+      }
+      marcarSemTabela(err);
+    }
+  }
+  for (const msgKey of lista) {
+    const k = `${clientId}|${msgKey}`;
+    const atual = concessoesEmMemoria.get(k) || { attempts: 1, criadaEm: Date.now() };
+    concessoesEmMemoria.set(k, { ...atual, status: "enviando", leaseUntil: 0 });
+  }
 }
 
 /** Grava o desfecho das mensagens de um lote. status: respondida | descartada | falhou. Nunca lança. */
@@ -162,9 +228,8 @@ export async function finalizarEntradas({ pool, clientId, chaves, status, motivo
   for (const msgKey of lista) {
     const k = `${clientId}|${msgKey}`;
     const atual = concessoesEmMemoria.get(k) || { attempts: 1, criadaEm: Date.now() };
-    concessoesEmMemoria.set(k, { ...atual, status, motivo, owner: BOOT_ID, leaseUntil: 0 });
+    concessoesEmMemoria.set(k, { ...atual, status, motivo, leaseUntil: 0 });
   }
-  // Memória limitada: some o que passou do teto de 30 min (a varredura nunca olha além disso).
   if (concessoesEmMemoria.size > 5000) {
     const limite = Date.now() - MAX_IDADE_MS - 5 * 60 * 1000;
     for (const [k, v] of concessoesEmMemoria) if ((v.criadaEm || 0) < limite) concessoesEmMemoria.delete(k);
@@ -190,7 +255,7 @@ async function empresasComAgenteLigado(pool) {
 }
 
 /**
- * Conversas cuja última mensagem é do lead, entre 60 s e 30 min atrás, sem nenhuma mensagem nossa depois.
+ * Conversas cuja última mensagem é do lead, entre 60 s e 30 min atrás (hora real), sem nenhuma mensagem nossa depois.
  * Usa o índice (client_id, created_at). Devolve a mensagem mais recente do lead de cada conversa.
  */
 export async function listarOrfas({ pool, agora = new Date(), empresas = null }) {
@@ -218,6 +283,46 @@ export async function listarOrfas({ pool, agora = new Date(), empresas = null })
   return rows;
 }
 
+/**
+ * Envio que ficou parado em 'enviando' (o processo caiu durante o fetch, ou o fetch deu erro/tempo limite: o lead pode
+ * ter recebido). Nunca reenvia: marca a mensagem para "Esperam você" e fecha a concessão como 'descartada'.
+ */
+export async function encerrarEnviosParados({ pool }) {
+  const { rows } = await pool.query(
+    `UPDATE public.agent_inbound_claims
+        SET status = 'descartada', motivo = 'envio_sem_confirmacao', finished_at = now(), updated_at = now()
+      WHERE (status = 'enviando' OR (status = 'processando' AND motivo = 'enviando'))
+        AND updated_at < now() - ($1::int * interval '1 millisecond')
+      RETURNING client_id, msg_key`,
+    [PRAZO_MS]
+  );
+  for (const r of rows) {
+    await marcarMensagemBarrada(pool, { clientId: r.client_id, waMessageId: r.msg_key, motivo: "envio_sem_confirmacao" });
+    console.warn("[agente-orfas] envio sem confirmação: não reenvia, vai para Esperam você", { clientId: r.client_id });
+  }
+  return rows.length;
+}
+
+/** Concessões antigas (mais de RETENCAO_DIAS): apagadas aos poucos. */
+export async function limparConcessoesAntigas({ pool, dias = RETENCAO_DIAS, lote = 5000 }) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM public.agent_inbound_claims
+      WHERE ctid IN (SELECT ctid FROM public.agent_inbound_claims WHERE updated_at < now() - ($1::int * interval '1 day') LIMIT $2)`,
+    [dias, lote]
+  );
+  return rowCount || 0;
+}
+
+async function tabelaExiste(pool) {
+  try {
+    await pool.query("SELECT 1 FROM public.agent_inbound_claims LIMIT 0");
+    return true;
+  } catch (err) {
+    if (isMissingTable(err)) return false;
+    throw err;
+  }
+}
+
 // ── Handler do webhook (registrado pelas rotas do chatbot) ───────────────────────────────────────────────────────────
 let handlerDeEntrada = null;
 export function registrarHandlerDeEntrada(fn) {
@@ -239,13 +344,34 @@ function corpoSintetico(m) {
   };
 }
 
+const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let ultimaLimpeza = 0;
+
 /**
- * Uma passada da varredura. Devolve { candidatas, reprocessadas, puladas }. Nunca lança.
+ * Uma passada da varredura. Devolve { candidatas, reprocessadas, puladas, enviosParados }. Nunca lança.
  * handler: o handler do webhook (padrão: o registrado pelas rotas do chatbot).
  */
-export async function varrerOrfas({ pool, agora = new Date(), handler = handlerDeEntrada, empresas = null } = {}) {
-  const resultado = { candidatas: 0, reprocessadas: 0, puladas: [] };
+export async function varrerOrfas({
+  pool,
+  agora = new Date(),
+  handler = handlerDeEntrada,
+  empresas = null,
+  owner = BOOT_ID,
+  espacoMs = ESPACO_ENTRE_REPROCESSOS_MS,
+} = {}) {
+  const resultado = { candidatas: 0, reprocessadas: 0, puladas: [], enviosParados: 0 };
   if (!pool || typeof handler !== "function") return { ...resultado, motivo: !pool ? "sem_banco" : "sem_handler" };
+  try {
+    if (!(await tabelaExiste(pool))) return { ...resultado, motivo: "sem_tabela" };
+    resultado.enviosParados = await encerrarEnviosParados({ pool });
+    if (Date.now() - ultimaLimpeza > LIMPEZA_A_CADA_MS) {
+      ultimaLimpeza = Date.now();
+      await limparConcessoesAntigas({ pool }).catch((err) => console.warn("[agente-orfas] limpeza falhou", { erro: err?.message }));
+    }
+  } catch (err) {
+    console.warn("[agente-orfas] preparo da varredura falhou", { erro: err?.message });
+    return { ...resultado, motivo: "preparo_falhou" };
+  }
   let orfas;
   try {
     orfas = await listarOrfas({ pool, agora, empresas });
@@ -264,11 +390,15 @@ export async function varrerOrfas({ pool, agora = new Date(), handler = handlerD
     marcarConversaEmAndamento(m.client_id, m.phone, "varredura");
     let reservou = false;
     try {
-      reservou = await reservarParaVarredura({ pool, clientId: m.client_id, phone: m.phone, msgKey: m.wa_message_id });
+      reservou = await reservarParaVarredura({ pool, clientId: m.client_id, phone: m.phone, msgKey: m.wa_message_id, owner });
+    } catch (err) {
+      console.warn("[agente-orfas] falha ao reservar", { clientId: m.client_id, erro: err?.message });
     } finally {
       if (!reservou) liberarConversa(m.client_id, m.phone);
     }
     if (!reservou) { pular("ja_concedida"); continue; }
+    // Envios espaçados: um lote grande de órfãs (deploy no pico) não sai de rajada pelo mesmo chip.
+    if (resultado.reprocessadas > 0 && espacoMs > 0) await esperar(espacoMs);
     console.warn("[agente-orfas] reprocessando mensagem sem resposta", {
       clientId: m.client_id,
       phone: `***${String(m.phone || "").replace(/\D/g, "").slice(-4)}`,
@@ -282,7 +412,7 @@ export async function varrerOrfas({ pool, agora = new Date(), handler = handlerD
           body: corpoSintetico(m),
           query: { clientId: m.client_id, client_id: m.client_id, instanceName: m.instance_name || undefined },
           headers: {},
-          __vexoReprocessamento: { origem: "varredura", msgKey: m.wa_message_id, recebidaEm: new Date(m.at).getTime() },
+          __vexoReprocessamento: { origem: "varredura", msgKey: m.wa_message_id, horaReal: new Date(m.at).getTime() },
         },
         res
       );
@@ -308,7 +438,7 @@ export function startAgentRecoverySweeper({ pool, intervalMs = 60_000, primeiraE
     _emCurso = true;
     try {
       const r = await varrerOrfas({ pool });
-      if (r.reprocessadas > 0 || r.motivo) console.info("[agente-orfas] varredura", r);
+      if (r.reprocessadas > 0 || r.enviosParados > 0 || (r.motivo && r.motivo !== "sem_tabela")) console.info("[agente-orfas] varredura", r);
     } catch (err) {
       console.warn("[agente-orfas] varredura falhou", { erro: err?.message || err });
     } finally {
@@ -336,4 +466,5 @@ export function _resetAgentRecoveryForTest() {
   concessoesEmMemoria.clear();
   semTabelaAte = 0;
   handlerDeEntrada = null;
+  ultimaLimpeza = 0;
 }
