@@ -45,6 +45,9 @@ const EVO = "https://evo.teste";
 const LEAD = "5534999001001";
 const AGENTE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CAMPANHA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+// Campanha só do teste do desvio: continueCampaignLeadFromReply tem trava em memória por lead e campanha, e o teste
+// do desvio anda a campanha; com o mesmo id, os testes seguintes da mesma campanha ficariam travados.
+const CAMPANHA_DESVIO = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 // Pool real; tabela/coluna que este teste não montou (o handler toca tabelas de outras frentes) responde vazio.
 // A concessão PRECISA ver o erro de tabela ausente: é ele que liga o modo em memória, como em produção.
@@ -351,9 +354,9 @@ describe("[OBRIGATÓRIO] portão de idade: mensagem que a Evolution entregou hor
       { id: "s2", type: "text", text: "Segue o catálogo", order: 2, enabled: true, triggerMode: "after_reply" },
     ];
     await db.query("INSERT INTO campaigns (id, client_id, name, analytics_meta, status, mode) VALUES ($1, $2, 'Feirão', $3::jsonb, 'ativa', 'disparo')", [
-      CAMPANHA, TENANT, JSON.stringify({ sequence: seq, dispatchOptions: { waitForReply: true } }),
+      CAMPANHA_DESVIO, TENANT, JSON.stringify({ sequence: seq, dispatchOptions: { waitForReply: true } }),
     ]);
-    await db.query("INSERT INTO campaign_dispatch_runs (campaign_id, client_id, phone, status, sent_at) VALUES ($1, $2, $3, 'sent', now() - interval '1 day')", [CAMPANHA, TENANT, LEAD]);
+    await db.query("INSERT INTO campaign_dispatch_runs (campaign_id, client_id, phone, status, sent_at) VALUES ($1, $2, $3, 'sent', now() - interval '1 day')", [CAMPANHA_DESVIO, TENANT, LEAD]);
 
     const out = await chamar(mensagem("Pode mandar", { id: "WA-DESVIO-ATRASADA", horaReal: new Date(Date.now() - 5 * 3600_000) }));
     expect(out).toMatchObject({ success: true, ignored: "mensagem_atrasada" });
