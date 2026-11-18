@@ -313,6 +313,60 @@ describe("[OBRIGATÓRIO] portão de idade: mensagem que a Evolution entregou hor
     expect((await varrer()).candidatas).toBe(0);
   }, SLOW);
 
+  // Tinge Brasil, 18/11/2026: robô desligado e mesmo assim a conversa ganhava o selo "Chegou atrasada / o robô não
+  // respondeu". O selo só vale onde o robô (ou o passo de campanha) teria respondido; nos outros casos vale o motivo real.
+  for (const [nome, preparar, motivoReal] of [
+    ["agente desligado", async () => {
+      await db.query("UPDATE lead_client_n8n_settings SET chatbot_enabled = false WHERE client_id = $1", [TENANT]);
+      await db.query("UPDATE followup_companies SET inbound_enabled = false WHERE id = $1", [AGENTE]);
+    }, /disabled/],
+    ["número de SDR", async () => db.query("UPDATE lead_client_n8n_settings SET sdr_whatsapp_numbers = $2::jsonb WHERE client_id = $1", [TENANT, JSON.stringify([LEAD])]), /sdr/i],
+  ]) {
+    it(`${nome} + mensagem de 5 h: desfecho é o motivo real, sem selo de atrasada e fora de Esperam você por isso`, async () => {
+      await montarBanco();
+      boot();
+      await preparar();
+      const out = await chamar(mensagem("Oi, quero orçamento", { id: "WA-ATRASADA-SEM-ROBO", horaReal: new Date(Date.now() - 5 * 3600_000) }));
+      expect(out.ignored).toMatch(motivoReal);
+      await assentar();
+      expect(envios).toHaveLength(0);
+      const c = await concessao("WA-ATRASADA-SEM-ROBO");
+      expect(c.status).toBe("descartada");
+      expect(c.motivo).toMatch(motivoReal);
+      expect((await metaDaMensagem("WA-ATRASADA-SEM-ROBO"))?.agente_barrado ?? null).toBeNull();
+    }, SLOW);
+  }
+
+  it("robô desligado MAS campanha esperando resposta (desvio do chatbot_disabled) + mensagem de 5 h: barra como atrasada, com selo, e não anda o passo", async () => {
+    await montarBanco();
+    boot();
+    // Chip sem agente próprio + chatbot do tenant desligado: só o desvio da campanha (envio 'sent' em campaign_dispatch_runs) agiria.
+    await db.query("UPDATE followup_companies SET archived_at = now() WHERE id = $1", [AGENTE]);
+    await db.query("UPDATE lead_client_n8n_settings SET chatbot_enabled = false WHERE client_id = $1", [TENANT]);
+    await db.query(`CREATE TABLE IF NOT EXISTS public.campaign_dispatch_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), dispatch_id UUID, campaign_id UUID, client_id TEXT, phone TEXT, lead_id UUID,
+      lead_import_item_id UUID, status TEXT, sent_at TIMESTAMPTZ)`);
+    const seq = [
+      { id: "s1", type: "text", text: "Oi", order: 1, enabled: true, triggerMode: "immediate" },
+      { id: "s2", type: "text", text: "Segue o catálogo", order: 2, enabled: true, triggerMode: "after_reply" },
+    ];
+    await db.query("INSERT INTO campaigns (id, client_id, name, analytics_meta, status, mode) VALUES ($1, $2, 'Feirão', $3::jsonb, 'ativa', 'disparo')", [
+      CAMPANHA, TENANT, JSON.stringify({ sequence: seq, dispatchOptions: { waitForReply: true } }),
+    ]);
+    await db.query("INSERT INTO campaign_dispatch_runs (campaign_id, client_id, phone, status, sent_at) VALUES ($1, $2, $3, 'sent', now() - interval '1 day')", [CAMPANHA, TENANT, LEAD]);
+
+    const out = await chamar(mensagem("Pode mandar", { id: "WA-DESVIO-ATRASADA", horaReal: new Date(Date.now() - 5 * 3600_000) }));
+    expect(out).toMatchObject({ success: true, ignored: "mensagem_atrasada" });
+    await assentar();
+    expect(envios).toHaveLength(0);
+    expect(await concessao("WA-DESVIO-ATRASADA")).toMatchObject({ status: "descartada", motivo: "mensagem_atrasada" });
+    expect((await metaDaMensagem("WA-DESVIO-ATRASADA")).agente_barrado).toBe("mensagem_atrasada");
+
+    // Mesma situação com mensagem nova: o desvio age (prova de que o cenário chega ao desvio).
+    const nova = await chamar(mensagem("Pode mandar", { id: "WA-DESVIO-NOVA" }));
+    expect(nova).toMatchObject({ status: "campaign_step_dispatched" });
+  }, SLOW);
+
   it("o agente segue ATIVO: a próxima mensagem do lead (nova) é respondida, e a conversa sai de Esperam você", async () => {
     await montarBanco();
     boot();
