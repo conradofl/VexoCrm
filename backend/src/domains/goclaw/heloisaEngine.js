@@ -27,6 +27,7 @@ import crypto from "node:crypto";
 import { resolveGoclawDir } from "./routes.js";
 import { defaultGroqModel } from "../../services/llmModels.js";
 import { generateSpeechAudio } from "../../services/voiceService.js";
+import { getFollowupQueue } from "../../followup/queue.js";
 
 export const DIRETORES_AUTORIZADOS = {
   conrado: {
@@ -1079,30 +1080,156 @@ export async function executarCancelarCompromisso(
   }
 }
 
-export async function executarCriarFollowup({ titulo, cliente_nome, data_lembrete, notas }, pool = pgDatabasePool) {
+export function parseDataLembrete(dataStr) {
+  if (!dataStr) {
+    const defaultDelay = 24 * 3600 * 1000;
+    return { dataIso: new Date(Date.now() + defaultDelay).toISOString(), delayMs: defaultDelay, minutos: 1440 };
+  }
+
+  const s = String(dataStr).trim().toLowerCase();
+
+  // Minutos: "daqui 10 minutos", "em 10 min", "daqui a 15 minutos", "10 minutos", "10m"
+  const matchMin = s.match(/(?:daqui\s+(?:a\s+)?|em\s+)?(\d+)\s*(?:minutos?|mins?|m\b)/i);
+  if (matchMin) {
+    const min = parseInt(matchMin[1], 10);
+    const delayMs = min * 60 * 1000;
+    const dataIso = new Date(Date.now() + delayMs).toISOString();
+    return { dataIso, delayMs, minutos: min };
+  }
+
+  // Horas: "daqui 2 horas", "em 1 hora", "daqui a 3h", "2 horas", "2h"
+  const matchHoras = s.match(/(?:daqui\s+(?:a\s+)?|em\s+)?(\d+)\s*(?:horas?|hrs?|h\b)/i);
+  if (matchHoras) {
+    const h = parseInt(matchHoras[1], 10);
+    const delayMs = h * 60 * 60 * 1000;
+    const dataIso = new Date(Date.now() + delayMs).toISOString();
+    return { dataIso, delayMs, minutos: h * 60 };
+  }
+
+  // Segundos: "daqui 30 segundos", "em 10s", "30 segundos", "30s"
+  const matchSeg = s.match(/(?:daqui\s+(?:a\s+)?|em\s+)?(\d+)\s*(?:segundos?|segs?|s\b)/i);
+  if (matchSeg) {
+    const seg = parseInt(matchSeg[1], 10);
+    const delayMs = seg * 1000;
+    const dataIso = new Date(Date.now() + delayMs).toISOString();
+    return { dataIso, delayMs, minutos: Math.ceil(seg / 60) };
+  }
+
+  // Parse de data normal ou no fuso de Brasília
+  try {
+    const iso = parseDataHoraBrasilia(dataStr);
+    const diffMs = new Date(iso).getTime() - Date.now();
+    const delayMs = Math.max(diffMs, 1000);
+    return { dataIso: iso, delayMs, minutos: Math.max(1, Math.round(delayMs / 60000)) };
+  } catch {
+    const parsed = new Date(dataStr);
+    if (!isNaN(parsed.getTime())) {
+      const diffMs = parsed.getTime() - Date.now();
+      const delayMs = Math.max(diffMs, 1000);
+      return { dataIso: parsed.toISOString(), delayMs, minutos: Math.max(1, Math.round(delayMs / 60000)) };
+    }
+  }
+
+  const defaultDelay = 24 * 3600 * 1000;
+  return { dataIso: new Date(Date.now() + defaultDelay).toISOString(), delayMs: defaultDelay, minutos: 1440 };
+}
+
+export async function executarCriarFollowup(
+  {
+    titulo,
+    cliente_nome,
+    data_lembrete,
+    mensagem_whatsapp,
+    enviar_whatsapp = false,
+    telefone_destino,
+    notas,
+  },
+  pool = pgDatabasePool,
+  instanceName = "vexo-adm-vexo-atende",
+  diretorSolicitante = null
+) {
   try {
     const tit = String(titulo || "Lembrete").trim();
-    let dataIso = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
-    try {
-      if (data_lembrete) {
-        const parsed = new Date(data_lembrete);
-        if (!isNaN(parsed.getTime())) dataIso = parsed.toISOString();
+    const { dataIso, delayMs, minutos } = parseDataLembrete(data_lembrete);
+
+    const telDestino = normalizarTelefoneHeloisa(
+      telefone_destino || diretorSolicitante?.telefone || "5534997817660"
+    );
+
+    // Se houver indicação explícita ou mensagem WhatsApp informada, programa envio
+    const deveEnviarWhatsapp =
+      Boolean(enviar_whatsapp) ||
+      Boolean(mensagem_whatsapp) ||
+      /whatsapp|meu\s+pr[oó]prio|zap|me\s+enviar|mandar/i.test(String(titulo || "")) ||
+      /whatsapp|meu\s+pr[oó]prio|zap|me\s+enviar|mandar/i.test(String(notas || ""));
+
+    const textoMensagem = String(
+      mensagem_whatsapp ||
+        notas ||
+        `📌 *Lembrete da Heloísa:* ${tit}${cliente_nome ? ` (${cliente_nome})` : ""}`
+    ).trim();
+
+    let reminderRow = null;
+    if (pool && typeof pool.query === "function") {
+      try {
+        const { rows } = await pool.query(
+          `INSERT INTO public.lead_reminders (client_id, phone, lead_name, title, notes, remind_at, status, created_at, updated_at)
+           VALUES ('geracao-digital', $1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+           RETURNING id, title, remind_at`,
+          [telDestino, cliente_nome || "Geração Digital", tit, notas || null, dataIso]
+        );
+        reminderRow = rows[0];
+      } catch (errDb) {
+        console.warn("[Heloísa] Aviso ao inserir lead_reminders:", errDb.message);
       }
-    } catch {
-      // default 24h
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO public.lead_reminders (client_id, phone, lead_name, title, notes, remind_at, status, created_at, updated_at)
-       VALUES ('geracao-digital', '5534997817660', $1, $2, $3, $4, 'pending', NOW(), NOW())
-       RETURNING id, title, remind_at`,
-      [cliente_nome || "Geração Digital", tit, notas || null, dataIso]
-    );
+    let jobAgendado = null;
+    if (deveEnviarWhatsapp && telDestino) {
+      try {
+        const queue = getFollowupQueue();
+        if (queue && typeof queue.add === "function") {
+          jobAgendado = await queue.add(
+            "heloisa-scheduled-whatsapp",
+            {
+              numero: telDestino,
+              texto: textoMensagem,
+              instanceName,
+              tenantId: "geracao-digital",
+              solicitanteNome: diretorSolicitante?.nome || "Conrado Finzi",
+              pool,
+            },
+            {
+              delay: Math.max(delayMs, 1000),
+              removeOnComplete: true,
+            }
+          );
+          console.log(`[Heloísa] Job de WhatsApp agendado com sucesso (delay: ${delayMs}ms) para ${telDestino}`);
+        }
+      } catch (errQueue) {
+        console.warn("[Heloísa] Falha ao agendar na fila BullMQ, tentando contingência:", errQueue.message);
+      }
+    }
+
+    const horaFormatada = new Date(dataIso).toLocaleTimeString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    let mensagemRetorno = `Lembrete "${tit}" criado para ${dataIso}.`;
+    if (deveEnviarWhatsapp) {
+      mensagemRetorno = `Lembrete de follow-up agendado com sucesso! A mensagem será enviada no seu WhatsApp às ${horaFormatada} (daqui a ${minutos} minutos).`;
+    }
 
     return {
       sucesso: true,
-      followup: rows[0],
-      mensagem: `Lembrete "${tit}" criado para ${dataIso}.`,
+      followup: reminderRow || { id: "rem-" + Date.now(), title: tit, remind_at: dataIso },
+      data_iso: dataIso,
+      delay_ms: delayMs,
+      minutos,
+      whatsapp_agendado: Boolean(jobAgendado || deveEnviarWhatsapp),
+      mensagem: mensagemRetorno,
     };
   } catch (err) {
     console.error("[Heloísa] Erro ao criar follow-up:", err);
@@ -1684,14 +1811,17 @@ export const HELOISA_TOOLS = [
     type: "function",
     function: {
       name: "criar_followup",
-      description: "Cria um lembrete ou tarefa de follow-up interno no CRM.",
+      description: "Cria um lembrete ou follow-up com opção de disparo programado de mensagem no WhatsApp.",
       parameters: {
         type: "object",
         properties: {
-          titulo: { type: "string", description: "Assunto do lembrete" },
-          cliente_nome: { type: "string", description: "Nome do cliente se houver" },
-          data_lembrete: { type: "string", description: "Data do lembrete" },
-          notas: { type: "string", description: "Observações ou detalhes da tarefa" },
+          titulo: { type: "string", description: "Assunto ou resumo do lembrete/follow-up" },
+          cliente_nome: { type: "string", description: "Nome do cliente ou destinatário" },
+          data_lembrete: { type: "string", description: "Data/hora ou tempo relativo (ex: 'daqui 10 minutos', 'amanhã às 15h', '2026-11-18 10:00')" },
+          mensagem_whatsapp: { type: "string", description: "Texto da mensagem a ser disparada no WhatsApp" },
+          enviar_whatsapp: { type: "boolean", description: "Se true, programa o envio automático da mensagem no WhatsApp quando o horário chegar" },
+          telefone_destino: { type: "string", description: "Telefone do destinatário (se não informado, usa o do solicitante)" },
+          notas: { type: "string", description: "Observações internas adicionais" },
         },
         required: ["titulo"],
       },
@@ -1970,7 +2100,7 @@ export async function processarMensagemHeloisa({
     } else if (fnName === "cancelar_compromisso") {
       resultado = await executarCancelarCompromisso(args, pool, instanceName, diretor);
     } else if (fnName === "criar_followup") {
-      resultado = await executarCriarFollowup(args, pool);
+      resultado = await executarCriarFollowup(args, pool, instanceName, diretor);
     } else if (fnName === "consultar_operacao") {
       resultado = await executarConsultarOperacao(args, pool);
     } else if (fnName === "auditar_geral_vexo") {
@@ -2334,7 +2464,7 @@ ${compromissosTexto}
     } else if (fnName === "cancelar_compromisso") {
       resultado = await executarCancelarCompromisso(args, pool, instanceName, diretorVoz);
     } else if (fnName === "criar_followup") {
-      resultado = await executarCriarFollowup(args, pool);
+      resultado = await executarCriarFollowup(args, pool, instanceName, diretorVoz);
     } else if (fnName === "consultar_operacao") {
       resultado = await executarConsultarOperacao(args, pool);
     } else if (fnName === "auditar_geral_vexo") {

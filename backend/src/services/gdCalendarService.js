@@ -720,11 +720,14 @@ export async function createBriefingCalendarEvent({
           };
         }
 
+        const errText = await res.text();
+        console.warn(`[gd-calendar] Falha na agenda '${calId}' (HTTP ${res.status}): ${errText}`);
+        lastCalendarError = `Google Calendar não sincronizado: permissão pendente na agenda '${calId}' (HTTP ${res.status}: ${errText})`;
+
         // Se retornar 400 ou 403 (ex: "Service accounts cannot invite attendees without Domain-Wide Delegation"),
         // realiza retry imediato com gravação limpa (sem attendees no payload e com o Meet na descrição/localização).
         if (res.status === 400 || res.status === 403) {
-          const errTextPeek = await res.text();
-          console.warn(`[gd-calendar] Tentativa inicial na agenda '${calId}' retornou HTTP ${res.status}: ${errTextPeek}. Realizando retry limpo sem attendees/conferência...`);
+          console.warn(`[gd-calendar] Tentativa inicial na agenda '${calId}' retornou HTTP ${res.status}: ${errText}. Realizando retry limpo sem attendees/conferência...`);
 
           const mockMeetUrl = `https://meet.google.com/vexo-${(clienteId || "briefing").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10)}`;
           const simpleEndpoint = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`;
@@ -800,46 +803,6 @@ export async function createBriefingCalendarEvent({
 }
 
 /**
- * Exclui um compromisso/reunião do Google Calendar oficial.
- */
-export async function deleteBriefingCalendarEvent({
-  eventId,
-  calendarId = null,
-  accessToken = null,
-} = {}) {
-  if (!eventId) return { success: false, error: "eventId é obrigatório" };
-  const token = accessToken || (await getGoogleCalendarAccessToken());
-  if (!token) return { success: true, mock: true, message: "Token indisponível, simulado" };
-
-  const candidateCalendars = Array.from(
-    new Set(
-      [
-        calendarId,
-        process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com",
-        process.env.GD_CALENDAR_AGENCIA || "mrkgeracaodigital@gmail.com",
-        "primary",
-      ].filter(Boolean)
-    )
-  );
-
-  for (const calId of candidateCalendars) {
-    try {
-      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`;
-      const res = await fetch(url, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok || res.status === 204 || res.status === 404) {
-        return { success: true, calendarId: calId, status: res.status };
-      }
-    } catch (err) {
-      console.warn(`[gd-calendar] Erro ao deletar evento ${eventId} na agenda ${calId}:`, err.message);
-    }
-  }
-  return { success: true, fallback: true };
-}
-
-/**
  * Monta o texto padronizado para oferta de horários no WhatsApp,
  * marcando o cliente no grupo oficial "MÁQUINA DE VENDAS: {CLIENTE}".
  */
@@ -892,4 +855,44 @@ export function calculateReminderTimes({ slotStart, timeZone = TIMEZONE_SAO_PAUL
     vesperaReminderAt: vespera19h.toISOString(),
     umaHoraReminderAt: umaHoraAntes.toISOString(),
   };
+}
+
+/**
+ * Exclui um compromisso/reunião do Google Calendar oficial.
+ */
+export async function deleteBriefingCalendarEvent({
+  eventId,
+  calendarId = null,
+  accessToken = null,
+} = {}) {
+  if (!eventId) return { success: false, error: "eventId é obrigatório" };
+  const token = accessToken || (await getGoogleCalendarAccessToken());
+  if (!token) return { success: true, mock: true, message: "Token indisponível, simulado" };
+
+  const candidateCalendars = Array.from(
+    new Set(
+      [
+        calendarId,
+        process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com",
+        process.env.GD_CALENDAR_AGENCIA || "mrkgeracaodigital@gmail.com",
+        "primary",
+      ].filter(Boolean)
+    )
+  );
+
+  for (const calId of candidateCalendars) {
+    try {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok || res.status === 204 || res.status === 404) {
+        return { success: true, calendarId: calId, status: res.status };
+      }
+    } catch (err) {
+      console.warn(`[gd-calendar] Erro ao deletar evento ${eventId} na agenda ${calId}:`, err.message);
+    }
+  }
+  return { success: true, fallback: true };
 }

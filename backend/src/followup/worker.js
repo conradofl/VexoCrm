@@ -42,6 +42,7 @@ import { leadsTableName } from "../services/tenant.js";
 import { evaluateStepConditions } from "./service.js";
 import { getTemplateLibraryAudioId, loadAudioForSend } from "../audioLibrary/service.js";
 import { isPhoneOptedOut } from "../services/optOut.js";
+import { enviarMensagemWhatsAppComFallback } from "../domains/goclaw/heloisaEngine.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -659,11 +660,26 @@ export async function processJob(job) {
   console.log(log, `mensagem ${effectiveMediaPath ? 'com mídia ' : ''}enviada via Evolution API (${evoConfig.displayName} -> ${evoConfig.instanceSlug})`);
 }
 
+export async function processHeloisaScheduledWhatsappJob(job) {
+  const { numero, texto, instanceName, tenantId, pool: jobPool } = job.data || {};
+  console.log(`[followup/worker] Executando envio programado Heloísa para ${numero}...`);
+  return await enviarMensagemWhatsAppComFallback({
+    numero,
+    texto,
+    instanceName: instanceName || "vexo-adm-vexo-atende",
+    tenantId: tenantId || "geracao-digital",
+    pool: jobPool || getFollowupWorkerDbPool(),
+  });
+}
+
 export function startFollowupWorker() {
   const worker = new Worker(
     QUEUE_NAME,
     async (job) => {
       try {
+        if (job.name === "heloisa-scheduled-whatsapp") {
+          return await processHeloisaScheduledWhatsappJob(job);
+        }
         if (job.name === "process-event-journey") {
           // Jornadas por evento foram removidas (nunca tiveram emissor ligado).
           // Job antigo que ainda esteja no Redis é descartado, não reprocessado.
