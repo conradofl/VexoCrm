@@ -686,7 +686,7 @@ export async function processHeloisaScheduledWhatsappJob(job) {
  * REGRA DE OURO: Se o card estiver em aprovação ou concluído, a cobrança é SUPRIMIDA.
  */
 export async function processTrelloCardFollowupCheckJob(job, customPool = null) {
-  const { cardId, marco = "D-1" } = job?.data || {};
+  const { cardId, marco = "D-1", monitorId } = job?.data || {};
   if (!cardId) {
     console.warn("[followup/worker] [Trello] Job sem cardId informado. Descartando.");
     return { cobrancaDispensada: true, motivo: "card_id_ausente" };
@@ -698,11 +698,19 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
   let monitor = null;
   if (pool && typeof pool.query === "function") {
     try {
-      const { rows } = await pool.query(
-        `SELECT * FROM public.gd_trello_card_monitors WHERE trello_card_id = $1 LIMIT 1`,
-        [cardId]
-      );
-      if (rows && rows.length > 0) monitor = rows[0];
+      if (monitorId) {
+        const { rows } = await pool.query(
+          `SELECT * FROM public.gd_trello_card_monitors WHERE id = $1 OR trello_card_id = $2 LIMIT 1`,
+          [monitorId, cardId]
+        );
+        if (rows && rows.length > 0) monitor = rows[0];
+      } else {
+        const { rows } = await pool.query(
+          `SELECT * FROM public.gd_trello_card_monitors WHERE trello_card_id = $1 LIMIT 1`,
+          [cardId]
+        );
+        if (rows && rows.length > 0) monitor = rows[0];
+      }
     } catch (errDb) {
       console.warn("[followup/worker] [Trello] Aviso ao buscar monitor no banco:", errDb.message);
     }
@@ -721,7 +729,7 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
     }
   }
 
-  // 3. Consulta status do Trello em tempo real
+  // 3. Consulta status do Trello em tempo real (Wandinha / Síndica)
   let cardStatus = null;
   try {
     cardStatus = await getTrelloCardStatus({ cardId });
@@ -733,10 +741,10 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
   const listName = cardStatus?.listName || "";
   const dueComplete = Boolean(cardStatus?.dueComplete);
 
-  // 4. REGRA DE OURO (Supressão de Cobrança)
+  // 4. REGRA DE OURO (Supressão de Cobrança da Mortícia)
   if (isCardInApprovalOrDone({ listName, dueComplete })) {
     console.log(
-      `[Cobrador Trello] Card ${cardId} já em status '${listName}' (dueComplete=${dueComplete}). Cobrança ${marco} dispensada!`
+      `[Mortícia/Trello] Card ${cardId} já em status '${listName}'. Cobrança dispensada!`
     );
 
     if (pool && typeof pool.query === "function") {
@@ -761,7 +769,7 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
     };
   }
 
-  // 5. Cobrança ativa: formata e dispara mensagem no WhatsApp do colaborador
+  // 5. Cobrança ativa da Mortícia: formata e dispara mensagem no WhatsApp do colaborador
   const colabNome = monitor?.colaborador_nome || job.data?.colaboradorNome || "Colega";
   const colabTelefone = monitor?.colaborador_telefone || job.data?.colaboradorTelefone;
   const titulo = monitor?.titulo || cardStatus?.name || job.data?.titulo || "Demanda no Trello";
@@ -772,7 +780,7 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
   if (marco === "D-2") {
     mensagemTexto = `Oi ${colabNome}! Passando para lembrar que faltam 2 dias para o prazo da demanda *${titulo}*. Tudo certo para entrega em ${dataPrazo}?`;
   } else if (marco === "D-1") {
-    mensagemTexto = `Atenção ${colabNome}! A demanda *${titulo}* vence amanhã (${dataPrazo}). Se precisar de algo ou estiver travado, avise aqui!`;
+    mensagemTexto = `Atenção ${colabNome}! A demanda *${titulo}* vence amanhã (${dataPrazo}). Se precisar de apoio ou estiver travado, avise aqui!`;
   } else {
     // D-0
     mensagemTexto = `🚨 ${colabNome}, hoje é o dia de entrega da demanda *${titulo}*! Já finalizou ou enviou para aprovação?`;
@@ -787,9 +795,9 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
         tenantId: "geracao-digital",
         pool,
       });
-      console.log(`[Cobrador Trello] ✅ Notificação ${marco} enviada para ${colabNome} (${colabTelefone})`);
+      console.log(`[Mortícia/Trello] ✅ Notificação ${marco} enviada para ${colabNome} (${colabTelefone})`);
     } catch (errSend) {
-      console.error(`[Cobrador Trello] Falha ao enviar WhatsApp para ${colabTelefone}:`, errSend.message);
+      console.error(`[Mortícia/Trello] Falha ao enviar WhatsApp para ${colabTelefone}:`, errSend.message);
     }
   }
 
@@ -806,7 +814,7 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
         [cardId, marco]
       );
     } catch (errUp) {
-      console.warn("[Cobrador Trello] Aviso ao registrar cobrança enviada no banco:", errUp.message);
+      console.warn("[Mortícia/Trello] Aviso ao registrar cobrança enviada no banco:", errUp.message);
     }
   }
 
@@ -816,6 +824,7 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
     marco,
     colaborador: colabNome,
     telefone: colabTelefone,
+    mensagem: mensagemTexto,
   };
 }
 

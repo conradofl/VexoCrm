@@ -1380,9 +1380,10 @@ export async function executarAbrirCardTrello(
     const cardUrl = cardRes.shortUrl || cardRes.url || "https://trello.com";
 
     // 2. Registra na tabela de monitoramento gd_trello_card_monitors
+    let monitorRow = null;
     if (pool && typeof pool.query === "function") {
       try {
-        await pool.query(
+        const { rows } = await pool.query(
           `INSERT INTO public.gd_trello_card_monitors
              (trello_card_id, trello_card_url, titulo, descricao, colaborador_nome, colaborador_telefone, due_date, aviso_criacao_enviado, status_final, created_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, true, 'aberto', NOW(), NOW())
@@ -1394,7 +1395,8 @@ export async function executarAbrirCardTrello(
              colaborador_telefone = EXCLUDED.colaborador_telefone,
              due_date = EXCLUDED.due_date,
              aviso_criacao_enviado = true,
-             updated_at = NOW()`,
+             updated_at = NOW()
+           RETURNING id`,
           [
             cardRes.id,
             cardUrl,
@@ -1405,6 +1407,7 @@ export async function executarAbrirCardTrello(
             dueDateUtc,
           ]
         );
+        if (rows && rows.length > 0) monitorRow = rows[0];
       } catch (errDb) {
         console.warn("[Heloísa] Aviso ao salvar monitor de card no banco:", errDb.message);
       }
@@ -1412,7 +1415,7 @@ export async function executarAbrirCardTrello(
 
     // 3. Disparo imediato de WhatsApp para o colaborador
     let notificacaoWhatsappEnviada = false;
-    const msgNotif = `Olá ${colab.nome}! 🎯 Uma nova demanda foi criada para você no Trello:\n📌 *${String(titulo).trim()}*\n📅 *Prazo:* ${dataHoraFormatada}\n🔗 *Link:* ${cardUrl}\n\nFique atento ao prazo. Bom trabalho!`;
+    const msgNotif = `Olá ${colab.nome}! 🎯 Uma nova demanda foi criada para você no Trello:\n📌 *${String(titulo).trim()}*\n📅 *Prazo de Entrega:* ${dataHoraFormatada}\n🔗 *Link:* ${cardUrl}\n\nFique atento ao prazo. Bom trabalho!`;
 
     if (colab.telefone) {
       try {
@@ -1443,6 +1446,7 @@ export async function executarAbrirCardTrello(
                 {
                   cardId: cardRes.id,
                   marco: m.marco,
+                  monitorId: monitorRow?.id || null,
                   colaboradorTelefone: colab.telefone,
                   colaboradorNome: colab.nome,
                   titulo: String(titulo).trim(),

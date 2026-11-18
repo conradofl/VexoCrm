@@ -221,6 +221,13 @@ describe("Tool abrir_card_trello e Régua de Cobrança Condicional (Trello)", ()
       expect(insertCalls[0][1][4]).toBe("Santana"); // colaborador_nome
       expect(insertCalls[0][1][5]).toBe("5516982447360"); // colaborador_telefone
 
+      // Verifica agendamento dos jobs na fila BullMQ
+      expect(mockQueue.add).toHaveBeenCalled();
+      const firstQueueCall = mockQueue.add.mock.calls[0];
+      expect(firstQueueCall[0]).toBe("trello-card-followup-check");
+      expect(firstQueueCall[1].cardId).toBe("card_santana_999");
+      expect(firstQueueCall[1].colaboradorNome).toBe("Santana");
+
       fetchSpy.mockRestore();
     });
 
@@ -363,7 +370,59 @@ describe("Tool abrir_card_trello e Régua de Cobrança Condicional (Trello)", ()
       expect(result.cobrancaDispensada).toBe(false);
       expect(result.cobrancaEnviada).toBe(true);
       expect(result.marco).toBe("D-1");
+      expect(result.mensagem).toContain("Se precisar de apoio ou estiver travado, avise aqui!");
       expect(updateExecuted).toBe(true);
+
+      fetchSpy.mockRestore();
+    });
+
+    it("localiza o monitor pelo monitorId UUID no banco de dados para D-0", async () => {
+      const mockPool = {
+        query: vi.fn().mockImplementation(async (sql) => {
+          if (sql.includes("gd_trello_card_monitors")) {
+            return {
+              rows: [
+                {
+                  id: "mon-uuid-custom",
+                  trello_card_id: "card_uuid_1",
+                  titulo: "Campanha Black Friday",
+                  colaborador_nome: "Humberto",
+                  colaborador_telefone: "5534992223651",
+                  due_date: new Date(Date.now() + 2 * 3600 * 1000).toISOString(),
+                  cobranca_d0_enviada: false,
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({
+          id: "card_uuid_1",
+          name: "Campanha Black Friday",
+          dueComplete: false,
+          idList: "list_prod",
+          list: { name: "Em Produção / Design" },
+        }),
+      }));
+
+      const job = {
+        data: {
+          cardId: "card_uuid_1",
+          monitorId: "mon-uuid-custom",
+          marco: "D-0",
+        },
+      };
+
+      const result = await processTrelloCardFollowupCheckJob(job, mockPool);
+
+      expect(result.cobrancaEnviada).toBe(true);
+      expect(result.marco).toBe("D-0");
+      expect(result.colaborador).toBe("Humberto");
+      expect(result.mensagem).toContain("hoje é o dia de entrega da demanda *Campanha Black Friday*");
 
       fetchSpy.mockRestore();
     });
