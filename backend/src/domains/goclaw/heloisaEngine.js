@@ -1086,7 +1086,48 @@ export function parseDataLembrete(dataStr) {
     return { dataIso: new Date(Date.now() + defaultDelay).toISOString(), delayMs: defaultDelay, minutos: 1440 };
   }
 
-  const s = String(dataStr).trim().toLowerCase();
+  let s = String(dataStr).trim().toLowerCase();
+
+  // Mapeamento de números por extenso no português para reconhecimento de voz
+  const extensoMap = {
+    um: 1,
+    uma: 1,
+    dois: 2,
+    duas: 2,
+    três: 3,
+    tres: 3,
+    quatro: 4,
+    cinco: 5,
+    seis: 6,
+    sete: 7,
+    oito: 8,
+    nove: 9,
+    dez: 10,
+    onze: 11,
+    doze: 12,
+    treze: 13,
+    quatorze: 14,
+    catorze: 14,
+    quinze: 15,
+    dezesseis: 16,
+    dezessete: 17,
+    dezoito: 18,
+    dezenove: 19,
+    vinte: 20,
+    trinta: 30,
+    quarenta: 40,
+    cinquenta: 50,
+    sessenta: 60,
+  };
+
+  // Expressões especiais como "meia hora"
+  s = s.replace(/\bmeia\s+hora\b/g, "30 minutos");
+
+  // Substitui números por extenso antes das expressões regulares
+  for (const [palavra, valor] of Object.entries(extensoMap)) {
+    const regex = new RegExp(`\\b${palavra}\\b`, "g");
+    s = s.replace(regex, String(valor));
+  }
 
   // Minutos: "daqui 10 minutos", "em 10 min", "daqui a 15 minutos", "10 minutos", "10m"
   const matchMin = s.match(/(?:daqui\s+(?:a\s+)?|em\s+)?(\d+)\s*(?:minutos?|mins?|m\b)/i);
@@ -1197,7 +1238,6 @@ export async function executarCriarFollowup(
               instanceName,
               tenantId: "geracao-digital",
               solicitanteNome: diretorSolicitante?.nome || "Conrado Finzi",
-              pool,
             },
             {
               delay: Math.max(delayMs, 1000),

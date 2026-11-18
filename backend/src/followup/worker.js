@@ -661,15 +661,19 @@ export async function processJob(job) {
 }
 
 export async function processHeloisaScheduledWhatsappJob(job) {
-  const { numero, texto, instanceName, tenantId, pool: jobPool } = job.data || {};
-  console.log(`[followup/worker] Executando envio programado Heloísa para ${numero}...`);
-  return await enviarMensagemWhatsAppComFallback({
+  const { numero, texto, instanceName, tenantId } = job?.data || {};
+  const pool = getFollowupWorkerDbPool() || pgDatabasePool;
+
+  console.log(`[followup/worker] ⏰ Disparando lembrete programado da Heloísa para ${numero}: "${texto}"`);
+  const res = await enviarMensagemWhatsAppComFallback({
     numero,
     texto,
     instanceName: instanceName || "vexo-adm-vexo-atende",
     tenantId: tenantId || "geracao-digital",
-    pool: jobPool || getFollowupWorkerDbPool(),
+    pool,
   });
+  console.log(`[followup/worker] ✅ Lembrete enviado com sucesso para ${numero} via ${res?.instanceName}!`);
+  return res;
 }
 
 export function startFollowupWorker() {
