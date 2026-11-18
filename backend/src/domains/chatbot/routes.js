@@ -3507,12 +3507,16 @@ export function registerChatbotRoutes(app, deps) {
     // mediana) e eles eram respondidos como novos. Mensagem com mais de 30 min de idade REAL não recebe resposta do
     // agente nem passo de campanha: fica marcada e aparece em "Esperam você" com o motivo, sem pausar o agente. Tudo que
     // rodou antes (gravação, concessão, follow-up, captura de opt-out) continua valendo. Sem hora na mensagem: passa.
+    // A barreira é aplicada SÓ onde o robô agiria (passo de campanha ou IA). Se antes disso outro portão já encerra
+    // (robô desligado, chip sem agente, SDR, pausa), vale aquele motivo e a conversa não ganha o selo "Chegou atrasada"
+    // (18/11/2026: Tinge Brasil, robô desligado, ganhava o selo).
     const atrasada = mensagemAtrasada(messageData.messageTimestamp);
-    if (atrasada) {
+    const barrarSeAtrasada = async () => {
+      if (!atrasada) return false;
       await marcarMensagemBarrada(pgDatabasePool, { clientId, waMessageId: msgKeyDaEntrada, motivo: "mensagem_atrasada" });
       descartar("mensagem_atrasada", { clientId, phone: maskPhoneForLog(phone), idadeMin: atrasada.idadeMin, instancia: instanceName || null });
-      return;
-    }
+      return true;
+    };
 
     // ── ETAPA 4: CAMPAIGN ROUTING (AVANÇA PASSO DE CAMPANHA, SE HOUVER) ──
     // Se o lead respondeu a uma campanha com passo pós-resposta (waitForReply),
@@ -3695,6 +3699,7 @@ export function registerChatbotRoutes(app, deps) {
       responder({ status: "skipped_human_pause", motivo: "atendimento_humano" }, { clientId, phone: maskPhoneForLog(phone) });
       return;
     }
+    if (activeWaitCampaignToDispatch && (await barrarSeAtrasada())) return;
     if (activeWaitCampaignToDispatch) {
       // 1. Responde 200 IMEDIATAMENTE ao Evolution (evita timeout e retry)
       responder({ status: "campaign_step_dispatched" }, {
@@ -3844,6 +3849,7 @@ export function registerChatbotRoutes(app, deps) {
           supabase,
         });
 
+        if (pendingCampaignMatch && (await barrarSeAtrasada())) return;
         if (pendingCampaignMatch) {
           console.log("[campaign-routing] bypass chatbot_disabled: lead tem campanha aguardando resposta", {
             clientId,
@@ -3978,6 +3984,9 @@ export function registerChatbotRoutes(app, deps) {
         return;
       }
     }
+
+    // Último portão antes da IA: aqui o robô de fato responderia.
+    if (await barrarSeAtrasada()) return;
 
     // Responde imediatamente ao Evolution (evita timeout)
     responder({ status: "buffering" }, { clientId, phone: maskPhoneForLog(phone) });
