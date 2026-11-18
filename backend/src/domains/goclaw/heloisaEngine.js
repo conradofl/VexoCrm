@@ -133,6 +133,41 @@ export function gerarLinkGoogleMeet(titulo = "", dataIso = "") {
   return `https://meet.google.com/${p1}-${p2}-${p3}`;
 }
 
+export function gerarLinkGoogleCalendarTemplate({
+  titulo = "Reunião de Alinhamento",
+  dataIso,
+  duracaoMinutos = 60,
+  meetUrl = "",
+  descricao = "",
+}) {
+  const start = new Date(dataIso || Date.now());
+  const durMs = (duracaoMinutos || 60) * 60 * 1000;
+  const end = new Date(start.getTime() + durMs);
+
+  const formatGCalDate = (d) => {
+    return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  };
+
+  const datesStr = `${formatGCalDate(start)}/${formatGCalDate(end)}`;
+  const detalhes = [
+    descricao,
+    meetUrl ? `Link do Meet: ${meetUrl}` : "",
+    "Agendado automaticamente pela Heloísa (Vexo OS)",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  let url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
+    String(titulo).trim()
+  )}&dates=${datesStr}&details=${encodeURIComponent(detalhes)}`;
+
+  if (meetUrl) {
+    url += `&location=${encodeURIComponent(meetUrl)}`;
+  }
+
+  return url;
+}
+
 export async function registrarExecucaoHeloisa({
   canal = "whatsapp",
   solicitanteNome = "Conrado Finzi",
@@ -289,12 +324,24 @@ export function isHeloisaAuthorizedSender(phone) {
   return Boolean(identificarDiretor(phone));
 }
 
+function matchTelefoneHeloisa(t1, t2) {
+  if (!t1 || !t2) return false;
+  const n1 = normalizarTelefoneHeloisa(t1);
+  const n2 = normalizarTelefoneHeloisa(t2);
+  if (!n1 || !n2) return false;
+  if (n1 === n2) return true;
+  if (n1.length >= 8 && n2.length >= 8) {
+    if (n1.endsWith(n2.slice(-8)) || n2.endsWith(n1.slice(-8))) return true;
+  }
+  return false;
+}
+
 export async function identificarUsuarioAutorizado(phone, pool = pgDatabasePool) {
   const limpo = normalizarTelefoneHeloisa(phone);
   if (!limpo) return null;
 
-  // 1. Consulta no banco na tabela heloisa_usuarios_autorizados
   if (pool && typeof pool.query === "function") {
+    // 1º) Consulta na tabela heloisa_usuarios_autorizados
     try {
       const { rows } = await pool.query(
         `SELECT id, client_id, nome, telefone, papel, ativo
@@ -303,12 +350,7 @@ export async function identificarUsuarioAutorizado(phone, pool = pgDatabasePool)
       );
 
       for (const u of rows) {
-        const uTel = normalizarTelefoneHeloisa(u.telefone);
-        if (
-          limpo === uTel ||
-          (uTel.length >= 8 && limpo.endsWith(uTel.slice(4))) ||
-          (limpo.length >= 8 && uTel.endsWith(limpo.slice(4)))
-        ) {
+        if (matchTelefoneHeloisa(limpo, u.telefone)) {
           return {
             id: u.id,
             chave: u.nome.toLowerCase().replace(/\s+/g, "_"),
@@ -316,17 +358,78 @@ export async function identificarUsuarioAutorizado(phone, pool = pgDatabasePool)
             telefone: u.telefone,
             papel: u.papel,
             client_id: u.client_id,
+            origem: "heloisa_usuarios_autorizados",
             ativo: u.ativo,
           };
         }
       }
     } catch (err) {
-      console.warn("[Heloísa] Aviso ao consultar heloisa_usuarios_autorizados, usando fallback:", err.message);
+      console.warn("[Heloísa] Aviso ao consultar heloisa_usuarios_autorizados:", err.message);
+    }
+
+    // 2º) Consulta na tabela heloisa_agendas (onde diretores e participantes são cadastrados)
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, nome, email, telefone, papel, ativo
+         FROM public.heloisa_agendas
+         WHERE ativo = true`
+      );
+
+      for (const a of rows) {
+        if (matchTelefoneHeloisa(limpo, a.telefone)) {
+          return {
+            id: a.id,
+            chave: a.nome.toLowerCase().replace(/\s+/g, "_"),
+            nome: a.nome,
+            telefone: a.telefone,
+            papel: a.papel || "Participante",
+            email: a.email,
+            origem: "heloisa_agendas",
+            ativo: a.ativo !== false,
+          };
+        }
+      }
+    } catch (errAg) {
+      console.warn("[Heloísa] Aviso ao consultar heloisa_agendas na autorização:", errAg.message);
+    }
+
+    // 3º) Consulta na tabela gd_colaboradores (equipe GD)
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, nome, funcao, telefone, email, ativo
+         FROM public.gd_colaboradores
+         WHERE ativo = true`
+      );
+
+      for (const c of rows) {
+        if (matchTelefoneHeloisa(limpo, c.telefone)) {
+          return {
+            id: c.id,
+            chave: c.nome.toLowerCase().replace(/\s+/g, "_"),
+            nome: c.nome,
+            telefone: c.telefone,
+            papel: c.funcao || "Colaborador GD",
+            email: c.email || null,
+            origem: "gd_colaboradores",
+            ativo: c.ativo !== false,
+          };
+        }
+      }
+    } catch (errColab) {
+      console.warn("[Heloísa] Aviso ao consultar gd_colaboradores na autorização:", errColab.message);
     }
   }
 
-  // 2. Fallback de segurança em memória: Conrado e Caio
-  return identificarDiretor(phone);
+  // 4º) Fallback de segurança em memória: Conrado e Caio
+  const dirMem = identificarDiretor(phone);
+  if (dirMem) {
+    return {
+      ...dirMem,
+      origem: "memoria",
+    };
+  }
+
+  return null;
 }
 
 export async function isHeloisaAuthorizedSenderAsync(phone, pool = pgDatabasePool) {
@@ -806,29 +909,82 @@ export async function executarAgendarCompromisso(
 
     const listaEmails = agendasAtivas.map((a) => a.email).filter(Boolean);
 
-    // 2. Extrai participantes extras e identifica se a instrução foi exclusiva ("só comigo", "apenas...", etc)
+    // 2. Extrai participantes extras e identifica se a instrução foi exclusiva ("só comigo", "na minha agenda", etc)
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const extrasStr = String(participantes_extras || "").trim();
     const tituloStr = String(titulo || "").trim();
+    const textoCompleto = `${tituloStr} ${extrasStr}`;
     const emailsExtras = extrasStr.match(emailRegex) || [];
     const emailsNoTitulo = tituloStr.match(emailRegex) || [];
     const todosEmailsSolicitados = Array.from(new Set([...emailsExtras, ...emailsNoTitulo]));
 
-    const ehApenasComigo =
-      /s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal/i.test(extrasStr) ||
-      /s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal/i.test(tituloStr);
+    const REGEX_INDIVIDUAL =
+      /na\s+minha\s+agenda|minha\s+agenda|agenda\s+(do|da|de)\s+(\w+)|s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal|pessoal/i;
+
+    const ehIndividual = REGEX_INDIVIDUAL.test(extrasStr) || REGEX_INDIVIDUAL.test(tituloStr);
+
+    const pediuCaioExplicitamente = /com\s+(o\s+)?caio|caioalmeidamrk/i.test(textoCompleto);
+    const pediuConradoExplicitamente = /com\s+(o\s+)?conrado|conradofl/i.test(textoCompleto);
+    const pediuDiretoriaExplicitamente = /com\s+(a\s+)?diretoria|com\s+(os\s+)?diretores|mrkgeracaodigital/i.test(textoCompleto);
 
     const isExclusivo =
-      ehApenasComigo ||
+      ehIndividual ||
       /apenas|somente|só\s+o|exclusive/i.test(extrasStr) ||
       /apenas|somente|só\s+o|exclusive/i.test(tituloStr);
 
     let listaParticipantesFinal = [];
     let strictAttendees = false;
 
-    if (ehApenasComigo) {
-      const emailSolicitante = diretorSolicitante?.email || "conradofl@gmail.com";
-      listaParticipantesFinal = [emailSolicitante];
+    if (ehIndividual) {
+      let emailAlvo = null;
+      const nomeEspecificadoMatch = textoCompleto.match(/(?:agenda\s+(?:do|da|de)|minha\s+agenda)\s+([a-zA-ZÀ-ÿ]+)/i);
+      const nomeEspecificado = nomeEspecificadoMatch ? nomeEspecificadoMatch[1].trim().toLowerCase() : null;
+
+      if (nomeEspecificado && !["conrado", "caio"].includes(nomeEspecificado)) {
+        const achadoAgenda = agendasAtivas.find((a) =>
+          String(a.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(nomeEspecificado)
+        );
+        if (achadoAgenda?.email) {
+          emailAlvo = achadoAgenda.email;
+        }
+      }
+
+      if (!emailAlvo && diretorSolicitante) {
+        if (diretorSolicitante.email) {
+          emailAlvo = diretorSolicitante.email;
+        } else {
+          const achadoPorTelOuNome = agendasAtivas.find((a) => {
+            if (diretorSolicitante.telefone && a.telefone) {
+              return matchTelefoneHeloisa(a.telefone, diretorSolicitante.telefone);
+            }
+            if (diretorSolicitante.nome && a.nome) {
+              return String(a.nome).toLowerCase().includes(String(diretorSolicitante.nome).toLowerCase());
+            }
+            return false;
+          });
+          if (achadoPorTelOuNome?.email) {
+            emailAlvo = achadoPorTelOuNome.email;
+          }
+        }
+      }
+
+      if (!emailAlvo) {
+        emailAlvo = "conradofl@gmail.com";
+      }
+
+      listaParticipantesFinal = [emailAlvo];
+      if (pediuCaioExplicitamente && !listaParticipantesFinal.includes("caioalmeidamrk@gmail.com")) {
+        listaParticipantesFinal.push("caioalmeidamrk@gmail.com");
+      }
+      if (pediuConradoExplicitamente && !listaParticipantesFinal.includes("conradofl@gmail.com")) {
+        listaParticipantesFinal.push("conradofl@gmail.com");
+      }
+      if (pediuDiretoriaExplicitamente && !listaParticipantesFinal.includes("mrkgeracaodigital@gmail.com")) {
+        listaParticipantesFinal.push("mrkgeracaodigital@gmail.com");
+      }
+      for (const em of todosEmailsSolicitados) {
+        if (!listaParticipantesFinal.includes(em)) listaParticipantesFinal.push(em);
+      }
       strictAttendees = true;
     } else if (isExclusivo && todosEmailsSolicitados.length > 0) {
       listaParticipantesFinal = todosEmailsSolicitados;
@@ -910,15 +1066,30 @@ export async function executarAgendarCompromisso(
     // 4. Já nos avisar também (Dispara WhatsApp para os participantes cadastrados)
     const notificacoes = [];
     const telSolicitanteNorm = String(diretorSolicitante?.telefone || "").replace(/\D/g, "");
-    const destinatariosNotif = agendasAtivas.filter((a) => {
-      if (!a.notificar_whatsapp || !a.telefone) return false;
-      const telDestNorm = String(a.telefone).replace(/\D/g, "");
-      // O solicitante jamais deve receber a notificação de broadcast, pois ele recebe a resposta final da Heloísa
-      if (telSolicitanteNorm && telDestNorm === telSolicitanteNorm) return false;
-      // Notifica apenas se o email da pessoa estiver na lista final de participantes
-      return listaParticipantesFinal.some((emailPart) =>
-        String(emailPart || "").trim().toLowerCase() === String(a.email || "").trim().toLowerCase()
-      );
+
+    // SUPRESSÃO TOTAL DE BROADCAST:
+    // Se a reunião for individual/pessoal e os outros diretores não foram expressamente convidados,
+    // não envia broadcast para os outros diretores (o solicitante recebe a confirmação final diretamente).
+    let destinatariosNotif = [];
+    if (!ehIndividual || pediuCaioExplicitamente || pediuConradoExplicitamente || pediuDiretoriaExplicitamente) {
+      destinatariosNotif = agendasAtivas.filter((a) => {
+        if (!a.notificar_whatsapp || !a.telefone) return false;
+        const telDestNorm = String(a.telefone).replace(/\D/g, "");
+        // O solicitante jamais deve receber a notificação de broadcast, pois ele recebe a resposta final da Heloísa
+        if (telSolicitanteNorm && telDestNorm === telSolicitanteNorm) return false;
+        // Notifica apenas se o email da pessoa estiver na lista final de participantes
+        return listaParticipantesFinal.some((emailPart) =>
+          String(emailPart || "").trim().toLowerCase() === String(a.email || "").trim().toLowerCase()
+        );
+      });
+    }
+
+    const googleCalendarLink = gerarLinkGoogleCalendarTemplate({
+      titulo: tit,
+      dataIso,
+      duracaoMinutos: 60,
+      meetUrl,
+      descricao: `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`,
     });
 
     const participantesFormatados = listaParticipantesFinal.map((email) => {
@@ -931,6 +1102,7 @@ export async function executarAgendarCompromisso(
 📌 *Título:* ${tit}
 ⏰ *Data/Hora:* ${dataFormatada}
 🔗 *Google Meet:* ${meetUrl}
+📅 *Adicionar ao Google Agenda:* ${googleCalendarLink}
 👥 *Participantes Cadastrados:*
 ${participantesFormatados}
 
@@ -974,13 +1146,14 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
       data_iso: dataIso,
       data_formatada: dataFormatada,
       meet_url: meetUrl,
+      googleCalendarLink,
       attendees: listaParticipantesFinal,
       participantes: listaParticipantesFinal,
       googleCalendarSincronizado: sincronizado,
       calendarError: calResult?.calendarError || null,
       mensagem_notificacao_broadcast: msgNotif,
       notificacoes_whatsapp: notificacoes,
-      mensagem: `Compromisso "${tit}" agendado com sucesso para ${dataFormatada}. Google Meet: ${meetUrl}. Participantes: ${listaParticipantesFinal.join(", ")}. Convites registrados e aviso enviado no WhatsApp!${avisoSincronizacao}`,
+      mensagem: `Compromisso "${tit}" agendado com sucesso para ${dataFormatada}.\n🔗 *Google Meet:* ${meetUrl}\n👥 *Participantes:* ${listaParticipantesFinal.join(", ")}\n📅 *Adicionar ao Google Agenda:* ${googleCalendarLink}${avisoSincronizacao}`,
     };
   } catch (err) {
     console.error("[Heloísa] Erro ao agendar compromisso:", err);
