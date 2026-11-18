@@ -17,6 +17,8 @@ export type FindingKey = "waiting" | "neverApproached" | "chipQuota" | "weakCamp
 
 export interface PlanFinding {
   key: FindingKey;
+  // Chip ou campanha de que o achado fala (null para fila e nunca abordados). Com `key`, identifica o item gravado.
+  subject: string | null;
   // O fato, como aparece na lista da esquerda.
   title: string;
   detail: string;
@@ -49,6 +51,7 @@ export function buildPlanFindings(data: DashboardPayload): PlanFinding[] {
         : "";
     findings.push({
       key: "waiting",
+      subject: null,
       title: `${n(waiting.waiting)} ${plural(waiting.waiting, "pessoa espera", "pessoas esperam")} resposta`,
       detail: overText || "o lead falou por último e ninguém respondeu",
       action: `Responder ${plural(waiting.waiting, "a conversa que espera", `as ${n(waiting.waiting)} conversas que esperam`)} e manter a fila zerada`,
@@ -65,6 +68,7 @@ export function buildPlanFindings(data: DashboardPayload): PlanFinding[] {
     const best = bestAndWorstCampaign(data)?.best;
     findings.push({
       key: "neverApproached",
+      subject: null,
       title: `${n(never.reachable)} ${plural(never.reachable, "contato nunca abordado", "contatos nunca abordados")}`,
       detail: `${share}telefone válido`,
       action: "Campanha de primeiro contato para quem nunca recebeu mensagem",
@@ -85,6 +89,7 @@ export function buildPlanFindings(data: DashboardPayload): PlanFinding[] {
       const left = Math.max(0, hot.quotaLimit - hot.sentToday);
       findings.push({
         key: "chipQuota",
+        subject: hot.name,
         title: `Chip ${hot.name} a ${decimal(hot.quotaPercentage)}% da cota de hoje`,
         detail: left > 0 ? `${plural(left, "falta", "faltam")} ${n(left)} ${plural(left, "envio", "envios")}` : "a cota de hoje acabou",
         action: `Dividir os envios de hoje com outro chip ou segurar o próximo lote do chip ${hot.name}`,
@@ -102,6 +107,7 @@ export function buildPlanFindings(data: DashboardPayload): PlanFinding[] {
     const bestName = pair.best.campaign_name || "Campanha sem nome";
     findings.push({
       key: "weakCampaign",
+      subject: worstName,
       title: `"${worstName}" responde pouco`,
       detail: `${decimal(pair.worst.reply_rate)} de cada 100, contra ${decimal(pair.best.reply_rate)} da melhor`,
       action: `Reescrever a mensagem de "${worstName}" a partir da que mais responde ("${bestName}")`,
@@ -128,14 +134,18 @@ export interface PlanChoice {
   owner: string;
   due: string;
 }
-export type PlanChoices = Partial<Record<FindingKey, PlanChoice>>;
+// Chave: planItemId(key, subject).
+export type PlanChoices = Record<string, PlanChoice>;
 
-export function choiceFor(finding: PlanFinding, choices: PlanChoices): PlanChoice {
-  const saved = choices[finding.key];
+export const planItemId = (key: FindingKey, subject: string | null | undefined) => `${key}::${subject ?? ""}`;
+
+export function choiceFor(finding: Pick<PlanFinding, "key" | "subject" | "checkedByDefault">, choices: PlanChoices): PlanChoice {
+  const saved = choices[planItemId(finding.key, finding.subject)];
   return { checked: saved?.checked ?? finding.checkedByDefault, owner: saved?.owner ?? "", due: saved?.due ?? "" };
 }
 
 export interface PlanAction {
+  id: string;
   key: FindingKey;
   action: string;
   why: string;
@@ -144,13 +154,120 @@ export interface PlanAction {
   metric: string;
 }
 
-export function buildPlanActions(findings: PlanFinding[], choices: PlanChoices): PlanAction[] {
-  return findings
+// ── O plano gravado no servidor ───────────────────────────────────────────
+// O número do dia em que o item entrou no plano (baseline) e o de hoje (current) vêm do servidor, medidos pelo
+// mesmo payload do Dashboard. A tela não calcula nenhum dos dois.
+
+export interface PlanNumber {
+  value: number;
+  unit: string;
+}
+
+export interface StoredPlanItem {
+  key: FindingKey;
+  subject: string | null;
+  checked: boolean;
+  owner: string;
+  due: string;
+  action: string;
+  why: string;
+  metric: string;
+  baseline?: PlanNumber | null;
+  baselineAt?: string | null;
+}
+
+export interface FollowUpItem extends StoredPlanItem {
+  current: PlanNumber | null;
+}
+
+export interface DashboardPlanResponse {
+  weekStart: string;
+  canEdit: boolean;
+  canExport: boolean;
+  current: { weekStart: string; items: StoredPlanItem[]; updatedAt: string | null } | null;
+  previous: { weekStart: string; items: FollowUpItem[] } | null;
+}
+
+export type PlanItemInput = Omit<StoredPlanItem, "baseline" | "baselineAt">;
+export type PlanExportList = "waiting" | "neverApproached";
+export const PLAN_EXPORT_KEYS: readonly FindingKey[] = ["waiting", "neverApproached"];
+
+export function choicesFromItems(items: StoredPlanItem[] | null | undefined): PlanChoices {
+  const out: PlanChoices = {};
+  for (const item of items ?? []) out[planItemId(item.key, item.subject)] = { checked: !!item.checked, owner: item.owner ?? "", due: item.due ?? "" };
+  return out;
+}
+
+/** Itens gravados cujo achado não aparece mais neste período (a fila zerou, a campanha saiu): seguem no plano. */
+export function storedOnlyItems(findings: PlanFinding[], stored: StoredPlanItem[] | null | undefined): StoredPlanItem[] {
+  const shown = new Set(findings.map((f) => planItemId(f.key, f.subject)));
+  return (stored ?? []).filter((item) => !shown.has(planItemId(item.key, item.subject)));
+}
+
+export function buildPlanActions(findings: PlanFinding[], choices: PlanChoices, storedOnly: StoredPlanItem[] = []): PlanAction[] {
+  const fromFindings = findings
     .filter((finding) => choiceFor(finding, choices).checked)
     .map((finding) => {
       const choice = choiceFor(finding, choices);
-      return { key: finding.key, action: finding.action, why: finding.why, owner: choice.owner.trim(), due: choice.due.trim(), metric: finding.metric };
+      const id = planItemId(finding.key, finding.subject);
+      return { id, key: finding.key, action: finding.action, why: finding.why, owner: choice.owner.trim(), due: choice.due.trim(), metric: finding.metric };
     });
+  const fromStored = storedOnly
+    .map((item) => ({ item, choice: choiceFor({ ...item, checkedByDefault: item.checked }, choices) }))
+    .filter(({ choice }) => choice.checked)
+    .map(({ item, choice }) => ({
+      id: planItemId(item.key, item.subject),
+      key: item.key,
+      action: item.action,
+      why: item.why,
+      owner: choice.owner.trim(),
+      due: choice.due.trim(),
+      metric: item.metric,
+    }));
+  return [...fromFindings, ...fromStored];
+}
+
+/** O que vai para o servidor: cada achado com a escolha da pessoa, mais os itens gravados que saíram do período. */
+export function buildItemsToSave(findings: PlanFinding[], choices: PlanChoices, storedOnly: StoredPlanItem[] = []): PlanItemInput[] {
+  const fromFindings = findings.map((finding) => {
+    const choice = choiceFor(finding, choices);
+    return {
+      key: finding.key,
+      subject: finding.subject,
+      checked: choice.checked,
+      owner: choice.owner.trim(),
+      due: choice.due.trim(),
+      action: finding.action,
+      why: finding.why,
+      metric: finding.metric,
+    };
+  });
+  const fromStored = storedOnly.map((item) => {
+    const choice = choiceFor({ ...item, checkedByDefault: item.checked }, choices);
+    return { key: item.key, subject: item.subject, checked: choice.checked, owner: choice.owner.trim(), due: choice.due.trim(), action: item.action, why: item.why, metric: item.metric };
+  });
+  return [...fromFindings, ...fromStored];
+}
+
+const formatPlanNumber = (number: PlanNumber) => {
+  const value = Number.isInteger(number.value) ? n(number.value) : decimal(number.value);
+  return number.unit.startsWith("%") ? `${value}${number.unit}` : `${value} ${number.unit}`;
+};
+
+/** Cobrança: "foi de A para B". Sem número de um dos lados, diz qual falta; nunca inventa. */
+export function describeFollowUp(item: Pick<FollowUpItem, "baseline" | "current">): string {
+  const before = item.baseline ? formatPlanNumber(item.baseline) : null;
+  const now = item.current ? formatPlanNumber(item.current) : null;
+  if (before && now) return `O número foi de ${before} para ${now}.`;
+  if (before) return `No dia do plano: ${before}. Hoje o Dashboard não tem esse número.`;
+  if (now) return `Hoje: ${now}. O número do dia do plano não foi registrado.`;
+  return "Sem número para comparar.";
+}
+
+/** "2026-11-09" → "09/11". */
+export function weekLabelFromIso(weekStart: string): string {
+  const [, month, day] = weekStart.split("-");
+  return day && month ? `${day}/${month}` : weekStart;
 }
 
 /** Segunda-feira da semana de `now`, como "10/11". */
@@ -168,28 +285,4 @@ export function buildDirective(actions: PlanAction[], { companyName, now = new D
       `${index + 1}. ${a.action}\n   Por quê: ${a.why}\n   Dono: ${a.owner || "a definir"} · Prazo: ${a.due || "a definir"}\n   Mede-se por: ${a.metric}`
   );
   return `${head}\n\n${lines.join("\n\n")}`;
-}
-
-// ── Guardar a escolha no navegador, por empresa ───────────────────────────
-// Dono e prazo digitados não podem sumir ao trocar de aba. Fica no navegador de quem montou o plano; o plano
-// compartilhado entre pessoas depende de gravação no servidor, que esta versão não tem.
-
-const planKey = (clientId: string) => `vexo:dashboard-plano:${clientId || "sem-empresa"}`;
-
-export function readPlanChoices(clientId: string): PlanChoices {
-  try {
-    const raw = window.localStorage.getItem(planKey(clientId));
-    const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as PlanChoices) : {};
-  } catch {
-    return {};
-  }
-}
-
-export function writePlanChoices(clientId: string, choices: PlanChoices) {
-  try {
-    window.localStorage.setItem(planKey(clientId), JSON.stringify(choices));
-  } catch {
-    // sem armazenamento: vale só nesta visita
-  }
 }

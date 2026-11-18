@@ -141,7 +141,7 @@ export default function Dashboard({
             {tab === "attendance" && <AttendanceTab data={data} periodLabel={periodLabel} />}
             {tab === "base" && <BaseTab data={data} periodLabel={periodLabel} />}
             {tab === "chips" && <ChipsTab data={data} periodLabel={periodLabel} />}
-            {tab === "plan" && <PlanTab data={data} clientId={effectiveClientId} companyName={resolvedClientName} />}
+            {tab === "plan" && <PlanTab data={data} clientId={effectiveClientId} companyName={resolvedClientName} period={period} range={range} />}
           </>
         ) : data ? (
           // Payload gravado antes da Visão geral existir: não há o que mostrar até o próximo recálculo.

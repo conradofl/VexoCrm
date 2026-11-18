@@ -1,13 +1,37 @@
 // frontend/src/test/dashboardPlan.test.tsx
 //
 // Plano de ação do Dashboard. O sistema traz o fato e o número; dono e prazo quem decide é a pessoa.
-// Achado sem fonte não existe, meta não é inventada, e o que a pessoa digita não some.
+// Achado sem fonte não existe, meta não é inventada. O plano mora no servidor (um por empresa por semana): só a
+// equipe Vexo edita, o cliente vê; a planilha com nome e telefone só aparece para quem acessa a tela Conversas; e
+// o plano da semana anterior volta como cobrança, com o número do dia ao lado do de hoje.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { PlanTab } from "@/pages/Dashboard/PlanTab";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { PlanBoard, PlanTab, type PlanSaveState, type PlanServerState } from "@/pages/Dashboard/PlanTab";
 import type { DashboardOverview, DashboardPayload } from "@/hooks/useDashboard";
-import { buildDirective, buildPlanActions, buildPlanFindings, weekLabel } from "@/lib/dashboard/plan";
+import {
+  buildDirective,
+  buildItemsToSave,
+  buildPlanActions,
+  buildPlanFindings,
+  describeFollowUp,
+  storedOnlyItems,
+  weekLabel,
+  type DashboardPlanResponse,
+  type StoredPlanItem,
+} from "@/lib/dashboard/plan";
+
+const apiCalls: Array<{ path: string; init?: RequestInit }> = [];
+let apiResponder: (path: string, init?: RequestInit) => Response = () => new Response("{}", { status: 200 });
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ isAuthenticated: true, getIdToken: async () => "token" }) }));
+vi.mock("@/lib/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api")>()),
+  fetchApi: async (path: string, init?: RequestInit) => {
+    apiCalls.push({ path, init });
+    return apiResponder(path, init);
+  },
+}));
 
 const OVERVIEW: DashboardOverview = {
   waiting: { status: "ready", waiting: 12, waitingOverThreshold: 7, thresholdHours: 3 },
@@ -49,7 +73,7 @@ function payload(overview: Partial<DashboardOverview> = {}): DashboardPayload {
 }
 
 beforeEach(() => {
-  window.localStorage.clear();
+  apiCalls.length = 0;
 });
 
 describe("Plano de ação — o que o período mostrou", () => {
@@ -102,8 +126,22 @@ describe("Plano de ação — o que o período mostrou", () => {
   });
 });
 
+function planResponse(overrides: Partial<DashboardPlanResponse> = {}): DashboardPlanResponse {
+  return { weekStart: "2026-11-16", canEdit: true, canExport: true, current: null, previous: null, ...overrides };
+}
+const ready = (plan: DashboardPlanResponse = planResponse()): PlanServerState => ({ status: "ready", plan });
+
 describe("Plano de ação — a tela", () => {
-  const show = (data = payload(), clientId = "t1") => render(<PlanTab data={data} clientId={clientId} companyName="Empresa" />);
+  const onChange = vi.fn();
+  const onRetry = vi.fn();
+  const onDownload = vi.fn().mockResolvedValue(undefined);
+  beforeEach(() => {
+    onChange.mockClear();
+    onRetry.mockClear();
+    onDownload.mockClear();
+  });
+  const show = ({ server = ready(), saveState = { status: "idle" } as PlanSaveState, data = payload(), clientId = "t1" } = {}) =>
+    render(<PlanBoard data={data} clientId={clientId} companyName="Empresa" server={server} saveState={saveState} onChange={onChange} onRetry={onRetry} onDownload={onDownload} />);
 
   it("abre com o que pede ação agora marcado; dono e prazo nascem 'definir', nunca um nome inventado", () => {
     show();
@@ -119,34 +157,140 @@ describe("Plano de ação — a tela", () => {
     }
   });
 
-  it("marcar um achado põe a ação no plano; desmarcar tira", () => {
+  it("marcar um achado põe a ação no plano e manda o plano inteiro para gravar", () => {
     show();
     const findings = screen.getByTestId("plan-findings");
     fireEvent.click(within(findings).getByRole("checkbox", { name: /Chip Gabriel/ }));
     expect(screen.getByText("3 ações para esta semana")).toBeInTheDocument();
     expect(within(screen.getByTestId("plan-actions")).getByText(/segurar o próximo lote do chip Gabriel/)).toBeInTheDocument();
+    const sent = onChange.mock.calls.at(-1)![0];
+    expect(sent.map((i: StoredPlanItem) => [i.key, i.subject, i.checked])).toEqual([
+      ["waiting", null, true],
+      ["neverApproached", null, true],
+      ["chipQuota", "Gabriel", true],
+      ["weakCampaign", "Reativação de parados", false],
+    ]);
+    // a tela não manda número: quem mede é o servidor
+    expect(JSON.stringify(sent)).not.toMatch(/baseline/);
 
     fireEvent.click(within(findings).getByRole("checkbox", { name: /pessoas esperam resposta/ }));
     expect(screen.getByText("2 ações para esta semana")).toBeInTheDocument();
     expect(within(screen.getByTestId("plan-actions")).queryByText(/manter a fila zerada/)).not.toBeInTheDocument();
   });
 
-  it("[TESTE OBRIGATÓRIO] dono, prazo e o que foi marcado não somem ao sair da tela, e valem só para aquela empresa", () => {
-    const first = show();
-    fireEvent.change(screen.getAllByLabelText("Dono")[0], { target: { value: "Gabriel" } });
-    fireEvent.change(screen.getAllByLabelText("Prazo")[0], { target: { value: "hoje" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /nunca abordados/ }));
-    first.unmount();
-
-    const second = show();
-    expect((screen.getAllByLabelText("Dono")[0] as HTMLInputElement).value).toBe("Gabriel");
-    expect((screen.getAllByLabelText("Prazo")[0] as HTMLInputElement).value).toBe("hoje");
+  it("[TESTE OBRIGATÓRIO] abre com o plano salvo no servidor (o que foi marcado, dono e prazo)", () => {
+    const current = {
+      weekStart: "2026-11-16",
+      updatedAt: "2026-11-18T15:00:00.000Z",
+      items: [
+        { key: "waiting", subject: null, checked: false, owner: "", due: "", action: "a", why: "", metric: "" },
+        { key: "neverApproached", subject: null, checked: true, owner: "Gabriel", due: "hoje", action: "b", why: "", metric: "" },
+      ] as StoredPlanItem[],
+    };
+    show({ server: ready(planResponse({ current })) });
     expect(screen.getByText("1 ação para esta semana")).toBeInTheDocument();
-    second.unmount();
+    expect((screen.getByLabelText("Dono") as HTMLInputElement).value).toBe("Gabriel");
+    expect((screen.getByLabelText("Prazo") as HTMLInputElement).value).toBe("hoje");
+  });
 
-    show(payload(), "outra-empresa");
-    expect((screen.getAllByLabelText("Dono")[0] as HTMLInputElement).value).toBe("");
-    expect(screen.getByText("2 ações para esta semana")).toBeInTheDocument();
+  it("[TESTE OBRIGATÓRIO] cliente vê o plano e não edita: tudo travado e a tela diz por quê", () => {
+    const current = {
+      weekStart: "2026-11-16",
+      updatedAt: null,
+      items: [{ key: "waiting", subject: null, checked: true, owner: "Caio", due: "", action: "a", why: "", metric: "" }] as StoredPlanItem[],
+    };
+    show({ server: ready(planResponse({ canEdit: false, canExport: false, current })) });
+    for (const box of screen.getAllByRole("checkbox")) expect(box).toBeDisabled();
+    for (const input of screen.getAllByRole("textbox")) expect(input).toBeDisabled();
+    // campo vazio de quem só vê não pede ação: "a definir", sem o destaque de pendência
+    const due = screen.getAllByLabelText("Prazo")[0] as HTMLInputElement;
+    expect(due).toHaveAttribute("placeholder", "a definir");
+    expect(due.className).not.toMatch(/border-dashed/);
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("Só a equipe Vexo edita este plano.");
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Marque o que vira ação/)).not.toBeInTheDocument();
+  });
+
+  it("[TESTE OBRIGATÓRIO] planilha só aparece para quem acessa a tela Conversas, e só para fila e nunca abordados", async () => {
+    show({ server: ready(planResponse({ canExport: false })) });
+    expect(screen.queryByText(/Baixar planilha/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("tab-plan")).not.toHaveTextContent(/planilha/i);
+  });
+
+  it("planilha: um botão para a fila e um para nunca abordados; falha diz o motivo", async () => {
+    show();
+    expect(screen.getAllByRole("button", { name: "Baixar planilha (nome e telefone)" })).toHaveLength(2);
+    fireEvent.click(screen.getByTestId("plan-sheet-neverApproached"));
+    expect(onDownload).toHaveBeenCalledWith("neverApproached");
+    // enquanto monta, os botões ficam travados (sem pedido em dobro); depois voltam
+    expect(screen.getByTestId("plan-sheet-waiting")).toBeDisabled();
+    await vi.waitFor(() => expect(screen.getByTestId("plan-sheet-waiting")).not.toBeDisabled());
+    onDownload.mockRejectedValueOnce(new Error("A planilha com nome e telefone é só para quem acessa a tela Conversas."));
+    fireEvent.click(screen.getByTestId("plan-sheet-waiting"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("só para quem acessa a tela Conversas");
+  });
+
+  it("[TESTE OBRIGATÓRIO] cobrança: a semana anterior volta com 'você combinou' e o número de antes e de hoje", () => {
+    const previous = {
+      weekStart: "2026-11-09",
+      items: [
+        {
+          key: "waiting", subject: null, checked: true, owner: "Caio", due: "sexta", action: "Responder as 36 conversas que esperam", why: "", metric: "",
+          baseline: { value: 36, unit: "pessoas esperando resposta" }, current: { value: 4, unit: "pessoas esperando resposta" },
+        },
+        {
+          key: "chipQuota", subject: "Gabriel", checked: true, owner: "", due: "", action: "Segurar o chip Gabriel", why: "", metric: "",
+          baseline: { value: 92.5, unit: "% da cota de hoje" }, current: null,
+        },
+      ],
+    } as DashboardPlanResponse["previous"];
+    show({ server: ready(planResponse({ previous })) });
+    const section = screen.getByTestId("plan-followup");
+    expect(section).toHaveTextContent("Semana de 09/11: o que foi combinado");
+    const [first, second] = within(section).getAllByTestId("plan-followup-item");
+    expect(first).toHaveTextContent("Você combinou: Responder as 36 conversas que esperam");
+    expect(first).toHaveTextContent("Dono: Caio · Prazo: sexta");
+    expect(first).toHaveTextContent("O número foi de 36 pessoas esperando resposta para 4 pessoas esperando resposta.");
+    expect(second).toHaveTextContent("Dono: a definir · Prazo: a definir");
+    expect(second).toHaveTextContent("No dia do plano: 92,5% da cota de hoje. Hoje o Dashboard não tem esse número.");
+  });
+
+  it("sem plano anterior, não há cobrança", () => {
+    show();
+    expect(screen.queryByTestId("plan-followup")).not.toBeInTheDocument();
+  });
+
+  it("enquanto o plano salvo carrega, ou se não carregou, nada é editável (não grava por cima do que existe)", () => {
+    const { unmount } = show({ server: { status: "loading" } });
+    for (const box of screen.getAllByRole("checkbox")) expect(box).toBeDisabled();
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("Carregando o plano salvo");
+    unmount();
+    show({ server: { status: "error", message: "x" } });
+    for (const box of screen.getAllByRole("checkbox")) expect(box).toBeDisabled();
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("Nada do que aparece aqui foi gravado.");
+  });
+
+  it("servidor sem onde guardar: a tela diz que vale só nesta visita e não tenta gravar", () => {
+    show({ server: { status: "unavailable" } });
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("O plano ainda não pode ser salvo no servidor.");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Chip Gabriel/ }));
+    expect(screen.getByText("3 ações para esta semana")).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("gravação: salvando, salvo, e falha com 'tentar de novo' sem perder o que foi digitado", () => {
+    const { rerender } = show({ saveState: { status: "saving" } });
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("Salvando…");
+    const board = (saveState: PlanSaveState) => (
+      <PlanBoard data={payload()} clientId="t1" companyName="Empresa" server={ready()} saveState={saveState} onChange={onChange} onRetry={onRetry} onDownload={onDownload} />
+    );
+    rerender(board({ status: "saved", at: "2026-11-18T15:04:00.000Z" }));
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent(/Salvo às \d{2}:\d{2}\. Quem abrir o Dashboard desta empresa vê este plano\./);
+    rerender(board({ status: "failed", message: "Não foi possível salvar o plano." }));
+    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("O que você digitou continua na tela.");
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it("copiar como diretriz leva o plano em texto, com 'a definir' onde falta dono ou prazo", async () => {
@@ -173,24 +317,85 @@ describe("Plano de ação — a tela", () => {
   });
 
   it("período sem achado: nada a marcar, nada a copiar, e a tela diz isso", () => {
-    show(payload({ waiting: { status: "pending_source" }, base: null, chips: null, campaigns: null }));
+    show({ data: payload({ waiting: { status: "pending_source" }, base: null, chips: null, campaigns: null }) });
     expect(screen.getByText("Nenhum número deste período pede ação.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copiar como diretriz" })).toBeDisabled();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
-  it("[TESTE OBRIGATÓRIO] a tela diz que o plano fica salvo só neste navegador", () => {
-    show();
-    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("O plano fica salvo só neste navegador.");
-    expect(screen.getByTestId("plan-storage-note")).toHaveTextContent("não vê o que foi marcado aqui");
+  it("[TESTE OBRIGATÓRIO] combinado que saiu do período continua no plano (a fila zerou, a campanha saiu)", () => {
+    const current = {
+      weekStart: "2026-11-16",
+      updatedAt: null,
+      items: [{ key: "weakCampaign", subject: "Campanha encerrada", checked: true, owner: "Ana", due: "", action: "Reescrever a campanha encerrada", why: "x", metric: "y" }] as StoredPlanItem[],
+    };
+    show({ server: ready(planResponse({ current })) });
+    expect(within(screen.getByTestId("plan-actions")).getByText("Reescrever a campanha encerrada")).toBeInTheDocument();
+    fireEvent.change(screen.getAllByLabelText("Dono").at(-1)!, { target: { value: "Bia" } });
+    const sent = onChange.mock.calls.at(-1)![0];
+    expect(sent.find((i: StoredPlanItem) => i.subject === "Campanha encerrada")).toMatchObject({ owner: "Bia", checked: true });
   });
 
-  it("o que ainda não existe não é prometido: sem Slack, sem planilha, sem 'se cobra sozinho'", () => {
+  it("o que não existe não é prometido: sem Slack, sem 'se cobra sozinho', sem meta", () => {
     show();
     const tab = screen.getByTestId("tab-plan");
     expect(tab).not.toHaveTextContent(/Slack/i);
-    expect(tab).not.toHaveTextContent(/planilha/i);
-    expect(tab).not.toHaveTextContent(/semana seguinte/i);
+    expect(tab).not.toHaveTextContent(/sozinho/i);
+    expect(tab).not.toHaveTextContent(/sem proposta/i);
+  });
+});
+
+describe("Plano de ação — gravação no servidor (contêiner)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function withClient(ui: React.ReactElement) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  }
+
+  it("[TESTE OBRIGATÓRIO] espera a pessoa parar de digitar e grava UMA vez, na empresa em que foi digitado", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    apiResponder = (path, init) =>
+      init?.method === "PUT"
+        ? new Response(JSON.stringify({ success: true, plan: { weekStart: "2026-11-16", items: [], updatedAt: "2026-11-18T15:00:00.000Z" } }), { status: 200 })
+        : new Response(JSON.stringify({ success: true, ...planResponse() }), { status: 200 });
+    const view = withClient(<PlanTab data={payload()} clientId="empresa-a" companyName="A" />);
+    await vi.waitFor(() => expect(screen.getAllByRole("checkbox")[0]).not.toBeDisabled());
+
+    const owner = screen.getAllByLabelText("Dono")[0];
+    for (const value of ["G", "Ga", "Gab"]) fireEvent.change(owner, { target: { value } });
+    expect(apiCalls.filter((c) => c.init?.method === "PUT")).toHaveLength(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+    const puts = apiCalls.filter((c) => c.init?.method === "PUT");
+    expect(puts).toHaveLength(1);
+    const body = JSON.parse(String(puts[0].init!.body));
+    expect(body.clientId).toBe("empresa-a");
+    expect(body.items[0]).toMatchObject({ key: "waiting", owner: "Gab" });
+    expect(await screen.findByText(/Salvo às/)).toBeInTheDocument();
+
+    // Troca de empresa com tecla pendente: grava na empresa A, nunca na B.
+    fireEvent.change(owner, { target: { value: "Gabriel" } });
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <PlanTab data={payload()} clientId="empresa-b" companyName="B" />
+      </QueryClientProvider>
+    );
+    await vi.waitFor(() => expect(apiCalls.filter((c) => c.init?.method === "PUT")).toHaveLength(2));
+    const second = JSON.parse(String(apiCalls.filter((c) => c.init?.method === "PUT")[1].init!.body));
+    expect(second.clientId).toBe("empresa-a");
+    expect(second.items[0].owner).toBe("Gabriel");
+  });
+
+  it("servidor sem a tabela (503 PLAN_STORAGE_UNAVAILABLE): a aba diz isso e não grava", async () => {
+    apiResponder = () => new Response(JSON.stringify({ error: { code: "PLAN_STORAGE_UNAVAILABLE", message: "O plano ainda não pode ser salvo no servidor." } }), { status: 503, headers: { "content-type": "application/json" } });
+    withClient(<PlanTab data={payload()} clientId="empresa-a" companyName="A" />);
+    expect(await screen.findByText(/O plano ainda não pode ser salvo no servidor/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Chip Gabriel/ }));
+    expect(apiCalls.filter((c) => c.init?.method === "PUT")).toHaveLength(0);
   });
 });
 
@@ -201,5 +406,23 @@ describe("Plano de ação — texto e semana", () => {
     expect(weekLabel(new Date(2026, 10, 15))).toBe("09/11"); // domingo ainda é a semana da segunda anterior
     expect(buildDirective([], { now: new Date(2026, 10, 12) })).toBe("Plano de ação · semana de 09/11\n\nNenhuma ação marcada.");
     expect(buildPlanActions(buildPlanFindings(payload()), {}).map((a) => a.key)).toEqual(["waiting", "neverApproached"]);
+  });
+
+  it("cobrança por extenso: sem número de um lado, diz qual falta; nunca inventa", () => {
+    const people = { value: 36, unit: "pessoas esperando resposta" };
+    expect(describeFollowUp({ baseline: people, current: { value: 0, unit: people.unit } })).toBe("O número foi de 36 pessoas esperando resposta para 0 pessoas esperando resposta.");
+    expect(describeFollowUp({ baseline: { value: 80033, unit: "contatos nunca abordados" }, current: { value: 79500, unit: "contatos nunca abordados" } })).toBe(
+      "O número foi de 80.033 contatos nunca abordados para 79.500 contatos nunca abordados."
+    );
+    expect(describeFollowUp({ baseline: null, current: people })).toBe("Hoje: 36 pessoas esperando resposta. O número do dia do plano não foi registrado.");
+    expect(describeFollowUp({ baseline: null, current: null })).toBe("Sem número para comparar.");
+  });
+
+  it("itens gravados fora do período seguem no que vai para o servidor", () => {
+    const findings = buildPlanFindings(payload());
+    const stored = [{ key: "weakCampaign", subject: "Velha", checked: true, owner: "", due: "", action: "a", why: "", metric: "" }] as StoredPlanItem[];
+    const only = storedOnlyItems(findings, stored);
+    expect(only).toHaveLength(1);
+    expect(buildItemsToSave(findings, {}, only).map((i) => i.subject)).toEqual([null, null, "Gabriel", "Reativação de parados", "Velha"]);
   });
 });
