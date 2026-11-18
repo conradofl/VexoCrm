@@ -130,10 +130,45 @@ interface GoclawStatusResponse {
 const LANES_METADATA = [
   {
     key: "heloisa",
-    nome: "Heloísa (Secretária Executiva WhatsApp)",
-    descricao: "Copiloto direto de Conrado e Caio no WhatsApp. Processa áudios, executa cadastros, cobranças e agendamentos.",
-    tag: "Exclusivo Sócios (WhatsApp)",
+    nome: "Heloísa (Átrio & Interface Executiva)",
+    descricao: "Copiloto direto de Conrado e Caio no WhatsApp. Processa áudios e texto, comanda e orquestra todas as personas da família.",
+    tag: "Átrio / WhatsApp",
     cor: "purple",
+  },
+  {
+    key: "gomes",
+    nome: "Gomes (Cartório & Contratos)",
+    descricao: "Emissão autônoma de propostas e minutas contratuais da GD. Publica no grupo PASTA do WhatsApp e notifica Caio no privado (Zero Slack).",
+    tag: "Cartório & Contratos",
+    cor: "emerald",
+  },
+  {
+    key: "tropeco",
+    nome: "Tropeço (Operações & Onboarding)",
+    descricao: "Estruturação das 4 pastas no Google Drive, criação de grupos WhatsApp internos e de clientes via Evolution API e boas-vindas operacionais.",
+    tag: "Operações & Drive",
+    cor: "blue",
+  },
+  {
+    key: "maozinha",
+    nome: "Mãozinha (Agendador & Reuniões)",
+    descricao: "Sincronização com Google Calendar oficial, links Google Meet seguros, supressão de mensagens duplicadas e respeito a reuniões exclusivas.",
+    tag: "Agendador & Meet",
+    cor: "amber",
+  },
+  {
+    key: "morticia",
+    nome: "Mortícia (Cobradora D-2, D-1, D-0)",
+    descricao: "Régua de cobrança condicional inteligente no WhatsApp para prazos de demandas do Trello, ativada em D-2, D-1 e D-0.",
+    tag: "Cobrança Condicional",
+    cor: "rose",
+  },
+  {
+    key: "wandinha",
+    nome: "Wandinha (Síndica & Trello Auditor)",
+    descricao: "Vigilância em tempo real dos quadros na workspace 'Mídias Sociais'. Inspeciona colunas e status de aprovação/conclusão para desarmar cobranças da Mortícia.",
+    tag: "Síndica & Auditoria",
+    cor: "slate",
   },
   {
     key: "maestro",
@@ -144,7 +179,7 @@ const LANES_METADATA = [
   },
   {
     key: "demandas_cron",
-    nome: "Vigia GD (Auditor Trello WhatsApp)",
+    nome: "Vigia GD (Auditor Cron WhatsApp)",
     descricao: "Robô de monitoramento de prazos que roda às 09h00 e 18h00 disparando alertas no WhatsApp.",
     tag: "Automação Cron",
     cor: "amber",

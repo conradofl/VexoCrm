@@ -828,6 +828,67 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
   };
 }
 
+/**
+ * Disjuntor de 4 Dias do Caio (Geração Digital):
+ * Verifica após 4 dias se o contrato foi assinado e/ou pagamento foi efetuado.
+ * Se ainda pendente, alerta Caio no WhatsApp com opção de pausa manual.
+ */
+export async function processGdDisjuntorContratoCheckJob(job, customPool = null) {
+  const { clienteId, clienteNome, valor } = job.data || {};
+  const pool = customPool || getFollowupWorkerDbPool() || pgDatabasePool;
+
+  let cliente = null;
+  if (pool && typeof pool.query === "function" && clienteId) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, nome, status_pagamento, contrato_assinado, valor FROM public.gd_clientes WHERE id = $1 LIMIT 1`,
+        [clienteId]
+      );
+      if (rows && rows.length > 0) cliente = rows[0];
+    } catch (errDb) {
+      console.warn("[followup/worker] [Disjuntor] Erro ao buscar gd_clientes:", errDb.message);
+    }
+  }
+
+  const nomeFinal = cliente?.nome || clienteNome || "Cliente GD";
+  const valorFinal = valor || cliente?.valor;
+  const valorFormatado = valorFinal
+    ? `R$ ${Number(valorFinal).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
+    : "A combinar";
+
+  // Se já estiver pago ou contrato assinado, encerra sem disparar alerta
+  if (cliente && (cliente.status_pagamento === "pago" || cliente.contrato_assinado === true)) {
+    return {
+      regularizado: true,
+      alertaDisjuntorEnviado: false,
+      motivo: "Cliente com pagamento quitado ou contrato assinado.",
+      clienteId,
+    };
+  }
+
+  // Monta mensagem de alerta do disjuntor para Caio
+  const caioTelefone = process.env.CAIO_PHONE || "5534997719779";
+  const mensagemCaio = `⚡ *Disjuntor de 4 Dias - Geração Digital*\n\nOlá Caio! O cliente *${nomeFinal}* completou o marco de 4 dias do onboarding, porém o contrato ainda não foi assinado e/ou o pagamento inicial consta como pendente.\n\n💰 *Valor:* ${valorFormatado}\n\n⚠️ Deseja pausar o projeto manualmente ou já alinhou com o financeiro do cliente?`;
+
+  try {
+    await enviarMensagemWhatsAppComFallback({
+      numero: caioTelefone,
+      texto: mensagemCaio,
+      tenantId: "geracao-digital",
+      pool,
+    });
+  } catch (errZap) {
+    console.warn("[followup/worker] [Disjuntor] Falha ao enviar WhatsApp para Caio:", errZap.message);
+  }
+
+  return {
+    regularizado: false,
+    alertaDisjuntorEnviado: true,
+    mensagemCaio,
+    clienteId,
+  };
+}
+
 export function startFollowupWorker() {
   const worker = new Worker(
     QUEUE_NAME,
@@ -838,6 +899,9 @@ export function startFollowupWorker() {
         }
         if (job.name === "trello-card-followup-check") {
           return await processTrelloCardFollowupCheckJob(job);
+        }
+        if (job.name === "gd-disjuntor-contrato-check") {
+          return await processGdDisjuntorContratoCheckJob(job);
         }
         if (job.name === "process-event-journey") {
           // Jornadas por evento foram removidas (nunca tiveram emissor ligado).

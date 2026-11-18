@@ -42,10 +42,15 @@ export function resolveGoclawDir() {
 }
 
 const PROMPT_FILE_MAP = {
+  heloisa: "heloisa_executiva.md",
+  gomes: "gomes_cartorio.md",
+  tropeco: "tropeco_operacoes.md",
+  maozinha: "maozinha_agendador.md",
+  morticia: "morticia_cobradora.md",
+  wandinha: "wandinha_sindica.md",
   maestro: "maestro_coo.md",
   onboarding: "gestor_digital_onboarding.md",
   demandas_cron: "gestor_demandas_auditor.md",
-  heloisa: "heloisa_executiva.md",
 };
 
 export function registerGoclawRoutes(app, {
@@ -150,7 +155,7 @@ export function registerGoclawRoutes(app, {
 
     const fileName = PROMPT_FILE_MAP[lane];
     if (!fileName) {
-      return res.status(400).json({ error: `Lane "${lane}" inválida. Opções: maestro, onboarding, demandas_cron, heloisa.` });
+      return res.status(400).json({ error: `Lane "${lane}" inválida. Opções: ${Object.keys(PROMPT_FILE_MAP).join(", ")}.` });
     }
 
     if (typeof content !== "string" || !content.trim()) {

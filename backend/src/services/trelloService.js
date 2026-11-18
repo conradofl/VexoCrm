@@ -224,14 +224,224 @@ export function formatarPrazoAmigavel(dateIso) {
 }
 
 /**
- * Cria um card no Trello da Geração Digital com membros e data de entrega
+ * Roteamento Multiquadro do Trello:
+ * Localiza o quadro por URL/shortLink, por nome da empresa na workspace socialmediagdigital ou fallback
+ */
+export async function resolveTrelloBoard({
+  clientName,
+  boardIdOrUrl,
+  apiKey = process.env.TRELLO_API_KEY || (process.env.NODE_ENV === "test" ? "test_trello_key" : undefined),
+  token = process.env.TRELLO_TOKEN || (process.env.NODE_ENV === "test" ? "test_trello_token" : undefined),
+  workspaceId = "socialmediagdigital",
+  allowMock = true,
+} = {}) {
+  // 1. Se for passado URL completa ou shortLink (ex: https://trello.com/b/oLurW041/geracao-digital ou oLurW041)
+  if (boardIdOrUrl) {
+    const s = String(boardIdOrUrl).trim();
+    const urlMatch = s.match(/(?:boards|b)\/([a-zA-Z0-9]+)/);
+    if (urlMatch) {
+      return urlMatch[1];
+    }
+    // Se for um shortLink ou ID alfanumérico direto
+    if (/^[a-zA-Z0-9_-]+$/.test(s)) {
+      return s;
+    }
+  }
+
+  // 2. Se for informado o nome do cliente, busca quadros da workspace socialmediagdigital
+  if (clientName && apiKey && token) {
+    const cNorm = String(clientName)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+    try {
+      const url = `https://api.trello.com/1/organizations/${workspaceId}/boards?key=${apiKey}&token=${token}&fields=name,id,shortLink,url`;
+      const res = await fetch(url);
+      if (res && res.ok) {
+        const boards = await res.json();
+        if (Array.isArray(boards)) {
+          // Busca por correspondência no nome do quadro
+          const found = boards.find((b) => {
+            const bNorm = String(b.name || "")
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .trim();
+            return bNorm.includes(cNorm) || cNorm.includes(bNorm);
+          });
+          if (found) {
+            return found.id || found.shortLink;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[trelloService] Falha ao buscar quadros da workspace ${workspaceId}:`, err.message);
+    }
+  }
+
+  // 3. Fallback: board padrão configurado ou padrão de teste
+  return process.env.TRELLO_BOARD_ID || (process.env.NODE_ENV === "test" ? "oLurW041" : undefined);
+}
+
+/**
+ * Garante que a coluna "Heloísa" existe no quadro do cliente.
+ * Se não existir, cria automaticamente via API no topo (pos=top).
+ */
+export async function ensureHeloisaList({
+  boardId,
+  apiKey = process.env.TRELLO_API_KEY || (process.env.NODE_ENV === "test" ? "test_trello_key" : undefined),
+  token = process.env.TRELLO_TOKEN || (process.env.NODE_ENV === "test" ? "test_trello_token" : undefined),
+  allowMock = true,
+}) {
+  if (!boardId) {
+    throw new Error("boardId é obrigatório para garantir a coluna Heloísa.");
+  }
+
+  if ((!apiKey || !token) && allowMock) {
+    return { id: `mock_list_heloisa_${boardId}`, name: "Heloísa", created: false };
+  }
+
+  const listsUrl = `https://api.trello.com/1/boards/${boardId}/lists?key=${apiKey}&token=${token}&fields=name,id`;
+  let lists = [];
+  try {
+    const res = await fetch(listsUrl);
+    if (res && res.ok) {
+      lists = await res.json();
+    }
+  } catch (err) {
+    console.warn(`[trelloService] Falha ao listar colunas do quadro ${boardId}:`, err.message);
+  }
+
+  if (Array.isArray(lists)) {
+    const found = lists.find((l) => {
+      const ln = String(l.name || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
+      return ln === "heloisa";
+    });
+    if (found) {
+      return { id: found.id, name: found.name, created: false };
+    }
+  }
+
+  // Cria a coluna Heloísa no topo do quadro
+  const postUrl = `https://api.trello.com/1/boards/${boardId}/lists?name=Helo%C3%ADsa&pos=top&key=${apiKey}&token=${token}`;
+  try {
+    const res = await fetch(postUrl, { method: "POST" });
+    if (res && res.ok) {
+      const newList = await res.json();
+      return { id: newList.id, name: newList.name || "Heloísa", created: true };
+    }
+  } catch (errPost) {
+    console.warn(`[trelloService] Falha ao criar coluna Heloísa no quadro ${boardId}:`, errPost.message);
+  }
+
+  if (allowMock) {
+    return { id: `mock_list_heloisa_${boardId}`, name: "Heloísa", created: true };
+  }
+
+  throw new Error(`Não foi possível garantir a coluna Heloísa no quadro ${boardId}.`);
+}
+
+/**
+ * Clona o quadro Board Base (TEMPLATE) da organização para uma nova empresa
+ */
+export async function cloneBoardBaseForNewClient({
+  clientName,
+  apiKey = process.env.TRELLO_API_KEY || (process.env.NODE_ENV === "test" ? "test_trello_key" : undefined),
+  token = process.env.TRELLO_TOKEN || (process.env.NODE_ENV === "test" ? "test_trello_token" : undefined),
+  workspaceId = "socialmediagdigital",
+  allowMock = true,
+}) {
+  if (!clientName) {
+    throw new Error("clientName é obrigatório para clonar quadro base.");
+  }
+
+  if ((!apiKey || !token) && allowMock) {
+    const mockId = `mock_board_${Date.now()}`;
+    return {
+      id: mockId,
+      name: clientName,
+      shortUrl: `https://trello.com/b/${mockId.slice(-8)}`,
+      url: `https://trello.com/b/${mockId.slice(-8)}`,
+      isMock: true,
+    };
+  }
+
+  // 1. Localiza o quadro Board Base (TEMPLATE)
+  let templateId = null;
+  try {
+    const url = `https://api.trello.com/1/organizations/${workspaceId}/boards?key=${apiKey}&token=${token}&fields=name,id`;
+    const res = await fetch(url);
+    if (res && res.ok) {
+      const boards = await res.json();
+      if (Array.isArray(boards)) {
+        const foundTemplate = boards.find((b) => {
+          const bn = String(b.name || "").toLowerCase();
+          return bn.includes("board base") || bn.includes("template");
+        });
+        if (foundTemplate) templateId = foundTemplate.id;
+      }
+    }
+  } catch (err) {
+    console.warn(`[trelloService] Falha ao localizar Board Base na workspace ${workspaceId}:`, err.message);
+  }
+
+  // 2. Dispara POST de criação do novo quadro clonado
+  const postUrl = `https://api.trello.com/1/boards/?name=${encodeURIComponent(clientName)}&idOrganization=${workspaceId}${templateId ? `&idBoardSource=${templateId}` : ""}&key=${apiKey}&token=${token}`;
+  let newBoard = null;
+  try {
+    const res = await fetch(postUrl, { method: "POST" });
+    if (res && res.ok) {
+      newBoard = await res.json();
+    }
+  } catch (errPost) {
+    console.warn(`[trelloService] Falha ao clonar quadro para ${clientName}:`, errPost.message);
+  }
+
+  if (!newBoard?.id) {
+    if (allowMock) {
+      const mockId = `mock_board_${Date.now()}`;
+      return {
+        id: mockId,
+        name: clientName,
+        shortUrl: `https://trello.com/b/${mockId.slice(-8)}`,
+        url: `https://trello.com/b/${mockId.slice(-8)}`,
+        isMock: true,
+      };
+    }
+    throw new Error(`Falha ao clonar quadro para o cliente ${clientName}.`);
+  }
+
+  // 3. Garante a coluna "Heloísa" no novo quadro
+  await ensureHeloisaList({ boardId: newBoard.id, apiKey, token, allowMock });
+
+  return {
+    id: newBoard.id,
+    name: newBoard.name || clientName,
+    shortUrl: newBoard.shortUrl || newBoard.url,
+    url: newBoard.url || newBoard.shortUrl,
+    isMock: false,
+  };
+}
+
+/**
+ * Cria um card no Trello da Geração Digital com suporte a roteamento multiquadro
  */
 export async function createTrelloCard({
   name,
   desc = "",
-  listName = "Em Produção / Design",
+  listName = null, // se não informado, usa a coluna "Heloísa"
   dueDate,
   memberUsername,
+  boardIdOrUrl,
+  clientName,
+  empresa,
+  tipoDemanda,
   apiKey = process.env.TRELLO_API_KEY || (process.env.NODE_ENV === "test" ? "test_trello_key" : undefined),
   token = process.env.TRELLO_TOKEN || (process.env.NODE_ENV === "test" ? "test_trello_token" : undefined),
   boardId = process.env.TRELLO_BOARD_ID || (process.env.NODE_ENV === "test" ? "test_trello_board" : undefined),
@@ -241,9 +451,18 @@ export async function createTrelloCard({
     throw new Error("Título da demanda é obrigatório para criação de card no Trello.");
   }
 
+  // 1. Resolve o quadro do Trello (por URL, shortLink, nome do cliente na workspace ou fallback)
+  const targetBoardId = await resolveTrelloBoard({
+    clientName: clientName || empresa,
+    boardIdOrUrl: boardIdOrUrl || boardId,
+    apiKey,
+    token,
+    allowMock,
+  });
+
   const dueIsoUtc = dueDate ? new Date(dueDate).toISOString() : null;
 
-  const buildMockCard = () => {
+  const buildMockCard = (coluna = listName || "Heloísa") => {
     const mockId = `mock_card_${Date.now()}`;
     return {
       id: mockId,
@@ -252,21 +471,22 @@ export async function createTrelloCard({
       name,
       due: dueIsoUtc,
       idList: "mock_list_default",
-      listName: listName || "Em Produção / Design",
+      listName: coluna,
+      boardId: targetBoardId,
       isMock: true,
     };
   };
 
   // Sem credenciais reais: fallback mock para testes e desenvolvimento
-  if (!apiKey || !token || !boardId) {
+  if (!apiKey || !token || !targetBoardId) {
     if (!allowMock) {
       throw new Error("Credenciais do Trello incompletas (TRELLO_API_KEY, TRELLO_TOKEN, TRELLO_BOARD_ID).");
     }
     return buildMockCard();
   }
 
-  // 1. Resolve idList do quadro
-  const listsUrl = `https://api.trello.com/1/boards/${boardId}/lists?key=${apiKey}&token=${token}&fields=name,id`;
+  // 2. Resolve a lista do quadro
+  const listsUrl = `https://api.trello.com/1/boards/${targetBoardId}/lists?key=${apiKey}&token=${token}&fields=name,id`;
   let listsRes;
   try {
     listsRes = await fetch(listsUrl);
@@ -275,43 +495,56 @@ export async function createTrelloCard({
     throw errNet;
   }
 
-  if (!listsRes || !listsRes.ok) {
-    if (allowMock) return buildMockCard();
-    const errText = await listsRes?.text().catch(() => "");
-    throw new Error(`Erro na API do Trello ao obter listas (${listsRes?.status}): ${errText}`);
-  }
-
-  let lists = null;
-  try {
-    lists = await listsRes.json();
-  } catch {
-    if (allowMock) return buildMockCard();
-    throw new Error("Resposta inválida (não-JSON) da API do Trello ao obter listas.");
+  let lists = [];
+  if (listsRes && listsRes.ok) {
+    lists = await listsRes.json().catch(() => []);
   }
 
   let targetList = null;
   if (Array.isArray(lists) && lists.length > 0) {
     if (listName) {
-      const lnNorm = String(listName).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      targetList = lists.find((l) => {
-        const itemNorm = l.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        return itemNorm.includes(lnNorm);
-      });
+      const lnNorm = String(listName).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+      // Regra de Negócio: Se pedir "aprovação", mapeia preferencialmente para "Aguardando Aprovação"
+      if (lnNorm.includes("aprov")) {
+        targetList = lists.find((l) => {
+          const itemNorm = l.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          return itemNorm.includes("aguardando aprov") || itemNorm.includes("aprov");
+        });
+      }
+
+      if (!targetList) {
+        targetList = lists.find((l) => {
+          const itemNorm = l.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          return itemNorm.includes(lnNorm);
+        });
+      }
     }
-    if (!targetList) targetList = lists[0];
+  }
+
+  // Se a lista não foi encontrada ou não foi informada, utiliza a coluna "Heloísa"
+  if (!targetList) {
+    try {
+      const heloisaCol = await ensureHeloisaList({ boardId: targetBoardId, apiKey, token, allowMock });
+      targetList = { id: heloisaCol.id, name: heloisaCol.name };
+    } catch {
+      if (Array.isArray(lists) && lists.length > 0) {
+        targetList = lists[0];
+      }
+    }
   }
 
   const idList = targetList?.id;
   if (!idList) {
     if (allowMock) return buildMockCard();
-    throw new Error(`Lista de destino não encontrada no quadro do Trello (${listName || "padrão"}).`);
+    throw new Error(`Lista de destino não encontrada no quadro do Trello (${listName || "Heloísa"}).`);
   }
 
-  // 2. Resolve idMember se memberUsername foi fornecido
+  // 3. Resolve idMember se memberUsername foi fornecido
   let idMembers = [];
   if (memberUsername) {
     try {
-      const membersUrl = `https://api.trello.com/1/boards/${boardId}/members?key=${apiKey}&token=${token}&fields=username,fullName,id`;
+      const membersUrl = `https://api.trello.com/1/boards/${targetBoardId}/members?key=${apiKey}&token=${token}&fields=username,fullName,id`;
       const membersRes = await fetch(membersUrl);
       if (membersRes?.ok) {
         const members = await membersRes.json().catch(() => []);
@@ -330,7 +563,7 @@ export async function createTrelloCard({
     }
   }
 
-  // 3. Dispara POST /1/cards
+  // 4. Dispara POST /1/cards
   const postUrl = `https://api.trello.com/1/cards`;
   const cardPayload = {
     key: apiKey,
@@ -350,26 +583,17 @@ export async function createTrelloCard({
       body: JSON.stringify(cardPayload),
     });
   } catch (errPost) {
-    if (allowMock) return buildMockCard();
+    if (allowMock) return buildMockCard(targetList?.name);
     throw errPost;
   }
 
-  if (!createRes || !createRes.ok) {
-    if (allowMock) return buildMockCard();
-    const errText = await createRes?.text().catch(() => "");
-    throw new Error(`Falha ao criar card no Trello (${createRes?.status}): ${errText}`);
-  }
-
   let cardData = null;
-  try {
-    cardData = await createRes.json();
-  } catch {
-    if (allowMock) return buildMockCard();
-    throw new Error("Resposta inválida (não-JSON) da API do Trello ao criar card.");
+  if (createRes && createRes.ok) {
+    cardData = await createRes.json().catch(() => null);
   }
 
   if (!cardData?.id) {
-    if (allowMock) return buildMockCard();
+    if (allowMock) return buildMockCard(targetList?.name);
     throw new Error(`Falha ao criar card no Trello: ${JSON.stringify(cardData)}`);
   }
 
@@ -380,7 +604,8 @@ export async function createTrelloCard({
     name: cardData.name || name,
     due: cardData.due || dueIsoUtc,
     idList: cardData.idList || idList,
-    listName: targetList?.name || listName,
+    listName: targetList?.name || listName || "Heloísa",
+    boardId: targetBoardId,
     isMock: false,
   };
 }

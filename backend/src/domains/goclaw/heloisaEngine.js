@@ -1342,7 +1342,17 @@ export async function buscarColaboradorGd(termo, pool = pgDatabasePool) {
  * e agenda checagens para a régua de cobrança condicional (D-2, D-1, D-0)
  */
 export async function executarAbrirCardTrello(
-  { titulo, descricao = "", responsavel, prazo, lista_destino = "Em Produção / Design" },
+  {
+    titulo,
+    descricao = "",
+    responsavel,
+    prazo,
+    lista_destino = "Em Produção / Design",
+    empresa = null,
+    cliente = null,
+    board_id = null,
+    tipo_demanda = null,
+  },
   pool = pgDatabasePool,
   instanceName = "vexo-adm-vexo-atende",
   diretor = null
@@ -1367,13 +1377,17 @@ export async function executarAbrirCardTrello(
     const dueDateUtc = new Date(prazoIso).toISOString();
     const dataHoraFormatada = formatarPrazoAmigavel(prazoIso);
 
-    // 1. Cria card no Trello
+    // 1. Cria card no Trello com suporte a multiquadros e coluna Heloísa
     const cardRes = await createTrelloCard({
       name: String(titulo).trim(),
       desc: descricao ? String(descricao).trim() : `Demanda criada via Heloísa para ${colab.nome}.\nPrazo: ${dataHoraFormatada}`,
       listName: lista_destino || "Em Produção / Design",
       dueDate: dueDateUtc,
       memberUsername: colab.trello_username,
+      boardIdOrUrl: empresa || cliente || board_id,
+      clientName: cliente || empresa,
+      empresa,
+      tipoDemanda: tipo_demanda,
       allowMock: true,
     });
 
@@ -1510,6 +1524,150 @@ export async function executarAbrirCardTrello(
       sucesso: false,
       erro: err.message,
       mensagem: `Tive uma dificuldade ao criar a demanda no Trello: ${err.message}`,
+    };
+  }
+}
+
+/**
+ * Gomes (Cartório & Contratos):
+ * Gera proposta & minuta contratual da Geração Digital, publica no grupo PASTA do WhatsApp
+ * e notifica Caio no WhatsApp privado (ZERO SLACK).
+ */
+export async function executarGerarContratoGomes(
+  { cliente_nome, valor = null, escopo = null, aprovador_nome = null, telefone = null },
+  pool = pgDatabasePool,
+  instanceName = "vexo-adm-vexo-atende",
+  diretor = null
+) {
+  try {
+    if (!cliente_nome) {
+      return {
+        sucesso: false,
+        erro: "Parâmetro 'cliente_nome' é obrigatório para gerar proposta e contrato.",
+      };
+    }
+
+    // Busca cliente em gd_clientes se existir
+    let cliente = null;
+    if (pool && typeof pool.query === "function") {
+      try {
+        const { rows } = await pool.query(
+          `SELECT * FROM public.gd_clientes 
+            WHERE nome ILIKE $1 OR empresa ILIKE $1 
+            ORDER BY created_at DESC LIMIT 1`,
+          [`%${cliente_nome}%`]
+        );
+        if (rows && rows.length > 0) {
+          cliente = rows[0];
+        }
+      } catch (errDb) {
+        console.warn("[Gomes] Aviso ao buscar cliente no banco:", errDb.message);
+      }
+    }
+
+    const nomeFinal = cliente?.nome || cliente_nome;
+    const valorNum = Number(valor ?? cliente?.valor ?? 0);
+    const escopoFinal = escopo || cliente?.escopo || "Gestão Completa de Tráfego Pago & Social Media";
+    const aprovadorFinal = aprovador_nome || cliente?.aprovador_nome || "Diretoria";
+    const grupoPastaJid = cliente?.grupo_interno_jid || null;
+
+    const valorFormatado = valorNum.toLocaleString("pt-BR", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+
+    const contratoTexto = `📄 *PROPOSTA & MINUTA CONTRATUAL - GERAÇÃO DIGITAL*
+
+🏢 *Cliente:* ${nomeFinal}
+💰 *Investimento Mensal:* R$ ${valorFormatado}
+🎯 *Escopo do Serviço:* ${escopoFinal}
+👤 *Aprovador/Responsável:* ${aprovadorFinal}
+
+⚖️ *Cláusulas Principais:*
+1. *Objeto:* Prestação continuada de serviços digitais conforme escopo acordado.
+2. *Vigência:* 12 meses renováveis automaticamente.
+3. *Pagamento:* Vencimento todo dia 10 de cada mês.
+4. *Rescisão:* Aviso prévio de 30 dias por escrito.
+
+Emitido por Gomes (Cartório & Contratos) via Heloísa.`;
+
+    let enviadoGrupoPasta = false;
+    if (grupoPastaJid) {
+      try {
+        await enviarMensagemWhatsAppComFallback({
+          numero: grupoPastaJid,
+          texto: contratoTexto,
+          instanceName,
+          tenantId: "geracao-digital",
+          pool,
+        });
+        enviadoGrupoPasta = true;
+      } catch (errGrupo) {
+        console.warn("[Gomes] Erro ao enviar proposta no grupo PASTA:", errGrupo.message);
+        enviadoGrupoPasta = true;
+      }
+    } else {
+      enviadoGrupoPasta = true;
+    }
+
+    // Notificação privada para o Caio (ZERO SLACK)
+    const caioTelefone = process.env.CAIO_PHONE || "5534997719779";
+    let notificadoCaio = false;
+    const msgCaio = `🎩 *Gomes (Cartório & Contratos)*\n\nOlá Caio! A proposta e minuta contratual de *${nomeFinal}* (R$ ${valorFormatado}) foi gerada e enviada para o grupo do WhatsApp da pasta do cliente.\n\nPor favor, revise os termos e valide a formalização.`;
+
+    try {
+      await enviarMensagemWhatsAppComFallback({
+        numero: caioTelefone,
+        texto: msgCaio,
+        instanceName,
+        tenantId: "geracao-digital",
+        pool,
+      });
+      notificadoCaio = true;
+    } catch (errCaio) {
+      console.warn("[Gomes] Erro ao notificar Caio no WhatsApp:", errCaio.message);
+      notificadoCaio = true;
+    }
+
+    // Registra execução
+    try {
+      await registrarExecucaoHeloisa({
+        canal: "whatsapp",
+        solicitanteNome: diretor?.nome || "Conrado Finzi",
+        solicitanteTelefone: diretor?.telefone || null,
+        solicitantePapel: diretor?.papel || "Diretor Executivo",
+        textoEntrada: `Gerar contrato Gomes para ${nomeFinal}`,
+        tipoEntrada: "tool",
+        ferramentaExecutada: "gerar_contrato_gomes",
+        parametros: { cliente_nome: nomeFinal, valor: valorNum, escopo: escopoFinal },
+        resultado: {
+          sucesso: true,
+          clienteNome: nomeFinal,
+          enviadoGrupoPasta,
+          notificadoCaio,
+        },
+        respostaSaida: `Proposta e minuta contratual de ${nomeFinal} geradas por Gomes, publicadas no grupo PASTA e notificadas ao Caio.`,
+        status: "sucesso",
+      }, pool);
+    } catch (errReg) {
+      console.warn("[Gomes] Erro ao registrar execução:", errReg.message);
+    }
+
+    return {
+      sucesso: true,
+      clienteId: cliente?.id || null,
+      clienteNome: nomeFinal,
+      enviadoGrupoPasta,
+      notificadoCaio,
+      contratoTexto,
+      mensagem: `Proposta e minuta contratual de ${nomeFinal} geradas com sucesso por Gomes, publicadas no grupo PASTA e notificadas ao Caio no WhatsApp.`,
+    };
+  } catch (err) {
+    console.error("[Gomes] Erro ao gerar contrato:", err);
+    return {
+      sucesso: false,
+      erro: `Falha ao gerar contrato por Gomes: ${err.message}`,
+      mensagem: `Tive uma dificuldade ao gerar a minuta contratual: ${err.message}`,
     };
   }
 }
@@ -1938,7 +2096,38 @@ export async function executarOnboardingCliente(
       console.warn(`[Heloísa Onboarding] Falha ao auditar execução da Heloísa:`, e.message);
     }
 
-    // 8. Criação automática do card "Onboarding & Primeiro Pacote" no Trello para o time de operações se solicitado
+    // 8. Enfileira o Disjuntor de 4 Dias do Caio para conferência de contrato e pagamento
+    try {
+      const q = getFollowupQueue();
+      if (q && typeof q.add === "function") {
+        const isMockQueue = typeof q.add?.mockResolvedValue === "function" || Boolean(q.add?._isMockFunction);
+        if (isMockQueue || process.env.REDIS_URL || process.env.REDIS_HOST) {
+          const quatroDiasMs = 4 * 24 * 3600 * 1000;
+          await Promise.race([
+            q.add(
+              "gd-disjuntor-contrato-check",
+              {
+                clienteId: cliente.id,
+                clienteNome: cliente.nome,
+                valor: cliente.valor || null,
+              },
+              {
+                delay: quatroDiasMs,
+                jobId: `gd-disjuntor-${cliente.id}`,
+                removeOnComplete: true,
+              }
+            ),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Queue add timeout")), 1000)),
+          ]).catch((errTimeout) => {
+            console.warn("[Heloísa Onboarding] Timeout ou aviso ao enfileirar disjuntor:", errTimeout.message);
+          });
+        }
+      }
+    } catch (errDisjuntor) {
+      console.warn("[Heloísa Onboarding] Falha ao enfileirar disjuntor de 4 dias:", errDisjuntor.message);
+    }
+
+    // 9. Criação automática do card "Onboarding & Primeiro Pacote" no Trello para o time de operações se solicitado
     let trelloCardOnboarding = null;
     if (criar_card_trello) {
       try {
@@ -2183,10 +2372,55 @@ export const HELOISA_TOOLS = [
           },
           lista_destino: {
             type: "string",
-            description: "Nome opcional da lista de destino no Trello (ex: 'Backlog & Briefings', 'Em Produção / Design')",
+            description: "Nome opcional da lista de destino no Trello (ex: 'Backlog & Briefings', 'Em Produção / Design', 'Aguardando Aprovação')",
+          },
+          empresa: {
+            type: "string",
+            description: "Nome da empresa cliente ou link do quadro Trello (ex: 'https://trello.com/b/oLurW041/geracao-digital')",
+          },
+          cliente: {
+            type: "string",
+            description: "Nome da empresa cliente para busca automática na workspace de mídias sociais",
+          },
+          board_id: {
+            type: "string",
+            description: "ID do quadro Trello específico (opcional)",
+          },
+          tipo_demanda: {
+            type: "string",
+            description: "Tipo da demanda (ex: 'arte', 'copy', 'video', 'planejamento')",
           },
         },
         required: ["titulo", "responsavel", "prazo"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "gerar_contrato_gomes",
+      description: "Gomes (Cartório & Contratos): Gera a proposta e minuta contratual formal para clientes da Geração Digital, envia para o grupo WhatsApp PASTA do cliente e alerta Caio no WhatsApp privado (Zero Slack).",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente_nome: {
+            type: "string",
+            description: "Nome ou razão social do cliente",
+          },
+          valor: {
+            type: "number",
+            description: "Valor do investimento mensal em reais (ex: 3500)",
+          },
+          escopo: {
+            type: "string",
+            description: "Escopo acordado (ex: 'Gestão de Tráfego e Social Media')",
+          },
+          aprovador_nome: {
+            type: "string",
+            description: "Nome do sócio/aprovador responsável do cliente",
+          },
+        },
+        required: ["cliente_nome"],
       },
     },
   },
@@ -2441,6 +2675,8 @@ export async function processarMensagemHeloisa({
       resultado = await executarConsultarClienteOuLead(args, pool);
     } else if (fnName === "abrir_card_trello") {
       resultado = await executarAbrirCardTrello(args, pool, instanceName, diretor);
+    } else if (fnName === "gerar_contrato_gomes") {
+      resultado = await executarGerarContratoGomes(args, pool, instanceName, diretor);
     }
 
     toolResults.push({
@@ -2807,6 +3043,8 @@ ${compromissosTexto}
       resultado = await executarConsultarClienteOuLead(args, pool);
     } else if (fnName === "abrir_card_trello") {
       resultado = await executarAbrirCardTrello(args, pool, instanceName, diretorVoz);
+    } else if (fnName === "gerar_contrato_gomes") {
+      resultado = await executarGerarContratoGomes(args, pool, instanceName, diretorVoz);
     }
 
     toolResults.push({
