@@ -102,7 +102,7 @@ describe("GD Calendar Service · Agendador Autônomo de Briefing", () => {
       expect(res.options[2].inicio).toContain("2026-11-12");
     });
 
-    it("respeita ocupação em mrkgeracaodigital@gmail.com ou caioalmeidmrk@gmail.com e desvia de horários ocupados", async () => {
+    it("respeita ocupação em mrkgeracaodigital@gmail.com ou caioalmeidamrk@gmail.com e desvia de horários ocupados", async () => {
       const ref = new Date("2026-11-09T13:00:00.000Z"); // 10h00 BRT
 
       // Simula que na Terça-feira (10/11) a manhã inteira (09h às 12h) está ocupada na agenda do Caio

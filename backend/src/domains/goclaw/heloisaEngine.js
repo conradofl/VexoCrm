@@ -244,6 +244,15 @@ export async function ensureHeloisaTables(pool = pgDatabasePool) {
       DELETE FROM public.heloisa_agendas WHERE email = 'conradofinzi@gmail.com';
       DELETE FROM public.heloisa_usuarios_autorizados WHERE email = 'conradofinzi@gmail.com';
 
+      -- Migração / Atualização Idempotente do e-mail oficial do Caio Almeida (caioalmeidamrk@gmail.com)
+      UPDATE public.heloisa_agendas 
+      SET email = 'caioalmeidamrk@gmail.com' 
+      WHERE email = 'caioalmeidmrk@gmail.com';
+
+      UPDATE public.heloisa_usuarios_autorizados 
+      SET email = 'caioalmeidamrk@gmail.com' 
+      WHERE email = 'caioalmeidmrk@gmail.com';
+
       INSERT INTO public.heloisa_config (chave, valor)
       VALUES ('status_ativo', '{"ativo": true}')
       ON CONFLICT (chave) DO NOTHING;
@@ -251,14 +260,14 @@ export async function ensureHeloisaTables(pool = pgDatabasePool) {
       INSERT INTO public.heloisa_agendas (nome, email, telefone, papel, ativo, notificar_whatsapp)
       VALUES 
         ('Conrado Finzi', 'conradofl@gmail.com', '5534997817660', 'Sócio Diretor Executivo', true, true),
-        ('Caio Almeida', 'caioalmeidmrk@gmail.com', '5534997719779', 'Sócio Diretor Comercial', true, true),
+        ('Caio Almeida', 'caioalmeidamrk@gmail.com', '5534997719779', 'Sócio Diretor Comercial', true, true),
         ('Geração Digital', 'mrkgeracaodigital@gmail.com', NULL, 'Agência Oficial', true, false)
       ON CONFLICT (email) DO NOTHING;
 
       INSERT INTO public.heloisa_usuarios_autorizados (client_id, nome, telefone, email, papel, ativo)
       VALUES
         ('geracao-digital', 'Conrado Finzi', '5534997817660', 'conradofl@gmail.com', 'Diretor Executivo / Sócio', true),
-        ('geracao-digital', 'Caio Almeida', '5534997719779', 'caioalmeidmrk@gmail.com', 'Diretor Comercial / Sócio', true)
+        ('geracao-digital', 'Caio Almeida', '5534997719779', 'caioalmeidamrk@gmail.com', 'Diretor Comercial / Sócio', true)
       ON CONFLICT (telefone) DO NOTHING;
     `);
   } catch (err) {
@@ -790,7 +799,7 @@ export async function executarAgendarCompromisso(
     if (agendasAtivas.length === 0) {
       agendasAtivas = [
         { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-        { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+        { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
         { nome: "Geração Digital", email: "mrkgeracaodigital@gmail.com", telefone: null, notificar_whatsapp: false },
       ];
     }

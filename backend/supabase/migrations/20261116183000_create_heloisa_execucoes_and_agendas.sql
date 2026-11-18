@@ -65,12 +65,12 @@ ON CONFLICT (chave) DO NOTHING;
 INSERT INTO public.heloisa_agendas (nome, email, telefone, papel, ativo, notificar_whatsapp)
 VALUES 
   ('Conrado Finzi', 'conradofinzi@gmail.com', '5534997817660', 'Sócio Diretor Executivo', true, true),
-  ('Caio Almeida', 'caioalmeidmrk@gmail.com', '5534997719779', 'Sócio Diretor Comercial', true, true),
+  ('Caio Almeida', 'caioalmeidamrk@gmail.com', '5534997719779', 'Sócio Diretor Comercial', true, true),
   ('Geração Digital', 'mrkgeracaodigital@gmail.com', NULL, 'Agência Oficial', true, false)
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO public.heloisa_usuarios_autorizados (client_id, nome, telefone, email, papel, ativo)
 VALUES
   ('geracao-digital', 'Conrado Finzi', '5534997817660', 'conradofinzi@gmail.com', 'Diretor Executivo / Sócio', true),
-  ('geracao-digital', 'Caio Almeida', '5534997719779', 'caioalmeidmrk@gmail.com', 'Diretor Comercial / Sócio', true)
+  ('geracao-digital', 'Caio Almeida', '5534997719779', 'caioalmeidamrk@gmail.com', 'Diretor Comercial / Sócio', true)
 ON CONFLICT (telefone) DO UPDATE SET email = EXCLUDED.email WHERE public.heloisa_usuarios_autorizados.email IS NULL;

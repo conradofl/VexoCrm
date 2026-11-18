@@ -419,7 +419,7 @@ export async function processarRespostaBriefingNoWhatsApp({
     `• *Cliente:* ${cliente.nome}\n` +
     `• *Data/Hora:* ${dataFormatada}\n` +
     `• *Google Meet:* ${eventResult.meetUrl}\n` +
-    `• *Convidados:* mrkgeracaodigital@gmail.com, caioalmeidmrk@gmail.com, ${clientCalendarEmail || "cliente"}\n` +
+    `• *Convidados:* mrkgeracaodigital@gmail.com, caioalmeidamrk@gmail.com, ${clientCalendarEmail || "cliente"}\n` +
     `• *Responsável:* ${cliente.aprovador_nome || cliente.nome} (${cliente.aprovador_telefone || "N/A"})`;
 
   await evolutionSender({

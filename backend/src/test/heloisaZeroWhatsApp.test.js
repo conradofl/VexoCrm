@@ -58,7 +58,7 @@ describe("Blindagem Heloísa: Zero WhatsApp em Testes e Título Preciso de Reuni
           return {
             rows: [
               { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
             ],
           };
         }

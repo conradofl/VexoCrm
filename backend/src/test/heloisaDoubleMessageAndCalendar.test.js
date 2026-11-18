@@ -14,7 +14,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
           return {
             rows: [
               { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
             ],
           };
         }
@@ -59,7 +59,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
           return {
             rows: [
               { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
             ],
           };
         }
@@ -98,7 +98,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
           return {
             rows: [
               { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
               { nome: "Geração Digital", email: "mrkgeracaodigital@gmail.com", telefone: null, notificar_whatsapp: false },
             ],
           };
@@ -114,7 +114,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
       {
         titulo: "Reunião de Parceria",
         data_hora: "2026-11-20 16:00",
-        participantes_extras: "apenas caioalmeidmrk@gmail.com",
+        participantes_extras: "apenas caioalmeidamrk@gmail.com",
       },
       mockPool,
       "instancia-teste",
@@ -124,7 +124,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
     expect(res.sucesso).toBe(true);
     expect(res.mensagem_notificacao_broadcast).toBeDefined();
     // A notificação deve conter Caio, mas NÃO Conrado nem mrkgeracaodigital
-    expect(res.mensagem_notificacao_broadcast).toContain("caioalmeidmrk@gmail.com");
+    expect(res.mensagem_notificacao_broadcast).toContain("caioalmeidamrk@gmail.com");
     expect(res.mensagem_notificacao_broadcast).not.toContain("mrkgeracaodigital@gmail.com");
   });
 
@@ -188,7 +188,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
           return {
             rows: [
               { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
               { nome: "Geração Digital", email: "mrkgeracaodigital@gmail.com", telefone: null, notificar_whatsapp: false },
             ],
           };
@@ -220,7 +220,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
     expect(res.sucesso).toBe(true);
     // Attendees deve conter estritamente conradofl@gmail.com e NÃO deve conter Caio nem a agência
     expect(res.attendees).toEqual(["conradofl@gmail.com"]);
-    expect(res.attendees).not.toContain("caioalmeidmrk@gmail.com");
+    expect(res.attendees).not.toContain("caioalmeidamrk@gmail.com");
     expect(res.attendees).not.toContain("mrkgeracaodigital@gmail.com");
     expect(res.notificacoes_whatsapp).toEqual([]);
   });
@@ -316,7 +316,7 @@ describe("Heloísa — Prevenção de Mensagem Dupla e Agenda Compartilhada no G
     const agendasRaw = [
       { id: "1", nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660" },
       { id: "2", nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660" },
-      { id: "3", nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779" },
+      { id: "3", nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779" },
     ];
 
     // Função de sanitização/unificação de agendas

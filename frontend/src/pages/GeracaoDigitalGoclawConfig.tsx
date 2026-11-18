@@ -41,6 +41,7 @@ import {
   ExternalLink,
   Check,
   ListTodo,
+  Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchApi } from "@/lib/api";
@@ -356,6 +357,7 @@ export function GeracaoDigitalGoclawConfig() {
 
   // Modal Agendas State
   const [modalAgendaAberto, setModalAgendaAberto] = useState(false);
+  const [agendaEmEdicao, setAgendaEmEdicao] = useState<HeloisaAgenda | null>(null);
   const [formAgendaNome, setFormAgendaNome] = useState("");
   const [formAgendaEmail, setFormAgendaEmail] = useState("");
   const [formAgendaTelefone, setFormAgendaTelefone] = useState("");
@@ -363,6 +365,7 @@ export function GeracaoDigitalGoclawConfig() {
   const [formAgendaNotificar, setFormAgendaNotificar] = useState(true);
 
   const abrirModalCriarAgenda = () => {
+    setAgendaEmEdicao(null);
     setFormAgendaNome("");
     setFormAgendaEmail("");
     setFormAgendaTelefone("");
@@ -371,42 +374,64 @@ export function GeracaoDigitalGoclawConfig() {
     setModalAgendaAberto(true);
   };
 
-  // ─── Mutation Salvar Agenda ───────────────────────────────────────────────
+  const abrirModalEditarAgenda = (agenda: HeloisaAgenda) => {
+    setAgendaEmEdicao(agenda);
+    setFormAgendaNome(agenda.nome || "");
+    setFormAgendaEmail(agenda.email || "");
+    setFormAgendaTelefone(agenda.telefone || "");
+    setFormAgendaPapel(agenda.papel || "Sócio Diretor");
+    setFormAgendaNotificar(agenda.notificar_whatsapp ?? true);
+    setModalAgendaAberto(true);
+  };
+
+  // ─── Mutation Salvar / Atualizar Agenda ───────────────────────────────────
   const salvarAgendaMutation = useMutation({
     mutationFn: async () => {
       const token = await getIdToken();
-      const res = await fetchApi("/api/goclaw/heloisa/agendas", {
-        method: "POST",
+      const payload = {
+        nome: formAgendaNome,
+        email: formAgendaEmail,
+        telefone: formAgendaTelefone,
+        papel: formAgendaPapel,
+        notificar_whatsapp: formAgendaNotificar,
+        ...(agendaEmEdicao ? {} : { ativo: true }),
+      };
+
+      const url = agendaEmEdicao
+        ? `/api/goclaw/heloisa/agendas/${agendaEmEdicao.id}`
+        : "/api/goclaw/heloisa/agendas";
+      const method = agendaEmEdicao ? "PATCH" : "POST";
+
+      const res = await fetchApi(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          nome: formAgendaNome,
-          email: formAgendaEmail,
-          telefone: formAgendaTelefone,
-          papel: formAgendaPapel,
-          notificar_whatsapp: formAgendaNotificar,
-          ativo: true,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Falha ao salvar agenda.");
+        throw new Error(err.error || (agendaEmEdicao ? "Falha ao atualizar agenda." : "Falha ao salvar agenda."));
       }
       return res.json();
     },
     onSuccess: (data) => {
       toast({
-        title: "Agenda Cadastrada!",
-        description: data.message || "E-mail de agenda configurado com sucesso para Google Meet.",
+        title: agendaEmEdicao ? "Agenda Atualizada!" : "Agenda Cadastrada!",
+        description:
+          data.message ||
+          (agendaEmEdicao
+            ? "Os dados da agenda foram atualizados com sucesso."
+            : "E-mail de agenda configurado com sucesso para Google Meet."),
       });
       queryClient.invalidateQueries({ queryKey: ["heloisaAgendas"] });
       setModalAgendaAberto(false);
+      setAgendaEmEdicao(null);
     },
     onError: (err: any) => {
       toast({
-        title: "Erro ao cadastrar agenda",
+        title: agendaEmEdicao ? "Erro ao atualizar agenda" : "Erro ao cadastrar agenda",
         description: err.message,
         variant: "destructive",
       });
@@ -1241,6 +1266,15 @@ export function GeracaoDigitalGoclawConfig() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              className="h-7 w-7 text-slate-500 hover:text-blue-600"
+                              title="Editar agenda"
+                              onClick={() => abrirModalEditarAgenda(ag)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="h-7 w-7 text-slate-500"
                               title={ag.ativo ? "Pausar agenda" : "Ativar agenda"}
                               onClick={() =>
@@ -1651,17 +1685,25 @@ export function GeracaoDigitalGoclawConfig() {
       </Dialog>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          MODAL ADICIONAR AGENDA (GOOGLE MEET)
+          MODAL ADICIONAR / EDITAR AGENDA (GOOGLE MEET)
          ══════════════════════════════════════════════════════════════════════ */}
-      <Dialog open={modalAgendaAberto} onOpenChange={setModalAgendaAberto}>
+      <Dialog
+        open={modalAgendaAberto}
+        onOpenChange={(aberto) => {
+          setModalAgendaAberto(aberto);
+          if (!aberto) setAgendaEmEdicao(null);
+        }}
+      >
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold flex items-center gap-2">
               <Calendar className="h-5 w-5 text-blue-600" />
-              + Cadastrar Agenda (Google Meet)
+              {agendaEmEdicao ? "Editar Agenda (Google Meet)" : "+ Cadastrar Agenda (Google Meet)"}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Cadastre o e-mail da agenda Google para envio automático de convites e geração de link do Meet.
+              {agendaEmEdicao
+                ? "Atualize o e-mail e configurações de notificação desta agenda para reuniões e links do Meet."
+                : "Cadastre o e-mail da agenda Google para envio automático de convites e geração de link do Meet."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1737,7 +1779,10 @@ export function GeracaoDigitalGoclawConfig() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setModalAgendaAberto(false)}
+              onClick={() => {
+                setModalAgendaAberto(false);
+                setAgendaEmEdicao(null);
+              }}
               className="text-xs rounded-xl"
             >
               Cancelar
@@ -1749,7 +1794,11 @@ export function GeracaoDigitalGoclawConfig() {
               className="bg-blue-600 hover:bg-blue-700 text-white text-xs gap-1.5 rounded-xl"
             >
               <Save className="h-3.5 w-3.5" />
-              {salvarAgendaMutation.isPending ? "Salvando..." : "Salvar Agenda"}
+              {salvarAgendaMutation.isPending
+                ? "Salvando..."
+                : agendaEmEdicao
+                ? "Salvar Alterações"
+                : "Salvar Agenda"}
             </Button>
           </DialogFooter>
         </DialogContent>

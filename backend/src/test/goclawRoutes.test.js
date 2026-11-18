@@ -58,7 +58,7 @@ let mockAgendas = [
   {
     id: "ag-2",
     nome: "Caio Almeida",
-    email: "caioalmeidmrk@gmail.com",
+    email: "caioalmeidamrk@gmail.com",
     telefone: "5534997719779",
     papel: "Sócio Diretor Comercial",
     ativo: true,

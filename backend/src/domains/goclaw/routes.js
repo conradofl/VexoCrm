@@ -690,7 +690,7 @@ export function registerGoclawRoutes(app, {
           {
             id: "default-caio",
             nome: "Caio Almeida",
-            email: "caioalmeidmrk@gmail.com",
+            email: "caioalmeidamrk@gmail.com",
             telefone: "5534997719779",
             papel: "Sócio Diretor Comercial",
             ativo: true,

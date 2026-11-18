@@ -363,7 +363,7 @@ describe("Agendamento, Fuso Horário e Auditoria (Moacir, Timezone -03:00, Googl
             return {
               rows: [
                 { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-                { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+                { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
               ],
             };
           }
@@ -395,7 +395,7 @@ describe("Agendamento, Fuso Horário e Auditoria (Moacir, Timezone -03:00, Googl
             return {
               rows: [
                 { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-                { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+                { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
               ],
             };
           }
@@ -417,7 +417,7 @@ describe("Agendamento, Fuso Horário e Auditoria (Moacir, Timezone -03:00, Googl
       expect(res.sucesso).toBe(true);
       expect(res.meet_url).toMatch(/^https:\/\/meet\.google\.com\//);
       expect(res.participantes).toContain("conradofinzi@gmail.com");
-      expect(res.participantes).toContain("caioalmeidmrk@gmail.com");
+      expect(res.participantes).toContain("caioalmeidamrk@gmail.com");
     });
 
     it("4. registrarExecucaoHeloisa utiliza console.error ao invés de ignorar ou warn", async () => {

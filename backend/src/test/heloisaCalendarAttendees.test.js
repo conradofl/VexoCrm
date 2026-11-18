@@ -14,7 +14,7 @@ describe("Google Calendar & Participantes Extras da Heloísa", () => {
           return {
             rows: [
               { nome: "Conrado Finzi", email: "conradofinzi@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
-              { nome: "Caio Almeida", email: "caioalmeidmrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
             ],
           };
         }
@@ -41,7 +41,7 @@ describe("Google Calendar & Participantes Extras da Heloísa", () => {
     // Na chamada do Google Calendar, deve conter estritamente conradofl@gmail.com
     expect(res.attendees).toBeDefined();
     expect(res.attendees).toContain("conradofl@gmail.com");
-    expect(res.attendees).not.toContain("caioalmeidmrk@gmail.com");
+    expect(res.attendees).not.toContain("caioalmeidamrk@gmail.com");
   });
 
   it("createBriefingCalendarEvent: tenta fallback para agenda 'primary' se mrkgeracaodigital retornar 403 ou 404", async () => {

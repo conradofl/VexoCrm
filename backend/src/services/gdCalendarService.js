@@ -6,7 +6,7 @@
  *
  * Contas Oficiais de Calendário:
  * - Agência: mrkgeracaodigital@gmail.com
- * - Caio: caioalmeidmrk@gmail.com
+ * - Caio: caioalmeidamrk@gmail.com
  *
  * Regras de Negócio (Alinhamento Conrado & Caio):
  * 1. Janelas de Atendimento Comercial: 09h00 às 18h00 (exceto almoço 12h00 às 13h00).
@@ -23,7 +23,7 @@
 import crypto from "node:crypto";
 
 export const GD_CALENDAR_AGENCIA = "mrkgeracaodigital@gmail.com";
-export const GD_CALENDAR_CAIO = "caioalmeidmrk@gmail.com";
+export const GD_CALENDAR_CAIO = "caioalmeidamrk@gmail.com";
 export const GD_CALENDAR_CONRADO = process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com";
 export const GD_CALENDARS = [GD_CALENDAR_AGENCIA, GD_CALENDAR_CAIO, GD_CALENDAR_CONRADO];
 
@@ -435,7 +435,7 @@ export function generateDeterministicBriefingSlots({
 
 /**
  * Encontra slots de horários válidos e disponíveis para a Reunião de Briefing
- * nas contas oficiais (mrkgeracaodigital@gmail.com e caioalmeidmrk@gmail.com).
+ * nas contas oficiais (mrkgeracaodigital@gmail.com e caioalmeidamrk@gmail.com).
  *
  * @param {Object} options
  * @param {Date|string} [options.fromDate] - Data de referência (default: agora)
