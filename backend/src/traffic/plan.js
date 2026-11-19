@@ -316,7 +316,9 @@ export async function generatePlan(pool, clientId, { now = new Date(), generated
       const counts = { ESCALAR: 0, MANTER: 0, MATAR: 0, AMOSTRA_INSUFICIENTE: 0, SEM_META: 0 };
       for (const ad of ads) if (ad.decision?.decisao) counts[ad.decision.decisao] = (counts[ad.decision.decisao] || 0) + 1;
       const resumo =
-        `${kpiLabel} da campanha em ${campaignKpi === null ? "sem resultado" : num(campaignKpi)} (meta ${num(primary.target)}), ` +
+        (campaignKpi === null
+          ? `${kpiLabel} da campanha sem resultado para calcular (meta ${num(primary.target)}), `
+          : `${kpiLabel} da campanha em ${num(campaignKpi)} (meta ${num(primary.target)}), `) +
         `gasto de ${money(campaign.metrics.spend, currency)} em ${windowDays} dias. ` +
         `Anúncios: ${counts.ESCALAR} para escalar, ${counts.MANTER} na faixa, ${counts.MATAR} para cortar, ${counts.AMOSTRA_INSUFICIENTE} sem amostra.`;
 
