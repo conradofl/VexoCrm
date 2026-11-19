@@ -7,11 +7,26 @@ on:
       - codex/stabilization-maps
       - codex/**
       - fix/**
+  # Commit direto no main também roda: o main fica vermelho na hora, e não no PR de outra pessoa dias depois.
+  push:
+    branches:
+      - main
+
+# Push novo no mesmo PR cancela a rodada anterior, que já não vale nada.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend checks
+  # A suíte do backend (380 arquivos) levava 21 min num job só. Dividida em 6 partes que rodam ao mesmo tempo,
+  # cada parte leva uns 4 min. Cada parte continua com --maxWorkers=2 (o que deixou o CI estável no #198/#199).
+  backend-parte:
+    name: Backend parte ${{ matrix.parte }}/6
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        parte: [1, 2, 3, 4, 5, 6]
     defaults:
       run:
         working-directory: backend
@@ -33,7 +48,19 @@ jobs:
         run: npm run check
 
       - name: Unit tests
-        run: npm test -- --maxWorkers=2
+        run: npm test -- --maxWorkers=2 --shard=${{ matrix.parte }}/6
+
+  # Mesmo nome de antes ("Backend checks"): só fica verde se as 6 partes passarem.
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    needs: backend-parte
+    if: always()
+    steps:
+      - name: Resultado das 6 partes
+        run: |
+          echo "partes: ${{ needs.backend-parte.result }}"
+          test "${{ needs.backend-parte.result }}" = "success"
 
   frontend:
     name: Frontend checks
@@ -71,4 +98,5 @@ jobs:
           fetch-depth: 0
 
       - name: Check whitespace
+        if: github.event_name == 'pull_request'
         run: git diff --check origin/${{ github.base_ref }}...HEAD
