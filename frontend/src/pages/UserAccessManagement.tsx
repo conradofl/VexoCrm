@@ -85,6 +85,7 @@ import {
   type AccessView,
   type ApprovalLevel,
   type InternalPage,
+  internalPagesForStorage,
 } from "@/lib/access";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -833,12 +834,11 @@ function buildPayload(draft: AccessDraft, clientPlan?: string) {
   };
 }
 
-function estimateClaimsPayloadSize(draft: AccessDraft): number {
+export function estimateClaimsPayloadSize(draft: AccessDraft): number {
   const normalized = normalizeDraft(draft);
-  const effectivePermissions =
-    draft.granularPermissions && draft.granularPermissions.length > 0
-      ? draft.granularPermissions
-      : normalized.permissions;
+  // Mesma regra do buildPayload: usuário interno não envia a matriz granular, só as permissões do preset.
+  const granular = normalized.role === "internal" ? undefined : draft.granularPermissions;
+  const effectivePermissions = granular && granular.length > 0 ? granular : normalized.permissions;
 
   const simulatedClaims = {
     role: normalized.role,
@@ -851,7 +851,8 @@ function estimateClaimsPayloadSize(draft: AccessDraft): number {
     tenantId: normalized.clientIds[0] || null,
     tenantIds: normalized.clientIds,
     allowedViews: normalized.role === "client" ? normalized.allowedViews : [],
-    internalPages: normalized.role === "internal" ? normalized.internalPages : [],
+    internalPages:
+      normalized.role === "internal" ? internalPagesForStorage(normalized.accessPreset, normalized.internalPages) : [],
     allowedModules: normalized.role === "internal" ? (draft.allowedModules || []) : undefined,
     permissions: effectivePermissions,
     companyName: normalized.companyName ? normalized.companyName.trim() : null,
