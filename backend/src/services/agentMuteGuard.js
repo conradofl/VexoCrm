@@ -137,10 +137,11 @@ export async function isChatMarkedPersonal(pool, { clientId, phone }) {
   if (!pool || !clientId || !phone) return false;
   try {
     const res = await pool.query(
-      `SELECT 1 FROM public.whatsapp_chat_states WHERE client_id = $1 AND phone = $2 AND state = 'pessoal' LIMIT 1`,
+      `SELECT state FROM public.whatsapp_chat_states WHERE client_id = $1 AND phone = $2 AND state = 'pessoal' LIMIT 1`,
       [clientId, phone]
     );
-    return res.rows.length > 0;
+    // Confere o valor lido, não só a presença de linha: resposta inesperada nunca cala o robô.
+    return res.rows[0]?.state === "pessoal";
   } catch (err) {
     console.warn("[agentMuteGuard] erro ao consultar isChatMarkedPersonal:", err?.message || err);
     return false;
