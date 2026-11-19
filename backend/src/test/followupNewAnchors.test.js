@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, onTestFinished } from "vitest";
 
 const mockQuery = vi.fn();
 const mockGetSupabase = vi.fn();
@@ -189,6 +189,11 @@ describe("Item 05 — As Três Novas Âncoras no Follow-up", () => {
 
   describe("4. Resolução Dinâmica Integrada em enrollLead", () => {
     it("Lead cadastrado com aniversario_casamento e data_retorno no banco tem os valores recuperados e os jobs agendados sem envio no payload", async () => {
+      // Relógio fixo: o aniversário do fixture (20/11) com envio 1 dia antes cai em 19/11. Sem relógio fixo o teste
+      // quebrava todo ano no dia 19/11 (o passo já passou e é pulado). Data longe dos dois âncoras.
+      vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+      vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
+      onTestFinished(() => vi.useRealTimers());
       mockQuery.mockImplementation(async (sql, params) => {
         if (sql.includes("INSERT INTO followup_schedules")) {
           return { rows: [{ id: "sched-novas-ancoras" }] };
