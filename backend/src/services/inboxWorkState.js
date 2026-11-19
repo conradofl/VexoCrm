@@ -21,7 +21,7 @@
 // 33 s a lista). Pelas grafias: 0,04 ms por conversa, mesmo lead em 1.143 de 1.143 conversas.
 
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_SPELLINGS } from "./canonicalPhone.js";
-import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH, SQL_WORK_QUEUE_MATCH } from "./inboxSqlMatchers.js";
+import { CHAT_STATE_PERSONAL, SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH, SQL_WORK_QUEUE_MATCH } from "./inboxSqlMatchers.js";
 
 export const WORK_STATES = ["esperam", "com_lead", "robo", "esfriaram"];
 export const AWAITING_WINDOW_DAYS = 7;
@@ -241,6 +241,7 @@ export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql 
       )::integer AS esperam_over_threshold,
       count(*) FILTER (WHERE c.is_group IS TRUE AND COALESCE(c.chat_state, 'ativa') != 'lixeira')::integer AS groups_count,
       count(*) FILTER (WHERE c.is_group IS NOT TRUE AND c.chat_state = 'arquivada')::integer AS archived_count,
+      count(*) FILTER (WHERE c.is_group IS NOT TRUE AND c.chat_state = '${CHAT_STATE_PERSONAL}')::integer AS personal_count,
       count(*) FILTER (
         WHERE c.is_group IS NOT TRUE
           AND (c.chat_state = 'automacao' OR (c.chat_state IS NULL AND ${SQL_AUTOMATION_MATCH("c.message_text")}))
@@ -290,7 +291,7 @@ export async function withStatementTimeout(pool, timeoutMs, fn) {
 /**
  * Todos os contadores da coluna, de uma consulta só.
  * @param {(sql: string, params: any[]) => Promise<{rows: any[]}>} query
- * @returns {Promise<{work: Record<string, number>, waitingOverThreshold: number, groups: number, archived: number, automations: number, paused: number}>}
+ * @returns {Promise<{work: Record<string, number>, waitingOverThreshold: number, groups: number, archived: number, personal: number, automations: number, paused: number}>}
  */
 export async function fetchInboxCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql, arrivedNow = null } = {}) {
   const { params, hasChipScope } = baseParams({ clientId, now, robotChips, chipAliases });
@@ -311,6 +312,7 @@ export async function fetchInboxCounts(query, { clientId, now, robotChips, chipA
     waitingOverThreshold: int(row.esperam_over_threshold),
     groups: int(row.groups_count),
     archived: int(row.archived_count),
+    personal: int(row.personal_count),
     automations: int(row.automations_count),
     paused: int(row.paused_count),
   };

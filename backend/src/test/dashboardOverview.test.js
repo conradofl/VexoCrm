@@ -74,6 +74,12 @@ const SCHEMA = `
     created_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE TABLE followup_companies (id uuid PRIMARY KEY, tenant_id text NOT NULL);
+  -- Em produção existe desde 01/09/2026; a cobertura do tempo de resposta lê o estado "pessoal" daqui.
+  CREATE TABLE whatsapp_chat_states (
+    client_id text NOT NULL, phone text NOT NULL, state text NOT NULL DEFAULT 'ativa', reason text, source text, changed_by text,
+    attended_at timestamptz, attended_by text, agent_muted_at timestamptz, agent_muted_reason text, agent_muted_source text,
+    agent_mute_last_human_at timestamptz, PRIMARY KEY (client_id, phone)
+  );
   CREATE TABLE followup_schedules (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id uuid,
@@ -415,6 +421,25 @@ describe("Aba Atendimento: faixas de espera", () => {
     expect(r.waitBuckets).toEqual({ upTo10m: 2, upTo30m: 1, upTo2h: 1, over2h: 1 });
     expect(Object.values(r.waitBuckets).reduce((a, b) => a + b, 0)).toBe(r.answered);
     expect(r.waiting).toBe(1);
+  });
+
+  it("[MUTAÇÃO: tirar o NOT EXISTS de 'pessoal' derruba] conversa marcada como pessoal sai do tempo de resposta e de quem espera", async () => {
+    const TP = "tenant-pessoal-cobertura";
+    const at = (min) => new Date(Date.parse("2026-11-01T10:00:00Z") + min * 60000).toISOString();
+    await db.exec(
+      [
+        msg(TP, "5534994440001", "inbound", at(0), "lead"), // cliente esperando
+        msg(TP, "5534994440002", "inbound", at(0), "lead"), // mãe do dono esperando, marcada pessoal
+        msg(TP, "5534994440003", "inbound", at(0), "lead"), // amigo respondido em 5 min, marcado pessoal
+        msg(TP, "5534994440003", "outbound", at(5), "device"),
+        `INSERT INTO whatsapp_chat_states (client_id, phone, state, source) VALUES ('${TP}', '5534994440002', 'pessoal', 'manual'), ('${TP}', '5534994440003', 'pessoal', 'manual');`,
+      ].join("\n")
+    );
+    const r = await measureFirstHumanResponseCoverage(db, { clientId: TP, ...PERIOD });
+    expect(r.conversations).toBe(1);
+    expect(r.waiting).toBe(1);
+    expect(r.answered).toBe(0);
+    expect(r.medianMinutes).toBeNull();
   });
 
   it("empresa sem conversa: faixas zeradas, sem inventar distribuição", async () => {

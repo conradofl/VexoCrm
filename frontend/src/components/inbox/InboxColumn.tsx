@@ -16,6 +16,7 @@ import {
   Send,
   ShieldAlert,
   SlidersHorizontal,
+  UserX,
   Users, MessageSquarePlus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -33,6 +34,7 @@ export type InboxTab =
   | "hoje"
   | "automacao"
   | "arquivadas"
+  | "pessoais"
   | "pausadas"
   | "grupos"
   | "todas";
@@ -361,6 +363,8 @@ export interface ConversationFlags {
   isAutomation?: boolean;
   automationReason?: string | null;
   isArchived?: boolean;
+  /** Contato pessoal do celular do empresário: fora da fila e do Dashboard. */
+  isPersonal?: boolean;
   isGroup?: boolean;
   transferredTo?: string | null;
   isTransferred?: boolean;
@@ -588,6 +592,11 @@ export function ConversationListItem({
                 <Archive className={icon} />
               </FlagIcon>
             )}
+            {flags.isPersonal && (
+              <FlagIcon title="Conversa pessoal: fora da fila e do Dashboard" className="text-rose-600 dark:text-rose-400">
+                <UserX className={icon} />
+              </FlagIcon>
+            )}
             {flags.agentBarred && (
               <Tag tone="amber" title={`O robô não respondeu: ${flags.agentBarred.longo}. Responda pela equipe; o robô segue ativo nas próximas mensagens.`}>
                 {flags.agentBarred.curto}
@@ -619,7 +628,7 @@ export function ConversationListItem({
   );
 }
 
-/** Rodapé da coluna: Grupos, Automações e Arquivadas. */
+/** Rodapé da coluna: Grupos, Automações, Arquivadas e Pessoais. */
 export function InboxFooterFilters({
   active,
   filters,

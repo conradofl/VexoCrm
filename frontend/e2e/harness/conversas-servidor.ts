@@ -80,6 +80,7 @@ export const COUNTS = {
   automations: 17,
   groups: 72,
   archived: 5,
+  personal: 3,
   paused: 2,
   myUnopened: 0,
   work: { esperam: 14, com_lead: 31, robo: 171, esfriaram: 667 },
@@ -153,6 +154,8 @@ export interface Served {
   /** Lembretes/reuniões gravados, como o servidor de verdade guardaria. */
   reminders: Record<string, unknown>[];
   deletedReminders: string[];
+  /** Mudanças de estado gravadas (uma conversa ou em lote), como o servidor de verdade receberia. */
+  states: { phones: string[]; state: string }[];
 }
 
 export const CHAT_ON_DOWN_CHIP = "5534990000003";
@@ -160,7 +163,7 @@ export const CHAT_ON_REMOVED_CHIP = "5534990000008";
 export const OPTED_OUT_PHONE = "5534977770001";
 
 export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok(route, chatsPage(url.searchParams.get("tab") || "esperam"))) {
-  const served: Served = { sent: [], refused: [], started: [], startRefused: [], tabs: [], reminders: [], deletedReminders: [] };
+  const served: Served = { sent: [], refused: [], started: [], startRefused: [], tabs: [], reminders: [], deletedReminders: [], states: [] };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -168,6 +171,16 @@ export async function serve(page: Page, chats: ChatsHandler = (route, url) => ok
     if (url.pathname === "/api/whatsapp/chats") {
       served.tabs.push(url.searchParams.get("tab") || "");
       return chats(route, url);
+    }
+    if (url.pathname === "/api/whatsapp/chats/state" && req.method() === "POST") {
+      const body = req.postDataJSON();
+      served.states.push({ phones: [String(body.phone)], state: body.state });
+      return json({ success: true, phone: body.phone, state: body.state, reason: body.reason ?? null });
+    }
+    if (url.pathname === "/api/whatsapp/chats/state/bulk" && req.method() === "POST") {
+      const body = req.postDataJSON();
+      served.states.push({ phones: (body.phones || []).map(String), state: body.state });
+      return json({ success: true, count: (body.phones || []).length, state: body.state });
     }
     if (url.pathname === "/api/whatsapp/messages" && req.method() === "POST") {
       const body = req.postDataJSON();

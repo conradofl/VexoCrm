@@ -4,6 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { API_BASE_URL } from "@/lib/api";
 import { orderChatsForTab } from "@/lib/inbox/chatOrder";
 
+/** Estados que a conversa pode ter. "pessoal" = contato do celular do empresário que não é cliente. */
+export type ChatState = "ativa" | "automacao" | "arquivada" | "lixeira" | "pessoal";
+
 export interface WhatsAppChat {
   id: string;
   name: string;
@@ -11,7 +14,7 @@ export interface WhatsAppChat {
   unreadCount: number;
   timestamp: number | null;
   archived: boolean;
-  state?: "ativa" | "automacao" | "arquivada" | "lixeira";
+  state?: ChatState;
   stateReason?: string | null;
   stateSource?: "auto" | "manual";
   isNumberChange?: boolean;
@@ -70,6 +73,8 @@ export interface WhatsAppCounts {
   automations: number;
   groups: number;
   archived: number;
+  /** Conversas marcadas como pessoais: fora da fila e do Dashboard. */
+  personal?: number;
   paused?: number;
   myUnopened?: number;
   work?: WorkStateCounts;
@@ -356,7 +361,7 @@ export function useUpdateChatState(clientId: string | null) {
       reason,
     }: {
       phone: string;
-      state: "ativa" | "automacao" | "arquivada" | "lixeira";
+      state: ChatState;
       reason?: string;
     }) => {
       const token = await getIdToken();
@@ -390,7 +395,7 @@ export function useBulkUpdateChatState(clientId: string | null) {
       reason,
     }: {
       phones: string[];
-      state: "ativa" | "automacao" | "arquivada" | "lixeira";
+      state: ChatState;
       reason?: string;
     }) => {
       const token = await getIdToken();

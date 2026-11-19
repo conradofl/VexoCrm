@@ -90,6 +90,18 @@ describe("escopo de inbound: quem o chatbot pode atender", () => {
     expect(decisao.engage).toBe(false);
     expect(decisao.reason).toBe("conversa_nao_comercial");
   });
+
+  it("conversa marcada como pessoal NAO engaja nem em escopo 'all', lead conhecido ou campanha", async () => {
+    const decisao = shouldEngageInbound({
+      scope: INBOUND_SCOPE_ALL,
+      isKnownLead: true,
+      hasCampaignMatch: true,
+      isPersonal: true,
+    });
+    expect(decisao).toEqual({ engage: false, reason: "conversa_marcada_pessoal" });
+    // Sem a marca, o mesmo caso engaja (prova de que o descarte acima vem dela).
+    expect(shouldEngageInbound({ scope: INBOUND_SCOPE_ALL, isKnownLead: true, hasCampaignMatch: true }).engage).toBe(true);
+  });
 });
 
 describe("[Um agente por chip, Regra 1] chip de campanha não faz atendimento espontâneo", () => {
