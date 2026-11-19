@@ -48,7 +48,12 @@ export const COVERAGE_MIN_PCT = 50;
 // afirmar que descontou alguém quando nada é registrado.
 // `leadFilterSql`: condição extra sobre os leads (alias l), com parâmetros a partir de $3. A tela Leads Parados usa
 // para filtrar por estágio e por responsável sem ter uma segunda conta de "nunca abordado".
-export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
+// Quem entra no número do cartão "nunca abordados" (telefones abordáveis). Uma definição só: a contagem do cartão e
+// a planilha do Plano de ação (lista de nome e telefone) usam esta mesma condição sobre o conjunto f.
+const REACHABLE_NEVER_APPROACHED = "valido AND NOT com_entrada AND NOT com_envio AND NOT opt_tabela AND open_no_opt";
+
+// Conjuntos comuns à contagem e à lista. `withName` traz um nome por telefone (só a lista precisa).
+function baseSlicesCtes({ leadFilterSql = "", withName = false } = {}) {
   return `
     WITH msg AS MATERIALIZED (
       SELECT ${SQL_CANONICAL_PHONE("lm.phone")} AS cphone,
@@ -82,9 +87,9 @@ export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
              COUNT(*) FILTER (WHERE b.estagio_aberto) AS n_open,
              COUNT(*) FILTER (WHERE b.opt_flag) AS n_opt,
              COALESCE(bool_or(b.estagio_aberto AND NOT b.opt_flag), false) AS open_no_opt,
-             COALESCE(bool_or(b.estagio_aberto AND b.opt_flag), false) AS open_opt
+             COALESCE(bool_or(b.estagio_aberto AND b.opt_flag), false) AS open_opt${withName ? ",\n             min(b.nome) AS nome" : ""}
       FROM (
-        SELECT COALESCE(l.telefone, l.phone) AS tel,
+        SELECT COALESCE(l.telefone, l.phone) AS tel,${withName ? "\n               NULLIF(btrim(l.nome), '') AS nome," : ""}
                (${sqlStalledStageCondition("l")}) AS estagio_aberto,
                COALESCE(l.opt_out IS TRUE OR l.metadata->>'opt_out' = 'true' OR l.dados->>'opt_out' = 'true', false) AS opt_flag
         FROM public.leads l
@@ -94,7 +99,7 @@ export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
       GROUP BY b.tel
     ),
     f AS (
-      SELECT t.n, t.n_open, t.n_opt, t.open_no_opt, t.open_opt,
+      SELECT t.tel, t.n, t.n_open, t.n_opt, t.open_no_opt, t.open_opt,${withName ? " t.nome," : ""}
              COALESCE(t.tel ~ '${VALID_CANONICAL_PHONE_REGEX}', false) AS valido,
              (COALESCE(m.teve_saida, false) OR s.cphone IS NOT NULL) AS com_envio,
              COALESCE(m.teve_entrada, false) AS com_entrada,
@@ -103,7 +108,11 @@ export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
       LEFT JOIN msg m ON m.cphone = t.tel
       LEFT JOIN sent_runs s ON s.cphone = t.tel
       LEFT JOIN optout o ON o.cphone = t.tel
-    )
+    )`;
+}
+
+export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
+  return `${baseSlicesCtes({ leadFilterSql })}
     -- Fatias contam LEADS (soma de n); os três últimos contam TELEFONES (uma linha de f é um telefone).
     SELECT
       COALESCE(SUM(n), 0)::int AS base_total,
@@ -113,9 +122,7 @@ export function buildBaseSlicesSql({ leadFilterSql = "" } = {}) {
       COALESCE(SUM(n_open) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio), 0)::int AS slice_never_approached,
       COALESCE(SUM(n - n_open) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio), 0)::int AS slice_closed_no_approach,
       COUNT(*) FILTER (WHERE valido AND NOT com_entrada AND NOT com_envio AND n_open > 0)::int AS never_approached_phones,
-      COUNT(*) FILTER (
-        WHERE valido AND NOT com_entrada AND NOT com_envio AND NOT opt_tabela AND open_no_opt
-      )::int AS reachable_phones,
+      COUNT(*) FILTER (WHERE ${REACHABLE_NEVER_APPROACHED})::int AS reachable_phones,
       COUNT(*) FILTER (
         WHERE valido AND NOT com_entrada AND NOT com_envio AND ((opt_tabela AND n_open > 0) OR open_opt)
       )::int AS optout_discounted_phones,
@@ -167,6 +174,22 @@ export async function measureBaseSlices(pool, { clientId, currentEnd, asOf = cur
   }
   const { rows } = await pool.query(buildBaseSlicesSql({ leadFilterSql: filters.join(" AND ") }), params);
   return buildBaseSlicesResult(rows[0]);
+}
+
+// Planilha do Plano de ação: as pessoas por trás do número do cartão, uma linha por telefone abordável.
+// Mesmos conjuntos e mesma condição da contagem: o número de linhas é o número do cartão.
+export function buildNeverApproachedListSql() {
+  return `${baseSlicesCtes({ withName: true })}
+    SELECT tel AS phone, nome AS name
+    FROM f
+    WHERE ${REACHABLE_NEVER_APPROACHED}
+    ORDER BY nome NULLS LAST, tel;
+  `;
+}
+
+export async function listNeverApproachedReachable(pool, { clientId, asOf = new Date() }) {
+  const { rows } = await pool.query(buildNeverApproachedListSql(), [clientId, iso(asOf)]);
+  return rows.map((row) => ({ phone: row.phone, name: row.name || null }));
 }
 
 // ── 2. Reunião: o Dashboard só LÊ followup_schedules ──────────────────────
@@ -471,7 +494,11 @@ export function buildChipNameResolver(instances) {
   return (alias) => (alias ? names.get(alias) ?? alias : null);
 }
 
-export async function measureQueue(pool, { clientId, now }, { loadModule = () => import("./inboxWorkState.js"), deps = {} } = {}) {
+export async function measureQueue(
+  pool,
+  { clientId, now, oldestLimit = QUEUE_OLDEST_LIMIT },
+  { loadModule = () => import("./inboxWorkState.js"), deps = {} } = {}
+) {
   const queue = await loadModule();
   // Sem a lista de chips o cartão ainda funciona: mostra o nome técnico em vez de falhar.
   const chipName = buildChipNameResolver(await (deps.loadInstances ?? defaultLoadChipInstances)(clientId).catch(() => []));
@@ -481,7 +508,7 @@ export async function measureQueue(pool, { clientId, now }, { loadModule = () =>
     const counts = await queue.fetchInboxCounts(query, options);
     const oldest =
       counts.work.esperam > 0
-        ? await queue.fetchWorkStatePage(query, { ...options, state: "esperam", limit: QUEUE_OLDEST_LIMIT, offset: 0 })
+        ? await queue.fetchWorkStatePage(query, { ...options, state: "esperam", limit: oldestLimit, offset: 0 })
         : [];
     return { counts, oldest };
   };

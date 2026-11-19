@@ -15,6 +15,7 @@ import { registerVexoSalesRoutes } from "./vexoSales/routes.js";
 import { registerLeadsRoutes } from "./leads/routes.js";
 import { registerAiExtractRoutes } from "./leads/aiExtractRoutes.js";
 import { registerInsightsRoutes } from "./insights/routes.js";
+import { registerDashboardPlanRoutes } from "./insights/dashboardPlanRoutes.js";
 import { registerIntegrationsRoutes } from "./integrations/routes.js";
 import { registerChatbotRoutes } from "./chatbot/routes.js";
 import { registerRemindersRoutes } from "./reminders/routes.js";
@@ -46,6 +47,7 @@ export function registerAllDomainRoutes(app) {
 
   registerSuperAdminRoutes(app, routeDeps);
   registerInsightsRoutes(app, routeDeps);
+  registerDashboardPlanRoutes(app);
   registerLeadsRoutes(app, routeDeps);
   registerAiExtractRoutes(app, routeDeps);
   registerIntegrationsRoutes(app, routeDeps);
