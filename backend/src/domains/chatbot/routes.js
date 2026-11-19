@@ -95,6 +95,9 @@ import {
 } from "../../services/agentInboundRecovery.js";
 import { idadeRealMs, marcarMensagemBarrada, mensagemAtrasada } from "../../services/inboundAge.js";
 
+// Empresas cujos chips a Heloísa atende (as mesmas de obterInstanciaWhatsAppAtiva no heloisaEngine).
+const EMPRESAS_DA_HELOISA = new Set(["geracao-digital", "vexo-adm"]);
+
 // Tempo limite do envio pela Evolution. Sem ele, um fetch pendurado segurava o lote (e a conversa) para sempre.
 const ENVIO_EVOLUTION_TIMEOUT_MS = 20_000;
 import {
@@ -3318,11 +3321,23 @@ export function registerChatbotRoutes(app, deps) {
     // para a Heloísa, sem exigir prefixo "heloísa". Se for terceiro/lead, só se o alvo explícito for heloisa.
     // Chips pessoais não são interceptados para manter comunicação humana livre de robôs.
     // CONFIGURAÇÃO LIGA/DESLIGA: Se a Heloísa estiver desativada pelo administrador, não intercepta.
-    if (reprocesso && !fromMe && !isPersonal && (isDirector || isHeloisaTarget)) {
+    // A Heloísa só atende e responde pelos chips da Geração Digital (19/11/2026: o "teste 2" do Conrado para o chip da
+    // Container LED foi interceptado e respondido pelo chip do cliente). Em chip de outra empresa, mensagem de usuário
+    // autorizado segue o caminho normal: Conversas e os portões do agente daquela empresa.
+    const chipDaHeloisa = EMPRESAS_DA_HELOISA.has(String(clientId || "").toLowerCase());
+    if (reprocesso && !fromMe && !isPersonal && chipDaHeloisa && (isDirector || isHeloisaTarget)) {
       descartar("heloisa_fora_da_varredura", { clientId, phone: maskPhoneForLog(phone) });
       return;
     }
-    if (!fromMe && !isPersonal && (isDirector || isHeloisaTarget)) {
+    if (!fromMe && !isPersonal && chipDaHeloisa && (isDirector || isHeloisaTarget)) {
+      // Comando com mais de 30 min (fila solta pela Evolution depois de horas presa) não é executado: a Heloísa
+      // marcaria reunião, cadastraria cliente ou cobraria em cima de um pedido velho. A mensagem já está gravada.
+      const comandoAtrasado = mensagemAtrasada(messageData.messageTimestamp);
+      if (comandoAtrasado) {
+        await marcarMensagemBarrada(pgDatabasePool, { clientId, waMessageId: msgKeyDaEntrada, motivo: "mensagem_atrasada" });
+        descartar("heloisa_mensagem_atrasada", { clientId, phone: maskPhoneForLog(phone), idadeMin: comandoAtrasado.idadeMin });
+        return;
+      }
       const heloisaAtiva = await isHeloisaActive(pgDatabasePool);
       if (!heloisaAtiva) {
         console.log(`[chatbot-webhook] Heloísa está DESATIVADA no Painel de Controle. Mensagem de ${maskPhoneForLog(phone)} seguirá o fluxo padrão/humano.`);
@@ -3447,7 +3462,8 @@ export function registerChatbotRoutes(app, deps) {
 
         // 3. Se um humano responder manualmente pelo celular (fromMe), o silenciamento DO CLASSIFICADOR
         //    se desfaz sozinho. Pausa manual (botão) só sai pelo "Reativar agente".
-        if (fromMe) {
+        // Mensagem do aparelho com mais de 30 min (fila solta pela Evolution) não mexe no agente agora.
+        if (fromMe && !mensagemAtrasada(messageData.messageTimestamp)) {
           await clearAgentMute(pgDatabasePool, { clientId, phone, onlyClassifier: true }).catch((err) => {
             console.warn("[chatbot-webhook] erro ao limpar silenciamento do agente com resposta manual (fromMe):", err?.message || err);
           });
@@ -3477,7 +3493,9 @@ export function registerChatbotRoutes(app, deps) {
       if (explicitClientId && pgDatabasePool) {
         const pausaLigada = (await getLeadClientN8nSettings(clientId).catch(() => null))?.agent_pause_on_device_reply === true;
         const waIdDoEco = messageData.waMessageId || resolveMessageId(body) || null;
-        if (pausaLigada && (await isDeviceTypedMessage(pgDatabasePool, { clientId, waMessageId: waIdDoEco }))) {
+        // Digitada no aparelho há mais de 30 min (chegou atrasada pela Evolution): não pausa agora.
+        const doAparelhoAtrasada = mensagemAtrasada(messageData.messageTimestamp);
+        if (pausaLigada && !doAparelhoAtrasada && (await isDeviceTypedMessage(pgDatabasePool, { clientId, waMessageId: waIdDoEco }))) {
           await pauseAgentOnHumanReply(clientId, phone);
         }
       }
