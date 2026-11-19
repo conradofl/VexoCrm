@@ -189,75 +189,83 @@ describe("Item 05 — As Três Novas Âncoras no Follow-up", () => {
 
   describe("4. Resolução Dinâmica Integrada em enrollLead", () => {
     it("Lead cadastrado com aniversario_casamento e data_retorno no banco tem os valores recuperados e os jobs agendados sem envio no payload", async () => {
-      mockQuery.mockImplementation(async (sql, params) => {
-        if (sql.includes("INSERT INTO followup_schedules")) {
-          return { rows: [{ id: "sched-novas-ancoras" }] };
-        }
-        if (sql.includes("FROM followup_companies")) {
-          return { rows: [{ tenant_id: "geracao-digital" }] };
-        }
-        // Resolução dinâmica de aniversario_casamento
-        if (sql.includes("aniversario_casamento")) {
-          return { rows: [{ aniversario_casamento: "2016-11-20" }] };
-        }
-        // Resolução dinâmica de data_retorno
-        if (sql.includes("data_retorno")) {
-          return { rows: [{ data_retorno: "2027-02-10T14:00:00.000Z" }] };
-        }
-        if (sql.includes("INSERT INTO followup_jobs")) {
-          return { rows: [{ id: `job-${Math.random()}` }] };
-        }
-        return { rows: [] };
-      });
+      // Relógio fixo. Com a data de verdade este teste quebrava todo ano em 19/11: o passo "1 dia antes" do
+      // aniversário de casamento (20/11) caía num horário já passado e era pulado (enqueued 1, não 2).
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-01T12:00:00.000Z"));
+      try {
+        mockQuery.mockImplementation(async (sql, params) => {
+          if (sql.includes("INSERT INTO followup_schedules")) {
+            return { rows: [{ id: "sched-novas-ancoras" }] };
+          }
+          if (sql.includes("FROM followup_companies")) {
+            return { rows: [{ tenant_id: "geracao-digital" }] };
+          }
+          // Resolução dinâmica de aniversario_casamento
+          if (sql.includes("aniversario_casamento")) {
+            return { rows: [{ aniversario_casamento: "2016-11-20" }] };
+          }
+          // Resolução dinâmica de data_retorno
+          if (sql.includes("data_retorno")) {
+            return { rows: [{ data_retorno: "2027-02-10T14:00:00.000Z" }] };
+          }
+          if (sql.includes("INSERT INTO followup_jobs")) {
+            return { rows: [{ id: `job-${Math.random()}` }] };
+          }
+          return { rows: [] };
+        });
 
-      const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          order: vi.fn().mockResolvedValue({
-            data: [
-              {
-                id: "step-1",
-                name: "Casamento Parabéns",
-                order_index: 0,
-                trigger_type: "before_anchor",
-                anchor_field: "aniversario_casamento",
-                trigger_value: 1,
-                trigger_unit: "days",
-                is_active: true,
-              },
-              {
-                id: "step-2",
-                name: "Pós Retorno",
-                order_index: 1,
-                trigger_type: "after_anchor",
-                anchor_field: "data_retorno",
-                trigger_value: 3,
-                trigger_unit: "days",
-                is_active: true,
-              },
-            ],
-            error: null,
+        const supabase = {
+          from: vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockResolvedValue({
+              data: [
+                {
+                  id: "step-1",
+                  name: "Casamento Parabéns",
+                  order_index: 0,
+                  trigger_type: "before_anchor",
+                  anchor_field: "aniversario_casamento",
+                  trigger_value: 1,
+                  trigger_unit: "days",
+                  is_active: true,
+                },
+                {
+                  id: "step-2",
+                  name: "Pós Retorno",
+                  order_index: 1,
+                  trigger_type: "after_anchor",
+                  anchor_field: "data_retorno",
+                  trigger_value: 3,
+                  trigger_unit: "days",
+                  is_active: true,
+                },
+              ],
+              error: null,
+            }),
           }),
-        }),
-      };
-      mockGetSupabase.mockReturnValue(supabase);
+        };
+        mockGetSupabase.mockReturnValue(supabase);
 
-      const campaign = { id: "camp-full-anchors", company_id: "comp-1" };
-      const enrollResult = await enrollLead(campaign, {
-        lead_name: "Renata e Bruno",
-        phone: "34988776655",
-      });
+        const campaign = { id: "camp-full-anchors", company_id: "comp-1" };
+        const enrollResult = await enrollLead(campaign, {
+          lead_name: "Renata e Bruno",
+          phone: "34988776655",
+        });
 
-      expect(enrollResult.enqueued).toBe(2);
-      expect(enrollResult.skippedSteps).toHaveLength(0);
+        expect(enrollResult.enqueued).toBe(2);
+        expect(enrollResult.skippedSteps).toHaveLength(0);
 
-      // Confirma que ambas as colunas foram buscadas na tabela do lead
-      const casamentoQuery = mockQuery.mock.calls.find((c) => c[0].includes("aniversario_casamento"));
-      expect(casamentoQuery).toBeDefined();
+        // Confirma que ambas as colunas foram buscadas na tabela do lead
+        const casamentoQuery = mockQuery.mock.calls.find((c) => c[0].includes("aniversario_casamento"));
+        expect(casamentoQuery).toBeDefined();
 
-      const retornoQuery = mockQuery.mock.calls.find((c) => c[0].includes("data_retorno"));
-      expect(retornoQuery).toBeDefined();
+        const retornoQuery = mockQuery.mock.calls.find((c) => c[0].includes("data_retorno"));
+        expect(retornoQuery).toBeDefined();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
