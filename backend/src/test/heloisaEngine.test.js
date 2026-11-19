@@ -416,8 +416,10 @@ describe("Agendamento, Fuso Horário e Auditoria (Moacir, Timezone -03:00, Googl
 
       expect(res.sucesso).toBe(true);
       expect(res.meet_url).toMatch(/^https:\/\/meet\.google\.com\//);
-      expect(res.participantes).toContain("conradofinzi@gmail.com");
-      expect(res.participantes).toContain("caioalmeidamrk@gmail.com");
+      // Regra desde 08d2a3ac (decisão do Conrado, 19/11/2026): "Reunião de Diretoria" sem destinatário convida só o
+      // Conrado, pelo e-mail oficial dele. O Caio só entra se for pedido ("com a diretoria", "com o Caio").
+      expect(res.participantes).toEqual(["conradofl@gmail.com"]);
+      expect(res.participantes).not.toContain("caioalmeidamrk@gmail.com");
     });
 
     it("4. registrarExecucaoHeloisa utiliza console.error ao invés de ignorar ou warn", async () => {

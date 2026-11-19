@@ -188,7 +188,7 @@ describe("gerador do plano do dia: travas", () => {
     const daCampanha = porCampanha(items, "c1");
     expect(daCampanha).toHaveLength(1);
     expect(daCampanha[0]).toMatchObject({ action: "pausar", level: "ad", entityId: "pior" });
-    expect(daCampanha[0].reason).toContain("Outros 1 anúncios da campanha também estão para cortar");
+    expect(daCampanha[0].reason).toContain("Outro anúncio da campanha também está para cortar e fica para o próximo plano");
   });
 
   it("uma mudança por dia por campanha: mudança aplicada hoje, aprovada sem aplicar ou proposta pendente bloqueiam a campanha", async () => {
