@@ -7,6 +7,7 @@ import Aquecimento from "./Aquecimento";
 import EvolutionAdmin from "./EvolutionAdmin";
 import { ChipsHealthReport } from "@/components/chips/ChipsHealthReport";
 import { ChipDiary } from "@/components/chips/ChipDiary";
+import { ChipAlertBanner } from "@/components/chips/ChipAlertBanner";
 import { SendWindowSettings } from "@/components/chips/SendWindowSettings";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
@@ -103,6 +104,8 @@ export default function ChipsWhatsapp() {
               </span>
             )}
           </div>
+
+          <ChipAlertBanner clientId={crmClient?.selectedClient?.id ?? null} />
 
           <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
             <div className="border-b border-slate-200 dark:border-white/10 pb-2">

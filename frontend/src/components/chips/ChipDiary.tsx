@@ -5,6 +5,8 @@
 import { Plug, Unplug } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useChipDiary, type ChipDiaryEvent, type ChipDiaryReport, type ChipDiarySnapshot } from "@/hooks/useReports";
+import { useChipAlerts, type ChipAlertsReport } from "@/hooks/useChipAlerts";
+import { ChipAlertBannerView } from "./ChipAlertBanner";
 
 const TZ = "America/Sao_Paulo";
 
@@ -94,7 +96,17 @@ function EventoDoDiario({ ev }: { ev: ChipDiaryEvent }) {
   );
 }
 
-export function ChipDiaryView({ data, isLoading, error }: { data?: ChipDiaryReport; isLoading?: boolean; error?: unknown }) {
+export function ChipDiaryView({
+  data,
+  isLoading,
+  error,
+  alertas,
+}: {
+  data?: ChipDiaryReport;
+  isLoading?: boolean;
+  error?: unknown;
+  alertas?: ChipAlertsReport;
+}) {
   let corpo: JSX.Element;
   if (isLoading) {
     corpo = <p className="text-sm text-muted-foreground">Carregando o diário do chip...</p>;
@@ -133,12 +145,16 @@ export function ChipDiaryView({ data, isLoading, error }: { data?: ChipDiaryRepo
           Quedas e voltas de cada chip, com o motivo que a Evolution informou e o que o Vexo enviou antes da queda.
         </CardDescription>
       </CardHeader>
-      <CardContent>{corpo}</CardContent>
+      <CardContent>
+        <ChipAlertBannerView data={alertas} compact className="mb-3" />
+        {corpo}
+      </CardContent>
     </Card>
   );
 }
 
 export function ChipDiary({ clientId }: { clientId: string | null }) {
   const { data, isLoading, error } = useChipDiary(clientId);
-  return <ChipDiaryView data={data} isLoading={isLoading} error={error} />;
+  const { data: alertas } = useChipAlerts(clientId);
+  return <ChipDiaryView data={data} isLoading={isLoading} error={error} alertas={alertas} />;
 }

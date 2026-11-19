@@ -135,3 +135,26 @@ export function phoneMatches(a, b) {
   if (!canonicalA || !canonicalB) return false;
   return canonicalA === canonicalB;
 }
+
+/**
+ * Formas de busca de um telefone digitado na busca de Conversas (19/11/2026): só os dígitos, sem o 55, com e sem o
+ * nono dígito. A busca antiga comparava o texto cru com o telefone salvo: "(34) 98410-6585" ou "3484106585" não
+ * achavam a conversa 5534984106585. A listagem usa cada forma como `%forma%` sobre os dígitos do telefone.
+ *   "(34) 98410-6585" -> ["34984106585", "3484106585"]
+ *   "553484106585"    -> ["3484106585", "34984106585"]
+ *   "84106585"        -> ["84106585", "984106585"]
+ * Vazio quando o texto tem letra (é busca por nome ou por mensagem) ou menos de 8 dígitos.
+ */
+export function variantesDeBuscaPorTelefone(texto) {
+  const s = String(texto ?? "").trim();
+  if (!s || /\p{L}/u.test(s)) return [];
+  let d = s.replace(/\D/g, "");
+  if (d.length < 8 || d.length > 13) return [];
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) d = d.slice(2);
+  const formas = [d];
+  if (d.length === 11 && /^[1-9]{2}9[6-9]/.test(d)) formas.push(d.slice(0, 2) + d.slice(3)); // DD 9XXXX-XXXX -> sem o 9
+  else if (d.length === 10 && /^[1-9]{2}[6-9]/.test(d)) formas.push(`${d.slice(0, 2)}9${d.slice(2)}`); // DD XXXX-XXXX -> com o 9
+  else if (d.length === 9 && /^9[6-9]/.test(d)) formas.push(d.slice(1));
+  else if (d.length === 8 && /^[6-9]/.test(d)) formas.push(`9${d}`);
+  return formas;
+}
