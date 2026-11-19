@@ -1,6 +1,6 @@
 // Aba Metas e regras: o perfil da empresa. Nível de autonomia aparece com as
-// três opções, só "Relatório" habilitada. O servidor recusa as outras duas de
-// qualquer forma.
+// três opções; habilitadas só as que o servidor diz estarem disponíveis
+// (Fase 2: Relatório e Sugere). O servidor recusa "aplica" de qualquer forma.
 import { useEffect, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -72,6 +72,7 @@ export function MetasTab({ clientId }: { clientId: string }) {
   const [monthlyCap, setMonthlyCap] = useState("");
   const [maxIncrease, setMaxIncrease] = useState("");
   const [approvers, setApprovers] = useState<TrafficApprover[]>([]);
+  const [autonomy, setAutonomy] = useState<TrafficAutonomy>("relatorio");
 
   useEffect(() => {
     if (!data) return;
@@ -85,6 +86,7 @@ export function MetasTab({ clientId }: { clientId: string }) {
     setMonthlyCap(toText(p.monthlyBudgetCap));
     setMaxIncrease(toText(p.maxIncreasePct));
     setApprovers(p.approvers);
+    setAutonomy(p.autonomyLevel);
   }, [data]);
 
   if (isLoading) {
@@ -131,8 +133,10 @@ export function MetasTab({ clientId }: { clientId: string }) {
         dailyBudgetCap: toNumber(dailyCap),
         monthlyBudgetCap: toNumber(monthlyCap),
         maxIncreasePct: toNumber(maxIncrease) ?? 50,
-        autonomyLevel: "relatorio",
-        approvers: approvers.filter((approver) => approver.name.trim()),
+        autonomyLevel: autonomy,
+        approvers: approvers
+          .filter((approver) => approver.name.trim())
+          .map((approver) => (approver.email?.trim() ? { ...approver, email: approver.email.trim() } : { name: approver.name, role: approver.role })),
       });
       toast.success("Metas e regras salvas.");
     } catch (err) {
@@ -256,13 +260,18 @@ export function MetasTab({ clientId }: { clientId: string }) {
           </div>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Tetos e aumento máximo ficam guardados para as próximas fases. Nesta fase nenhuma verba é alterada.
+          No nível "Sugere", o plano do dia respeita estes tetos, o aumento máximo e o mínimo de R$ 10 por dia. Nenhuma verba é alterada pelo Vexo.
         </p>
       </section>
 
       <section className="rounded-2xl border bg-card/60 p-4">
         <h2 className="font-medium">Nível de autonomia</h2>
-        <RadioGroup value="relatorio" className="mt-3 space-y-2" aria-label="Nível de autonomia">
+        <RadioGroup
+          value={autonomy}
+          onValueChange={(value) => setAutonomy(value as TrafficAutonomy)}
+          className="mt-3 space-y-2"
+          aria-label="Nível de autonomia"
+        >
           {data.autonomy.levels.map((level) => {
             const available = data.autonomy.available.includes(level);
             return (
@@ -284,17 +293,28 @@ export function MetasTab({ clientId }: { clientId: string }) {
       <section className="rounded-2xl border bg-card/60 p-4">
         <h2 className="font-medium">Aprovadores</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Quando houver ação, ela só vale com o gestor da GD e o cliente aprovando. Nesta fase a lista fica só registrada.
+          Cada item do plano só vale com o gestor da GD e o cliente aprovando, por pessoas diferentes. O email precisa ser o mesmo do login no
+          Vexo: é por ele que o servidor sabe de que lado a pessoa aprova. Sem email, a pessoa aparece na lista mas não aprova.
         </p>
         <div className="mt-3 space-y-2">
           {approvers.map((approver, index) => (
-            <div key={index} className="grid gap-2 sm:grid-cols-[1fr_200px_auto]">
+            <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_180px_auto]">
               <Input
                 aria-label={`Nome do aprovador ${index + 1}`}
                 placeholder="Nome"
                 value={approver.name}
                 maxLength={80}
                 onChange={(e) => setApprovers((list) => list.map((item, i) => (i === index ? { ...item, name: e.target.value } : item)))}
+              />
+              <Input
+                aria-label={`Email do aprovador ${index + 1}`}
+                placeholder="Email do login"
+                type="email"
+                inputMode="email"
+                autoComplete="off"
+                value={approver.email || ""}
+                maxLength={160}
+                onChange={(e) => setApprovers((list) => list.map((item, i) => (i === index ? { ...item, email: e.target.value } : item)))}
               />
               <select
                 aria-label={`Papel do aprovador ${index + 1}`}

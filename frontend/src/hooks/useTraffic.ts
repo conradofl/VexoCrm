@@ -50,9 +50,13 @@ export interface TrafficProfileKpi {
   min_spend: number | null;
 }
 
+export type TrafficApproverRole = "gestor_gd" | "cliente";
+
 export interface TrafficApprover {
   name: string;
-  role: "gestor_gd" | "cliente";
+  role: TrafficApproverRole;
+  /** Email do login. É por ele que o servidor sabe de que lado a pessoa aprova. */
+  email?: string;
 }
 
 export interface TrafficProfile {
@@ -279,6 +283,178 @@ export function useSaveTrafficProfile(clientId: string | undefined) {
       queryClient.invalidateQueries({ queryKey: ["trafficProfile", clientId] });
       queryClient.invalidateQueries({ queryKey: ["trafficPerformance", clientId] });
     },
+  });
+}
+
+// ─── Plano do dia e aprovação dupla (Fase 2). Nada é aplicado em plataforma. ─
+
+export type TrafficPlanAction = "pausar" | "reduzir_verba" | "aumentar_verba" | "manter";
+export type TrafficPlanItemStatus = "proposto" | "aprovado_gd" | "aprovado_cliente" | "aprovado" | "recusado" | "expirado";
+
+export interface TrafficPlanStamp {
+  email: string | null;
+  at: string;
+}
+
+export interface TrafficPlanItem {
+  id: string;
+  planId: string;
+  platform: TrafficPlatform;
+  accountId: string;
+  level: "campaign" | "adset" | "ad";
+  entityId: string;
+  entityName: string | null;
+  campaignId: string | null;
+  campaignName: string | null;
+  action: TrafficPlanAction;
+  currentValue: number | null;
+  proposedValue: number | null;
+  kpi: { key: string | null; value: number | null; target: number | null };
+  decision: TrafficDecisionKey | null;
+  reason: string;
+  window: { since: string; until: string };
+  status: TrafficPlanItemStatus;
+  expiresAt: string;
+  approvals: { gestor_gd: TrafficPlanStamp | null; cliente: TrafficPlanStamp | null };
+  rejection: (TrafficPlanStamp & { role: TrafficApproverRole; reason: string }) | null;
+  applied: TrafficPlanStamp | null;
+}
+
+export interface TrafficPlanSkipped {
+  platform: TrafficPlatform;
+  campaignId: string | null;
+  campaignName: string | null;
+  reason: string;
+}
+
+export interface TrafficPlan {
+  id: string;
+  date: string;
+  windowDays: number;
+  window: { since: string; until: string };
+  primaryKpi: string;
+  dataCollectedAt: string;
+  generatedBy: "agendador" | "pessoa";
+  generatedAt: string;
+  expiresAt: string;
+  summary: {
+    primaryKpiLabel?: string;
+    primaryKpiUnit?: TrafficKpiUnit | null;
+    target?: number;
+    maxIncreasePct?: number;
+    minDailyBudget?: number;
+    caps?: {
+      daily: number | null;
+      monthly: number | null;
+      monthToDate: number | null;
+      monthlyAllowedDaily: number | null;
+      effective: number | null;
+      currentTotal: number;
+      shortfall: number | null;
+    };
+    skipped?: TrafficPlanSkipped[];
+  };
+}
+
+export interface TrafficPlanToday {
+  plan: TrafficPlan | null;
+  items: TrafficPlanItem[];
+  applyQueue: TrafficPlanItem[];
+  autonomyLevel: TrafficAutonomy;
+  myRoles: TrafficApproverRole[];
+}
+
+export interface TrafficPlanHistoryEntry extends TrafficPlan {
+  counts: Partial<Record<TrafficPlanItemStatus, number>>;
+}
+
+export function useTrafficPlanToday(clientId: string | undefined, enabled = true) {
+  const { isAuthenticated } = useAuth();
+  const request = useTrafficRequest();
+  return useQuery({
+    queryKey: ["trafficPlanToday", clientId],
+    enabled: isAuthenticated && Boolean(clientId) && enabled,
+    queryFn: () =>
+      request<TrafficPlanToday>(
+        `/api/traffic/plans/today?${new URLSearchParams({ clientId: clientId as string })}`,
+        "traffic-plan-today",
+        "Erro ao carregar o plano do dia"
+      ),
+  });
+}
+
+export function useTrafficPlanHistory(clientId: string | undefined, enabled = true) {
+  const { isAuthenticated } = useAuth();
+  const request = useTrafficRequest();
+  return useQuery({
+    queryKey: ["trafficPlanHistory", clientId],
+    enabled: isAuthenticated && Boolean(clientId) && enabled,
+    queryFn: () =>
+      request<{ plans: TrafficPlanHistoryEntry[] }>(
+        `/api/traffic/plans?${new URLSearchParams({ clientId: clientId as string, limit: "30" })}`,
+        "traffic-plan-history",
+        "Erro ao carregar o histórico de planos"
+      ),
+  });
+}
+
+function usePlanInvalidation(clientId: string | undefined) {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ["trafficPlanToday", clientId] });
+    queryClient.invalidateQueries({ queryKey: ["trafficPlanHistory", clientId] });
+  };
+}
+
+export function useGenerateTrafficPlan(clientId: string | undefined) {
+  const request = useTrafficRequest();
+  const invalidate = usePlanInvalidation(clientId);
+  return useMutation({
+    mutationFn: () =>
+      request<{ plan: TrafficPlan; items: TrafficPlanItem[] }>("/api/traffic/plans/generate", "traffic-plan-generate", "Não foi possível gerar o plano", {
+        method: "POST",
+        body: JSON.stringify({ clientId }),
+      }),
+    onSuccess: invalidate,
+  });
+}
+
+export function useApproveTrafficPlanItem(clientId: string | undefined) {
+  const request = useTrafficRequest();
+  const invalidate = usePlanInvalidation(clientId);
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: TrafficApproverRole }) =>
+      request<{ item: TrafficPlanItem }>(`/api/traffic/plan-items/${id}/approve`, "traffic-plan-approve", "Não foi possível aprovar", {
+        method: "POST",
+        body: JSON.stringify({ role }),
+      }),
+    onSettled: invalidate,
+  });
+}
+
+export function useRejectTrafficPlanItem(clientId: string | undefined) {
+  const request = useTrafficRequest();
+  const invalidate = usePlanInvalidation(clientId);
+  return useMutation({
+    mutationFn: ({ id, role, reason }: { id: string; role: TrafficApproverRole; reason: string }) =>
+      request<{ item: TrafficPlanItem }>(`/api/traffic/plan-items/${id}/reject`, "traffic-plan-reject", "Não foi possível recusar", {
+        method: "POST",
+        body: JSON.stringify({ role, reason }),
+      }),
+    onSettled: invalidate,
+  });
+}
+
+export function useMarkTrafficPlanItemApplied(clientId: string | undefined) {
+  const request = useTrafficRequest();
+  const invalidate = usePlanInvalidation(clientId);
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      request<{ item: TrafficPlanItem }>(`/api/traffic/plan-items/${id}/applied`, "traffic-plan-applied", "Não foi possível marcar como aplicado", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onSettled: invalidate,
   });
 }
 

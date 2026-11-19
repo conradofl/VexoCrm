@@ -1,6 +1,6 @@
-// Gestor de Tráfego, Fase 1: só leitura. A tela mostra conexão, metas e
-// desempenho com a decisão sugerida por anúncio. Nada daqui é aplicado em
-// plataforma nenhuma.
+// Gestor de Tráfego: conexão, metas, desempenho com a decisão sugerida por
+// anúncio e, na Fase 2, o plano do dia com aprovação dupla. Nada daqui é
+// aplicado em plataforma nenhuma.
 import { useSearchParams } from "react-router-dom";
 import { ShieldAlert } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,8 +11,9 @@ import { useTrafficAccess } from "@/hooks/useTraffic";
 import { ConexaoTab } from "./Trafego/ConexaoTab";
 import { MetasTab } from "./Trafego/MetasTab";
 import { DesempenhoTab } from "./Trafego/DesempenhoTab";
+import { PlanoTab } from "./Trafego/PlanoTab";
 
-const TABS = ["conexao", "metas", "desempenho"] as const;
+const TABS = ["conexao", "metas", "desempenho", "plano"] as const;
 type TabKey = (typeof TABS)[number];
 
 export default function Trafego() {
@@ -34,7 +35,7 @@ export default function Trafego() {
   return (
     <PageShell
       title="Tráfego"
-      subtitle="Meta e Google Ads por empresa. Nesta fase o Vexo só lê e sugere: nada é alterado nas plataformas."
+      subtitle="Meta e Google Ads por empresa. O Vexo lê, sugere e pede aprovação: nada é alterado nas plataformas."
     >
       {access.isLoading ? (
         <div className="rounded-2xl border bg-card/60 p-8 text-center text-sm text-muted-foreground" role="status">
@@ -57,10 +58,11 @@ export default function Trafego() {
         </div>
       ) : (
         <Tabs value={tab} onValueChange={changeTab} className="space-y-4">
-          <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-flex sm:w-auto">
+          <TabsList className="grid h-auto w-full grid-cols-2 sm:inline-flex sm:w-auto">
             <TabsTrigger value="conexao">Conexão</TabsTrigger>
             <TabsTrigger value="metas">Metas e regras</TabsTrigger>
             <TabsTrigger value="desempenho">Desempenho</TabsTrigger>
+            <TabsTrigger value="plano">Plano e aprovações</TabsTrigger>
           </TabsList>
           <TabsContent value="conexao">
             <ConexaoTab clientId={clientId} />
@@ -70,6 +72,9 @@ export default function Trafego() {
           </TabsContent>
           <TabsContent value="desempenho">
             <DesempenhoTab clientId={clientId} onGoToTab={changeTab} />
+          </TabsContent>
+          <TabsContent value="plano">
+            <PlanoTab clientId={clientId} onGoToTab={changeTab} />
           </TabsContent>
         </Tabs>
       )}
