@@ -1,4 +1,5 @@
 import { motivoAgenteBarrado } from "@/lib/agentBarred";
+import { ChipAlertBanner } from "@/components/chips/ChipAlertBanner";
 import { describeMessageLabel } from "@/lib/inbox/messageLabel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -2384,6 +2385,7 @@ export default function WhatsAppInbox({
               mobileView === "chat" ? "hidden md:flex" : "flex"
             )}
           >
+            <ChipAlertBanner clientId={clientId} compact className="mx-3 mt-3" />
             <InboxSearchRow
               search={searchQuery}
               onSearchChange={setSearchQuery}

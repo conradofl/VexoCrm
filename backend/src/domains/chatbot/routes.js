@@ -35,7 +35,9 @@ import {
   saveMediaBuffer,
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
-import { SQL_CANONICAL_PHONE } from "../../services/canonicalPhone.js";
+import { SQL_CANONICAL_PHONE, variantesDeBuscaPorTelefone } from "../../services/canonicalPhone.js";
+import { mapaDeLidTemTelefone, registrarLidDoWebhook, telefoneRealDoLid } from "../../services/lidMap.js";
+import { listarAlertasDeChip } from "../../services/chipAlerts.js";
 import { isDeviceTypedMessage, registerSystemSentFromResponse } from "../../services/systemSentMessages.js";
 import { isPhoneOptedOut } from "../../services/optOut.js";
 import { captureOptOutFromInbound } from "../../services/optOutCapture.js";
@@ -733,6 +735,21 @@ export function registerChatbotRoutes(app, deps) {
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
   });
+  // GET /api/whatsapp/chip-alerts: chip conectado que recebe com mais de 30 min de atraso ou ficou mudo num horário em
+  // que costuma receber (services/chipAlerts.js). Aparece em Conversas, Canais & Chips e no Diário do chip. Mesmo
+  // portão e mesmo escopo de empresa de Conversas. Só leitura.
+  app.get("/api/whatsapp/chip-alerts", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.query.clientId));
+    if (!clientId) return;
+    try {
+      const chips = await getLeadClientEvolutionInstances(clientId).catch(() => []);
+      res.json(await listarAlertasDeChip(pgDatabasePool, clientId, { chips: Array.isArray(chips) ? chips : [] }));
+    } catch (err) {
+      sendError(res, 500, "CHIP_ALERTS_FAILED", err instanceof Error ? err.message : "Failed");
+    }
+  });
+
   app.get("/api/whatsapp/chats", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     if (!ensureDb(res)) return;
     try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS instance_name VARCHAR(150);").catch(() => {}); } catch(e) {}
@@ -827,6 +844,26 @@ export function registerChatbotRoutes(app, deps) {
       if (search) {
         queryParams.push(`%${search}%`);
         const searchIdx = queryParams.length;
+        // Número digitado de qualquer jeito ("(34) 98410-6585", sem o nono dígito, com 55): compara só os dígitos, com
+        // e sem o nono dígito, no telefone da conversa e no telefone real de uma conversa salva pelo LID
+        // (whatsapp_lid_map). Antes, só o texto cru era comparado e essas conversas não apareciam (19/11/2026).
+        const formasDoNumero = variantesDeBuscaPorTelefone(search);
+        let numeroFilter = "";
+        if (formasDoNumero.length > 0) {
+          queryParams.push(formasDoNumero.map((f) => `%${f}%`));
+          const numIdx = queryParams.length;
+          numeroFilter = `
+          OR regexp_replace(COALESCE(m.phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])
+          OR regexp_replace(COALESCE(m.raw_phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])`;
+          // Só com a coluna phone no mapa (information_schema): sem ela, a busca inteira quebraria.
+          if (await mapaDeLidTemTelefone(pgDatabasePool)) {
+            numeroFilter += `
+          OR split_part(m.raw_phone, '@', 1) IN (
+            SELECT split_part(lb.lid, '@', 1) FROM public.whatsapp_lid_map lb
+            WHERE regexp_replace(COALESCE(lb.phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])
+          )`;
+          }
+        }
         // Busca ampla por nome, telefone canônico, telefone bruto, texto da mensagem ou pushName
         searchFilter = `AND (
           LOWER(COALESCE(l.nome, '')) LIKE $${searchIdx}
@@ -834,7 +871,7 @@ export function registerChatbotRoutes(app, deps) {
           OR m.raw_phone LIKE $${searchIdx}
           OR LOWER(COALESCE(m.message_text, '')) LIKE $${searchIdx}
           OR LOWER(COALESCE(m.contact_name, '')) LIKE $${searchIdx}
-          OR LOWER(COALESCE(lm.contact_name, '')) LIKE $${searchIdx}
+          OR LOWER(COALESCE(lm.contact_name, '')) LIKE $${searchIdx}${numeroFilter}
         ) AND COALESCE(cs.state, 'ativa') != 'lixeira'`;
       } else {
         if (rawTab === "grupos") {
@@ -3199,10 +3236,17 @@ export function registerChatbotRoutes(app, deps) {
     );
     const clientId = explicitClientId || "outlier";
 
-    const phone = sanitizePhone(
+    // Conversa identificada por LID: a Evolution manda o telefone real em key.remoteJidAlt (ou senderPn). Usa o
+    // telefone real e guarda o par LID -> telefone. Sem isso, LID de 15 dígitos era descartado como "missing_phone"
+    // e LID de 14 dígitos virava um "telefone" que a busca de Conversas não achava (19/11/2026).
+    const identificadorDaConversa =
       body.phone || body.telefone || body.remoteJid ||
-      body.data?.key?.remoteJid || body.senderJid
-    );
+      body.data?.key?.remoteJid || body.senderJid;
+    const lidComTelefone = telefoneRealDoLid(body, identificadorDaConversa);
+    const phone = sanitizePhone(lidComTelefone ? lidComTelefone.phone : identificadorDaConversa);
+    if (lidComTelefone && phone) {
+      await registrarLidDoWebhook(pgDatabasePool, { lid: lidComTelefone.lid, phone });
+    }
 
     if (!phone) {
       const duracaoMs = Date.now() - startTime;
