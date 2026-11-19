@@ -49,7 +49,7 @@ export default function Dashboard({
   // A Visão geral é a entrada; o detalhe de cada assunto mora na sua aba.
   const [tab, setTab] = useState<DashboardTab>("overview");
 
-  const { data, isLoading, error } = useDashboard(effectiveClientId, period, range);
+  const { data, isLoading, error, refreshingInBackground } = useDashboard(effectiveClientId, period, range);
   const refreshMutation = useRefreshDashboard(effectiveClientId);
 
   const periodLabel = useMemo(() => {
@@ -77,7 +77,7 @@ export default function Dashboard({
   const normalizedCacheStatus =
     data?.cacheStatus === "error"
       ? "failed"
-      : refreshMutation.isPending
+      : refreshMutation.isPending || refreshingInBackground
       ? "updating"
       : "ready";
 
@@ -141,7 +141,7 @@ export default function Dashboard({
             {tab === "attendance" && <AttendanceTab data={data} periodLabel={periodLabel} />}
             {tab === "base" && <BaseTab data={data} periodLabel={periodLabel} />}
             {tab === "chips" && <ChipsTab data={data} periodLabel={periodLabel} />}
-            {tab === "plan" && <PlanTab data={data} clientId={effectiveClientId} companyName={resolvedClientName} />}
+            {tab === "plan" && <PlanTab data={data} clientId={effectiveClientId} companyName={resolvedClientName} period={period} range={range} />}
           </>
         ) : data ? (
           // Payload gravado antes da Visão geral existir: não há o que mostrar até o próximo recálculo.
