@@ -363,7 +363,11 @@ export async function generatePlan(pool, clientId, { now = new Date(), generated
             decision: worst.decision.decisao,
             reason:
               `${worst.decision.motivo} Proposta: pausar este anúncio.` +
-              (others > 0 ? ` Outros ${others} anúncios da campanha também estão para cortar e ficam para o próximo plano (uma mudança por dia).` : ""),
+              (others === 1
+                ? " Outro anúncio da campanha também está para cortar e fica para o próximo plano (uma mudança por dia)."
+                : others > 1
+                  ? ` Outros ${others} anúncios da campanha também estão para cortar e ficam para o próximo plano (uma mudança por dia).`
+                  : ""),
             numbers: { ad: worst.decision.numeros, adMetrics: worst.metrics, counts },
           });
         }
