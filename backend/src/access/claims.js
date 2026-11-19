@@ -897,10 +897,32 @@ export function mergeManagedClaims(existingClaims = {}, managedClaims = {}) {
     delete preserved[key];
   }
 
-  return {
+  return omitDefaultInternalPages({
     ...preserved,
     ...managedClaims,
-  };
+  });
+}
+
+// O Firebase recusa claims acima de 1000 bytes; só a lista de telas do Gestor ocupa ~530 (o preset
+// inteiro dava 1262 e ninguém conseguia ser cadastrado como Gestor). Quando a lista é igual à do
+// preset ela não vai para o login: extractManagedAccessClaims aqui e buildAccessProfile no frontend
+// devolvem as telas do preset quando a lista falta. Lista diferente da do preset vai inteira.
+function omitDefaultInternalPages(claims) {
+  if (normalizeRole(claims.role) !== "internal" || !Array.isArray(claims.internalPages)) {
+    return claims;
+  }
+
+  const preset = normalizeAccessPreset(claims.accessPreset, "internal");
+  const defaults = buildPresetDefaults(preset).internalPages;
+  const stored = new Set(normalizeStringArray(claims.internalPages).map((item) => item.toLowerCase()));
+  const sameAsPreset = stored.size === defaults.length && defaults.every((page) => stored.has(page));
+
+  if (!sameAsPreset) {
+    return claims;
+  }
+
+  const { internalPages: _omitted, ...compact } = claims;
+  return compact;
 }
 
 export function buildManagedClaims({
