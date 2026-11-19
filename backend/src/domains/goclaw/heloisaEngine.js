@@ -865,7 +865,7 @@ export async function executarCobrarColaborador({ colaborador, mensagem }, pool 
 }
 
 export async function executarAgendarCompromisso(
-  { titulo, data_hora, local_ou_link, participantes_extras },
+  { titulo, data_hora, local_ou_link, participantes_extras, agenda_alvo },
   pool = pgDatabasePool,
   instanceName = "vexo-adm-vexo-atende",
   diretorSolicitante = null
@@ -913,85 +913,139 @@ export async function executarAgendarCompromisso(
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
     const extrasStr = String(participantes_extras || "").trim();
     const tituloStr = String(titulo || "").trim();
-    const textoCompleto = `${tituloStr} ${extrasStr}`;
+    const targetHint = String(agenda_alvo || "").trim();
+    const textoCompleto = `${tituloStr} ${extrasStr} ${targetHint}`;
     const emailsExtras = extrasStr.match(emailRegex) || [];
     const emailsNoTitulo = tituloStr.match(emailRegex) || [];
-    const todosEmailsSolicitados = Array.from(new Set([...emailsExtras, ...emailsNoTitulo]));
+    const emailsNoAlvo = targetHint.match(emailRegex) || [];
+    const todosEmailsSolicitados = Array.from(new Set([...emailsExtras, ...emailsNoTitulo, ...emailsNoAlvo]));
+
+    // Resolução de emailAlvo prioritário
+    let emailAlvo = null;
+
+    // A) Se agenda_alvo tem e-mail direto
+    if (emailsNoAlvo.length > 0) {
+      emailAlvo = emailsNoAlvo[0].toLowerCase();
+    }
+
+    // B) Se agenda_alvo foi passado por nome (ex: "Carlos", "Carlos Arantes")
+    if (!emailAlvo && targetHint) {
+      const hintNorm = targetHint.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const achado = agendasAtivas.find((a) => {
+        const aNorm = String(a.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        return aNorm.includes(hintNorm) || hintNorm.includes(aNorm);
+      });
+      if (achado?.email) {
+        emailAlvo = achado.email.toLowerCase();
+      }
+    }
+
+    // C) Se diretorSolicitante tem e-mail ou foi identificado
+    if (!emailAlvo && diretorSolicitante) {
+      if (diretorSolicitante.email && emailRegex.test(diretorSolicitante.email)) {
+        emailAlvo = diretorSolicitante.email.toLowerCase();
+      } else {
+        const achadoPorTelOuNome = agendasAtivas.find((a) => {
+          if (diretorSolicitante.telefone && a.telefone) {
+            return matchTelefoneHeloisa(a.telefone, diretorSolicitante.telefone);
+          }
+          if (diretorSolicitante.nome && a.nome) {
+            const dNorm = String(diretorSolicitante.nome).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            const aNorm = String(a.nome).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            return aNorm.includes(dNorm) || dNorm.includes(aNorm);
+          }
+          return false;
+        });
+        if (achadoPorTelOuNome?.email) {
+          emailAlvo = achadoPorTelOuNome.email.toLowerCase();
+        }
+      }
+    }
+
+    // D) Se o texto/título menciona colaborador (ex: "no meu e-mail Carlos", "agenda do Carlos", "Carlos")
+    if (!emailAlvo) {
+      const matchNome = textoCompleto.match(/(?:agenda\s+(?:do|da|de)|minha\s+agenda|e-?mail\s+(?:do|da|de)?)\s+([a-zA-ZÀ-ÿ]+)/i) ||
+        textoCompleto.match(/\b(carlos|santana|eflen|éflen|duda|gabriel|humberto)\b/i);
+      const nomeAchado = matchNome ? (matchNome[1] || matchNome[0]).trim().toLowerCase() : null;
+
+      if (nomeAchado && !["conrado", "caio"].includes(nomeAchado)) {
+        const hintNorm = nomeAchado.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const achado = agendasAtivas.find((a) => {
+          const aNorm = String(a.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          return aNorm.includes(hintNorm) || hintNorm.includes(aNorm);
+        });
+        if (achado?.email) {
+          emailAlvo = achado.email.toLowerCase();
+        }
+      }
+    }
+
+    // E) Fallback no banco em gd_colaboradores se pool estiver ativo
+    if (!emailAlvo && pool && typeof pool.query === "function" && (targetHint || textoCompleto)) {
+      try {
+        const termoBusca = targetHint || "Carlos";
+        const { rows } = await pool.query(
+          `SELECT email, nome FROM public.gd_colaboradores WHERE ativo = true AND (nome ILIKE $1 OR email ILIKE $1) LIMIT 1`,
+          [`%${termoBusca}%`]
+        );
+        if (rows && rows[0]?.email) emailAlvo = rows[0].email.toLowerCase();
+      } catch (errColab) {
+        console.warn("[Heloísa] Aviso ao buscar colaborador em gd_colaboradores:", errColab.message);
+      }
+    }
+
+    // F) Fallback padrão se solicitante for Conrado
+    if (!emailAlvo) {
+      emailAlvo = "conradofl@gmail.com";
+    }
 
     const REGEX_INDIVIDUAL =
-      /na\s+minha\s+agenda|minha\s+agenda|agenda\s+(do|da|de)\s+(\w+)|s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal|pessoal/i;
+      /na\s+minha\s+agenda|minha\s+agenda|agenda\s+(do|da|de)\s+(\w+)|s[oó]\s+comigo|apenas\s+(eu|comigo)|somente\s+(eu|comigo)|minha\s+reuni[aã]o|reuni[aã]o\s+pessoal|pessoal|no\s+meu\s+e-?mail/i;
 
-    const ehIndividual = REGEX_INDIVIDUAL.test(extrasStr) || REGEX_INDIVIDUAL.test(tituloStr);
+    const ehIndividual = REGEX_INDIVIDUAL.test(extrasStr) || REGEX_INDIVIDUAL.test(tituloStr) || Boolean(targetHint);
 
     const pediuCaioExplicitamente = /com\s+(o\s+)?caio|caioalmeidamrk/i.test(textoCompleto);
     const pediuConradoExplicitamente = /com\s+(o\s+)?conrado|conradofl/i.test(textoCompleto);
     const pediuDiretoriaExplicitamente = /com\s+(a\s+)?diretoria|com\s+(os\s+)?diretores|mrkgeracaodigital/i.test(textoCompleto);
 
-    const isExclusivo =
-      ehIndividual ||
-      /apenas|somente|só\s+o|exclusive/i.test(extrasStr) ||
-      /apenas|somente|só\s+o|exclusive/i.test(tituloStr);
+    const solicitanteEhSocio = diretorSolicitante && (
+      /conrado/i.test(diretorSolicitante.nome || "") ||
+      /caio/i.test(diretorSolicitante.nome || "") ||
+      diretorSolicitante.telefone === "5534997817660" ||
+      diretorSolicitante.telefone === "5534997719779"
+    );
+
+    const ehGeralOuDiretoria = /geral|diretoria|alinhamento\s+geral|planejamento/i.test(textoCompleto) || pediuDiretoriaExplicitamente;
 
     let listaParticipantesFinal = [];
-    let strictAttendees = false;
+    let strictAttendees = true;
 
-    if (ehIndividual) {
-      let emailAlvo = null;
-      const nomeEspecificadoMatch = textoCompleto.match(/(?:agenda\s+(?:do|da|de)|minha\s+agenda)\s+([a-zA-ZÀ-ÿ]+)/i);
-      const nomeEspecificado = nomeEspecificadoMatch ? nomeEspecificadoMatch[1].trim().toLowerCase() : null;
-
-      if (nomeEspecificado && !["conrado", "caio"].includes(nomeEspecificado)) {
-        const achadoAgenda = agendasAtivas.find((a) =>
-          String(a.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(nomeEspecificado)
-        );
-        if (achadoAgenda?.email) {
-          emailAlvo = achadoAgenda.email;
-        }
-      }
-
-      if (!emailAlvo && diretorSolicitante) {
-        if (diretorSolicitante.email) {
-          emailAlvo = diretorSolicitante.email;
-        } else {
-          const achadoPorTelOuNome = agendasAtivas.find((a) => {
-            if (diretorSolicitante.telefone && a.telefone) {
-              return matchTelefoneHeloisa(a.telefone, diretorSolicitante.telefone);
-            }
-            if (diretorSolicitante.nome && a.nome) {
-              return String(a.nome).toLowerCase().includes(String(diretorSolicitante.nome).toLowerCase());
-            }
-            return false;
-          });
-          if (achadoPorTelOuNome?.email) {
-            emailAlvo = achadoPorTelOuNome.email;
-          }
-        }
-      }
-
-      if (!emailAlvo) {
-        emailAlvo = "conradofl@gmail.com";
-      }
-
+    if (solicitanteEhSocio && ehGeralOuDiretoria && !ehIndividual) {
+      listaParticipantesFinal = Array.from(new Set([...listaEmails, ...todosEmailsSolicitados]));
+      strictAttendees = false;
+    } else {
+      // REGRA DE OURO DOS PARTICIPANTES:
+      // Se o usuário NÃO pediu expressamente para convidar outros:
+      // listaParticipantesFinal = [emailAlvo]; strictAttendees = true;
+      // NUNCA injetar a lista completa de diretores.
       listaParticipantesFinal = [emailAlvo];
+      strictAttendees = true;
+
       if (pediuCaioExplicitamente && !listaParticipantesFinal.includes("caioalmeidamrk@gmail.com")) {
         listaParticipantesFinal.push("caioalmeidamrk@gmail.com");
       }
       if (pediuConradoExplicitamente && !listaParticipantesFinal.includes("conradofl@gmail.com")) {
         listaParticipantesFinal.push("conradofl@gmail.com");
       }
-      if (pediuDiretoriaExplicitamente && !listaParticipantesFinal.includes("mrkgeracaodigital@gmail.com")) {
-        listaParticipantesFinal.push("mrkgeracaodigital@gmail.com");
+      if (pediuDiretoriaExplicitamente) {
+        strictAttendees = false;
+        for (const em of listaEmails) {
+          if (!listaParticipantesFinal.includes(em)) listaParticipantesFinal.push(em);
+        }
       }
       for (const em of todosEmailsSolicitados) {
         if (!listaParticipantesFinal.includes(em)) listaParticipantesFinal.push(em);
       }
-      strictAttendees = true;
-    } else if (isExclusivo && todosEmailsSolicitados.length > 0) {
-      listaParticipantesFinal = todosEmailsSolicitados;
-      strictAttendees = true;
-    } else {
-      listaParticipantesFinal = Array.from(new Set([...listaEmails, ...todosEmailsSolicitados]));
-      strictAttendees = false;
     }
 
     // 3. Integração Real com Google Calendar (cria evento com Google Meet e convites)
@@ -1006,6 +1060,7 @@ export async function executarAgendarCompromisso(
         title: tit,
         attendees: listaParticipantesFinal,
         strictAttendees,
+        primaryCalendarId: emailAlvo, // GRAVA DIRETO NA AGENDA DA PESSOA!
       });
       if (calResult?.meetUrl) {
         meetUrl = calResult.meetUrl;
@@ -1068,19 +1123,34 @@ export async function executarAgendarCompromisso(
     const telSolicitanteNorm = String(diretorSolicitante?.telefone || "").replace(/\D/g, "");
 
     // SUPRESSÃO TOTAL DE BROADCAST:
-    // Se a reunião for individual/pessoal e os outros diretores não foram expressamente convidados,
-    // não envia broadcast para os outros diretores (o solicitante recebe a confirmação final diretamente).
+    // Só disparar WhatsApp para outros diretores se eles constarem expressamente na listaParticipantesFinal.
+    // Reuniões individuais de colaboradores não disparam WhatsApp para Conrado nem Caio.
     let destinatariosNotif = [];
-    if (!ehIndividual || pediuCaioExplicitamente || pediuConradoExplicitamente || pediuDiretoriaExplicitamente) {
+    if (!strictAttendees || (solicitanteEhSocio && ehGeralOuDiretoria && !ehIndividual)) {
       destinatariosNotif = agendasAtivas.filter((a) => {
         if (!a.notificar_whatsapp || !a.telefone) return false;
         const telDestNorm = String(a.telefone).replace(/\D/g, "");
-        // O solicitante jamais deve receber a notificação de broadcast, pois ele recebe a resposta final da Heloísa
         if (telSolicitanteNorm && telDestNorm === telSolicitanteNorm) return false;
-        // Notifica apenas se o email da pessoa estiver na lista final de participantes
         return listaParticipantesFinal.some((emailPart) =>
           String(emailPart || "").trim().toLowerCase() === String(a.email || "").trim().toLowerCase()
         );
+      });
+    } else {
+      destinatariosNotif = agendasAtivas.filter((a) => {
+        if (!a.notificar_whatsapp || !a.telefone) return false;
+        const telDestNorm = String(a.telefone).replace(/\D/g, "");
+        if (telSolicitanteNorm && telDestNorm === telSolicitanteNorm) return false;
+
+        const estaNaLista = listaParticipantesFinal.some((emailPart) =>
+          String(emailPart || "").trim().toLowerCase() === String(a.email || "").trim().toLowerCase()
+        );
+        if (!estaNaLista) return false;
+
+        // Se for Conrado ou Caio, só notifica se eles foram convidados expressamente
+        if (a.email === "conradofl@gmail.com" && !pediuConradoExplicitamente && !pediuDiretoriaExplicitamente) return false;
+        if (a.email === "caioalmeidamrk@gmail.com" && !pediuCaioExplicitamente && !pediuDiretoriaExplicitamente) return false;
+
+        return true;
       });
     }
 
@@ -2440,14 +2510,15 @@ export const HELOISA_TOOLS = [
     type: "function",
     function: {
       name: "agendar_compromisso",
-      description: "Agenda uma reunião ou compromisso na agenda do Vexo OS, gerando link do Google Meet automaticamente e notificando os participantes (Conrado, Caio, GD).",
+      description: "Agenda uma reunião ou compromisso na agenda do Vexo OS e no Google Calendar, gerando link do Google Meet automaticamente e notificando os participantes convidados.",
       parameters: {
         type: "object",
         properties: {
           titulo: { type: "string", description: "Título do compromisso ou reunião" },
           data_hora: { type: "string", description: "Data e horário (ex: 2026-11-17 15:00 ou amanhã às 15h)" },
           local_ou_link: { type: "string", description: "Link do Google Meet ou deixe em branco para gerar link automaticamente" },
-          participantes_extras: { type: "string", description: "Nomes ou e-mails de outros participantes convidados além da diretoria" },
+          agenda_alvo: { type: "string", description: "E-mail ou nome da pessoa dona da agenda que deve receber o evento (ex: 'Carlos', 'carlosarantes524@gmail.com', 'Caio', 'Conrado')" },
+          participantes_extras: { type: "string", description: "Nomes ou e-mails de outros participantes convidados para a reunião" },
         },
         required: ["titulo", "data_hora"],
       },

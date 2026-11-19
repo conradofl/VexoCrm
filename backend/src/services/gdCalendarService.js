@@ -659,7 +659,7 @@ export async function createBriefingCalendarEvent({
     new Set(
       [
         primaryCalendarId,
-        process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com",
+        strictAttendees ? null : (process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com"),
         ...attendeesList.map((a) => a.email),
         "primary",
       ].filter(Boolean)

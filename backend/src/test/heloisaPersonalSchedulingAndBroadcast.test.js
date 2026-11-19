@@ -3,7 +3,9 @@ import {
   executarAgendarCompromisso,
   gerarLinkGoogleCalendarTemplate,
   identificarUsuarioAutorizado,
+  HELOISA_TOOLS,
 } from "../domains/goclaw/heloisaEngine.js";
+import * as gdCalendarService from "../services/gdCalendarService.js";
 
 describe("Protocolo Ralph Loop: Agendamentos Pessoais, Supressão de Broadcast, Link Google Calendar e Unificação", () => {
   beforeEach(() => {
@@ -199,6 +201,161 @@ describe("Protocolo Ralph Loop: Agendamentos Pessoais, Supressão de Broadcast, 
       expect(user.nome).toBe("Santana");
       expect(user.papel).toBe("Diretor de Arte");
       expect(user.origem).toBe("gd_colaboradores");
+    });
+  });
+
+  describe("4. Correção Cirúrgica de primaryCalendarId e Supressão de E-mails da Diretoria", () => {
+    it("Schema da tool agendar_compromisso não menciona '(Conrado, Caio, GD)' e possui parâmetro 'agenda_alvo'", () => {
+      const tool = HELOISA_TOOLS.find((t) => t.function?.name === "agendar_compromisso");
+      expect(tool).toBeDefined();
+      expect(tool.function.description).not.toContain("(Conrado, Caio, GD)");
+      expect(tool.function.parameters.properties.agenda_alvo).toBeDefined();
+      expect(tool.function.parameters.properties.participantes_extras.description).not.toContain("além da diretoria");
+    });
+
+    it("passa primaryCalendarId: carlosarantes524@gmail.com diretamente para createBriefingCalendarEvent", async () => {
+      const calSpy = vi.spyOn(gdCalendarService, "createBriefingCalendarEvent").mockResolvedValue({
+        success: true,
+        eventId: "cal-carlos-123",
+        meetUrl: "https://meet.google.com/abc-carlos",
+      });
+
+      const mockPool = {
+        query: vi.fn().mockImplementation(async (sql) => {
+          if (sql.includes("public.heloisa_agendas")) {
+            return {
+              rows: [
+                { nome: "Carlos", email: "carlosarantes524@gmail.com", telefone: "5534991234567", notificar_whatsapp: true },
+                { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+                { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              ],
+            };
+          }
+          if (sql.includes("public.events")) {
+            return { rows: [{ id: "evt-carlos-direct" }] };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const res = await executarAgendarCompromisso(
+        {
+          titulo: "Alinhamento Carlos",
+          data_hora: "2026-11-20 14:00",
+          agenda_alvo: "carlosarantes524@gmail.com",
+        },
+        mockPool,
+        "vexo-adm-vexo-atende",
+        { nome: "Carlos", email: "carlosarantes524@gmail.com", telefone: "5534991234567" }
+      );
+
+      expect(res.sucesso).toBe(true);
+      expect(calSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          primaryCalendarId: "carlosarantes524@gmail.com",
+          strictAttendees: true,
+        })
+      );
+      expect(res.attendees).toEqual(["carlosarantes524@gmail.com"]);
+      expect(res.attendees).not.toContain("conradofl@gmail.com");
+      expect(res.attendees).not.toContain("caioalmeidamrk@gmail.com");
+
+      // Zero broadcast para Conrado
+      const tels = (res.notificacoes_whatsapp || []).map((n) => n.telefone);
+      expect(tels).not.toContain("5534997817660");
+    });
+
+    it("resolve 'agenda_alvo: Carlos' para o e-mail cadastrado em heloisa_agendas e grava direto na agenda dele", async () => {
+      const calSpy = vi.spyOn(gdCalendarService, "createBriefingCalendarEvent").mockResolvedValue({
+        success: true,
+        eventId: "cal-carlos-name-123",
+        meetUrl: "https://meet.google.com/abc-carlos",
+      });
+
+      const mockPool = {
+        query: vi.fn().mockImplementation(async (sql) => {
+          if (sql.includes("public.heloisa_agendas")) {
+            return {
+              rows: [
+                { nome: "Carlos Arantes", email: "carlosarantes524@gmail.com", telefone: "5534991234567", notificar_whatsapp: true },
+                { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+              ],
+            };
+          }
+          if (sql.includes("public.events")) {
+            return { rows: [{ id: "evt-1" }] };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const res = await executarAgendarCompromisso(
+        {
+          titulo: "Reunião de Tráfego",
+          data_hora: "2026-11-20 16:00",
+          agenda_alvo: "Carlos",
+        },
+        mockPool,
+        "vexo-adm-vexo-atende",
+        { nome: "Carlos Arantes", telefone: "5534991234567" }
+      );
+
+      expect(res.sucesso).toBe(true);
+      expect(calSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          primaryCalendarId: "carlosarantes524@gmail.com",
+          strictAttendees: true,
+        })
+      );
+      expect(res.attendees).toEqual(["carlosarantes524@gmail.com"]);
+    });
+
+    it("quando o usuário diz 'no meu e-mail Carlos', não injeta a diretoria e grava na agenda do Carlos", async () => {
+      const calSpy = vi.spyOn(gdCalendarService, "createBriefingCalendarEvent").mockResolvedValue({
+        success: true,
+        eventId: "cal-email-carlos",
+        meetUrl: "https://meet.google.com/abc-carlos",
+      });
+
+      const mockPool = {
+        query: vi.fn().mockImplementation(async (sql) => {
+          if (sql.includes("public.heloisa_agendas")) {
+            return {
+              rows: [
+                { nome: "Carlos Arantes", email: "carlosarantes524@gmail.com", telefone: "5534991234567", notificar_whatsapp: true },
+                { nome: "Conrado Finzi", email: "conradofl@gmail.com", telefone: "5534997817660", notificar_whatsapp: true },
+                { nome: "Caio Almeida", email: "caioalmeidamrk@gmail.com", telefone: "5534997719779", notificar_whatsapp: true },
+              ],
+            };
+          }
+          if (sql.includes("public.events")) {
+            return { rows: [{ id: "evt-email-carlos" }] };
+          }
+          return { rows: [] };
+        }),
+      };
+
+      const res = await executarAgendarCompromisso(
+        {
+          titulo: "Alinhamento de Tráfego",
+          data_hora: "2026-11-20 17:00",
+          participantes_extras: "no meu e-mail Carlos",
+        },
+        mockPool,
+        "vexo-adm-vexo-atende",
+        { nome: "Carlos Arantes", telefone: "5534991234567" }
+      );
+
+      expect(res.sucesso).toBe(true);
+      expect(calSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          primaryCalendarId: "carlosarantes524@gmail.com",
+          strictAttendees: true,
+        })
+      );
+      expect(res.attendees).toEqual(["carlosarantes524@gmail.com"]);
+      expect(res.attendees).not.toContain("conradofl@gmail.com");
+      expect(res.attendees).not.toContain("caioalmeidamrk@gmail.com");
     });
   });
 });
