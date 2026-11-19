@@ -40,3 +40,27 @@ export async function registrarLidDoWebhook(pool, { lid, phone }) {
     return false;
   }
 }
+
+// A busca de Conversas só usa o mapa LID -> telefone se a coluna existir (information_schema). Sem a coluna, a
+// consulta inteira quebraria ("column lb.phone does not exist") e nenhuma busca funcionaria. "Tem" fica guardado
+// para sempre; "não tem" é conferido de novo depois de 10 min.
+const CONFERIR_DE_NOVO_MS = 10 * 60 * 1000;
+const cacheTelefoneNoMapa = new WeakMap();
+
+export async function mapaDeLidTemTelefone(pool, agora = Date.now()) {
+  if (!pool || typeof pool !== "object") return false;
+  const guardado = cacheTelefoneNoMapa.get(pool);
+  if (guardado && (guardado.tem || agora - guardado.em < CONFERIR_DE_NOVO_MS)) return guardado.tem;
+  let tem = false;
+  try {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'whatsapp_lid_map' AND column_name = 'phone' LIMIT 1`
+    );
+    tem = Array.isArray(rows) && rows.length > 0;
+  } catch {
+    tem = false;
+  }
+  cacheTelefoneNoMapa.set(pool, { tem, em: agora });
+  return tem;
+}

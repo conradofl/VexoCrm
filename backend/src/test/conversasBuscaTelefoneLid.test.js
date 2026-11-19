@@ -12,6 +12,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 import { sanitizePhone } from "../services/leadImport.js";
 import { variantesDeBuscaPorTelefone } from "../services/canonicalPhone.js";
+import { mapaDeLidTemTelefone } from "../services/lidMap.js";
 import { countTenantMutedToday, recordAgentMute, resolveAgentPauseExpiryDays } from "../services/agentMuteGuard.js";
 import { _resetInboundGuard } from "../services/inboundGuard.js";
 import {
@@ -363,5 +364,40 @@ describe("Rota de alertas de chip (GET /api/whatsapp/chip-alerts)", () => {
     const t = setup();
     const r = await t.chipAlerts();
     expect(r.alertas).toEqual([]);
+  });
+});
+
+describe("mapaDeLidTemTelefone (information_schema antes de usar o mapa na busca)", () => {
+  const poolFalso = (resposta) => {
+    const chamadas = [];
+    return {
+      chamadas,
+      query: async (sql) => {
+        chamadas.push(sql);
+        if (resposta instanceof Error) throw resposta;
+        return { rows: resposta };
+      },
+    };
+  };
+
+  it("coluna existe: true, e não pergunta de novo", async () => {
+    const p = poolFalso([{ "?column?": 1 }]);
+    expect(await mapaDeLidTemTelefone(p, 0)).toBe(true);
+    expect(await mapaDeLidTemTelefone(p, 999_999_999)).toBe(true);
+    expect(p.chamadas).toHaveLength(1);
+    expect(p.chamadas[0]).toContain("information_schema.columns");
+  });
+
+  it("coluna não existe: false, e confere de novo só depois de 10 min", async () => {
+    const p = poolFalso([]);
+    expect(await mapaDeLidTemTelefone(p, 0)).toBe(false);
+    expect(await mapaDeLidTemTelefone(p, 9 * 60 * 1000)).toBe(false);
+    expect(p.chamadas).toHaveLength(1);
+    expect(await mapaDeLidTemTelefone(p, 11 * 60 * 1000)).toBe(false);
+    expect(p.chamadas).toHaveLength(2);
+  });
+
+  it("erro do banco: false, sem derrubar", async () => {
+    expect(await mapaDeLidTemTelefone(poolFalso(new Error("sem permissão")), 0)).toBe(false);
   });
 });

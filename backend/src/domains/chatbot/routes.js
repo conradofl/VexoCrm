@@ -36,7 +36,7 @@ import {
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE, variantesDeBuscaPorTelefone } from "../../services/canonicalPhone.js";
-import { registrarLidDoWebhook, telefoneRealDoLid } from "../../services/lidMap.js";
+import { mapaDeLidTemTelefone, registrarLidDoWebhook, telefoneRealDoLid } from "../../services/lidMap.js";
 import { listarAlertasDeChip } from "../../services/chipAlerts.js";
 import { isDeviceTypedMessage, registerSystemSentFromResponse } from "../../services/systemSentMessages.js";
 import { isPhoneOptedOut } from "../../services/optOut.js";
@@ -854,11 +854,15 @@ export function registerChatbotRoutes(app, deps) {
           const numIdx = queryParams.length;
           numeroFilter = `
           OR regexp_replace(COALESCE(m.phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])
-          OR regexp_replace(COALESCE(m.raw_phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])
+          OR regexp_replace(COALESCE(m.raw_phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])`;
+          // Só com a coluna phone no mapa (information_schema): sem ela, a busca inteira quebraria.
+          if (await mapaDeLidTemTelefone(pgDatabasePool)) {
+            numeroFilter += `
           OR split_part(m.raw_phone, '@', 1) IN (
             SELECT split_part(lb.lid, '@', 1) FROM public.whatsapp_lid_map lb
             WHERE regexp_replace(COALESCE(lb.phone, ''), '\\D', '', 'g') LIKE ANY($${numIdx}::text[])
           )`;
+          }
         }
         // Busca ampla por nome, telefone canônico, telefone bruto, texto da mensagem ou pushName
         searchFilter = `AND (
