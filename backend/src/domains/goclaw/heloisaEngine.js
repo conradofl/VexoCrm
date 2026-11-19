@@ -524,7 +524,7 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
       process.env.EVOLUTION_API_KEY ||
       process.env.GD_EVOLUTION_API_TOKEN ||
       process.env.GD_EVOLUTION_TOKEN ||
-      "429683C4C977415CAAFCCE10F7D57E11";
+      ""; // sem valor fixo: a chave que ficava aqui estava no repositório público (18/11/2026)
 
     const headers = {
       Accept: "application/json",
@@ -604,7 +604,7 @@ export async function enviarMensagemWhatsAppComFallback({
     "https://vexo-evolution-api.xdvm8y.easypanel.host";
   const defaultApiKey =
     process.env.EVOLUTION_API_KEY ||
-    "429683C4C977415CAAFCCE10F7D57E11";
+    ""; // sem valor fixo: a chave que ficava aqui estava no repositório público (18/11/2026)
 
   const candidateMap = new Map();
 

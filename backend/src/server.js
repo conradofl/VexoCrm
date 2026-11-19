@@ -318,9 +318,13 @@ import { recoverOrphanDispatches } from "./campaign/orphanRecovery.js";
 import { startChipDiarySampler } from "./services/chipDiary.js";
 import { startAgentRecoverySweeper, stopAgentRecoverySweeper } from "./services/agentInboundRecovery.js";
 import { drenarBuffersDoAgente } from "./chatbot-ai-engine.js";
+import { instalarMascaraDeLog } from "./services/logRedaction.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "..", ".env") });
+// Máscara de segredos no log (services/logRedaction.js): token do webhook e apikey da Evolution nunca saem no log, nem
+// dentro de URL, cabeçalho, objeto ou resposta de erro ecoada. Logo depois do dotenv, para já conhecer os valores.
+instalarMascaraDeLog();
 
 // Identidade do build. Preenchida por ARG no Dockerfile (docker build --build-arg
 // GIT_COMMIT=... BUILD_TIME=...), nunca por git em runtime: o .dockerignore exclui

@@ -154,6 +154,7 @@ import {
   buildMessageEffectivenessSql,
 } from "../../services/messageEffectiveness.js";
 import { syncDailyStalledNotificationsForAllTenants } from "../../services/leadReactivationEngine.js";
+import { cabecalhoDoWebhook } from "../../services/webhookAuth.js";
 
 export {
   MESSAGE_EFFECTIVENESS_MIN_SENT,
@@ -7257,7 +7258,7 @@ export function registerCampaignsRoutes(app, deps) {
             }
             fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...cabecalhoDoWebhook() },
               body: JSON.stringify({
                 clientId,
                 phone,
@@ -7272,7 +7273,7 @@ export function registerCampaignsRoutes(app, deps) {
           } else {
             fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...cabecalhoDoWebhook() },
               body: JSON.stringify({
                 clientId,
                 phone,
@@ -7350,7 +7351,7 @@ export function registerCampaignsRoutes(app, deps) {
       if (replyText) {
         fetch("http://localhost:3001/api/hardcoded-chat-webhook", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...cabecalhoDoWebhook() },
           body: JSON.stringify({
             clientId,
             phone,
