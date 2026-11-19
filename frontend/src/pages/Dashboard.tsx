@@ -49,7 +49,7 @@ export default function Dashboard({
   // A Visão geral é a entrada; o detalhe de cada assunto mora na sua aba.
   const [tab, setTab] = useState<DashboardTab>("overview");
 
-  const { data, isLoading, error } = useDashboard(effectiveClientId, period, range);
+  const { data, isLoading, error, refreshingInBackground } = useDashboard(effectiveClientId, period, range);
   const refreshMutation = useRefreshDashboard(effectiveClientId);
 
   const periodLabel = useMemo(() => {
@@ -77,7 +77,7 @@ export default function Dashboard({
   const normalizedCacheStatus =
     data?.cacheStatus === "error"
       ? "failed"
-      : refreshMutation.isPending
+      : refreshMutation.isPending || refreshingInBackground
       ? "updating"
       : "ready";
 
