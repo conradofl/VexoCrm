@@ -519,6 +519,18 @@ export function normalizeAccessPreset(value: unknown, role: AccessRole = "intern
   return resolveAccessPreset(value, role).preset;
 }
 
+/**
+ * Telas internas como ficam gravadas no login. Igual ao backend (mergeManagedClaims em claims.js): o
+ * Firebase recusa claims acima de 1000 bytes, então a lista igual à do preset não vai para o login e quem
+ * lê devolve as telas do preset. `undefined` = não grava. Sem isso nenhum Gestor cabia (1262 bytes).
+ */
+export function internalPagesForStorage(preset: AccessPreset, pages: readonly string[]): string[] | undefined {
+  const defaults = buildPresetDefaults(preset).internalPages;
+  const stored = new Set(pages.map((page) => page.toLowerCase()));
+  const sameAsPreset = stored.size === defaults.length && defaults.every((page) => stored.has(page));
+  return sameAsPreset ? undefined : [...pages];
+}
+
 export function buildPresetDefaults(preset: AccessPreset): PresetDefaults {
   const defaults = PRESET_DEFAULTS[preset as SystemAccessPreset] || PRESET_DEFAULTS[getPresetFallbackKey(preset)];
 
