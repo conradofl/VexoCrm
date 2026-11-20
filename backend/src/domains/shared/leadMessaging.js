@@ -252,7 +252,7 @@ export function createLeadMessaging({
             engagement_signal, message_text, delivered_at, message_timestamp,
             meta, instance_name, wa_message_id, media_path, media_url, content_type
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-          ON CONFLICT (wa_message_id) DO UPDATE SET
+          ON CONFLICT (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL DO UPDATE SET
             media_url = COALESCE(EXCLUDED.media_url, public.lead_messages.media_url),
             content_type = COALESCE(EXCLUDED.content_type, public.lead_messages.content_type),
             meta = EXCLUDED.meta || public.lead_messages.meta;`,
@@ -277,7 +277,13 @@ export function createLeadMessaging({
         );
         error = null;
       } catch (directInsertErr) {
-        // Segue para logging se ambas tentativas falharem
+        // Antes este catch era vazio: com "ON CONFLICT (wa_message_id)" a reserva falhava SEMPRE (42P10: produção só
+        // tem o índice (client_id, wa_message_id) parcial) e ninguém via. Agora o erro da reserva vai para o log.
+        console.error("[lead-messages] reserva também falhou:", directInsertErr?.code || "", directInsertErr?.message || directInsertErr, {
+          clientId,
+          phone: maskPhoneForLog(canonicalPhone),
+          direction,
+        });
       }
     }
 
@@ -290,8 +296,8 @@ export function createLeadMessaging({
              SET media_url = COALESCE(media_url, $1),
                  content_type = COALESCE(content_type, $2),
                  meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('mediaUrl', $1::text, 'media_url', $1::text, 'contentType', $2::text, 'content_type', $2::text)
-             WHERE wa_message_id = $3`,
-            [resolvedMediaUrl, resolvedContentType, waMessageId]
+             WHERE client_id = $4 AND wa_message_id = $3`,
+            [resolvedMediaUrl, resolvedContentType, waMessageId, clientId]
           );
         } else {
           await pool.query(
