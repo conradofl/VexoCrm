@@ -393,3 +393,55 @@ describe("contadores da coluna e o número do Dashboard", () => {
     expect(r).toEqual({ waiting: 0, waitingOverThreshold: 0 });
   });
 });
+
+describe("conversa marcada como pessoal (contato do celular do empresário que não é cliente)", () => {
+  const TP = "empresa-pessoal";
+  const Q = {
+    cliente: "5534995550001",
+    pessoal: "5534995550002",
+    pessoalTrocaNumero: "5534995550003",
+    arquivadaTrocaNumero: "5534995550004",
+  };
+  const baseP = { clientId: TP, now: NOW, robotChips: [] };
+
+  beforeAll(async () => {
+    await msg(Q.cliente, "inbound", ago({ hours: 1 }), { tenant: TP, text: "quanto custa a instalação?" });
+    await msg(Q.pessoal, "inbound", ago({ hours: 1 }), { tenant: TP, text: "filho, vem jantar?" });
+    await msg(Q.pessoalTrocaNumero, "inbound", ago({ hours: 1 }), { tenant: TP, text: "anota meu novo número" });
+    await msg(Q.arquivadaTrocaNumero, "inbound", ago({ hours: 1 }), { tenant: TP, text: "anota meu novo número" });
+    await db.query(
+      `INSERT INTO public.whatsapp_chat_states (client_id, phone, state, source) VALUES
+         ($1, $2, 'pessoal', 'manual'), ($1, $3, 'pessoal', 'manual'), ($1, $4, 'arquivada', 'manual')`,
+      [TP, Q.pessoal, Q.pessoalTrocaNumero, Q.arquivadaTrocaNumero]
+    );
+  });
+
+  it("[MUTAÇÃO: tirar 'pessoal' de SQL_ACTIVE_OR_NUMBER_CHANGE derruba] some de 'Esperam você' e do número do Dashboard, até com aviso de troca de número", async () => {
+    const lista = phonesOf(await page("esperam", { clientId: TP }));
+    expect(lista).toContain(Q.cliente);
+    expect(lista).not.toContain(Q.pessoal);
+    expect(lista).not.toContain(Q.pessoalTrocaNumero);
+    const r = await countWaitingForDashboard(db, { clientId: TP, now: NOW }, { settings: null, loadInstances: async () => [] });
+    expect(r.waiting).toBe(lista.length);
+  });
+
+  it("arquivada com aviso de troca de número continua voltando para a fila (regra de antes)", async () => {
+    expect(phonesOf(await page("esperam", { clientId: TP }))).toContain(Q.arquivadaTrocaNumero);
+  });
+
+  it("faixa 'Chegaram agora' também não mostra conversa pessoal", async () => {
+    const counts = await fetchInboxCounts(query, { ...baseP, arrivedNow: { leadsTable: "leads" } });
+    const faixa = counts.arrivedNow.rows.map((r) => r.phone_number);
+    expect(faixa).toContain(Q.cliente);
+    expect(faixa).not.toContain(Q.pessoal);
+    expect(faixa).not.toContain(Q.pessoalTrocaNumero);
+    expect(counts.arrivedNow.total).toBe(faixa.length);
+  });
+
+  it("o rodapé conta as pessoais, separadas das arquivadas", async () => {
+    const counts = await fetchInboxCounts(query, baseP);
+    expect(counts.personal).toBe(2);
+    expect(counts.archived).toBe(1);
+    expect(counts.work.esperam).toBe(2); // cliente + arquivada com troca de número
+  });
+});

@@ -48,7 +48,12 @@ import { reclassifyLeadFromMessages } from "../../services/funnelService.js";
 import { generateSpeechAudio, resolveVoiceDecision } from "../../services/voiceService.js";
 import { sendAgentLibraryAudio } from "../../audioLibrary/agentAudio.js";
 
-import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH } from "../../services/inboxSqlMatchers.js";
+import {
+  CHAT_STATE_PERSONAL,
+  SQL_ACTIVE_OR_NUMBER_CHANGE,
+  SQL_AUTOMATION_MATCH,
+  SQL_NUMBER_CHANGE_MATCH,
+} from "../../services/inboxSqlMatchers.js";
 import {
   ARRIVED_NOW_MINUTES,
   fetchInboxCounts,
@@ -100,6 +105,8 @@ import { idadeRealMs, marcarMensagemBarrada, mensagemAtrasada } from "../../serv
 
 // Empresas cujos chips a Heloísa atende (as mesmas de obterInstanciaWhatsAppAtiva no heloisaEngine).
 const EMPRESAS_DA_HELOISA = new Set(["geracao-digital", "vexo-adm"]);
+// Estados que a tela pode gravar numa conversa (CHECK de whatsapp_chat_states.state).
+const CHAT_STATES = ["ativa", "automacao", "arquivada", "lixeira", CHAT_STATE_PERSONAL];
 
 // Tempo limite do envio pela Evolution. Sem ele, um fetch pendurado segurava o lote (e a conversa) para sempre.
 const ENVIO_EVOLUTION_TIMEOUT_MS = 20_000;
@@ -264,6 +271,7 @@ import {
   recordAgentMute,
   clearAgentMute,
   MUTE_SOURCE_MANUAL,
+  isChatMarkedPersonal,
 } from "../../services/agentMuteGuard.js";
 
 import { describeUnrecognizedMessage, rawMessageKind } from "../../services/messageKind.js";
@@ -879,6 +887,9 @@ export function registerChatbotRoutes(app, deps) {
           tabCondition = "AND m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira'";
         } else if (rawTab === "arquivada" || rawTab === "arquivadas") {
           tabCondition = "AND (m.is_group IS NOT TRUE) AND cs.state = 'arquivada'";
+        } else if (rawTab === "pessoais" || rawTab === CHAT_STATE_PERSONAL) {
+          // Contatos pessoais do celular do empresário (família, amigo, fornecedor): fora da fila e do Dashboard.
+          tabCondition = `AND (m.is_group IS NOT TRUE) AND cs.state = '${CHAT_STATE_PERSONAL}'`;
         } else if (rawTab === "pausadas") {
           // Toda conversa com o agente pausado, em qualquer estado menos lixeira: a pausa
           // não expira sozinha, então esta aba é onde a conversa esquecida aparece.
@@ -889,7 +900,7 @@ export function registerChatbotRoutes(app, deps) {
           ) AND NOT ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}`;
         } else if (rawTab === "aguardando" || rawTab === "espera") {
           tabCondition = `AND (m.is_group IS NOT TRUE) AND (
-            COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
+            ${SQL_ACTIVE_OR_NUMBER_CHANGE("m", "cs")}
           ) AND m.direction = 'inbound' AND (
             cs.attended_at IS NULL OR cs.attended_at < m.effective_timestamp
           ) AND (
@@ -901,7 +912,7 @@ export function registerChatbotRoutes(app, deps) {
             queryParams.push(operatorIdentifiers);
             const opIdx = queryParams.length;
             tabCondition = `AND (m.is_group IS NOT TRUE) AND l.assigned_to = ANY($${opIdx}) AND (
-              COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
+              ${SQL_ACTIVE_OR_NUMBER_CHANGE("m", "cs")}
             ) AND (
               cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
             )`;
@@ -920,7 +931,7 @@ export function registerChatbotRoutes(app, deps) {
         } else {
           // Padrão: "fila" / "ativa" (exclui grupos, automações e arquivadas)
           tabCondition = `AND (m.is_group IS NOT TRUE) AND (
-            COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
+            ${SQL_ACTIVE_OR_NUMBER_CHANGE("m", "cs")}
           ) AND (
             cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")}
           )`;
@@ -977,7 +988,7 @@ export function registerChatbotRoutes(app, deps) {
 
       let total = 0;
       let items = [];
-      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0, myUnopened: 0 };
+      let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, personal: 0, paused: 0, myUnopened: 0 };
       let lastQueryInfo = { step: "init", sql: null, params: null };
       // Faixa "Chegaram agora" (inboxWorkState.js): só na primeira página das abas de trabalho e sem busca digitada.
       // Vem da mesma consulta dos contadores, então o polling de 12 s da primeira página já a mantém em dia.
@@ -1000,6 +1011,7 @@ export function registerChatbotRoutes(app, deps) {
           counts.work = work.inboxCounts.work;
           counts.groups = work.inboxCounts.groups;
           counts.archived = work.inboxCounts.archived;
+          counts.personal = work.inboxCounts.personal;
           counts.automations = work.inboxCounts.automations;
           counts.paused = work.inboxCounts.paused;
           total = work.inboxCounts.work?.[rawTab] || 0;
@@ -1063,6 +1075,7 @@ export function registerChatbotRoutes(app, deps) {
           SELECT
             COUNT(*) FILTER (WHERE m.is_group IS TRUE AND COALESCE(cs.state, 'ativa') != 'lixeira')::integer as groups_count,
             COUNT(*) FILTER (WHERE m.is_group IS NOT TRUE AND cs.state = 'arquivada')::integer as archived_count,
+            COUNT(*) FILTER (WHERE m.is_group IS NOT TRUE AND cs.state = '${CHAT_STATE_PERSONAL}')::integer as personal_count,
             COUNT(*) FILTER (
               WHERE m.is_group IS NOT TRUE AND cs.agent_muted_at IS NOT NULL AND NOT ${pauseExpiredSql}
                 AND COALESCE(cs.state, 'ativa') != 'lixeira'
@@ -1074,12 +1087,12 @@ export function registerChatbotRoutes(app, deps) {
             )::integer as automations_count,
             COUNT(*) FILTER (
               WHERE m.is_group IS NOT TRUE
-                AND (COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")})
+                AND (${SQL_ACTIVE_OR_NUMBER_CHANGE("m", "cs")})
                 AND (cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")})
             )::integer as active_count,
             COUNT(*) FILTER (
               WHERE m.is_group IS NOT TRUE
-                AND (COALESCE(cs.state, 'ativa') = 'ativa' OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")})
+                AND (${SQL_ACTIVE_OR_NUMBER_CHANGE("m", "cs")})
                 AND m.direction = 'inbound'
                 AND (cs.attended_at IS NULL OR cs.attended_at < m.effective_timestamp)
                 AND (cs.state IS NOT NULL OR NOT ${SQL_AUTOMATION_MATCH("m.message_text")} OR ${SQL_NUMBER_CHANGE_MATCH("m.message_text")})
@@ -1106,6 +1119,7 @@ export function registerChatbotRoutes(app, deps) {
             automations: countsRow.automations_count || 0,
             groups: countsRow.groups_count || 0,
             archived: countsRow.archived_count || 0,
+            personal: countsRow.personal_count || 0,
             paused: countsRow.paused_count || 0,
             myUnopened: countsRow.my_unopened_count || 0,
           };
@@ -1286,7 +1300,7 @@ export function registerChatbotRoutes(app, deps) {
         query: _req.query,
         stack: error?.stack,
       });
-      res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0 }, nextOffset: 0, hasMore: false });
+      res.json({ items: [], total: 0, counts: { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, personal: 0, paused: 0 }, nextOffset: 0, hasMore: false });
     }
   });
 
@@ -1300,7 +1314,7 @@ export function registerChatbotRoutes(app, deps) {
     const state = normalizeString(req.body?.state)?.toLowerCase();
     const reason = normalizeString(req.body?.reason) || null;
 
-    if (!phone || !["ativa", "automacao", "arquivada", "lixeira"].includes(state)) {
+    if (!phone || !CHAT_STATES.includes(state)) {
       sendError(res, 400, "INVALID_BODY", "Telefone ou estado inválido");
       return;
     }
@@ -1335,7 +1349,7 @@ export function registerChatbotRoutes(app, deps) {
     const state = normalizeString(req.body?.state)?.toLowerCase();
     const reason = normalizeString(req.body?.reason) || null;
 
-    if (phones.length === 0 || !["ativa", "automacao", "arquivada", "lixeira"].includes(state)) {
+    if (phones.length === 0 || !CHAT_STATES.includes(state)) {
       sendError(res, 400, "INVALID_BODY", "Lista de telefones ou estado inválido");
       return;
     }
@@ -4041,10 +4055,11 @@ export function registerChatbotRoutes(app, deps) {
     }
     const agentMutedSource = muteState?.source ?? null;
     const isAgentMuted = agentMutedSource !== null;
+    const conversaPessoal = await isChatMarkedPersonal(pgDatabasePool, { clientId, phone });
     const escopoInbound = resolveInboundScope(tenantSettings);
     const telefoneEhSdr = resolveTenantSdrNumbers(tenantSettings).includes(normalizeSdrNumber(phone));
-    if (isAgentMuted || escopoInbound !== INBOUND_SCOPE_ALL || telefoneEhSdr) {
-      const leadConhecido = (telefoneEhSdr || isAgentMuted) ? false : await telefoneEhLeadConhecido(clientId, phone);
+    if (isAgentMuted || conversaPessoal || escopoInbound !== INBOUND_SCOPE_ALL || telefoneEhSdr) {
+      const leadConhecido = (telefoneEhSdr || isAgentMuted || conversaPessoal) ? false : await telefoneEhLeadConhecido(clientId, phone);
       const decisao = shouldEngageInbound({
         scope: escopoInbound,
         isKnownLead: leadConhecido,
@@ -4052,6 +4067,7 @@ export function registerChatbotRoutes(app, deps) {
         isSdrNumber: telefoneEhSdr,
         isAgentMuted,
         agentMutedSource,
+        isPersonal: conversaPessoal,
       });
       if (!decisao.engage) {
         descartar(decisao.reason, {
@@ -4063,6 +4079,7 @@ export function registerChatbotRoutes(app, deps) {
           isSdrNumber: telefoneEhSdr,
           isAgentMuted,
           agentMutedSource,
+          isPersonal: conversaPessoal,
         });
         return;
       }

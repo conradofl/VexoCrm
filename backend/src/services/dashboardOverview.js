@@ -331,6 +331,7 @@ export async function measureFunnelMeetings(pool, { clientId, currentStart, curr
 // número", sem dizer se foi gente ou robô. Conversa cuja única saída depois da entrada é 'user' (ou de tipo
 // desconhecido) fica INDETERMINADA: fora do numerador e do denominador. N = M − indeterminadas.
 // O cartão mostra "medido em N de M". Mediana e p90 saem só das respondidas.
+// Conversa marcada como pessoal (whatsapp_chat_states.state = 'pessoal') fica fora de tudo.
 export function buildFirstHumanResponseCoverageSql() {
   return `
     WITH m AS (
@@ -342,9 +343,15 @@ export function buildFirstHumanResponseCoverageSql() {
         AND ${MSG_TS} >= $2
     ),
     first_in AS (
+      -- Conversa marcada como pessoal na tela Conversas (contato do celular do empresário que não é cliente)
+      -- não entra: nem como esperando, nem no tempo de resposta.
       SELECT cphone, MIN(ts) AS in_at
       FROM m
       WHERE direction = 'inbound' AND ts >= $2 AND ts < $3
+        AND NOT EXISTS (
+          SELECT 1 FROM public.whatsapp_chat_states cs
+          WHERE cs.client_id = $1 AND cs.phone = m.cphone AND cs.state = 'pessoal'
+        )
       GROUP BY cphone
     ),
     c AS (

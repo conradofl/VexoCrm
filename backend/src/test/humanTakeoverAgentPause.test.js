@@ -172,6 +172,8 @@ function setup({ pauseOnDeviceReply = false, expiryDays = 3, settingsFail = fals
     mute: (phone) => call("POST /api/whatsapp/chats/mute", { body: { clientId: TENANT, phone } }),
     unmute: (phone) => call("POST /api/whatsapp/chats/unmute", { body: { clientId: TENANT, phone } }),
     listChats: (query = {}) => call("GET /api/whatsapp/chats", { query: { clientId: TENANT, ...query } }),
+    setState: (phone, state) => call("POST /api/whatsapp/chats/state", { body: { clientId: TENANT, phone, state }, user: { email: "dono@empresa.test" } }),
+    setStateBulk: (phones, state) => call("POST /api/whatsapp/chats/state/bulk", { body: { clientId: TENANT, phones, state }, user: { email: "dono@empresa.test" } }),
     replyFromScreen: (text) => call("POST /api/whatsapp/messages", { body: { clientId: TENANT, chatId: LEAD, body: text } }),
   };
 }
@@ -724,5 +726,57 @@ describe("Resposta pelo aparelho pausa o agente (D3)", () => {
     const livre = setup({ pauseOnDeviceReply: true, findCampaignReplyMatches: contexto, continueCampaignLeadFromReply: continuar });
     expect(await livre.webhook(mensagem({ text: "Sim" }))).toMatchObject({ status: "campaign_step_dispatched" });
     await vi.waitFor(() => expect(continuar).toHaveBeenCalledTimes(1));
+  });
+});
+
+// ── Conversa pessoal (19/11/2026): contato do celular do empresário que não é cliente ──
+describe("Conversa marcada como pessoal", () => {
+  it("[OBRIGATÓRIO] marcar pessoal cala o robô até no escopo 'all', e mensagem nova NÃO desfaz a marca", async () => {
+    const t = setup();
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" }); // antes de marcar, o robô atende
+
+    expect(await t.setState(LEAD, "pessoal")).toMatchObject({ success: true, state: "pessoal" });
+    expect(await t.webhook(mensagem({ text: "Filho, vem jantar?" }))).toMatchObject({ ignored: "conversa_marcada_pessoal" });
+    expect((await estadoDaConversa()).state).toBe("pessoal");
+
+    // Resposta do dono pelo celular também não desfaz (arquivada e automação voltam para ativa; pessoal não).
+    await t.webhook(mensagem({ fromMe: true, text: "Vou sim" }));
+    expect((await estadoDaConversa()).state).toBe("pessoal");
+    expect(await t.webhook(mensagem({ text: "Traz pão" }))).toMatchObject({ ignored: "conversa_marcada_pessoal" });
+  });
+
+  it("tirar a marca (voltar para ativa) devolve a conversa ao robô", async () => {
+    const t = setup();
+    await t.setState(LEAD, "pessoal");
+    expect(await t.setState(LEAD, "ativa")).toMatchObject({ success: true, state: "ativa" });
+    expect(await t.webhook(mensagem())).toMatchObject({ status: "buffering" });
+  });
+
+  it("some da Fila, aparece na aba Pessoais, e o rodapé conta", async () => {
+    const t = setup();
+    for (const [phone, text] of [["5534999990041", "Quero orçamento"], ["5534999990042", "Oi mãe"], ["5534999990043", "Bom dia, amigo"]]) {
+      await db.query(
+        `INSERT INTO public.lead_messages (client_id, phone, sender_type, direction, message_text, message_timestamp)
+         VALUES ($1, $2, 'lead', 'inbound', $3, now())`,
+        [TENANT, phone, text]
+      );
+    }
+    expect(await t.setStateBulk(["5534999990042", "5534999990043"], "pessoal")).toMatchObject({ success: true, count: 2, state: "pessoal" });
+
+    const fila = await t.listChats({ tab: "fila" });
+    expect(fila.items.map((c) => c.id)).toEqual(["5534999990041"]);
+    expect(fila.counts.personal).toBe(2);
+
+    // "Esperam você" e o número do Dashboard: inboxWorkState.test.js (este dublê de banco não abre conexão com teto).
+
+    const pessoais = await t.listChats({ tab: "pessoais" });
+    expect(pessoais.items.map((c) => c.id).sort()).toEqual(["5534999990042", "5534999990043"]);
+    expect(pessoais.items.every((c) => c.state === "pessoal")).toBe(true);
+    expect(pessoais.total).toBe(2);
+  });
+
+  it("estado fora da lista continua recusado", async () => {
+    const t = setup();
+    expect(await t.setState(LEAD, "familia")).toMatchObject({ success: false, status: 400, code: "INVALID_BODY" });
   });
 });
