@@ -99,6 +99,13 @@ export interface WhatsAppMessage {
   messageTimestamp?: string | null;
 }
 
+/** Faixa "Chegaram agora": conversas de "Esperam você" com a mensagem real dos últimos 60 min (mais recente primeiro). */
+export interface ArrivedNow {
+  items: WhatsAppChat[];
+  total: number;
+  minutes: number;
+}
+
 interface WhatsAppChatsPage {
   items: WhatsAppChat[];
   total: number;
@@ -106,6 +113,7 @@ interface WhatsAppChatsPage {
   chipAgents?: Record<string, ChipAgentInfo>;
   nextOffset: number;
   hasMore: boolean;
+  arrivedNow?: ArrivedNow;
 }
 
 export interface ReplyChipAlternative {
@@ -318,6 +326,8 @@ export function useWhatsAppChats(
     total,
     counts,
     chipAgents: recentChatsQuery.data?.chipAgents ?? {},
+    // Só vem na primeira página das abas de trabalho e sem busca (o servidor decide).
+    arrivedNow: search.trim() ? null : recentChatsQuery.data?.arrivedNow ?? null,
     hasMore,
     isLoading,
     error,
