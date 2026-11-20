@@ -27,6 +27,12 @@ export const WORK_STATES = ["esperam", "com_lead", "robo", "esfriaram"];
 export const AWAITING_WINDOW_DAYS = 7;
 // "Esperando há muito": o mesmo limite que o Dashboard mostra (SLOW_FIRST_RESPONSE_HOURS).
 export const WAITING_THRESHOLD_HOURS = 3;
+// Faixa "Chegaram agora" (19/11/2026): em "Esperam você" a ordem é "mais parado primeiro", e a conversa que acabou de
+// chegar caía na ÚLTIMA posição (42ª de 42, com a tela carregando 40). Ela fica no topo da coluna por 60 min, pela hora
+// REAL da mensagem (a mesma do EFFECTIVE_TS): mensagem que chegou atrasada não entra.
+export const ARRIVED_NOW_MINUTES = 60;
+// A tela mostra 10 e abre o resto em "ver todas (N)"; o servidor manda até 50 e o total exato.
+export const ARRIVED_NOW_LIMIT = 50;
 
 export function isWorkStateTab(tab) {
   return WORK_STATES.includes(tab);
@@ -175,13 +181,59 @@ function baseParams({ clientId, now, robotChips, chipAliases }) {
  *   - grupos, automações, arquivadas e pausadas, com os mesmos predicados das abas antigas.
  * Exposto pelo mesmo motivo de buildWorkStatePageSql.
  */
-export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql = "false" } = {}) {
+/** Conversa da faixa "Chegaram agora": a mesma regra de "esperam", com a hora real nos últimos 60 min. */
+export const SQL_ARRIVED_NOW_MATCH = (c = "c") => `(
+  ${c}.in_queue AND ${c}.work_state = 'esperam'
+  AND ${c}.effective_timestamp >= $2::timestamptz - make_interval(mins => ${ARRIVED_NOW_MINUTES})
+)`;
+
+// As até 10 conversas da faixa, mais recente primeiro, com as mesmas colunas da página (o mesmo mapeador serve).
+// Lê o MESMO conv dos contadores: o Postgres materializa o CTE usado duas vezes, sem nova varredura.
+function arrivedNowRowsSql(leadsTable) {
+  return `(
+      SELECT COALESCE(json_agg(a ORDER BY a.effective_timestamp DESC NULLS LAST, a.id DESC), '[]'::json)
+      FROM (
+        SELECT
+          c2.id, c2.phone AS phone_number, c2.raw_phone, c2.message_text, c2.direction, c2.sender_type,
+          c2.delivered_at, c2.created_at, c2.message_timestamp, c2.effective_timestamp, c2.campaign_id,
+          c2.contact_name, c2.is_group, c2.meta, c2.work_state, c2.last_in_at, c2.lead_chip, c2.lead_never_spoke,
+          c2.chat_state, c2.chat_state_reason, c2.chat_state_source, c2.chat_state_changed_by,
+          c2.chat_attended_at, c2.chat_attended_by, c2.agent_muted_at, c2.agent_muted_reason, c2.agent_mute_expired,
+          lm.profile_pic, lm.contact_name AS profile_name, l.nome AS lead_name, l.lead_origin, l.source_campaign_id
+        FROM conv c2
+        LEFT JOIN LATERAL (
+          SELECT nome, lead_origin, source_campaign_id
+          FROM public."${leadsTable}" l0
+          WHERE l0.client_id = $1 AND l0.telefone = ANY(${SQL_CANONICAL_PHONE_SPELLINGS("c2.phone")})
+          ORDER BY l0.created_at DESC NULLS LAST
+          LIMIT 1
+        ) l ON true
+        LEFT JOIN LATERAL (
+          SELECT profile_pic, contact_name
+          FROM public.whatsapp_lid_map lm0
+          WHERE lm0.lid = c2.phone OR lm0.lid = c2.raw_phone
+          LIMIT 1
+        ) lm ON true
+        WHERE ${SQL_ARRIVED_NOW_MATCH("c2")}
+        ORDER BY c2.effective_timestamp DESC NULLS LAST, c2.id DESC
+        LIMIT ${ARRIVED_NOW_LIMIT}
+      ) a
+    )`;
+}
+
+export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql = "false", arrivedNow = null } = {}) {
   const states = WORK_STATES.map(
     (state) => `count(*) FILTER (WHERE c.in_queue AND c.work_state = '${state}')::integer AS ${state}`
   ).join(",\n      ");
+  // Opcional: só a rota de Conversas pede a faixa (arrivedNow: { leadsTable }). O Dashboard lê os contadores sem ela.
+  const arrived = arrivedNow
+    ? `
+      count(*) FILTER (WHERE ${SQL_ARRIVED_NOW_MATCH("c")})::integer AS arrived_now_total,
+      ${arrivedNowRowsSql(arrivedNow.leadsTable || "leads")} AS arrived_now,`
+    : "";
   return `
     WITH ${buildWorkConvCte({ hasChipScope, pauseExpiredSql })}
-    SELECT
+    SELECT${arrived}
       ${states},
       count(*) FILTER (
         WHERE c.in_queue AND c.work_state = 'esperam'
@@ -240,12 +292,21 @@ export async function withStatementTimeout(pool, timeoutMs, fn) {
  * @param {(sql: string, params: any[]) => Promise<{rows: any[]}>} query
  * @returns {Promise<{work: Record<string, number>, waitingOverThreshold: number, groups: number, archived: number, automations: number, paused: number}>}
  */
-export async function fetchInboxCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql } = {}) {
+export async function fetchInboxCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql, arrivedNow = null } = {}) {
   const { params, hasChipScope } = baseParams({ clientId, now, robotChips, chipAliases });
-  const { rows } = await query(buildWorkStateCountsSql({ hasChipScope, pauseExpiredSql }), params);
+  const { rows } = await query(buildWorkStateCountsSql({ hasChipScope, pauseExpiredSql, arrivedNow }), params);
   const row = rows[0] || {};
   const int = (v) => Number(v) || 0;
+  const extra = arrivedNow
+    ? {
+        arrivedNow: {
+          total: int(row.arrived_now_total),
+          rows: Array.isArray(row.arrived_now) ? row.arrived_now : typeof row.arrived_now === "string" ? JSON.parse(row.arrived_now) : [],
+        },
+      }
+    : {};
   return {
+    ...extra,
     work: Object.fromEntries(WORK_STATES.map((state) => [state, int(row[state])])),
     waitingOverThreshold: int(row.esperam_over_threshold),
     groups: int(row.groups_count),
