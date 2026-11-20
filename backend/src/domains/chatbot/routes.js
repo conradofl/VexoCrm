@@ -3196,7 +3196,13 @@ export function registerChatbotRoutes(app, deps) {
     const eventoBruto = body?.event ?? body?.Event ?? body?.eventName ?? null;
     // Reprocessamento: a mensagem já passou por aqui uma vez (o id já está na memória de deduplicação, se o processo é o
     // mesmo), e só mensagem do lead chega pela varredura.
-    const guarda = reprocesso ? { ignore: false, reason: null } : shouldIgnoreInboundEvent(body);
+    // Empresa na chave da deduplicação: o mesmo messageId que sai de um chip do Vexo e chega em outro são duas
+    // mensagens (19/11/2026, "Teste 3": vexo-adm -> Container LED 9499, a chegada era jogada fora).
+    const empresaDaGuarda =
+      normalizeTenantKey(body.clientId ?? body.client_id ?? req.query.clientId ?? req.query.client_id) || "outlier";
+    const guarda = reprocesso
+      ? { ignore: false, reason: null }
+      : shouldIgnoreInboundEvent(body, Date.now(), { clientId: empresaDaGuarda });
     console.log("[chatbot-webhook] entrada", {
       evento: eventoBruto,
       eventoNormalizado: resolveInboundEventName(body) || null,
