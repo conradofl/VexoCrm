@@ -25,6 +25,7 @@ import { parseDashboardPeriodRequest } from "../../services/dashboardPeriod.js";
 import { redactQueueListForViewer } from "../../services/dashboardOverview.js";
 import { canAccessAppView } from "../../accessGuards.js";
 import { listChipDiary } from "../../services/chipDiary.js";
+import { computeRestartBlockers } from "../../services/restartBlockers.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -163,6 +164,9 @@ export function registerInsightsRoutes(app, deps) {
         activeDispatches = [];
       }
     }
+    // Trava de merge/reinício (20/11/2026): activeDispatchesCount continua igual para quem já lê; restartBlockers diz
+    // também o que COMEÇA nos próximos 15 min (o deploy reinicia 3 a 5 min depois do merge).
+    const restartBlockers = await computeRestartBlockers(pgDatabasePool);
 
     res.json({
       ok: true,
@@ -180,6 +184,7 @@ export function registerInsightsRoutes(app, deps) {
         activeDispatches.length > 0
           ? `ATENÇÃO: Existem ${activeDispatches.length} disparo(s) em andamento no momento. Evite reiniciar o servidor agora.`
           : null,
+      restartBlockers,
       build: BUILD_INFO_PUBLICO(),
       uptimeSeconds: process.uptime(),
       migrations: getMigrationStatus(),
