@@ -24,12 +24,16 @@ const LEAD_MESSAGES_SCHEMA = `
     message_timestamp timestamptz,
     meta jsonb DEFAULT '{}'::jsonb,
     instance_name text,
-    wa_message_id text UNIQUE,
+    wa_message_id text,
     media_path text,
     media_url text,
     content_type text,
     created_at timestamptz DEFAULT now()
   );
+  -- Igual a produção (pg_indexes, 20/11/2026): único por empresa e parcial. Antes este teste criava
+  -- "wa_message_id text UNIQUE", que produção não tem, e escondia o 42P10 da gravação de reserva.
+  CREATE UNIQUE INDEX idx_lead_messages_wa_message_id
+    ON public.lead_messages (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL;
 `;
 
 const openDbs = [];
