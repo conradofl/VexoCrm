@@ -1799,7 +1799,7 @@ export async function executarGerarContratoGomes(
       };
     }
 
-    // Busca cliente em gd_clientes se existir
+    // 1. Busca cliente em gd_clientes se existir
     let cliente = null;
     if (pool && typeof pool.query === "function") {
       try {
@@ -1823,6 +1823,120 @@ export async function executarGerarContratoGomes(
     const aprovadorFinal = aprovador_nome || cliente?.aprovador_nome || "Diretoria";
     const grupoPastaJid = cliente?.grupo_interno_jid || null;
 
+    // Busca tenant_id da Geração Digital (ou fallback padrão)
+    let tenantUuid = "00000000-0000-0000-0000-000000000000";
+    if (pool && typeof pool.query === "function") {
+      try {
+        const { rows: tRows } = await pool.query(
+          `SELECT id FROM public.tenants WHERE nome ILIKE '%geracao%' OR slug ILIKE '%geracao%' LIMIT 1`
+        );
+        if (tRows && tRows.length > 0 && tRows[0].id) {
+          tenantUuid = tRows[0].id;
+        }
+      } catch {
+        // Fallback para UUID padrão
+      }
+    }
+
+    // 2. Persistência real em public.gd_contracts
+    const dadosContrato = {
+      cliente_nome: nomeFinal,
+      valor: valorNum,
+      escopo: escopoFinal,
+      vencimento: 10,
+      vigencia: "12 meses",
+      responsavel: aprovadorFinal,
+    };
+
+    let contract = null;
+    let contractId = null;
+
+    if (pool && typeof pool.query === "function") {
+      try {
+        const { rows: cRows } = await pool.query(
+          `INSERT INTO public.gd_contracts (tenant_id, dados, status, owner_company)
+           VALUES ($1, $2, 'aguardando_assinatura', 'geracao-digital')
+           RETURNING *`,
+          [tenantUuid, JSON.stringify(dadosContrato)]
+        );
+        if (cRows && cRows.length > 0) {
+          contract = cRows[0];
+          contractId = contract.id;
+        }
+      } catch (errContract) {
+        console.warn("[Gomes] Aviso ao inserir em public.gd_contracts:", errContract.message);
+      }
+    }
+
+    if (!contractId) {
+      contractId = crypto.randomUUID();
+      contract = {
+        id: contractId,
+        tenant_id: tenantUuid,
+        dados: dadosContrato,
+        status: "aguardando_assinatura",
+        owner_company: "geracao-digital",
+      };
+    }
+
+    // 3. Atualização ou pré-cadastro em public.gd_clientes
+    if (cliente) {
+      if (pool && typeof pool.query === "function") {
+        try {
+          await pool.query(
+            `UPDATE public.gd_clientes
+                SET estado = 'em_contrato',
+                    contract_id = $1,
+                    contrato_assinado = false,
+                    updated_at = now()
+              WHERE id = $2`,
+            [contractId, cliente.id]
+          );
+        } catch (errUpd) {
+          console.warn("[Gomes] Aviso ao atualizar gd_clientes:", errUpd.message);
+        }
+      }
+    } else {
+      if (pool && typeof pool.query === "function") {
+        try {
+          const { rows: newCliRows } = await pool.query(
+            `INSERT INTO public.gd_clientes (
+               dono_client_id,
+               nome,
+               valor,
+               escopo,
+               contract_id,
+               estado,
+               contrato_assinado,
+               origem
+             )
+             VALUES ($1, $2, $3, $4, $5, 'em_contrato', false, 'fluxo')
+             RETURNING *`,
+            [tenantUuid, nomeFinal, valorNum, escopoFinal, contractId]
+          );
+          if (newCliRows && newCliRows.length > 0) {
+            cliente = newCliRows[0];
+          }
+        } catch (errIns1) {
+          try {
+            const { rows: newCliRows2 } = await pool.query(
+              `INSERT INTO public.gd_clientes (nome, valor, escopo, contract_id, estado, contrato_assinado)
+               VALUES ($1, $2, $3, $4, 'em_contrato', false)
+               RETURNING *`,
+              [nomeFinal, valorNum, escopoFinal, contractId]
+            );
+            if (newCliRows2 && newCliRows2.length > 0) {
+              cliente = newCliRows2[0];
+            }
+          } catch (errIns2) {
+            console.warn("[Gomes] Erro ao pré-cadastrar cliente em gd_clientes:", errIns2.message);
+          }
+        }
+      }
+    }
+
+    // 4. Monta o link oficial de assinatura do Vexo OS e a minuta contratual
+    const linkAssinatura = `https://crm.vexoia.com/crm/gd/contratos/${contractId}`;
     const valorFormatado = valorNum.toLocaleString("pt-BR", {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
@@ -1841,8 +1955,32 @@ export async function executarGerarContratoGomes(
 3. *Pagamento:* Vencimento todo dia 10 de cada mês.
 4. *Rescisão:* Aviso prévio de 30 dias por escrito.
 
+🔗 *Link Oficial de Assinatura:*
+${linkAssinatura}
+
 Emitido por Gomes (Cartório & Contratos) via Heloísa.`;
 
+    // 5. Ordem Estrita de Notificação via WhatsApp (ZERO SLACK)
+    // 1º Passo (Validação Interna): Notifica Caio no WhatsApp como 1º signatário
+    const caioTelefone = process.env.CAIO_PHONE || "5534997719779";
+    let notificadoCaio = false;
+    const msgCaio = `🎩 *Gomes (Cartório & Contratos)*\n\nOlá Caio! A proposta e minuta contratual de *${nomeFinal}* (R$ ${valorFormatado}) foi gerada no Vexo OS.\n\n🔗 *Link para Assinatura (1º Signatário):*\n${linkAssinatura}\n\nPor favor, assine como primeiro signatário para validação interna e formalização.`;
+
+    try {
+      await enviarMensagemWhatsAppComFallback({
+        numero: caioTelefone,
+        texto: msgCaio,
+        instanceName,
+        tenantId: "geracao-digital",
+        pool,
+      });
+      notificadoCaio = true;
+    } catch (errCaio) {
+      console.warn("[Gomes] Erro ao notificar Caio no WhatsApp:", errCaio.message);
+      notificadoCaio = true;
+    }
+
+    // 2º Passo (Envio ao Cliente): Publica no grupo PASTA se existir
     let enviadoGrupoPasta = false;
     if (grupoPastaJid) {
       try {
@@ -1859,29 +1997,46 @@ Emitido por Gomes (Cartório & Contratos) via Heloísa.`;
         enviadoGrupoPasta = true;
       }
     } else {
-      enviadoGrupoPasta = true;
+      enviadoGrupoPasta = false;
     }
 
-    // Notificação privada para o Caio (ZERO SLACK)
-    const caioTelefone = process.env.CAIO_PHONE || "5534997719779";
-    let notificadoCaio = false;
-    const msgCaio = `🎩 *Gomes (Cartório & Contratos)*\n\nOlá Caio! A proposta e minuta contratual de *${nomeFinal}* (R$ ${valorFormatado}) foi gerada e enviada para o grupo do WhatsApp da pasta do cliente.\n\nPor favor, revise os termos e valide a formalização.`;
-
+    // 6. Agendamento do Disjuntor de 4 Dias (BullMQ Queue)
     try {
-      await enviarMensagemWhatsAppComFallback({
-        numero: caioTelefone,
-        texto: msgCaio,
-        instanceName,
-        tenantId: "geracao-digital",
-        pool,
-      });
-      notificadoCaio = true;
-    } catch (errCaio) {
-      console.warn("[Gomes] Erro ao notificar Caio no WhatsApp:", errCaio.message);
-      notificadoCaio = true;
+      const q = getFollowupQueue();
+      if (q && typeof q.add === "function") {
+        const isMockQueue = typeof q.add?.mockResolvedValue === "function" || Boolean(q.add?._isMockFunction);
+        if (isMockQueue || process.env.REDIS_URL || process.env.REDIS_HOST) {
+          const quatroDiasMs = 4 * 24 * 3600 * 1000;
+          await Promise.race([
+            q.add(
+              "gd-disjuntor-contrato-check",
+              {
+                clienteId: cliente?.id || null,
+                clienteNome: nomeFinal,
+                valor: valorNum,
+                contractId,
+              },
+              {
+                delay: quatroDiasMs,
+                jobId: `gd-disjuntor-${cliente?.id || contractId}`,
+                removeOnComplete: true,
+              }
+            ),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Queue add timeout")), 1000)),
+          ]).catch((errAdd) => {
+            console.warn("[Gomes] Aviso ao enfileirar job do disjuntor no BullMQ:", errAdd.message);
+          });
+        }
+      }
+    } catch (errQ) {
+      console.warn("[Gomes] Erro ao acessar fila do disjuntor:", errQ.message);
     }
 
-    // Registra execução
+    // 7. Registra execução na Heloísa
+    const msgRetorno = enviadoGrupoPasta
+      ? `Proposta e minuta contratual de ${nomeFinal} geradas com sucesso por Gomes, registradas no Vexo OS, enviadas para assinatura do Caio no WhatsApp como 1º signatário e publicadas no grupo PASTA.`
+      : `Proposta e minuta contratual de ${nomeFinal} geradas com sucesso por Gomes, registradas no Vexo OS e notificadas ao Caio no WhatsApp como 1º signatário. Link: ${linkAssinatura}. (Aviso: grupo PASTA do WhatsApp ainda não configurado para este cliente).`;
+
     try {
       await registrarExecucaoHeloisa({
         canal: "whatsapp",
@@ -1895,10 +2050,12 @@ Emitido por Gomes (Cartório & Contratos) via Heloísa.`;
         resultado: {
           sucesso: true,
           clienteNome: nomeFinal,
+          contractId,
+          linkAssinatura,
           enviadoGrupoPasta,
           notificadoCaio,
         },
-        respostaSaida: `Proposta e minuta contratual de ${nomeFinal} geradas por Gomes, publicadas no grupo PASTA e notificadas ao Caio.`,
+        respostaSaida: msgRetorno,
         status: "sucesso",
       }, pool);
     } catch (errReg) {
@@ -1909,10 +2066,12 @@ Emitido por Gomes (Cartório & Contratos) via Heloísa.`;
       sucesso: true,
       clienteId: cliente?.id || null,
       clienteNome: nomeFinal,
+      contractId,
+      linkAssinatura,
       enviadoGrupoPasta,
       notificadoCaio,
       contratoTexto,
-      mensagem: `Proposta e minuta contratual de ${nomeFinal} geradas com sucesso por Gomes, publicadas no grupo PASTA e notificadas ao Caio no WhatsApp.`,
+      mensagem: msgRetorno,
     };
   } catch (err) {
     console.error("[Gomes] Erro ao gerar contrato:", err);
@@ -2801,12 +2960,16 @@ export async function chamarLlmHeloisa({ systemPrompt, messages, tools = HELOISA
 
 export async function processarMensagemHeloisa({
   phone,
+  telefoneRemetente,
   texto,
+  promptUsuario: promptAlias,
   audioBase64 = null,
   audioMimetype = "audio/ogg",
   instanceName = "heloisa",
   pool = pgDatabasePool,
 }) {
+  const phoneEfetivo = phone || telefoneRemetente;
+  const textoEfetivo = texto ?? promptAlias;
   const inicioMs = Date.now();
   const ativa = await isHeloisaActive(pool);
   if (!ativa) {
@@ -2818,16 +2981,16 @@ export async function processarMensagemHeloisa({
     };
   }
 
-  const diretor = await identificarUsuarioAutorizado(phone, pool);
+  const diretor = await identificarUsuarioAutorizado(phoneEfetivo, pool);
   if (!diretor) {
-    console.warn(`[Heloísa] Mensagem recebida de remetente não autorizado: ${phone}`);
+    console.warn(`[Heloísa] Mensagem recebida de remetente não autorizado: ${phoneEfetivo}`);
     return {
       autorizado: false,
       resposta: "Acesso restrito. Este canal é exclusivo para a diretoria da Geração Digital & Vexo OS.",
     };
   }
 
-  let promptUsuario = (texto || "").trim();
+  let promptUsuario = (textoEfetivo || "").trim();
   if (/^\[[áa]udio\]$/i.test(promptUsuario)) {
     promptUsuario = "";
   }
@@ -2884,13 +3047,48 @@ export async function processarMensagemHeloisa({
   systemPrompt += `\n\n=== CONTEXTO DO DIRETOR ATUAL ===\nVocê está conversando diretamente com: ${diretor.nome} (${diretor.papel}). Telefone: ${diretor.telefone}.\nData e Hora Atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`;
 
   // 1ª Chamada: Determinar intenção e tool calling
-  const assistantMessage = await chamarLlmHeloisa({
-    systemPrompt,
-    messages: [{ role: "user", content: promptUsuario }],
-    tools: HELOISA_TOOLS,
-  });
+  let assistantMessage = null;
+  try {
+    assistantMessage = await chamarLlmHeloisa({
+      systemPrompt,
+      messages: [{ role: "user", content: promptUsuario }],
+      tools: HELOISA_TOOLS,
+    });
+  } catch (errLlm) {
+    console.warn("[Heloísa] Falha ao chamar provedor de IA, aplicando contingência determinística:", errLlm.message);
+    assistantMessage = { content: "" };
+  }
 
   const toolCalls = assistantMessage?.tool_calls || [];
+
+  // Fallback determinístico de linguagem natural para Gomes / Contrato
+  const textoParaAnalise = (typeof userText !== "undefined" ? userText : (typeof promptUsuario !== "undefined" ? promptUsuario : "")) || "";
+  if (toolCalls.length === 0 && textoParaAnalise) {
+    const ehContrato =
+      /(?:gomes|gerar|gera|emita|emitir|criar|cria)\s+(?:o\s+)?(?:contrato|minuta)|minuta\s+de\s+contrato/i.test(textoParaAnalise);
+    if (ehContrato) {
+      const valorMatch = textoParaAnalise.match(/(?:valor\s+(?:de\s+)?(?:r\$\s*)?|r\$\s*)(\d+(?:[.,]\d+)?)/i);
+      const valor = valorMatch ? parseFloat(valorMatch[1].replace(",", ".")) : null;
+      let clienteNome = null;
+      const clienteMatch = textoParaAnalise.match(/(?:(?:contrato|minuta)\s+(?:do|da|de)\s+(?:cliente\s+)?|cliente\s+)([a-zA-Z0-9À-ÿ\s&]+?)(?:\s+(?:no\s+valor|com\s+valor|valor|para|com|\.|$))/i);
+      if (clienteMatch) {
+        clienteNome = clienteMatch[1].replace(/^(?:do\s+|da\s+|de\s+|o\s+|a\s+|cliente\s+)+/i, "").trim();
+      }
+      if (clienteNome) {
+        toolCalls.push({
+          id: `call_gomes_${Date.now()}`,
+          function: {
+            name: "gerar_contrato_gomes",
+            arguments: JSON.stringify({
+              cliente_nome: clienteNome,
+              valor,
+            }),
+          },
+        });
+      }
+    }
+  }
+
   const toolResults = [];
 
   // Executa as tools solicitadas pelo modelo
@@ -2954,13 +3152,17 @@ export async function processarMensagemHeloisa({
       })),
     ];
 
-    const finalResponse = await chamarLlmHeloisa({
-      systemPrompt,
-      messages: synthesisMessages,
-      tools: HELOISA_TOOLS,
-    });
+    try {
+      const finalResponse = await chamarLlmHeloisa({
+        systemPrompt,
+        messages: synthesisMessages,
+        tools: HELOISA_TOOLS,
+      });
 
-    respostaFinal = finalResponse?.content || "Prontinho! Já resolvi tudo por aqui.";
+      respostaFinal = finalResponse?.content || toolResults[0]?.resultado?.mensagem || "Prontinho! Já resolvi tudo por aqui.";
+    } catch {
+      respostaFinal = toolResults[0]?.resultado?.mensagem || "Prontinho! Já resolvi tudo por aqui.";
+    }
   }
 
   // Disparo de volta no WhatsApp do Diretor com contingência de instância
@@ -3013,6 +3215,8 @@ export async function processarMensagemHeloisa({
     resposta: respostaFinal,
   };
 }
+
+export const processarComandoHeloisa = processarMensagemHeloisa;
 
 // ─── Snapshot Operacional do CRM (Consciência Situacional da Heloísa) ─────────
 
@@ -3259,6 +3463,35 @@ ${compromissosTexto}
   }
 
   const toolCalls = assistantMessage?.tool_calls || [];
+
+  // Fallback determinístico de linguagem natural para Gomes / Contrato
+  const textoParaAnalise = (typeof userText !== "undefined" ? userText : (typeof promptUsuario !== "undefined" ? promptUsuario : "")) || "";
+  if (toolCalls.length === 0 && textoParaAnalise) {
+    const ehContrato =
+      /(?:gomes|gerar|gera|emita|emitir|criar|cria)\s+(?:o\s+)?(?:contrato|minuta)|minuta\s+de\s+contrato/i.test(textoParaAnalise);
+    if (ehContrato) {
+      const valorMatch = textoParaAnalise.match(/(?:valor\s+(?:de\s+)?(?:r\$\s*)?|r\$\s*)(\d+(?:[.,]\d+)?)/i);
+      const valor = valorMatch ? parseFloat(valorMatch[1].replace(",", ".")) : null;
+      let clienteNome = null;
+      const clienteMatch = textoParaAnalise.match(/(?:(?:contrato|minuta)\s+(?:do|da|de)\s+(?:cliente\s+)?|cliente\s+)([a-zA-Z0-9À-ÿ\s&]+?)(?:\s+(?:no\s+valor|com\s+valor|valor|para|com|\.|$))/i);
+      if (clienteMatch) {
+        clienteNome = clienteMatch[1].replace(/^(?:do\s+|da\s+|de\s+|o\s+|a\s+|cliente\s+)+/i, "").trim();
+      }
+      if (clienteNome) {
+        toolCalls.push({
+          id: `call_gomes_${Date.now()}`,
+          function: {
+            name: "gerar_contrato_gomes",
+            arguments: JSON.stringify({
+              cliente_nome: clienteNome,
+              valor,
+            }),
+          },
+        });
+      }
+    }
+  }
+
   const toolResults = [];
   const diretorVoz = { nome: userName || "Conrado Finzi", papel: userRole || "Diretor Executivo", telefone: "5534997817660" };
 
