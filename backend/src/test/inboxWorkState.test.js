@@ -429,6 +429,15 @@ describe("conversa marcada como pessoal (contato do celular do empresário que n
     expect(phonesOf(await page("esperam", { clientId: TP }))).toContain(Q.arquivadaTrocaNumero);
   });
 
+  it("faixa 'Chegaram agora' também não mostra conversa pessoal", async () => {
+    const counts = await fetchInboxCounts(query, { ...baseP, arrivedNow: { leadsTable: "leads" } });
+    const faixa = counts.arrivedNow.rows.map((r) => r.phone_number);
+    expect(faixa).toContain(Q.cliente);
+    expect(faixa).not.toContain(Q.pessoal);
+    expect(faixa).not.toContain(Q.pessoalTrocaNumero);
+    expect(counts.arrivedNow.total).toBe(faixa.length);
+  });
+
   it("o rodapé conta as pessoais, separadas das arquivadas", async () => {
     const counts = await fetchInboxCounts(query, baseP);
     expect(counts.personal).toBe(2);
