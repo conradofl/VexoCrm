@@ -55,10 +55,13 @@ export async function recoverOrphanDispatches(pool) {
       ).catch(() => ({ rows: [{ cnt: 0 }] }));
       const claimedCount = Number(claimedRes.rows[0]?.cnt || 0);
 
+      // Quantos 'claimed' viraram 'skipped' DE FATO (rowCount do UPDATE): é a única perda real de um reinício, e o log
+      // passa a dizer o número por lote (20/11/2026).
+      let claimedViraramSkipped = 0;
       if (claimedCount > 0) {
         // Marca leads em 'claimed' como 'skipped' para que constem no histórico como não confirmados
         // e NÃO sejam reenviados automaticamente.
-        await pool.query(
+        const upd = await pool.query(
           `UPDATE public.campaign_dispatch_runs
            SET status = 'skipped',
                error_message = 'Interrompido antes da confirmação de envio (envio não confirmado no restart do servidor)'
@@ -66,7 +69,9 @@ export async function recoverOrphanDispatches(pool) {
           [dispatchId]
         ).catch((err) => {
           console.warn("[boot-recovery] falha ao atualizar status de leads em 'claimed':", err?.message || err);
+          return null;
         });
+        claimedViraramSkipped = Number(upd?.rowCount || 0);
       }
 
       // 4. Contar falhas
@@ -111,15 +116,18 @@ export async function recoverOrphanDispatches(pool) {
           statusAnterior: disp.status,
           desfechos: outcomeCount,
           targetCount,
+          claimedViraramSkipped,
         });
         items.push({
           dispatchId,
           dispatchName: disp.name,
           campaignId: disp.campaign_id,
           clientId: disp.client_id,
+          statusAnterior: disp.status,
           leadsSent: sentCount,
           leadsFailed: failedCount,
           leadsUnconfirmed: claimedCount,
+          claimedViraramSkipped,
           errorMessage: null,
           novoStatus: "done",
         });
@@ -145,14 +153,18 @@ export async function recoverOrphanDispatches(pool) {
         [sentCount, failedCount, errorMessage, dispatchId]
       );
 
+      // statusAnterior: 'running' = o reinício cortou um envio; 'interrupted' = o lote já estava parado com pendentes e
+      // só mudou de nome (19/11 23:20Z, Nous: o log não dizia qual dos dois, 20/11/2026).
       console.log("[boot-recovery] lote órfão pausado com segurança:", {
         dispatchId,
         dispatchName: disp.name,
         campaignId: disp.campaign_id,
         clientId: disp.client_id,
+        statusAnterior: disp.status,
         leadsSent: sentCount,
         leadsFailed: failedCount,
         leadsUnconfirmed: claimedCount,
+        claimedViraramSkipped,
         novoStatus: "paused",
       });
 
@@ -161,9 +173,11 @@ export async function recoverOrphanDispatches(pool) {
         dispatchName: disp.name,
         campaignId: disp.campaign_id,
         clientId: disp.client_id,
+        statusAnterior: disp.status,
         leadsSent: sentCount,
         leadsFailed: failedCount,
         leadsUnconfirmed: claimedCount,
+        claimedViraramSkipped,
         errorMessage,
         novoStatus: "paused",
       });
