@@ -7,11 +7,29 @@ on:
       - codex/stabilization-maps
       - codex/**
       - fix/**
+  # Commit direto no main também roda: o main fica vermelho na hora, e não no PR de outra pessoa dias depois.
+  push:
+    branches:
+      - main
+
+# Push novo no mesmo PR cancela a rodada anterior, que já não vale nada.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend checks
+  # A suíte do backend levava 21 min num job só. Dividida em 6 partes que rodam ao mesmo tempo, cada parte leva uns
+  # 4 min. Cada parte continua com --maxWorkers=2 (o que deixou o CI estável no #198/#199).
+  # Os 4 arquivos mais pesados (3,0 a 3,6 GB de pico cada um, medido em 19/11/2026) ficam fora das partes e rodam
+  # no job "Backend pesados", um de cada vez: sorteados juntos na parte 6, rodavam em pares e a máquina do GitHub
+  # morria ("runner has received a shutdown signal", ou job sem log). Causa provável (memória), não provada.
+  backend-parte:
+    name: Backend parte ${{ matrix.parte }}/6
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        parte: [1, 2, 3, 4, 5, 6]
     defaults:
       run:
         working-directory: backend
@@ -33,7 +51,54 @@ jobs:
         run: npm run check
 
       - name: Unit tests
-        run: npm test -- --maxWorkers=2
+        run: >-
+          npm test -- --maxWorkers=2 --shard=${{ matrix.parte }}/6
+          --exclude src/test/campaignRecurrenceOccurrencesPostgres.test.js
+          --exclude src/test/leadImportBatchesPostgres.test.js
+          --exclude src/test/importAuditPostgres.test.js
+          --exclude src/test/bancoImportRegistration.test.js
+
+  # Os 4 pesados, um de cada vez (--maxWorkers=1). A mesma lista do --exclude acima: mudou lá, muda aqui.
+  backend-pesados:
+    name: Backend pesados
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests (pesados, um de cada vez)
+        run: >-
+          npm test -- --maxWorkers=1
+          src/test/campaignRecurrenceOccurrencesPostgres.test.js
+          src/test/leadImportBatchesPostgres.test.js
+          src/test/importAuditPostgres.test.js
+          src/test/bancoImportRegistration.test.js
+
+  # Mesmo nome de antes ("Backend checks"): só fica verde se as 6 partes E os pesados passarem.
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    needs: [backend-parte, backend-pesados]
+    if: always()
+    steps:
+      - name: Resultado das 6 partes e dos pesados
+        run: |
+          echo "partes: ${{ needs.backend-parte.result }} | pesados: ${{ needs.backend-pesados.result }}"
+          test "${{ needs.backend-parte.result }}" = "success"
+          test "${{ needs.backend-pesados.result }}" = "success"
 
   frontend:
     name: Frontend checks
@@ -71,4 +136,5 @@ jobs:
           fetch-depth: 0
 
       - name: Check whitespace
+        if: github.event_name == 'pull_request'
         run: git diff --check origin/${{ github.base_ref }}...HEAD
