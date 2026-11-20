@@ -64,6 +64,7 @@ import {
   Pause,
   Pin,
   PinOff,
+  UserX,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { EmojiPicker } from "@/pages/LeadImports/EmojiPicker";
@@ -982,6 +983,12 @@ export default function WhatsAppInbox({
       count: chatsQuery.counts?.automations,
     },
     { key: "arquivadas", label: "Arquivadas", title: "Conversas arquivadas manualmente" },
+    {
+      key: "pessoais",
+      label: "Pessoais",
+      title: "Contatos pessoais (família, amigos, fornecedores): fora da fila, do Dashboard e do Plano de ação. Mensagem nova não tira daqui.",
+      count: chatsQuery.counts?.personal,
+    },
   ];
 
   const handleReabrirAtendimento = async () => {
@@ -1036,6 +1043,43 @@ export default function WhatsAppInbox({
       toast.success(isCurrentlyArchived ? "Conversa desarquivada com sucesso!" : "Conversa arquivada com sucesso!");
     } catch (err: any) {
       toast.error(err?.message || "Erro ao alterar arquivamento.");
+    }
+  };
+
+  // Contato pessoal do celular do empresário: sai da fila, do "esperam resposta" do Dashboard e do Plano de ação,
+  // e o robô não responde. Ao contrário de arquivar, mensagem nova não desfaz: só este botão.
+  const isSelectedChatPersonal = selectedChat?.state === "pessoal";
+  const handleTogglePersonal = async () => {
+    if (!selectedChat) return;
+    const wasPersonal = selectedChat.state === "pessoal";
+    try {
+      await updateChatState.mutateAsync({
+        phone: selectedChat.id,
+        state: wasPersonal ? "ativa" : "pessoal",
+        reason: wasPersonal ? "Não é pessoal (desfeito manualmente)" : "Marcada como pessoal manualmente",
+      });
+      toast.success(
+        wasPersonal
+          ? "Conversa voltou para a fila."
+          : "Marcada como pessoal: saiu da fila e do Dashboard. Ela fica em Pessoais, no rodapé."
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao marcar a conversa.");
+    }
+  };
+
+  const handleBulkMarkPersonal = async () => {
+    const phones = Array.from(selectedChatIds);
+    if (phones.length === 0) return;
+    const count = phones.length;
+    try {
+      await bulkUpdateChatState.mutateAsync({ phones, state: "pessoal", reason: "Marcadas como pessoais em lote" });
+      setSelectedChatIds(new Set());
+      toast.success(
+        `${count} conversa${count > 1 ? "s" : ""} marcada${count > 1 ? "s" : ""} como pessoa${count > 1 ? "is" : "l"}. Para desfazer, abra Pessoais no rodapé.`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao marcar conversas como pessoais.");
     }
   };
 
@@ -1649,6 +1693,7 @@ export default function WhatsAppInbox({
       !selectedChat.isGroup &&
       selectedChat.state !== "automacao" &&
       selectedChat.state !== "arquivada" &&
+      selectedChat.state !== "pessoal" &&
       !selectedChat.archived &&
       selectedChat.lastMessage &&
       !selectedChat.lastMessage.fromMe &&
@@ -2456,6 +2501,18 @@ export default function WhatsAppInbox({
                       Cadastrar leads
                     </Button>
                     <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 cursor-pointer gap-1 rounded-lg border-rose-300 bg-white px-2 text-[11px] font-semibold text-rose-700 shadow-xs hover:bg-rose-50 dark:border-rose-500/40 dark:bg-transparent dark:text-rose-200 dark:hover:bg-rose-500/10"
+                      onClick={handleBulkMarkPersonal}
+                      disabled={bulkUpdateChatState.isPending || selectedChatIds.size === 0}
+                      title="Contatos pessoais (família, amigos, fornecedores): saem da fila e do Dashboard, e mensagem nova não traz de volta"
+                      data-testid="inbox-bulk-personal"
+                    >
+                      <UserX className="h-3 w-3" />
+                      Pessoal
+                    </Button>
+                    <Button
                       variant="default"
                       size="sm"
                       className="h-7 cursor-pointer gap-1 rounded-lg bg-slate-900 px-2 text-[11px] font-semibold text-white shadow-xs hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
@@ -2544,6 +2601,7 @@ export default function WhatsAppInbox({
                       !rawId.includes("@g.us") &&
                       chat.state !== "automacao" &&
                       chat.state !== "arquivada" &&
+                      chat.state !== "pessoal" &&
                       !chat.archived &&
                       chat.lastMessage &&
                       !chat.lastMessage.fromMe &&
@@ -2622,6 +2680,7 @@ export default function WhatsAppInbox({
                         isAutomation: chat.state === "automacao",
                         automationReason: chat.stateReason,
                         isArchived: chat.state === "arquivada" || chat.archived,
+                        isPersonal: chat.state === "pessoal",
                         isGroup: chat.isGroup,
                         isTransferred: Boolean(chat.lastMessage?.meta?.is_handoff_bridge),
                         transferredTo: chat.lastMessage?.meta?.transferred_to_chip || null,
@@ -2832,6 +2891,16 @@ export default function WhatsAppInbox({
                               <span>Arquivar conversa</span>
                             </DropdownMenuItem>
                           )}
+                          {!selectedChat.isGroup && (
+                            <DropdownMenuItem
+                              onClick={handleTogglePersonal}
+                              className="gap-2 cursor-pointer text-rose-700 dark:text-rose-300"
+                              data-testid="chat-menu-personal"
+                            >
+                              <UserX className="h-3.5 w-3.5 text-rose-600" />
+                              <span>{isSelectedChatPersonal ? "Não é pessoal (voltar para a fila)" : "Marcar como pessoal"}</span>
+                            </DropdownMenuItem>
+                          )}
                           {selectedChat.state !== "automacao" &&
                             selectedChat.state !== "arquivada" &&
                             !selectedChat.archived && (
@@ -3018,6 +3087,28 @@ export default function WhatsAppInbox({
                     className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80 hover:bg-muted"
                   >
                     <ArchiveRestore className="h-3 w-3" /> Arquivada · desarquivar
+                  </button>
+                )}
+                {isSelectedChatPersonal && (
+                  <button
+                    type="button"
+                    onClick={handleTogglePersonal}
+                    title="Conversa pessoal: fora da fila, do Dashboard e do Plano de ação, e o robô não responde. Clique se não for: ela volta para a fila."
+                    data-testid="chat-personal-undo"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-rose-300 bg-rose-50 px-[9px] py-[3px] text-xs font-semibold text-rose-700 hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200"
+                  >
+                    <UserX className="h-3 w-3" /> Pessoal · não é
+                  </button>
+                )}
+                {isSelectedChatAwaiting && !selectedChat.isGroup && (
+                  <button
+                    type="button"
+                    onClick={handleTogglePersonal}
+                    title="Contato pessoal (família, amigo, fornecedor)? Sai da fila, do Dashboard e do Plano de ação, e mensagem nova não traz de volta."
+                    data-testid="chat-mark-personal"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-[7px] border border-border bg-card px-[9px] py-[3px] text-xs font-semibold text-foreground/80 hover:bg-muted"
+                  >
+                    <UserX className="h-3 w-3" /> É pessoal
                   </button>
                 )}
                 {isSelectedChatAwaiting && (

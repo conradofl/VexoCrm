@@ -35,14 +35,19 @@ export function resolveInboundScope(tenantSettings) {
  * @param {boolean} [params.isSdrNumber=false] número pertence à equipe SDR
  * @param {boolean} [params.isAgentMuted=false] agente pausado na conversa (classificador ou gente)
  * @param {string|null} [params.agentMutedSource=null] quem pausou: "manual" ou "classificador"
+ * @param {boolean} [params.isPersonal=false] conversa marcada como pessoal na tela Conversas
  */
-export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSdrNumber = false, isAgentMuted = false, agentMutedSource = null }) {
+export function shouldEngageInbound({ scope, isKnownLead, hasCampaignMatch, isSdrNumber = false, isAgentMuted = false, agentMutedSource = null, isPersonal = false }) {
   // O SDR e equipe, nao lead. Ele RECEBE o briefing; se a chegada desse briefing
   // fosse tratada como mensagem de lead, o chatbot responderia, qualificaria e
   // mandaria outro briefing — o loop que voltou quando o destino virou lista.
   // Esta trava vale inclusive no escopo "all", porque nao e sobre quem o cliente
   // quer atender: e sobre nao conversar com a propria notificacao.
   if (isSdrNumber) return { engage: false, reason: "numero_e_do_sdr" };
+
+  // Contato pessoal do celular do empresário (família, amigo, fornecedor), marcado por gente na
+  // tela Conversas. Vale até no escopo "all" e para lead conhecido: quem marcou disse que não é cliente.
+  if (isPersonal) return { engage: false, reason: "conversa_marcada_pessoal" };
 
   // Conversa sem intenção comercial (pessoal, família, pedido de comida, engano):
   // o robô fica silenciado para evitar constrangimento e cortar custo de LLM.

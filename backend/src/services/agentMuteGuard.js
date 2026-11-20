@@ -129,6 +129,26 @@ export async function isChatAgentMuted(pool, clientId, phone) {
 }
 
 /**
+ * A conversa está marcada como pessoal (whatsapp_chat_states.state = 'pessoal')? Marca de gente,
+ * para contato do celular do empresário que não é cliente: o robô não responde ali.
+ * Erro de leitura = false (o portão segue a regra de sempre: lead conhecido ou campanha).
+ */
+export async function isChatMarkedPersonal(pool, { clientId, phone }) {
+  if (!pool || !clientId || !phone) return false;
+  try {
+    const res = await pool.query(
+      `SELECT state FROM public.whatsapp_chat_states WHERE client_id = $1 AND phone = $2 AND state = 'pessoal' LIMIT 1`,
+      [clientId, phone]
+    );
+    // Confere o valor lido, não só a presença de linha: resposta inesperada nunca cala o robô.
+    return res.rows[0]?.state === "pessoal";
+  } catch (err) {
+    console.warn("[agentMuteGuard] erro ao consultar isChatMarkedPersonal:", err?.message || err);
+    return false;
+  }
+}
+
+/**
  * Estado da pausa nesta conversa: null se não está pausada, senão
  * { source, expired, daysSinceHuman }. source = MUTE_SOURCE_MANUAL ou
  * MUTE_SOURCE_CLASSIFIER (linha antiga sem origem = classificador). expired só pode
