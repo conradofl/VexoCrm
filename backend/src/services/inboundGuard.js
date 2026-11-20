@@ -78,7 +78,7 @@ function registrarId(id, agora) {
  * Deve ignorar este evento? Roda ANTES de qualquer buffering, chamada de LLM ou
  * envio. Devolve o motivo para o log — silencio sem motivo esconde loop.
  */
-export function shouldIgnoreInboundEvent(body, agora = Date.now()) {
+export function shouldIgnoreInboundEvent(body, agora = Date.now(), { clientId = "" } = {}) {
 
   const isInternalForward =
     body?.isInternalForward === true ||
@@ -106,12 +106,16 @@ export function shouldIgnoreInboundEvent(body, agora = Date.now()) {
 
   // Trava independente das duas acima: o MESMO id reprocessado nao gera segundo
   // envio, venha ele por reentrega da Evolution, retry ou caminho novo.
+  // A chave e empresa + direcao + id (19/11/2026): quando quem manda e quem recebe sao chips do Vexo, o MESMO id
+  // chega como saida (fromMe) numa empresa e como entrada na outra; com a chave so pelo id, a chegada era jogada fora
+  // como "duplicado". O mesmo numero em dois aparelhos da MESMA empresa (final 1267 na vexo-adm) continua duplicado.
   if (id) {
-    const visto = processados.get(id);
+    const chave = `${String(clientId || "").trim().toLowerCase()}|${isFromMe(body) ? "saida" : "entrada"}|${id}`;
+    const visto = processados.get(chave);
     if (visto !== undefined && agora - visto < TTL_MS) {
       return { ignore: true, reason: "duplicado" };
     }
-    registrarId(id, agora);
+    registrarId(chave, agora);
   } else {
     // Payload vindo direto da Evolution sem id: processar, mas logar em warn com o corpo do evento
     console.warn("[inbound-guard] messageId vazio em evento de entrada:", JSON.stringify(body).slice(0, 300));
