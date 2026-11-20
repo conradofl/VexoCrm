@@ -50,6 +50,7 @@ import { sendAgentLibraryAudio } from "../../audioLibrary/agentAudio.js";
 
 import { SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH } from "../../services/inboxSqlMatchers.js";
 import {
+  ARRIVED_NOW_MINUTES,
   fetchInboxCounts,
   fetchWorkStatePage,
   isStatementTimeout,
@@ -978,6 +979,9 @@ export function registerChatbotRoutes(app, deps) {
       let items = [];
       let counts = { active: 0, awaiting: 0, automations: 0, groups: 0, archived: 0, paused: 0, myUnopened: 0 };
       let lastQueryInfo = { step: "init", sql: null, params: null };
+      // Faixa "Chegaram agora" (inboxWorkState.js): só na primeira página das abas de trabalho e sem busca digitada.
+      // Vem da mesma consulta dos contadores, então o polling de 12 s da primeira página já a mantém em dia.
+      let arrivedNow = null;
 
       if (useWorkState) {
         // Contador e lista do estado saem da MESMA consulta-base (inboxWorkState.js), numa
@@ -986,7 +990,10 @@ export function registerChatbotRoutes(app, deps) {
         // lentidão da primeira versão.
         try {
           const work = await withStatementTimeout(pgDatabasePool, WORK_STATE_QUERY_TIMEOUT_MS, async (runInboxQuery) => {
-            const inboxCounts = await fetchInboxCounts(runInboxQuery, workStateOptions);
+            const inboxCounts = await fetchInboxCounts(runInboxQuery, {
+              ...workStateOptions,
+              arrivedNow: offset === 0 ? { leadsTable } : null,
+            });
             const rows = await fetchWorkStatePage(runInboxQuery, { ...workStateOptions, state: rawTab, limit, offset, leadsTable });
             return { inboxCounts, rows };
           });
@@ -997,6 +1004,13 @@ export function registerChatbotRoutes(app, deps) {
           counts.paused = work.inboxCounts.paused;
           total = work.inboxCounts.work?.[rawTab] || 0;
           items = work.rows.map(mapChatRow);
+          if (work.inboxCounts.arrivedNow) {
+            arrivedNow = {
+              items: work.inboxCounts.arrivedNow.rows.map(mapChatRow),
+              total: work.inboxCounts.arrivedNow.total,
+              minutes: ARRIVED_NOW_MINUTES,
+            };
+          }
         } catch (workErr) {
           const timedOut = isStatementTimeout(workErr);
           console.error("[whatsapp/chats] Falha na consulta dos estados de trabalho:", {
@@ -1263,6 +1277,7 @@ export function registerChatbotRoutes(app, deps) {
         chipAgents: robotInfo.byChip,
         nextOffset: offset + items.length,
         hasMore: offset + items.length < (total || items.length),
+        ...(arrivedNow ? { arrivedNow } : {}),
       });
     } catch (error) {
       console.error("[whatsapp/chats] Erro fatal no endpoint:", {

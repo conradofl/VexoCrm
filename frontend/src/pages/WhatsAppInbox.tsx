@@ -1,7 +1,7 @@
 import { motivoAgenteBarrado } from "@/lib/agentBarred";
 import { ChipAlertBanner } from "@/components/chips/ChipAlertBanner";
 import { describeMessageLabel } from "@/lib/inbox/messageLabel";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useIsMobile, useKeyboardOpen, useVisibleArea } from "@/hooks/useMobileViewport";
 import { useBackLayers } from "@/hooks/useBackLayers";
@@ -156,6 +156,7 @@ import {
   InboxOrderRow,
   InboxSearchRow,
   InboxStateTabs,
+  STATE_TABS,
   type ChipOption,
   type FooterFilter,
   type InboxTab,
@@ -913,6 +914,27 @@ export default function WhatsAppInbox({
     return chats;
   }, [chats, inboxTab, itemsByPhone]);
   const totalChatsCount = chatsQuery.total ?? chats.length;
+
+  // Faixa "Chegaram agora" (19/11/2026): em "Esperam você" a ordem é "mais parado primeiro" e a conversa que acabou de
+  // chegar caía na última posição, fora da página carregada. A faixa mostra no topo, em qualquer aba de trabalho, até
+  // 10 conversas cuja mensagem real chegou nos últimos 60 min, sem atendimento depois. Com busca, não aparece.
+  // A conversa que está VISÍVEL na faixa sai da lista de baixo só na tela: a paginação e o contador do servidor não
+  // mudam (o contador da aba conta a conversa uma vez só, faixa + lista).
+  const [faixaAberta, setFaixaAberta] = useState(false);
+  const arrivedNow = chatsQuery.arrivedNow;
+  const faixaVisivel = useMemo(() => {
+    if (debouncedSearch || inboxTab === "hoje" || !arrivedNow?.items?.length) return [];
+    return faixaAberta ? arrivedNow.items : arrivedNow.items.slice(0, 10);
+  }, [arrivedNow, debouncedSearch, inboxTab, faixaAberta]);
+  const listaComFaixa = useMemo(() => {
+    const naFaixa = new Set(faixaVisivel.map((c) => c.id));
+    return [
+      ...faixaVisivel.map((chat, i) => ({ chat, nova: true, cabecalho: i === 0 ? ("faixa" as const) : null })),
+      ...filteredChats
+        .filter((c) => !naFaixa.has(c.id))
+        .map((chat, i) => ({ chat, nova: false, cabecalho: i === 0 && faixaVisivel.length > 0 ? ("lista" as const) : null })),
+    ];
+  }, [faixaVisivel, filteredChats]);
 
   const chipOptions = useMemo<ChipOption[]>(
     () =>
@@ -2488,12 +2510,12 @@ export default function WhatsAppInbox({
                     Tentar de novo
                   </button>
                 </div>
-              ) : filteredChats.length === 0 ? (
+              ) : listaComFaixa.length === 0 ? (
                 <div className="p-6 text-center text-xs text-muted-foreground" data-testid="inbox-empty">
                   {(!debouncedSearch && EMPTY_TAB_TEXT[inboxTab]) || "Nenhuma conversa encontrada."}
                 </div>
               ) : (
-                filteredChats.map((chat) => {
+                listaComFaixa.map(({ chat, nova, cabecalho }) => {
                   const isSelected = selectedChatId === chat.id;
                   const rawId = String(chat.id || "");
                   const isJid = rawId.includes("@");
@@ -2541,6 +2563,38 @@ export default function WhatsAppInbox({
                     : `Você: ${previewBody}`;
 
                   return (
+                    <Fragment key={`${nova ? "nova" : "lista"}-${chat.id}`}>
+                    {cabecalho === "faixa" && (
+                      <div
+                        data-testid="arrived-now-header"
+                        className="flex items-center justify-between gap-2 border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-300"
+                      >
+                        <span>
+                          Chegaram agora
+                          <span className="ml-1 font-normal normal-case tracking-normal">
+                            · última hora · {arrivedNow?.total ?? faixaVisivel.length}
+                          </span>
+                        </span>
+                        {(arrivedNow?.total ?? 0) > 10 && (
+                          <button
+                            type="button"
+                            data-testid="arrived-now-toggle"
+                            onClick={() => setFaixaAberta((v) => !v)}
+                            className="cursor-pointer font-semibold normal-case tracking-normal underline underline-offset-2"
+                          >
+                            {faixaAberta ? "mostrar 10" : `ver todas (${arrivedNow?.total})`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {cabecalho === "lista" && (
+                      <div
+                        data-testid="arrived-now-divider"
+                        className="border-b border-border/60 bg-muted/40 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                      >
+                        {STATE_TABS.find((t) => t.key === inboxTab)?.label || activeListName || "Conversas"}
+                      </div>
+                    )}
                     <ConversationListItem
                       key={chat.id}
                       id={chat.id}
@@ -2617,7 +2671,16 @@ export default function WhatsAppInbox({
                           <span className="truncate">{cardSummary.todayDue.reminderTitle}</span>
                         </div>
                       )}
+                      {nova && (
+                        <div
+                          data-testid="arrived-now-badge"
+                          className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:text-emerald-300"
+                        >
+                          Nova · {formatChatDate(chat.timestamp)}
+                        </div>
+                      )}
                     </ConversationListItem>
+                    </Fragment>
                   );
                 })
               )}
