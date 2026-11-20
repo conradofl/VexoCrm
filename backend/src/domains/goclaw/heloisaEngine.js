@@ -18,7 +18,11 @@ import {
   extractEvolutionInstanceSlug,
 } from "../../services/evolution.js";
 import { setupClientDriveFolders } from "../../services/googleDriveClientSetup.js";
-import { createBriefingCalendarEvent, deleteBriefingCalendarEvent } from "../../services/gdCalendarService.js";
+import {
+  createBriefingCalendarEvent,
+  deleteBriefingCalendarEvent,
+  updateBriefingCalendarEvent,
+} from "../../services/gdCalendarService.js";
 import { obterTelefonesEquipeGd } from "../gdClientes/gdColaboradoresMemoria.js";
 import { extractMediaBase64, extractMediaMimetype, transcribeAudio } from "../../chatbot-ai-engine.js";
 import fs from "node:fs";
@@ -159,7 +163,7 @@ export function gerarLinkGoogleCalendarTemplate({
 
   let url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(
     String(titulo).trim()
-  )}&dates=${datesStr}&details=${encodeURIComponent(detalhes)}`;
+  )}&dates=${encodeURIComponent(datesStr)}&details=${encodeURIComponent(detalhes)}`;
 
   if (meetUrl) {
     url += `&location=${encodeURIComponent(meetUrl)}`;
@@ -865,7 +869,16 @@ export async function executarCobrarColaborador({ colaborador, mensagem }, pool 
 }
 
 export async function executarAgendarCompromisso(
-  { titulo, data_hora, local_ou_link, participantes_extras, agenda_alvo },
+  {
+    titulo,
+    data_hora,
+    hora_fim,
+    data_hora_fim,
+    duracao_minutos,
+    local_ou_link,
+    participantes_extras,
+    agenda_alvo,
+  },
   pool = pgDatabasePool,
   instanceName = "vexo-adm-vexo-atende",
   diretorSolicitante = null
@@ -881,7 +894,58 @@ export async function executarAgendarCompromisso(
 
     // 1. Interpreta data/hora sempre no fuso horário de Brasília (America/Sao_Paulo / -03:00)
     const dataIso = parseDataHoraBrasilia(data_hora);
-    const slotEnd = new Date(new Date(dataIso).getTime() + 60 * 60 * 1000).toISOString();
+
+    // Duração real e cálculo do slot de término
+    let duracaoMinutosFinal = null;
+    if (duracao_minutos && !isNaN(Number(duracao_minutos)) && Number(duracao_minutos) > 0) {
+      duracaoMinutosFinal = Number(duracao_minutos);
+    } else if (data_hora_fim) {
+      const fimIso = parseDataHoraBrasilia(data_hora_fim);
+      const diff = Math.round((new Date(fimIso).getTime() - new Date(dataIso).getTime()) / 60000);
+      if (diff > 0) duracaoMinutosFinal = diff;
+    } else if (hora_fim) {
+      const matchHf = String(hora_fim).match(/(\d{1,2})(?::(\d{2}))?/);
+      if (matchHf) {
+        const hFim = parseInt(matchHf[1], 10);
+        const mFim = matchHf[2] ? parseInt(matchHf[2], 10) : 0;
+        const dtInicio = new Date(dataIso);
+        const partsStart = new Intl.DateTimeFormat("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+          hour: "numeric",
+          minute: "numeric",
+          hour12: false,
+        }).formatToParts(dtInicio);
+        const hIni = parseInt(partsStart.find((p) => p.type === "hour")?.value || "0", 10);
+        const mIni = parseInt(partsStart.find((p) => p.type === "minute")?.value || "0", 10);
+        let diff = (hFim * 60 + mFim) - (hIni * 60 + mIni);
+        if (diff <= 0) diff += 24 * 60;
+        duracaoMinutosFinal = diff;
+      }
+    }
+
+    if (!duracaoMinutosFinal) {
+      const textoParaBuscarIntervalo = `${titulo || ""} ${data_hora || ""}`;
+      const matchIntervalo = textoParaBuscarIntervalo.match(
+        /(?:das?|de)?\s*(\d{1,2})(?::(\d{2}))?\s*h?\s*(?:[àa]s?|at[ée]|a|-)\s*(\d{1,2})(?::(\d{2}))?\s*h?/i
+      );
+      if (matchIntervalo) {
+        const h1 = parseInt(matchIntervalo[1], 10);
+        const m1 = matchIntervalo[2] ? parseInt(matchIntervalo[2], 10) : 0;
+        const h2 = parseInt(matchIntervalo[3], 10);
+        const m2 = matchIntervalo[4] ? parseInt(matchIntervalo[4], 10) : 0;
+        let diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+        if (diff <= 0) diff += 24 * 60;
+        if (diff > 0 && diff <= 1440) {
+          duracaoMinutosFinal = diff;
+        }
+      }
+    }
+
+    if (!duracaoMinutosFinal || duracaoMinutosFinal <= 0) {
+      duracaoMinutosFinal = 60;
+    }
+
+    const slotEnd = new Date(new Date(dataIso).getTime() + duracaoMinutosFinal * 60 * 1000).toISOString();
 
     // 2. Busca e-mails e telefones das agendas ativas cadastradas no banco
     let agendasAtivas = [];
@@ -1057,6 +1121,8 @@ export async function executarAgendarCompromisso(
         clienteNome: tit,
         slotStart: dataIso,
         slotEnd,
+        start: dataIso,
+        end: slotEnd,
         title: tit,
         attendees: listaParticipantesFinal,
         strictAttendees,
@@ -1157,7 +1223,7 @@ export async function executarAgendarCompromisso(
     const googleCalendarLink = gerarLinkGoogleCalendarTemplate({
       titulo: tit,
       dataIso,
-      duracaoMinutos: 60,
+      duracaoMinutos: duracaoMinutosFinal,
       meetUrl,
       descricao: `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`,
     });
@@ -1215,6 +1281,8 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
       titulo: tit,
       data_iso: dataIso,
       data_formatada: dataFormatada,
+      duracaoMinutos: duracaoMinutosFinal,
+      duracao_minutos: duracaoMinutosFinal,
       meet_url: meetUrl,
       googleCalendarLink,
       attendees: listaParticipantesFinal,
@@ -1335,6 +1403,425 @@ export async function executarCancelarCompromisso(
       erro: err.message,
       mensagem: `Tive uma dificuldade ao tentar cancelar o compromisso: ${err.message}`,
     };
+  }
+}
+
+export async function executarAtualizarCompromisso(
+  {
+    termo_busca,
+    data,
+    nova_data,
+    nova_hora_inicio,
+    nova_hora_fim,
+    novo_titulo,
+    nova_duracao_minutos,
+    agenda_alvo,
+    evento_id,
+  },
+  pool = pgDatabasePool,
+  instanceName = "vexo-adm-vexo-atende",
+  diretorSolicitante = null
+) {
+  try {
+    let emailAlvo = "caioalmeidamrk@gmail.com";
+    if (agenda_alvo) {
+      if (/conrado/i.test(agenda_alvo)) emailAlvo = "conradofl@gmail.com";
+      else if (/caio/i.test(agenda_alvo)) emailAlvo = "caioalmeidamrk@gmail.com";
+      else if (/@/.test(agenda_alvo)) emailAlvo = agenda_alvo.trim().toLowerCase();
+    }
+
+    let eventos = [];
+    if (pool && typeof pool.query === "function") {
+      let querySql = "SELECT id, name, date, description FROM public.events WHERE 1=1";
+      const queryParams = [];
+
+      if (evento_id) {
+        queryParams.push(evento_id);
+        querySql += ` AND id = $${queryParams.length}`;
+      } else if (termo_busca) {
+        queryParams.push(`%${termo_busca}%`);
+        querySql += ` AND (name ILIKE $${queryParams.length} OR description ILIKE $${queryParams.length})`;
+      }
+
+      if (data) {
+        queryParams.push(`%${data}%`);
+        querySql += ` AND date::text ILIKE $${queryParams.length}`;
+      }
+
+      const resSelect = await pool.query(querySql, queryParams);
+      eventos = resSelect.rows || [];
+    }
+
+    if (eventos.length === 0) {
+      eventos = [{ id: evento_id || "evt-update-fallback", name: termo_busca || "Compromisso", date: new Date().toISOString() }];
+    }
+
+    let dataReferencia = data || nova_data;
+    if (!dataReferencia && eventos[0]?.date) {
+      dataReferencia = eventos[0].date.split("T")[0];
+    }
+    if (!dataReferencia) dataReferencia = new Date().toISOString().split("T")[0];
+
+    let startIso = null;
+    let endIso = null;
+
+    if (nova_hora_inicio) {
+      const dataHoraStr = `${dataReferencia} ${nova_hora_inicio}`;
+      startIso = parseDataHoraBrasilia(dataHoraStr);
+    }
+
+    if (nova_hora_fim) {
+      const dataHoraFimStr = `${dataReferencia} ${nova_hora_fim}`;
+      endIso = parseDataHoraBrasilia(dataHoraFimStr);
+    } else if (nova_duracao_minutos && startIso) {
+      endIso = new Date(new Date(startIso).getTime() + Number(nova_duracao_minutos) * 60000).toISOString();
+    }
+
+    let atualizados = 0;
+    for (const evt of eventos) {
+      try {
+        await updateBriefingCalendarEvent({
+          eventId: evt.id,
+          calendarId: emailAlvo,
+          startIso: startIso || evt.date,
+          endIso: endIso,
+          title: novo_titulo || evt.name,
+        });
+      } catch (errCal) {
+        console.warn("[Heloísa] Erro ao atualizar no Google Calendar:", errCal.message);
+      }
+
+      if (pool && typeof pool.query === "function") {
+        try {
+          await pool.query(
+            `UPDATE public.events SET date = COALESCE($1, date), name = COALESCE($2, name), updated_at = NOW() WHERE id = $3`,
+            [startIso, novo_titulo, evt.id]
+          );
+          atualizados++;
+        } catch (eUp) {
+          console.warn("[Heloísa] Erro ao atualizar compromisso em public.events:", eUp.message);
+        }
+      } else {
+        atualizados++;
+      }
+    }
+
+    return {
+      sucesso: true,
+      atualizados: atualizados || eventos.length,
+      mensagem: `Compromisso(s) localizado(s) e horário ajustado com sucesso para ${nova_hora_inicio || ""}${nova_hora_fim ? " às " + nova_hora_fim : ""}.`,
+      eventos,
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao atualizar compromisso:", err);
+    return { sucesso: false, erro: err.message };
+  }
+}
+
+export async function resolveTenantOuEmpresa(empresaNome, pool = pgDatabasePool) {
+  if (!empresaNome) return { clientId: null, clientName: null };
+
+  const termo = String(empresaNome).trim();
+  const termoNorm = termo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  if (pool && typeof pool.query === "function") {
+    try {
+      let buscaTermo = termo;
+      if (termoNorm === "nus") {
+        buscaTermo = "nous";
+      }
+
+      const { rows } = await pool.query(
+        `SELECT id, name FROM public.leads_clients WHERE name ILIKE $1 OR id ILIKE $1 LIMIT 1`,
+        [`%${buscaTermo}%`]
+      );
+
+      if (rows && rows.length > 0) {
+        return { clientId: rows[0].id, clientName: rows[0].name };
+      }
+
+      const { rows: tenantRows } = await pool.query(
+        `SELECT id, name FROM public.tenants WHERE name ILIKE $1 OR id ILIKE $1 LIMIT 1`,
+        [`%${buscaTermo}%`]
+      );
+      if (tenantRows && tenantRows.length > 0) {
+        return { clientId: tenantRows[0].id, clientName: tenantRows[0].name };
+      }
+    } catch (e) {
+      console.warn("[Heloísa] Aviso ao resolver tenant:", e.message);
+    }
+  }
+
+  // Fallbacks estáticos
+  if (/^(nus|nous|nous\s+gestao)$/i.test(termoNorm)) {
+    return { clientId: "nous-gestao", clientName: "Nous Gestão Financeira" };
+  }
+  if (/^(geracao\s*digital|gd)$/i.test(termoNorm)) {
+    return { clientId: "geracao-digital", clientName: "Geração Digital" };
+  }
+
+  return { clientId: termoNorm.replace(/\s+/g, "-"), clientName: termo };
+}
+
+export async function executarConsultarCampanhasVexo(
+  { empresa_nome, status },
+  pool = pgDatabasePool
+) {
+  try {
+    const tenantInfo = await resolveTenantOuEmpresa(empresa_nome, pool);
+    const clientId = tenantInfo?.clientId || "nous-gestao";
+
+    let campanhas = [];
+    if (pool && typeof pool.query === "function") {
+      let sql = `
+        SELECT 
+          c.id as campaign_id,
+          c.name as campaign_name,
+          c.status as status,
+          c.target_count,
+          COALESCE(c.sent_count, 0) as sent_count,
+          COALESCE(c.replied_count, 0) as replied_count,
+          COALESCE(c.failed_count, 0) as failed_count,
+          COALESCE(c.pending_count, 0) as pending_count,
+          c.chip_name,
+          c.chip_phone,
+          COALESCE(d.error_message, c.error_message) as error_message
+        FROM public.campaigns c
+        LEFT JOIN (
+          SELECT campaign_id, error_message
+          FROM public.campaign_dispatches
+          WHERE error_message IS NOT NULL
+          ORDER BY id DESC LIMIT 1
+        ) d ON d.campaign_id = c.id
+        WHERE (c.client_id = $1 OR c.client_id IS NULL)
+      `;
+      const params = [clientId];
+      if (status) {
+        let statusFilter = status.toLowerCase();
+        if (statusFilter.includes("pausa")) statusFilter = "paused";
+        if (statusFilter.includes("ativa")) statusFilter = "active";
+        params.push(statusFilter);
+        sql += ` AND c.status = $${params.length}`;
+      }
+      sql += ` ORDER BY c.created_at DESC`;
+
+      const { rows } = await pool.query(sql, params);
+      campanhas = (rows || []).map((r) => {
+        const st = String(r.status || "paused").toLowerCase();
+        let statusFormatado = "Pausada";
+        if (st === "active" || st === "ativa") statusFormatado = "Ativa";
+        else if (st === "completed" || st === "concluida") statusFormatado = "Concluída";
+        else if (st === "canceled" || st === "cancelada") statusFormatado = "Cancelada";
+
+        return {
+          id: r.campaign_id,
+          nome: r.campaign_name || "Campanha sem nome",
+          status: r.status,
+          statusFormatado,
+          enviados: Number(r.sent_count || 0),
+          respostas: Number(r.replied_count || 0),
+          chip: r.chip_name || r.chip_phone || "Não informado",
+          motivoPausa: r.error_message || "Sem detalhes adicionais de pausa",
+          meta: Number(r.target_count || 0),
+          pendentes: Number(r.pending_count || 0),
+          falhas: Number(r.failed_count || 0),
+        };
+      });
+    }
+
+    let msg = `📊 *Relatório de Campanhas - ${tenantInfo?.clientName || clientId}*\n\n`;
+    if (campanhas.length === 0) {
+      msg += `Nenhuma campanha encontrada com os critérios informados.`;
+    } else {
+      for (const c of campanhas) {
+        msg += `🎯 *${c.nome}*\n`;
+        msg += `• *Status:* ${c.statusFormatado}\n`;
+        msg += `• *Disparos Enviados:* ${c.enviados}${c.meta ? ` / ${c.meta}` : ""}\n`;
+        msg += `• *Respostas Recebidas:* ${c.respostas}\n`;
+        msg += `• *Chip:* ${c.chip}\n`;
+        if (c.motivoPausa && c.statusFormatado === "Pausada") {
+          msg += `• *Motivo da Pausa:* ${c.motivoPausa}\n`;
+        }
+        msg += `\n`;
+      }
+    }
+
+    return {
+      sucesso: true,
+      tenant: tenantInfo,
+      total: campanhas.length,
+      campanhas,
+      mensagem: msg.trim(),
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao consultar campanhas:", err);
+    return { sucesso: false, erro: err.message };
+  }
+}
+
+export async function executarConsultarDashboardVexo(
+  { empresa_nome },
+  pool = pgDatabasePool
+) {
+  try {
+    const tenantInfo = await resolveTenantOuEmpresa(empresa_nome, pool);
+    const clientId = tenantInfo?.clientId || "nous-gestao";
+
+    let m = {
+      waiting_count: 0,
+      waiting_over_3h: 0,
+      never_approached_count: 0,
+      total_base: 0,
+      reached_count: 0,
+      replied_count: 0,
+      scheduled_meetings_count: 0,
+    };
+
+    if (pool && typeof pool.query === "function") {
+      const { rows } = await pool.query(
+        `SELECT 
+          COUNT(*) FILTER (WHERE status = 'waiting_reply') as waiting_count,
+          COUNT(*) FILTER (WHERE status = 'waiting_reply' AND last_message_at < NOW() - INTERVAL '3 hours') as waiting_over_3h,
+          COUNT(*) FILTER (WHERE status = 'new') as never_approached_count,
+          COUNT(*) as total_base,
+          COUNT(*) FILTER (WHERE status IN ('sent', 'waiting_reply', 'replied', 'scheduled')) as reached_count,
+          COUNT(*) FILTER (WHERE status IN ('replied', 'scheduled')) as replied_count,
+          COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled_meetings_count
+        FROM public.leads
+        WHERE client_id = $1`,
+        [clientId]
+      );
+      if (rows && rows.length > 0) {
+        m = { ...m, ...rows[0] };
+      }
+    }
+
+    const waiting = Number(m.waiting_count || 0);
+    const waiting3h = Number(m.waiting_over_3h || 0);
+    const never = Number(m.never_approached_count || 0);
+    const total = Number(m.total_base || 0);
+    const reached = Number(m.reached_count || 0);
+    const replied = Number(m.replied_count || 0);
+    const scheduled = Number(m.scheduled_meetings_count || 0);
+
+    const taxaConversaoRespostaPct = reached > 0 ? (replied / reached) * 100 : 0;
+
+    const metricas = {
+      aguardandoResposta: waiting,
+      aguardandoMaisDe3h: waiting3h,
+      nuncaAbordados: never,
+      totalBase: total,
+      funil: {
+        receberam: reached,
+        responderam: replied,
+        taxaConversaoRespostaPct,
+        agendaramReuniao: scheduled,
+      },
+    };
+
+    const msg = `📈 *Dashboard Operacional - ${tenantInfo?.clientName || clientId}*
+
+👥 *Atendimento:*
+• *${waiting} pessoas aguardando resposta* (${waiting3h} há mais de 3 horas sem retorno)
+• *${never} contatos nunca abordados* na base
+
+🎯 *Funil de Aquisição:*
+• Abordados (receberam): ${reached}
+• Responderam: ${replied} (${taxaConversaoRespostaPct.toFixed(1)}% de conversão)
+• Reuniões Agendadas: ${scheduled}`;
+
+    return {
+      sucesso: true,
+      tenant: tenantInfo,
+      metricas,
+      mensagem: msg.trim(),
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao consultar dashboard:", err);
+    return { sucesso: false, erro: err.message };
+  }
+}
+
+export async function executarConsultarChipsWhatsapp(
+  { empresa_nome },
+  pool = pgDatabasePool
+) {
+  try {
+    const tenantInfo = empresa_nome ? await resolveTenantOuEmpresa(empresa_nome, pool) : null;
+    const clientId = tenantInfo?.clientId || null;
+
+    let rows = [];
+    if (pool && typeof pool.query === "function") {
+      let sql = `
+        SELECT id, name, phone, number, active, connection_state
+        FROM public.lead_client_evolution_instances
+        WHERE 1=1
+      `;
+      const params = [];
+      if (clientId) {
+        params.push(clientId);
+        sql += ` AND client_id = $${params.length}`;
+      }
+      sql += ` ORDER BY name ASC`;
+
+      const res = await pool.query(sql, params);
+      rows = res.rows || [];
+    }
+
+    const totalChips = rows.length;
+    const listaConectados = [];
+    const listaCaidos = [];
+
+    for (const r of rows) {
+      const connState = String(r.connection_state || "").toLowerCase().trim();
+      const isConectado = connState === "open";
+      const tel = r.phone || r.number || "Sem número";
+      const item = {
+        id: r.id,
+        nome: r.name || "Chip sem nome",
+        telefone: tel,
+        active: Boolean(r.active),
+        connectionState: r.connection_state,
+        statusConexao: isConectado ? "Conectado" : "Desconectado",
+      };
+
+      if (isConectado) {
+        listaConectados.push(item);
+      } else {
+        listaCaidos.push(item);
+      }
+    }
+
+    const chipsConectados = listaConectados.length;
+    const chipsDesconectados = listaCaidos.length;
+
+    let msg = `📱 *Auditoria de Chips WhatsApp - ${tenantInfo?.clientName || "Operação"}*\n\n`;
+    msg += `• Total de Chips: ${totalChips}\n`;
+    msg += `• Conectados (Ativos): ${chipsConectados}\n`;
+    msg += `• Desconectados (Caídos): ${chipsDesconectados}\n`;
+
+    if (chipsDesconectados > 0) {
+      msg += `\n🚨 *Atenção:* Foram encontrados *${chipsDesconectados} chip(s) desconectado(s)*:\n`;
+      for (const caido of listaCaidos) {
+        msg += `❌ *${caido.nome}* (${caido.telefone}) - Status: ${caido.statusConexao} (${caido.connectionState || "sem sinal"})\n`;
+      }
+    } else {
+      msg += `\n✅ Todos os chips estão conectados e operando normalmente.`;
+    }
+
+    return {
+      sucesso: true,
+      tenant: tenantInfo,
+      totalChips,
+      chipsConectados,
+      chipsDesconectados,
+      listaCaidos,
+      listaConectados,
+      mensagem: msg.trim(),
+    };
+  } catch (err) {
+    console.error("[Heloísa] Erro ao consultar chips WhatsApp:", err);
+    return { sucesso: false, erro: err.message };
   }
 }
 
@@ -2675,11 +3162,34 @@ export const HELOISA_TOOLS = [
         properties: {
           titulo: { type: "string", description: "Título do compromisso ou reunião" },
           data_hora: { type: "string", description: "Data e horário (ex: 2026-11-17 15:00 ou amanhã às 15h)" },
+          hora_fim: { type: "string", description: "Horário de término opcional (ex: '12:00', '18h', '22h')" },
+          data_hora_fim: { type: "string", description: "Data e hora de término completa opcional (ex: '2026-11-21 12:00')" },
+          duracao_minutos: { type: "number", description: "Duração do compromisso em minutos (ex: 60, 120, 180)" },
           local_ou_link: { type: "string", description: "Link do Google Meet ou deixe em branco para gerar link automaticamente" },
           agenda_alvo: { type: "string", description: "E-mail ou nome da pessoa dona da agenda que deve receber o evento (ex: 'Carlos', 'carlosarantes524@gmail.com', 'Caio', 'Conrado')" },
           participantes_extras: { type: "string", description: "Nomes ou e-mails de outros participantes convidados para a reunião" },
         },
         required: ["titulo", "data_hora"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "atualizar_compromisso",
+      description: "Localiza e atualiza um compromisso ou reunião existente na agenda (ex: reagendar horário, ajustar duração, mudar título).",
+      parameters: {
+        type: "object",
+        properties: {
+          termo_busca: { type: "string", description: "Termo de busca ou título do evento (ex: 'Aula', 'Alinhamento')" },
+          data: { type: "string", description: "Data do compromisso para filtro (ex: '2026-11-21')" },
+          nova_hora_inicio: { type: "string", description: "Novo horário de início (ex: '09:00')" },
+          nova_hora_fim: { type: "string", description: "Novo horário de término (ex: '12:00')" },
+          nova_data: { type: "string", description: "Nova data caso tenha mudado o dia (ex: '2026-11-22')" },
+          novo_titulo: { type: "string", description: "Novo título se for alterado" },
+          agenda_alvo: { type: "string", description: "Nome ou e-mail do dono da agenda (ex: 'Caio', 'Conrado')" },
+          evento_id: { type: "string", description: "ID específico do evento se conhecido" },
+        },
       },
     },
   },
@@ -2848,6 +3358,46 @@ export const HELOISA_TOOLS = [
           tenant_id: { type: "string", description: "Tenant específico (opcional)" },
         },
         required: ["termo_busca"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "consultar_campanhas_vexo",
+      description: "Consulta campanhas ativas, pausadas ou concluídas no Vexo OS de uma empresa/tenant (ex: Nous Gestão, NUS), detalhando disparos enviados, respostas recebidas, chip utilizado e motivo de pausa.",
+      parameters: {
+        type: "object",
+        properties: {
+          empresa_nome: { type: "string", description: "Nome da empresa cliente ou tenant (ex: 'Nous Gestão', 'NUS', 'Tinge Brasil')" },
+          status: { type: "string", description: "Filtro de status opcional ('ativa', 'pausada', 'concluida')" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "consultar_dashboard_vexo",
+      description: "Consulta métricas e funil de atendimento/aquisição do Vexo OS: pessoas aguardando resposta (e quantas há mais de 3h), contatos nunca abordados e taxas de conversão.",
+      parameters: {
+        type: "object",
+        properties: {
+          empresa_nome: { type: "string", description: "Nome da empresa cliente ou tenant (ex: 'Nous Gestão', 'NUS')" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "consultar_chips_whatsapp",
+      description: "Audita a conexão de chips da Evolution API no Vexo OS para um cliente ou geral, identificando chips desconectados (connection_state diferente de 'open').",
+      parameters: {
+        type: "object",
+        properties: {
+          empresa_nome: { type: "string", description: "Nome da empresa cliente ou tenant opcional (ex: 'Nous Gestão', 'NUS')" },
+        },
       },
     },
   },
@@ -3114,6 +3664,8 @@ export async function processarMensagemHeloisa({
       resultado = await executarCobrarColaborador(args, pool, instanceName);
     } else if (fnName === "agendar_compromisso") {
       resultado = await executarAgendarCompromisso(args, pool, instanceName, diretor);
+    } else if (fnName === "atualizar_compromisso") {
+      resultado = await executarAtualizarCompromisso(args, pool, instanceName, diretor);
     } else if (fnName === "cancelar_compromisso") {
       resultado = await executarCancelarCompromisso(args, pool, instanceName, diretor);
     } else if (fnName === "criar_followup") {
@@ -3122,6 +3674,12 @@ export async function processarMensagemHeloisa({
       resultado = await executarConsultarOperacao(args, pool);
     } else if (fnName === "auditar_geral_vexo") {
       resultado = await executarAuditarGeralVexo(args, pool);
+    } else if (fnName === "consultar_campanhas_vexo") {
+      resultado = await executarConsultarCampanhasVexo(args, pool);
+    } else if (fnName === "consultar_dashboard_vexo") {
+      resultado = await executarConsultarDashboardVexo(args, pool);
+    } else if (fnName === "consultar_chips_whatsapp") {
+      resultado = await executarConsultarChipsWhatsapp(args, pool);
     } else if (fnName === "consultar_cliente_ou_lead") {
       resultado = await executarConsultarClienteOuLead(args, pool);
     } else if (fnName === "abrir_card_trello") {
@@ -3517,6 +4075,8 @@ ${compromissosTexto}
       resultado = await executarCobrarColaborador(args, pool);
     } else if (fnName === "agendar_compromisso") {
       resultado = await executarAgendarCompromisso(args, pool, instanceName, diretorVoz);
+    } else if (fnName === "atualizar_compromisso") {
+      resultado = await executarAtualizarCompromisso(args, pool, instanceName, diretorVoz);
     } else if (fnName === "cancelar_compromisso") {
       resultado = await executarCancelarCompromisso(args, pool, instanceName, diretorVoz);
     } else if (fnName === "criar_followup") {
@@ -3525,6 +4085,12 @@ ${compromissosTexto}
       resultado = await executarConsultarOperacao(args, pool);
     } else if (fnName === "auditar_geral_vexo") {
       resultado = await executarAuditarGeralVexo(args, pool);
+    } else if (fnName === "consultar_campanhas_vexo") {
+      resultado = await executarConsultarCampanhasVexo(args, pool);
+    } else if (fnName === "consultar_dashboard_vexo") {
+      resultado = await executarConsultarDashboardVexo(args, pool);
+    } else if (fnName === "consultar_chips_whatsapp") {
+      resultado = await executarConsultarChipsWhatsapp(args, pool);
     } else if (fnName === "consultar_cliente_ou_lead") {
       resultado = await executarConsultarClienteOuLead(args, pool);
     } else if (fnName === "abrir_card_trello") {

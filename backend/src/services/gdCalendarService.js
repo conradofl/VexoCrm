@@ -21,6 +21,7 @@
  */
 
 import crypto from "node:crypto";
+import * as selfModule from "./gdCalendarService.js";
 
 export const GD_CALENDAR_AGENCIA = "mrkgeracaodigital@gmail.com";
 export const GD_CALENDAR_CAIO = "caioalmeidamrk@gmail.com";
@@ -892,6 +893,66 @@ export async function deleteBriefingCalendarEvent({
       }
     } catch (err) {
       console.warn(`[gd-calendar] Erro ao deletar evento ${eventId} na agenda ${calId}:`, err.message);
+    }
+  }
+  return { success: true, fallback: true };
+}
+
+/**
+ * Atualiza um compromisso/reunião existente no Google Calendar oficial (PATCH).
+ */
+export async function updateBriefingCalendarEvent({
+  eventId,
+  calendarId = null,
+  startIso = null,
+  endIso = null,
+  title = null,
+  description = null,
+  accessToken = null,
+} = {}) {
+  if (!eventId) return { success: false, error: "eventId é obrigatório" };
+  const token =
+    accessToken ||
+    (typeof selfModule.getGoogleCalendarAccessToken === "function"
+      ? await selfModule.getGoogleCalendarAccessToken()
+      : await getGoogleCalendarAccessToken());
+  if (!token) return { success: true, mock: true, message: "Token indisponível, simulado" };
+
+  const candidateCalendars = Array.from(
+    new Set(
+      [
+        calendarId,
+        process.env.GD_CALENDAR_CAIO || "caioalmeidamrk@gmail.com",
+        process.env.GD_CALENDAR_CONRADO || "conradofl@gmail.com",
+        process.env.GD_CALENDAR_AGENCIA || "mrkgeracaodigital@gmail.com",
+        "primary",
+      ].filter(Boolean)
+    )
+  );
+
+  const patchBody = {};
+  if (title) patchBody.summary = title;
+  if (description) patchBody.description = description;
+  if (startIso) patchBody.start = { dateTime: startIso, timeZone: "America/Sao_Paulo" };
+  if (endIso) patchBody.end = { dateTime: endIso, timeZone: "America/Sao_Paulo" };
+
+  for (const calId of candidateCalendars) {
+    try {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(eventId)}`;
+      const res = await fetch(url, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(patchBody),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        return { success: true, calendarId: calId, event: data };
+      }
+    } catch (err) {
+      console.warn(`[gd-calendar] Erro ao atualizar evento ${eventId} na agenda ${calId}:`, err.message);
     }
   }
   return { success: true, fallback: true };
