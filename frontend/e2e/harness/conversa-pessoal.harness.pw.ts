@@ -75,8 +75,6 @@ test.describe("conversa pessoal — computador (1440x900)", () => {
     await page.goto(PAGE_URL);
     await expect(firstCard(page)).toBeVisible();
 
-    await page.getByTestId("inbox-filters-button").click();
-    await expect(page.getByTestId("inbox-filters-panel")).toBeVisible();
     await page.getByTestId("inbox-select-mode").click();
     await page.getByRole("checkbox", { name: /Selecionar Jéssica/ }).click();
     await page.getByRole("checkbox", { name: /Selecionar Gabriel/ }).click();

@@ -2466,18 +2466,22 @@ export default function WhatsAppInbox({
               activeTab={inboxTab}
               onTabChange={setInboxTab}
               onNewConversation={() => setNewConversationOpen(true)}
-              selectMode={selectMode}
-              onToggleSelectMode={() => {
-                setSelectMode((v) => !v);
-                setSelectedChatIds(new Set());
-              }}
             />
 
             <div className="px-4 pt-3">
               <InboxStateTabs active={inboxTab} counts={chatsQuery.counts?.work} onChange={setInboxTab} />
             </div>
 
-            <InboxOrderRow label={orderLabel} chipLabel={chipScopeLabel} onChipClick={() => setFiltersOpen(true)} />
+            <InboxOrderRow
+              label={orderLabel}
+              chipLabel={chipScopeLabel}
+              onChipClick={() => setFiltersOpen(true)}
+              selectMode={selectMode}
+              onToggleSelectMode={() => {
+                setSelectMode((v) => !v);
+                setSelectedChatIds(new Set());
+              }}
+            />
 
             {showBulkBar && (
               <div className="flex flex-col gap-1.5 border-y border-indigo-200 bg-indigo-50 px-3 py-2 dark:border-indigo-500/30 dark:bg-indigo-500/10" data-testid="inbox-bulk-bar">
