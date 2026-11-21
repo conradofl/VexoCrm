@@ -26,6 +26,7 @@ import { redactQueueListForViewer } from "../../services/dashboardOverview.js";
 import { canAccessAppView } from "../../accessGuards.js";
 import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
+import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
 
@@ -107,6 +108,20 @@ export function registerInsightsRoutes(app, deps) {
   };
 
   app.get("/health", async (_req, res) => {
+    // Desligando (SIGTERM, 21/11/2026): 503 e restartSafe false enquanto o passo em voo do lote termina, para a trava
+    // de merge e o proxy não mandarem nada. Sem consultar o banco. O healthcheck do Docker lê /health/live, não esta
+    // rota, então o contêiner não é morto antes da espera acabar.
+    if (estaDesligando()) {
+      res.status(503).json({
+        ok: false,
+        status: "desligando",
+        timestamp: new Date().toISOString(),
+        uptimeSeconds: process.uptime(),
+        enviosEmAndamento: enviosEmAndamento(),
+        restartBlockers: { restartSafe: false, measured: true, desligando: true, reason: "processo_desligando" },
+      });
+      return;
+    }
     let postgresPing = null;
     /** Short diagnostic when ping fails (no secrets; may include host from PG error text). */
     let postgresPingDetail = null;

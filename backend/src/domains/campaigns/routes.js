@@ -154,7 +154,8 @@ import {
   buildMessageEffectivenessSql,
 } from "../../services/messageEffectiveness.js";
 import { syncDailyStalledNotificationsForAllTenants } from "../../services/leadReactivationEngine.js";
-import { isRunInternalNote, markRunSendStarted, runErrorForDisplay } from "../../services/runSendMarker.js";
+import { isRunInternalNote, markRunSendStarted, markRunSequenceCut, runErrorForDisplay } from "../../services/runSendMarker.js";
+import { comEnvioRegistrado } from "../../services/shutdownSignal.js";
 
 export {
   MESSAGE_EFFECTIVENESS_MIN_SENT,
@@ -3576,7 +3577,13 @@ export function registerCampaignsRoutes(app, deps) {
     return null;
   }
 
-  async function runCampaignDispatch({ dispatch, campaign, supabase: db, ignoreSendWindow = false }) {
+  // O lote inteiro conta como "envio em andamento" (services/shutdownSignal.js): no SIGTERM o pool só fecha depois que
+  // ele parar, ou depois do prazo (21/11/2026).
+  function runCampaignDispatch(args) {
+    return comEnvioRegistrado(() => runCampaignDispatchSemRegistro(args));
+  }
+
+  async function runCampaignDispatchSemRegistro({ dispatch, campaign, supabase: db, ignoreSendWindow = false }) {
     const dispatchId = dispatch.id;
     const clientId = campaign.client_id;
     const dispatchSteps = Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
@@ -4653,6 +4660,17 @@ export function registerCampaignsRoutes(app, deps) {
           phone: normalizeDispatchPhone(phone, lead),
         });
       },
+      // Sequência cortada pelo desligamento: nota interna no run, contada no /health (restartBlockers).
+      onLeadSequenceCut: async ({ lead, phone, passosEnviados, totalPassos }) => {
+        if (!pgDatabasePool) return;
+        await markRunSequenceCut(pgDatabasePool, {
+          dispatchId,
+          leadId: lead?.id || null,
+          phone: normalizeDispatchPhone(phone, lead),
+          passosEnviados,
+          totalPassos,
+        });
+      },
       onLeadCheckOptout: checkOptout,
       onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
         runChipTracker.record(lead?.id, activeChip);
@@ -4754,6 +4772,17 @@ export function registerCampaignsRoutes(app, deps) {
         ? () => Math.max(Number(dispatch.dispatch_options.leadDelaySeconds), 0) * 1000
         : () => 30_000 + Math.floor(Math.random() * 60_001),
     });
+
+    // Desligamento (SIGTERM, 21/11/2026): o motor parou no fim do passo atual. O lote fica 'running' como está, sem
+    // nenhuma consulta a mais: o boot o pausa e a conferência decide os claimed (orphanRecovery.js, claimedConference.js).
+    if (result?.summary?.shutdown) {
+      console.warn("[campaign-dispatch] desligamento: lote parado no fim do passo atual; o boot retoma o controle", {
+        dispatchId,
+        clientId,
+        enviadosNesteCiclo: sentCount,
+      });
+      return;
+    }
 
     let totalSent = sentCount;
     let totalFailed = failedCount;
