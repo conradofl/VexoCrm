@@ -140,6 +140,10 @@ async function mundoDeDisparo({ qdb, nLeads = 2, nPassos = 2, chip: chipInicial 
         estado.claimed.push(params[3]);
         return { rowCount: 1, rows: [{ id: "claim" }] };
       }
+      // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): grava no lead que tem claim, como o banco.
+      if (t.includes("UPDATE public.campaign_dispatch_runs") && t.includes("SET error_message = $3") && t.includes("status = 'claimed'")) {
+        return { rowCount: estado.claimed.includes(params[1]) ? 1 : 0, rows: [] };
+      }
       if (t.includes("UPDATE public.campaign_dispatch_runs SET status = 'sent'")) {
         estado.sent.push({ leadId: params[2], chipId: params[3] });
         estado.sentLeadIds.add(params[2]);

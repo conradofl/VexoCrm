@@ -176,6 +176,8 @@ describe("Permanent Guard — Teste de Fumaça CI (Ciclo de Vida Completo de Cam
           return { rowCount: 1, rows: [run] };
         }
 
+        // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): o banco grava 1 linha no run reivindicado.
+        if (sqlStr.includes("SET error_message = $3") && sqlStr.includes("status = 'claimed'")) return { rowCount: 1, rows: [] };
         if (sqlStr.includes("UPDATE public.campaign_dispatch_runs") && sqlStr.includes("status = 'sent'")) {
           const run = dispatchRuns.find((r) => r.phone === leadPhone);
           if (run) run.status = "sent";

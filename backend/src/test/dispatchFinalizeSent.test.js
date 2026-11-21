@@ -155,6 +155,8 @@ describe("SPEC 1 — finalize_sent", () => {
           if (s.includes("INSERT INTO public.campaign_dispatch_runs")) {
             return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
           }
+          // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): o banco grava 1 linha no run reivindicado.
+          if (s.includes("SET error_message = $3") && s.includes("status = 'claimed'")) return { rowCount: 1, rows: [] };
           if (s.includes("UPDATE public.campaign_dispatch_runs SET status = 'sent'")) {
             // SIMULAÇÃO DA FALHA: UPDATE não encontra nenhuma linha correspondente!
             return { rowCount: 0, rows: [] };

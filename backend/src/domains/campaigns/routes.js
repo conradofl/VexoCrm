@@ -154,6 +154,7 @@ import {
   buildMessageEffectivenessSql,
 } from "../../services/messageEffectiveness.js";
 import { syncDailyStalledNotificationsForAllTenants } from "../../services/leadReactivationEngine.js";
+import { isRunInternalNote, markRunSendStarted, runErrorForDisplay } from "../../services/runSendMarker.js";
 
 export {
   MESSAGE_EFFECTIVENESS_MIN_SENT,
@@ -4643,6 +4644,15 @@ export function registerCampaignsRoutes(app, deps) {
       },
       onLeadClaim: claimLead,
       onLeadClaimRollback: rollbackClaimLead,
+      // Marca "envio iniciado" no run antes da primeira chamada à Evolution (runSendMarker.js). false = não envia.
+      onLeadSendStarting: async ({ lead, phone }) => {
+        if (!pgDatabasePool) return true;
+        return markRunSendStarted(pgDatabasePool, {
+          dispatchId,
+          leadId: lead?.id || null,
+          phone: normalizeDispatchPhone(phone, lead),
+        });
+      },
       onLeadCheckOptout: checkOptout,
       onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
         runChipTracker.record(lead?.id, activeChip);
@@ -5377,7 +5387,7 @@ export function registerCampaignsRoutes(app, deps) {
   });
 
   function translateDispatchErrorMessage(rawError) {
-    if (!rawError) return null;
+    if (!rawError || isRunInternalNote(rawError)) return null;
     const s = String(rawError).trim();
     if (s.includes('"exists":false') || s.includes('"exists": false') || s.includes('"exists":false')) {
       return "Número não existe no WhatsApp";
@@ -5488,7 +5498,7 @@ export function registerCampaignsRoutes(app, deps) {
           sentAt,
           attemptedAt: createdAt,
           failureReason,
-          technicalDetails: run?.error_message || null,
+          technicalDetails: runErrorForDisplay(run?.error_message),
           campaignName: campaign.name,
           dispatchName: dispatch.name,
         };

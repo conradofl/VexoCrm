@@ -16,6 +16,8 @@ import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { buildDispatchLeads } from "../campaign/dispatch.js";
 import { recoverOrphanDispatches } from "../campaign/orphanRecovery.js";
+import { conferirClaimedDoBoot } from "../campaign/claimedConference.js";
+import { RUN_SEND_MARKER } from "../services/runSendMarker.js";
 
 const SLOW = 120_000;
 const T = "tenant-retomada";
@@ -25,6 +27,14 @@ const SEQ = [{ id: "s1", type: "text", text: "Oi {{nome}}", order: 1, enabled: t
 const SCHEMA = `
   SET TimeZone = 'UTC';
   CREATE TABLE public.leads_clients (id TEXT PRIMARY KEY, name TEXT);
+  -- Igual a produção nas colunas que o lote grava e no índice único por empresa (conferência do boot lê daqui).
+  CREATE TABLE public.lead_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT, lead_id UUID, campaign_id UUID, phone TEXT,
+    sender_type TEXT, direction TEXT, engagement_signal TEXT, message_text TEXT, delivered_at TIMESTAMPTZ,
+    message_timestamp TIMESTAMPTZ, meta JSONB DEFAULT '{}'::jsonb, instance_name TEXT, wa_message_id TEXT,
+    media_path TEXT, media_url TEXT, content_type TEXT, dispatch_id UUID, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE UNIQUE INDEX idx_lead_messages_wa_message_id ON public.lead_messages (client_id, wa_message_id) WHERE wa_message_id IS NOT NULL;
   CREATE TABLE public.leads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, telefone TEXT, nome TEXT, tipo_cliente TEXT,
     faixa_consumo TEXT, qualificacao TEXT, cidade TEXT, estado TEXT, status TEXT, opt_out BOOLEAN DEFAULT false,
@@ -178,9 +188,10 @@ async function mundo({ falharContagem = false } = {}) {
     await routes.runCampaignDispatch({ dispatch, campaign: campanha, supabase });
   };
   const boot = () => recoverOrphanDispatches(pool);
+  const conferir = (dispatchIds) => conferirClaimedDoBoot(pool, { dispatchIds, esperaMs: 0 });
   const estado = async (id) =>
     (await db.query("SELECT status, error_message, sent_count, finished_at FROM campaign_dispatches WHERE id = $1", [id])).rows[0];
-  return { db, camp, leads, lote, retomar, rodar, estado, routes, boot };
+  return { db, camp, leads, lote, retomar, rodar, estado, routes, boot, conferir };
 }
 
 describe("SPEC 13 — Retomar lote 'interrupted' (Postgres real, agendador de verdade)", () => {
@@ -312,16 +323,43 @@ describe("SPEC 13 — boot (recoverOrphanDispatches): lote completo fecha 'done'
     expect((await w.estado(d.id)).status).toBe("done");
   }, SLOW);
 
-  it("lead em 'claimed' sem confirmação vira 'skipped' no boot", async () => {
+  // 21/11/2026: o boot não transforma mais claimed em skipped; a conferência depois do listen decide (claimedConference.js).
+  it("claimed SEM marca e sem eco: boot deixa claimed, conferência devolve a pendente, Retomar envia para ele UMA vez", async () => {
     const w = await mundo();
     const d = await w.lote({ status: "running", enviadosAntes: 2 });
     await w.db.query(
-      "INSERT INTO campaign_dispatch_runs (dispatch_id, campaign_id, client_id, phone, status, lead_id) VALUES ($1, $2, $3, $4, 'claimed', $5)",
+      "INSERT INTO campaign_dispatch_runs (dispatch_id, campaign_id, client_id, phone, status, lead_id, claimed_at) VALUES ($1, $2, $3, $4, 'claimed', $5, now())",
       [d.id, w.camp.id, T, w.leads[2].telefone, w.leads[2].id]
     );
-    await w.boot();
-    const { rows } = await w.db.query("SELECT status FROM campaign_dispatch_runs WHERE dispatch_id = $1 AND lead_id = $2", [d.id, w.leads[2].id]);
-    expect(rows[0].status).toBe("skipped");
+    const r = await w.boot();
+    expect(r.claimedParaConferir).toEqual([d.id]);
     expect((await w.estado(d.id)).status).toBe("paused");
+    const c = await w.conferir(r.claimedParaConferir);
+    expect(c).toMatchObject({ pendente: 1, sent: 0, skipped: 0 });
+    expect((await w.estado(d.id)).status).toBe("paused"); // a conferência não retoma
+
+    expect((await w.retomar()).status).toBe(200);
+    await w.routes.runDueIndependentDispatches({ limit: 10 });
+    expect(enviados.filter((t) => t === w.leads[2].telefone)).toHaveLength(1);
+    expect(enviados).toHaveLength(5); // 7 do lote - 2 que já tinham recebido
+    expect(new Set(enviados).size).toBe(enviados.length);
+    expect((await w.estado(d.id)).status).toBe("done");
+  }, SLOW);
+
+  it("claimed COM marca e sem eco (chamada feita, sem confirmação): fica 'skipped' e a retomada NÃO envia para ele", async () => {
+    const w = await mundo();
+    const d = await w.lote({ status: "running", enviadosAntes: 2 });
+    await w.db.query(
+      "INSERT INTO campaign_dispatch_runs (dispatch_id, campaign_id, client_id, phone, status, lead_id, claimed_at, error_message) VALUES ($1, $2, $3, $4, 'claimed', $5, now(), $6)",
+      [d.id, w.camp.id, T, w.leads[2].telefone, w.leads[2].id, RUN_SEND_MARKER]
+    );
+    const r = await w.boot();
+    const c = await w.conferir(r.claimedParaConferir);
+    expect(c).toMatchObject({ skipped: 1, pendente: 0 });
+
+    expect((await w.retomar()).status).toBe(200);
+    await w.routes.runDueIndependentDispatches({ limit: 10 });
+    expect(enviados).not.toContain(w.leads[2].telefone);
+    expect(enviados).toHaveLength(4);
   }, SLOW);
 });

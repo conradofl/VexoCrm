@@ -11,6 +11,7 @@
 // Só leitura.
 
 import { QUOTA_PAUSE_MARKER } from "./campaignQuotaGate.js";
+import { RUN_BOOT_SKIP_TEXT } from "./runSendMarker.js";
 
 export const SCHEDULED_SOON_MINUTES = 15;
 const WINDOW_PAUSE_MARKER = "fora da janela de envio";
@@ -33,7 +34,10 @@ export const SQL_RESTART_BLOCKERS = `
     (SELECT count(*)::int FROM public.campaign_dispatches WHERE status = 'paused') AS paused,
     (SELECT count(*)::int FROM public.campaign_dispatch_runs r
       JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-      WHERE r.status = 'claimed' AND d.status = 'running') AS claimed_sem_confirmacao
+      WHERE r.status = 'claimed' AND d.status = 'running') AS claimed_sem_confirmacao,
+    (SELECT count(*)::int FROM public.campaign_dispatch_runs
+      WHERE status = 'skipped' AND error_message = $5
+        AND COALESCE(claimed_at, created_at) >= $1::timestamptz - interval '24 hours') AS skipped_sem_confirmacao_24h
 `;
 
 function naoMedido(checkedAt, motivo) {
@@ -55,7 +59,7 @@ export async function computeRestartBlockers(pool, { now = new Date() } = {}) {
   if (!pool) return naoMedido(checkedAt, "sem_banco");
   let row;
   try {
-    const { rows } = await pool.query(SQL_RESTART_BLOCKERS, [checkedAt, SCHEDULED_SOON_MINUTES, WINDOW_PAUSE_MARKER, QUOTA_PAUSE_MARKER]);
+    const { rows } = await pool.query(SQL_RESTART_BLOCKERS, [checkedAt, SCHEDULED_SOON_MINUTES, WINDOW_PAUSE_MARKER, QUOTA_PAUSE_MARKER, RUN_BOOT_SKIP_TEXT]);
     row = rows[0] || {};
   } catch (err) {
     return naoMedido(checkedAt, `consulta_falhou: ${String(err?.code || err?.message || err).slice(0, 80)}`);
@@ -79,6 +83,8 @@ export async function computeRestartBlockers(pool, { now = new Date() } = {}) {
       interrupted: int(row.interrupted),
       paused: int(row.paused),
       claimedSemConfirmacao: int(row.claimed_sem_confirmacao),
+      // Runs que a conferência do boot deixou 'skipped' por dúvida (chamada feita, sem eco) nas últimas 24 h.
+      skippedSemConfirmacao24h: int(row.skipped_sem_confirmacao_24h),
     },
     checkedAt,
   };

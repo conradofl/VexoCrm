@@ -10,11 +10,10 @@
  *   27/10/2026).
  * - Os demais são marcados como `status = 'paused'` para retomada segura pelo usuário. Se a contagem de desfechos
  *   falhar, o lote vai para 'paused' (o lado seguro: pede um clique, não declara pronto o que não foi medido).
- * - Leads em `campaign_dispatch_runs` que ficaram em `status = 'claimed'` sem `sent_at` são marcados
- *   como `status = 'skipped'` com motivo 'Interrompido antes da confirmação de envio (envio não confirmado no restart do servidor)'.
- *   Risco conhecido: 'skipped' conta como desfecho. Um lead que ficou em 'claimed' sem confirmação não volta para a
- *   fila e ajuda o lote a alcançar o alvo e fechar 'done' sem ter recebido. Medido em 27/10/2026: 31 runs 'skipped' em
- *   5 lotes — volume baixo, registrado aqui em vez de virar trabalho.
+ * - Leads em `campaign_dispatch_runs` que ficaram em `status = 'claimed'` NÃO são mais transformados em 'skipped' aqui
+ *   (21/11/2026). O boot só conta e devolve os lotes em `claimedParaConferir`; o server.js dispara, DEPOIS de subir,
+ *   a conferência (campaign/claimedConference.js), que espera 10 s e decide cada um: saída gravada = 'sent'; sem
+ *   saída e sem a marca de envio iniciado = volta a pendente; sem saída e com a marca = 'skipped' (dúvida).
  * - Ao retomar, o scheduler ou disparo manual deduplica rigorosamente via `buildDispatchLeads({ excludeDispatchId: dispatchId })`
  *   (quem já recebeu NÃO recebe de novo).
  * - Lotes em `status = 'done'`, `status = 'failed'` ou `status = 'draft'` permanecem 100% intocados.
@@ -37,6 +36,7 @@ export async function recoverOrphanDispatches(pool) {
     }
 
     const items = [];
+    const claimedParaConferir = [];
 
     for (const disp of orphanDispatches) {
       const dispatchId = disp.id;
@@ -55,24 +55,9 @@ export async function recoverOrphanDispatches(pool) {
       ).catch(() => ({ rows: [{ cnt: 0 }] }));
       const claimedCount = Number(claimedRes.rows[0]?.cnt || 0);
 
-      // Quantos 'claimed' viraram 'skipped' DE FATO (rowCount do UPDATE): é a única perda real de um reinício, e o log
-      // passa a dizer o número por lote (20/11/2026).
-      let claimedViraramSkipped = 0;
-      if (claimedCount > 0) {
-        // Marca leads em 'claimed' como 'skipped' para que constem no histórico como não confirmados
-        // e NÃO sejam reenviados automaticamente.
-        const upd = await pool.query(
-          `UPDATE public.campaign_dispatch_runs
-           SET status = 'skipped',
-               error_message = 'Interrompido antes da confirmação de envio (envio não confirmado no restart do servidor)'
-           WHERE dispatch_id = $1 AND status = 'claimed'`,
-          [dispatchId]
-        ).catch((err) => {
-          console.warn("[boot-recovery] falha ao atualizar status de leads em 'claimed':", err?.message || err);
-          return null;
-        });
-        claimedViraramSkipped = Number(upd?.rowCount || 0);
-      }
+      // Os 'claimed' ficam como estão: a conferência depois do listen decide cada um (claimedConference.js).
+      const claimedEmConferencia = claimedCount;
+      if (claimedCount > 0) claimedParaConferir.push(dispatchId);
 
       // 4. Contar falhas
       const failedRes = await pool.query(
@@ -116,7 +101,7 @@ export async function recoverOrphanDispatches(pool) {
           statusAnterior: disp.status,
           desfechos: outcomeCount,
           targetCount,
-          claimedViraramSkipped,
+          claimedEmConferencia,
         });
         items.push({
           dispatchId,
@@ -127,7 +112,7 @@ export async function recoverOrphanDispatches(pool) {
           leadsSent: sentCount,
           leadsFailed: failedCount,
           leadsUnconfirmed: claimedCount,
-          claimedViraramSkipped,
+          claimedEmConferencia,
           errorMessage: null,
           novoStatus: "done",
         });
@@ -137,7 +122,7 @@ export async function recoverOrphanDispatches(pool) {
       // 6. Formular mensagem explicativa
       let errorMessage = "Pausado — servidor reiniciou durante o envio. Retome quando quiser.";
       if (claimedCount > 0) {
-        errorMessage = `Pausado — servidor reiniciou durante o envio (${claimedCount} lead(s) com envio não confirmado). Retome quando quiser.`;
+        errorMessage = `Pausado — servidor reiniciou durante o envio (${claimedCount} lead(s) com envio em conferência). Retome quando quiser.`;
       }
 
       // 7. Atualizar o lote em campaign_dispatches para 'paused' para controle manual seguro pelo usuário
@@ -164,7 +149,7 @@ export async function recoverOrphanDispatches(pool) {
         leadsSent: sentCount,
         leadsFailed: failedCount,
         leadsUnconfirmed: claimedCount,
-        claimedViraramSkipped,
+        claimedEmConferencia,
         novoStatus: "paused",
       });
 
@@ -177,7 +162,7 @@ export async function recoverOrphanDispatches(pool) {
         leadsSent: sentCount,
         leadsFailed: failedCount,
         leadsUnconfirmed: claimedCount,
-        claimedViraramSkipped,
+        claimedEmConferencia,
         errorMessage,
         novoStatus: "paused",
       });
@@ -185,7 +170,7 @@ export async function recoverOrphanDispatches(pool) {
 
     const fechados = items.filter((i) => i.novoStatus === "done").length;
     console.log(`[boot-recovery] ${items.length} lote(s) órfão(s) recuperado(s): ${fechados} completo(s) fechado(s) como 'done', ${items.length - fechados} pausado(s) para retomada manual.`);
-    return { recovered: items.length, items };
+    return { recovered: items.length, items, claimedParaConferir };
   } catch (err) {
     console.error("[boot-recovery] erro ao verificar/recuperar lotes órfãos:", err?.message || err);
     return { recovered: 0, error: err?.message || String(err) };
