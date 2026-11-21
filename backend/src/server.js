@@ -315,6 +315,7 @@ import {
   stopCampaignScheduler,
 } from "./campaign/scheduler.js";
 import { recoverOrphanDispatches } from "./campaign/orphanRecovery.js";
+import { iniciarConferenciaDeClaimed } from "./campaign/claimedConference.js";
 import { startChipDiarySampler } from "./services/chipDiary.js";
 import { startAgentRecoverySweeper, stopAgentRecoverySweeper } from "./services/agentInboundRecovery.js";
 import { drenarBuffersDoAgente } from "./chatbot-ai-engine.js";
@@ -1010,11 +1011,20 @@ process.on("uncaughtException", (err) => {
 });
 
 // Rodar migrations e recuperação de lotes órfãos antes de subir o servidor
+// Os runs 'claimed' que o reinício deixou sem desfecho são conferidos DEPOIS do listen (campaign/claimedConference.js):
+// a conferência espera 10 s pelo eco de um envio em voo, e o /health responde desde já. Sem await, de propósito.
+let lotesComClaimedParaConferir = [];
 runMigrations(pgDatabasePool)
   .then(() => recoverOrphanDispatches(pgDatabasePool))
+  .then((recuperacao) => {
+    lotesComClaimedParaConferir = Array.isArray(recuperacao?.claimedParaConferir) ? recuperacao.claimedParaConferir : [];
+  })
   .catch((err) => {
     console.error("[server] erro na inicialização/recuperação de lotes órfãos:", err?.message || err);
   })
   .finally(() => {
     listenWithRetry();
+    if (lotesComClaimedParaConferir.length > 0) {
+      iniciarConferenciaDeClaimed(pgDatabasePool, lotesComClaimedParaConferir);
+    }
   });

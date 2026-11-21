@@ -57,9 +57,9 @@ export function createRunChipTracker({ settingsChipId = null } = {}) {
 }
 
 // O MESMO UPDATE que marca como enviado grava o chip: um único comando, sem janela entre "enviado" e "por qual chip".
-export const FINALIZE_RUN_SENT_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid WHERE dispatch_id = $2 AND lead_id = $3`;
+export const FINALIZE_RUN_SENT_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid, error_message = CASE WHEN error_message LIKE '[vexo:%' THEN NULL ELSE error_message END WHERE dispatch_id = $2 AND lead_id = $3`;
 
-export const FINALIZE_RUN_SENT_BY_PHONE_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid WHERE dispatch_id = $2 AND regexp_replace(phone, '\\D', '', 'g') = $3`;
+export const FINALIZE_RUN_SENT_BY_PHONE_SQL = `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $1, evolution_instance_id = $4::uuid, error_message = CASE WHEN error_message LIKE '[vexo:%' THEN NULL ELSE error_message END WHERE dispatch_id = $2 AND regexp_replace(phone, '\\D', '', 'g') = $3`;
 
 export const UPDATE_LEAD_LAST_MESSAGE_SQL = `UPDATE public.leads
    SET last_message_at = $1,

@@ -972,6 +972,7 @@ export async function dispatchCampaignSequence({
   leadDelayProvider = null,
   onLeadClaim = null,
   onLeadClaimRollback = null,
+  onLeadSendStarting = null,
   onLeadFailed = null,
   onLeadCheckOptout = null,
   quotaGate = null,
@@ -1170,6 +1171,10 @@ export async function dispatchCampaignSequence({
     let lastSuccessfulStep = null;
     let lastSuccessfulStepIndex = null;
     let lastSentAt = null;
+    // Marca "envio iniciado" (21/11/2026): gravada uma vez por lead, ANTES da primeira chamada à Evolution. Sem ela o
+    // lead não é enviado, para que no reinício "sem marca" prove que a chamada não aconteceu (claimedConference.js).
+    let marcaDeEnvioGravada = false;
+    let marcaDeEnvioFalhou = false;
 
     for (let stepIndex = 0; stepIndex < enabledSteps.length; stepIndex += 1) {
       const step = enabledSteps[stepIndex];
@@ -1231,6 +1236,32 @@ export async function dispatchCampaignSequence({
         step.type === "image"
           ? buildImagePayload(phone, stepForPayload, extendedContext)
           : buildTextPayload(phone, stepForPayload, extendedContext);
+
+      if (!marcaDeEnvioGravada && typeof onLeadSendStarting === "function") {
+        let marcou = false;
+        try {
+          marcou = (await onLeadSendStarting({ lead, phone, leadIndex })) !== false;
+        } catch (markErr) {
+          console.warn("[campaign-outbound] marca de envio não gravada; lead volta à fila sem envio:", {
+            phone: maskOutboundPhone(phone),
+            error: markErr?.message || String(markErr),
+          });
+          marcou = false;
+        }
+        if (!marcou) {
+          marcaDeEnvioFalhou = true;
+          if (typeof onLeadClaimRollback === "function") {
+            try {
+              await onLeadClaimRollback({ lead, phone, leadIndex, reason: "send_marker_failed" });
+            } catch {
+              /* rollback best-effort */
+            }
+          }
+          summary.warnings.push({ phone, stepId: step.id, stepType: step.type, reason: "marca de envio não gravada; lead devolvido à fila sem envio" });
+          break;
+        }
+        marcaDeEnvioGravada = true;
+      }
 
       try {
         const sentAt = new Date().toISOString();
@@ -1345,6 +1376,9 @@ export async function dispatchCampaignSequence({
     await releaseUnusedQuota();
 
     if (summary.paused) break;
+
+    // Marca não gravada: nada foi enviado e o claim já foi desfeito. Não conta como enviado nem como falha.
+    if (marcaDeEnvioFalhou) continue;
 
     if (!leadFailed) {
       summary.successCount += 1;

@@ -212,6 +212,8 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
           claimedLeads.push(params[3]);
           return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
         }
+        // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): o banco grava 1 linha no run reivindicado.
+        if (sqlStr.includes("SET error_message = $3") && sqlStr.includes("status = 'claimed'")) return { rowCount: 1, rows: [] };
         if (sqlStr.includes("UPDATE public.campaign_dispatch_runs SET status = 'sent'")) {
           finalizedSent.push(params[1]);
           finalizedChips.push(params[3]);
@@ -351,6 +353,8 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
         if (sqlStr.includes("INSERT INTO public.campaign_dispatch_runs")) {
           return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
         }
+        // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): o banco grava 1 linha no run reivindicado.
+        if (sqlStr.includes("SET error_message = $3") && sqlStr.includes("status = 'claimed'")) return { rowCount: 1, rows: [] };
         if (sqlStr.includes("UPDATE public.campaign_dispatch_runs SET status = 'sent'")) {
           finalizedSent.push(params[1]);
           return { rowCount: 1, rows: [] };
@@ -447,6 +451,8 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
         if (sqlStr.includes("INSERT INTO public.campaign_dispatch_runs")) {
           return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
         }
+        // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): o banco grava 1 linha no run reivindicado.
+        if (sqlStr.includes("SET error_message = $3") && sqlStr.includes("status = 'claimed'")) return { rowCount: 1, rows: [] };
         if (sqlStr.includes("DELETE FROM public.campaign_dispatch_runs") && sqlStr.includes("status = 'claimed'")) {
           deletedClaims.push(params[1]);
           return { rowCount: 1, rows: [] };
@@ -580,6 +586,8 @@ describe("runCampaignDispatch - Execução de Ponta a Ponta do Laço de Disparo"
         if (sqlStr.includes("INSERT INTO public.campaign_dispatch_runs")) {
           return { rowCount: 1, rows: [{ id: "claim-uuid" }] };
         }
+        // Marca "envio iniciado" no run claimed (runSendMarker.js, 21/11/2026): o banco grava 1 linha no run reivindicado.
+        if (sqlStr.includes("SET error_message = $3") && sqlStr.includes("status = 'claimed'")) return { rowCount: 1, rows: [] };
         if (sqlStr.includes("UPDATE public.campaign_dispatch_runs") && sqlStr.includes("status = 'sent'")) {
           return { rowCount: 1, rows: [] };
         }

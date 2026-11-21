@@ -106,7 +106,7 @@ describe("Recuperação de Lotes Órfãos no Startup com Retomada Automática", 
     expect(updatedDisp.error_message).toContain("Pausado — servidor reiniciou durante o envio. Retome quando quiser.");
   });
 
-  it("lead em 'claimed' sem sent_at NÃO é reenviado, vira 'skipped' e aparece na contagem de não confirmados", async () => {
+  it("lead em 'claimed' sem sent_at NÃO é reenviado pelo boot: fica 'claimed' para a conferência depois do listen (21/11/2026)", async () => {
     const mockPool = createMockPool({
       dispatches: [
         {
@@ -129,12 +129,12 @@ describe("Recuperação de Lotes Órfãos no Startup com Retomada Automática", 
     expect(result.recovered).toBe(1);
     expect(result.items[0].leadsSent).toBe(1);
     expect(result.items[0].leadsUnconfirmed).toBe(1);
-    expect(result.items[0].errorMessage).toContain("1 lead(s) com envio não confirmado");
+    expect(result.items[0].errorMessage).toContain("1 lead(s) com envio em conferência");
+    expect(result.claimedParaConferir).toEqual(["disp-102"]);
 
-    // O lead 'claimed' virou 'skipped'
+    // O boot não decide mais: o lead 'claimed' espera a conferência (claimedConference.js)
     const lead2Run = mockPool.runRows.find((r) => r.id === "run-2");
-    expect(lead2Run.status).toBe("skipped");
-    expect(lead2Run.error_message).toContain("envio não confirmado");
+    expect(lead2Run.status).toBe("claimed");
   });
 
   it("lote 'interrupted' no boot também vira 'paused' para retomada manual segura", async () => {

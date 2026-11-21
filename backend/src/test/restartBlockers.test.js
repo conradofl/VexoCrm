@@ -32,7 +32,8 @@ beforeAll(async () => {
       scheduled_at TIMESTAMPTZ, error_message TEXT, triggered_at TIMESTAMPTZ
     );
     CREATE TABLE public.campaign_dispatch_runs (
-      id BIGSERIAL PRIMARY KEY, dispatch_id TEXT, status TEXT, sent_at TIMESTAMPTZ
+      id BIGSERIAL PRIMARY KEY, dispatch_id TEXT, status TEXT, sent_at TIMESTAMPTZ,
+      error_message TEXT, claimed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
   pool = { query: (sql, params) => db.query(sql, params) };
