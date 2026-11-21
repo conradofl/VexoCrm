@@ -1677,6 +1677,11 @@ export async function runChatbotAI({
     };
   }
 
+  // A resposta saiu, mas de outro provedor da escada: a chave quebrada nao pode
+  // ficar escondida atras de uma conversa que parece saudavel (o simulador avisa).
+  if (credenciaisQuebradas.size > 0) {
+    finalResposta._credencialInvalida = [...credenciaisQuebradas];
+  }
   return finalResposta;
 }
 

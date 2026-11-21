@@ -2907,11 +2907,15 @@ export function registerChatbotRoutes(app, deps) {
   });
 
   // GET /api/chatbot-llm-models — lista modelos de LLM registrados e status dos provedores (API keys no servidor)
+  // So oferece modelo de provedor com chave: o que nao pode ser chamado nao aparece na tela.
+  // A escada ja descartava esses ids (filterLadderByProviderKey); agora o tenant nem consegue escolher.
+  // providerStatus e so sim/nao por provedor: nenhuma chave sai daqui.
   app.get("/api/chatbot-llm-models", requireFirebaseAuth, async (req, res) => {
+    const providerStatus = getLlmProviderStatus();
     return res.json({
-      models: LLM_MODELS,
+      models: LLM_MODELS.filter((m) => providerStatus[m.provider] === true),
       defaultModel: defaultLlmModel(),
-      providerStatus: getLlmProviderStatus(),
+      providerStatus,
     });
   });
 
@@ -4845,7 +4849,12 @@ export function registerChatbotRoutes(app, deps) {
           success: false,
           error: "Não foi possível gerar a resposta.",
           reason: motivo,
-          code: aiResponse?.mensagemAusente ? "MODEL_EMPTY_MESSAGE" : "CHATBOT_NOT_CONFIGURED",
+          code: aiResponse?._credencialInvalida?.length
+            ? "LLM_CREDENTIAL_INVALID"
+            : aiResponse?.mensagemAusente
+              ? "MODEL_EMPTY_MESSAGE"
+              : "CHATBOT_NOT_CONFIGURED",
+          ...(aiResponse?._credencialInvalida?.length ? { provedores: aiResponse._credencialInvalida } : {}),
           detalhe: aiResponse?._falhaDetalhe || null,
         });
       }
@@ -4861,6 +4870,11 @@ export function registerChatbotRoutes(app, deps) {
       if (aiResponse._repetiuUltimaFala) {
         avisos.push(
           "Esta resposta é idêntica à anterior — sinal de que o histórico não chegou ao modelo."
+        );
+      }
+      if (Array.isArray(aiResponse._credencialInvalida) && aiResponse._credencialInvalida.length > 0) {
+        avisos.push(
+          `Credencial inválida no provedor ${aiResponse._credencialInvalida.join(", ")}: esta resposta veio de outro provedor da escada. Troque a chave no EasyPanel.`
         );
       }
 
