@@ -474,7 +474,7 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
     await expect(page.getByTestId("inbox-footer-grupos")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("inbox-order-label")).toHaveText(/Grupos/i);
 
-    // Botão de filtros: escopo de chip, outras listas e seleção em massa.
+    // Botão de filtros: escopo de chip e outras listas.
     await page.getByTestId("inbox-filters-button").click();
     const panel = page.getByTestId("inbox-filters-panel");
     await expect(panel).toBeVisible();
@@ -499,9 +499,7 @@ test.describe("aba Conversas — tela nova, computador (1440x900)", () => {
       await expect(panel).toBeHidden({ timeout: 700 });
     }).toPass({ timeout: 6000 });
 
-    // Seleção em massa: nada disso sumiu.
-    await page.getByTestId("inbox-filters-button").click();
-    await expect(panel).toBeVisible();
+    // Seleção em massa: saiu do painel (21/11/2026) e fica à vista na linha da ordem.
     await page.getByTestId("inbox-select-mode").click();
     await expect(page.getByTestId("inbox-bulk-bar")).toBeVisible();
     await page.getByRole("checkbox", { name: /Selecionar Jéssica/ }).click();

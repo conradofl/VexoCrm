@@ -11,6 +11,7 @@ import {
   Check,
   Clock3,
   Hourglass,
+  ListChecks,
   Phone,
   Search,
   Send,
@@ -160,8 +161,6 @@ export function InboxSearchRow({
   otherLists,
   activeTab,
   onTabChange,
-  selectMode,
-  onToggleSelectMode,
   onNewConversation,
 }: {
   search: string;
@@ -175,13 +174,11 @@ export function InboxSearchRow({
   otherLists: FooterFilter[];
   activeTab: InboxTab;
   onTabChange: (tab: InboxTab) => void;
-  selectMode: boolean;
-  onToggleSelectMode: () => void;
   /** Abre a janela "Nova conversa". Sem a função, o botão não aparece. */
   onNewConversation?: () => void;
 }) {
   const agentText = chipValue ? describeChipAgent(chipAgents[chipValue.toLowerCase()] ?? chipAgents[chipValue]) : "";
-  const hasFilter = Boolean(chipValue) || otherLists.some((f) => f.key === activeTab) || selectMode;
+  const hasFilter = Boolean(chipValue) || otherLists.some((f) => f.key === activeTab);
 
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-4 pb-3 pt-4">
@@ -289,48 +286,61 @@ export function InboxSearchRow({
               })}
             </div>
           </div>
-
-          <button
-            type="button"
-            data-testid="inbox-select-mode"
-            aria-pressed={selectMode}
-            onClick={() => {
-              onToggleSelectMode();
-              onFiltersOpenChange(false);
-            }}
-            className="w-full cursor-pointer rounded-lg border border-border bg-card px-3 py-2 text-left text-xs font-semibold text-foreground/80 hover:bg-muted"
-          >
-            {selectMode ? "Sair da seleção em massa" : "Selecionar várias conversas"}
-          </button>
         </PopoverContent>
       </Popover>
     </div>
   );
 }
 
-/** "MAIS PARADO PRIMEIRO" à esquerda e o escopo de chip à direita. */
+/**
+ * "MAIS PARADO PRIMEIRO" à esquerda; à direita, "Selecionar" (seleção em massa) e o escopo de chip.
+ * "Selecionar" morava dentro do menu de filtros e ninguém achava (21/11/2026): fica sempre à vista,
+ * em todas as listas, sem acrescentar altura (a linha já existia).
+ */
 export function InboxOrderRow({
   label,
   chipLabel,
   onChipClick,
+  selectMode,
+  onToggleSelectMode,
 }: {
   label: string;
   chipLabel: string;
   onChipClick: () => void;
+  selectMode: boolean;
+  onToggleSelectMode: () => void;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 px-[18px] pb-2 pt-3.5">
-      <span className="truncate text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground" data-testid="inbox-order-label">
+    <div className="flex items-center justify-between gap-2 px-[18px] pb-2 pt-3.5">
+      <span className="min-w-0 truncate text-[11px] font-bold uppercase tracking-[.06em] text-muted-foreground" data-testid="inbox-order-label">
         {label}
       </span>
-      <button
-        type="button"
-        onClick={onChipClick}
-        data-testid="inbox-chip-link"
-        className="shrink-0 cursor-pointer text-[11.5px] font-semibold text-indigo-600 hover:underline dark:text-indigo-300"
-      >
-        {chipLabel}
-      </button>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleSelectMode}
+          aria-pressed={selectMode}
+          data-testid="inbox-select-mode"
+          title={selectMode ? "Sair da seleção em massa" : "Selecionar várias conversas para cadastrar como lead, marcar como pessoal ou arquivar"}
+          className={cn(
+            "inline-flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 py-0 text-[11.5px] font-semibold transition-colors",
+            selectMode
+              ? "bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+              : "text-indigo-600 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15"
+          )}
+        >
+          <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
+          {selectMode ? "Sair da seleção" : "Selecionar"}
+        </button>
+        <button
+          type="button"
+          onClick={onChipClick}
+          data-testid="inbox-chip-link"
+          className="shrink-0 cursor-pointer text-[11.5px] font-semibold text-indigo-600 hover:underline dark:text-indigo-300"
+        >
+          {chipLabel}
+        </button>
+      </div>
     </div>
   );
 }
