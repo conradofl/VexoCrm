@@ -37,7 +37,10 @@ export const SQL_RESTART_BLOCKERS = `
       WHERE r.status = 'claimed' AND d.status = 'running') AS claimed_sem_confirmacao,
     (SELECT count(*)::int FROM public.campaign_dispatch_runs
       WHERE status = 'skipped' AND error_message = $5
-        AND COALESCE(claimed_at, created_at) >= $1::timestamptz - interval '24 hours') AS skipped_sem_confirmacao_24h
+        AND COALESCE(claimed_at, created_at) >= $1::timestamptz - interval '24 hours') AS skipped_sem_confirmacao_24h,
+    (SELECT count(*)::int FROM public.campaign_dispatch_runs
+      WHERE error_message LIKE '%[vexo:cortado:%'
+        AND COALESCE(claimed_at, created_at) >= $1::timestamptz - interval '24 hours') AS sequencias_cortadas_24h
 `;
 
 function naoMedido(checkedAt, motivo) {
@@ -85,6 +88,9 @@ export async function computeRestartBlockers(pool, { now = new Date() } = {}) {
       claimedSemConfirmacao: int(row.claimed_sem_confirmacao),
       // Runs que a conferência do boot deixou 'skipped' por dúvida (chamada feita, sem eco) nas últimas 24 h.
       skippedSemConfirmacao24h: int(row.skipped_sem_confirmacao_24h),
+      // Leads que receberam só parte da sequência porque o servidor desligou no meio (log
+      // "sequencia_cortada_no_desligamento"), nas últimas 24 h. Não são completados depois.
+      sequenciasCortadas24h: int(row.sequencias_cortadas_24h),
     },
     checkedAt,
   };

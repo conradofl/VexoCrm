@@ -98,7 +98,12 @@ describe("contrato das chamadas de dispatchCampaignSequence", () => {
 
   it("chaves que o laço de envio realmente lê: toda chave passada existe na assinatura de dispatchCampaignSequence", () => {
     const outbound = readFileSync(resolve("src/campaign-outbound.js"), "utf8");
-    const assinatura = outbound.slice(outbound.indexOf("export async function dispatchCampaignSequence({"), outbound.indexOf("}) {", outbound.indexOf("export async function dispatchCampaignSequence({")));
+    // Desde 21/11/2026 dispatchCampaignSequence só registra o "envio em andamento" (desligamento gracioso) e repassa os
+    // argumentos para dispatchCampaignSequenceSemRegistro, onde está a assinatura que o laço lê.
+    expect(outbound).toContain("return comEnvioRegistrado(() => dispatchCampaignSequenceSemRegistro(args));");
+    const inicio = outbound.indexOf("async function dispatchCampaignSequenceSemRegistro({");
+    expect(inicio).toBeGreaterThan(-1);
+    const assinatura = outbound.slice(inicio, outbound.indexOf("}) {", inicio));
     for (const chaves of chamadas) {
       for (const k of chaves) expect(assinatura, `'${k}' é passado mas o laço não o declara (seria ignorado em silêncio)`).toMatch(new RegExp(`\\b${k}\\b`));
     }

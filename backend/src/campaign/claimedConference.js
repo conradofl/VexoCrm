@@ -16,7 +16,7 @@
 // lote; retomar é clique do cliente.
 
 import { toCanonicalPhone } from "../services/canonicalPhone.js";
-import { RUN_BOOT_SKIP_TEXT, RUN_SEND_MARKER, runConferenceNote } from "../services/runSendMarker.js";
+import { RUN_BOOT_SKIP_TEXT, RUN_SEQUENCE_CUT_RE, isRunSendStarted, runConferenceNote } from "../services/runSendMarker.js";
 
 export const CONFERENCIA_ESPERA_MS = 10_000;
 export const BOOT_PAUSE_MESSAGE_PREFIX = "Pausado — servidor reiniciou durante o envio";
@@ -54,11 +54,12 @@ async function decidirRun(pool, run) {
     await pool.query(
       `UPDATE public.campaign_dispatch_runs SET status = 'sent', sent_at = $2, error_message = $3
         WHERE id = $1 AND status = 'claimed'`,
-      [run.id, new Date(saida.quando).toISOString(), runConferenceNote(saida.criterio)]
+      // A nota de sequência cortada (desligamento) fica junto: é ela que o /health conta.
+      [run.id, new Date(saida.quando).toISOString(), runConferenceNote(saida.criterio) + ((String(run.error_message || "").match(RUN_SEQUENCE_CUT_RE) || [""])[0])]
     );
     return { desfecho: "sent", criterio: saida.criterio };
   }
-  if (run.error_message === RUN_SEND_MARKER) {
+  if (isRunSendStarted(run.error_message)) {
     await pool.query(
       `UPDATE public.campaign_dispatch_runs SET status = 'skipped', error_message = $2 WHERE id = $1 AND status = 'claimed'`,
       [run.id, RUN_BOOT_SKIP_TEXT]

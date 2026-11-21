@@ -316,6 +316,8 @@ import {
 } from "./campaign/scheduler.js";
 import { recoverOrphanDispatches } from "./campaign/orphanRecovery.js";
 import { iniciarConferenciaDeClaimed } from "./campaign/claimedConference.js";
+import { executarDesligamento } from "./services/shutdownCoordinator.js";
+import { aguardarEnviosPararem, iniciarDesligamento } from "./services/shutdownSignal.js";
 import { startChipDiarySampler } from "./services/chipDiary.js";
 import { startAgentRecoverySweeper, stopAgentRecoverySweeper } from "./services/agentInboundRecovery.js";
 import { drenarBuffersDoAgente } from "./chatbot-ai-engine.js";
@@ -855,12 +857,12 @@ function listenWithRetry(attempt = 1) {
   });
 }
 
-// (B) Shutdown gracioso ordenado:
+// (B) Shutdown gracioso ordenado (services/shutdownCoordinator.js, 21/11/2026):
+// 0. Flag de desligamento: o motor de campanha não pega lead nem passo novo; o /health responde "desligando"
 // 1. Parar de aceitar trabalho novo (schedulers, crons, workers BullMQ pausados)
-// 2. Fechar HTTP server + derrubar sockets ociosos (closeIdleConnections)
-// 3. Aguardar requisições em voo (com prazo de segurança antes de closeAllConnections)
-// 4. Fechar workers BullMQ, filas BullMQ, Redis e pool Postgres
-// 5. Sair com código 0
+// 2+3. Em paralelo, até 5 s: o passo em voo do lote termina e é registrado; o agente de IA drena
+// 4. Fechar o HTTP (até 1,5 s para requisições em voo)
+// 5. Fechar workers BullMQ, filas BullMQ, Redis e, por último, o pool Postgres; sair com código 0
 let shuttingDown = false;
 async function gracefulShutdown(signal) {
   if (shuttingDown) return;
@@ -876,118 +878,74 @@ async function gracefulShutdown(signal) {
   forceTimer.unref();
 
   try {
-    // ── ETAPA 1: Parar de aceitar trabalho novo ───────────────────────────
-    const t1 = Date.now();
-    try {
-      stopCampaignScheduler();
-      stopDueDispatchScheduler();
-      stopAutomationEngine();
-      stopAgentRecoverySweeper();
-      await Promise.allSettled([
-        pauseFollowupWorker(),
-        pauseRagWorker(),
-        pauseSlackWorker(),
-      ]);
-      console.log(`[server] [etapa 1/4] novos trabalhos pausados e schedulers encerrados (${Date.now() - t1}ms).`);
-    } catch (err) {
-      console.warn(`[server] [etapa 1/4] erro ao pausar novos trabalhos (${Date.now() - t1}ms):`, err?.message || err);
-    }
-
-    // ── ETAPA 2 & 3: Fechar HTTP server e aguardar requisições em voo ─────
-    const t2 = Date.now();
-    if (httpServer) {
-      // 2. Derruba sockets keep-alive ociosos imediatamente, mantendo requisições ativas
-      if (typeof httpServer.closeIdleConnections === "function") {
-        httpServer.closeIdleConnections();
-      }
-
-      await new Promise((resolve) => {
-        let isDone = false;
-        const done = () => {
-          if (!isDone) {
-            isDone = true;
-            console.log(`[server] HTTP server fechado (porta liberada) (${Date.now() - t2}ms).`);
-            resolve();
-          }
-        };
-
-        // 3. Prazo de até 4000ms para requisições em voo antes de forçar o fechamento de sockets restantes
-        const inFlightTimeout = setTimeout(() => {
-          if (!isDone) {
-            console.warn(`[server] [etapa 2/4] prazo de requisições em voo esgotado (${Date.now() - t2}ms) — encerrando sockets restantes.`);
-            if (typeof httpServer.closeAllConnections === "function") {
-              httpServer.closeAllConnections();
+    // Ordem e prazos em services/shutdownCoordinator.js (21/11/2026): o passo em voo do lote termina e é registrado
+    // ANTES de o pool fechar; o /health responde "desligando" enquanto isso.
+    const resultado = await executarDesligamento({
+      // ── ETAPA 0: flag de desligamento (motor não pega lead nem passo novo; pausas acordam; /health "desligando")
+      iniciar: iniciarDesligamento,
+      // ── ETAPA 1: parar de aceitar trabalho novo
+      pararAgendadores: async () => {
+        stopCampaignScheduler();
+        stopDueDispatchScheduler();
+        stopAutomationEngine();
+        stopAgentRecoverySweeper();
+        await Promise.allSettled([pauseFollowupWorker(), pauseRagWorker(), pauseSlackWorker()]);
+        console.log(`[server] [etapa 1] novos trabalhos pausados e schedulers encerrados (${Date.now() - shutdownStart}ms).`);
+      },
+      // ── ETAPA 2 (em paralelo com a 3): passo em voo do lote termina e é registrado
+      aguardarEnvios: (prazoMs) => aguardarEnviosPararem(prazoMs),
+      // ── ETAPA 3 (em paralelo com a 2): agente de IA adianta o buffer e espera as respostas em andamento
+      // Antes o buffer (3 s) e a chamada da IA morriam com o processo (Container LED, 17/11/2026). O que não couber no
+      // prazo a varredura de órfãs pega depois do boot.
+      drenarAgente: async (prazoMs) => {
+        const drenagem = await drenarBuffersDoAgente({ timeoutMs: prazoMs });
+        console.log(`[server] [etapa 3] agente: ${drenagem.buffers} buffer(s) adiantado(s), ${drenagem.emAndamento} resposta(s) em andamento, terminou no prazo: ${drenagem.terminou}.`);
+        return drenagem.terminou;
+      },
+      // ── ETAPA 4: fechar o HTTP (o /health respondeu "desligando" até aqui)
+      fecharHttp: async (prazoMs) => {
+        if (!httpServer) return;
+        const t2 = Date.now();
+        if (typeof httpServer.closeIdleConnections === "function") httpServer.closeIdleConnections();
+        await new Promise((resolve) => {
+          let isDone = false;
+          const done = () => {
+            if (!isDone) {
+              isDone = true;
+              console.log(`[server] HTTP server fechado (porta liberada) (${Date.now() - t2}ms).`);
+              resolve();
             }
-          }
-        }, 4000);
-        inFlightTimeout.unref();
-
-        httpServer.close((err) => {
-          clearTimeout(inFlightTimeout);
-          if (err) console.error("[server] erro ao fechar HTTP server:", err.message || err);
-          done();
+          };
+          const inFlightTimeout = setTimeout(() => {
+            if (!isDone) {
+              console.warn(`[server] [etapa 4] prazo de requisições em voo esgotado (${Date.now() - t2}ms) — encerrando sockets restantes.`);
+              if (typeof httpServer.closeAllConnections === "function") httpServer.closeAllConnections();
+            }
+          }, prazoMs);
+          inFlightTimeout.unref();
+          httpServer.close((err) => {
+            clearTimeout(inFlightTimeout);
+            if (err) console.error("[server] erro ao fechar HTTP server:", err.message || err);
+            done();
+          });
         });
-      });
-    }
+      },
+      // ── ETAPA 5: workers BullMQ, filas, Redis e, por último, o pool Postgres
+      fecharInfra: async () => {
+        stopTrelloSlackScheduler();
+        stopGdVigiaScheduler();
+        stopGdBriefingReminderScheduler();
+        stopTrafficCollectorScheduler();
+        await Promise.allSettled([stopFollowupWorker(), stopRagWorker(), stopSlackWorker()]);
+        await Promise.allSettled([closeFollowupQueue(), closeRagQueue(), closeSlackQueue()]);
+        await Promise.allSettled([closeRedisChat()]);
+        await shutdownPgPool();
+        console.log(`[server] [etapa 5] workers, filas, Redis e pool Postgres encerrados (${Date.now() - shutdownStart}ms).`);
+      },
+    });
 
-    // ── ETAPA 3b: Agente de IA — processa o que está no buffer e espera as respostas em andamento ──
-    // Antes o buffer (3 s) e a chamada da IA morriam com o processo e a mensagem do lead ficava sem resposta (Container
-    // LED, 17/11/2026). O que não couber no prazo a varredura de órfãs pega depois do boot.
-    // Prazo: o que sobra dos SHUTDOWN_FORCE_MS (10 s) menos 2,5 s de reserva para a etapa 4 (workers, Redis, pool).
-    // Com o HTTP no teto de 4 s: 10 - 4 - 2,5 = 3,5 s de drenagem. Nunca menos de 0,5 s.
-    const t3b = Date.now();
-    try {
-      const prazoDrenagem = Math.max(500, SHUTDOWN_FORCE_MS - (t3b - shutdownStart) - 2500);
-      const drenagem = await drenarBuffersDoAgente({ timeoutMs: prazoDrenagem });
-      console.log(`[server] [etapa 3b] agente: ${drenagem.buffers} buffer(s) adiantado(s), ${drenagem.emAndamento} resposta(s) em andamento, terminou no prazo: ${drenagem.terminou} (${Date.now() - t3b}ms).`);
-    } catch (err) {
-      console.warn(`[server] [etapa 3b] drenagem do agente falhou (${Date.now() - t3b}ms):`, err?.message || err);
-    }
-
-    // ── ETAPA 4: Fechar workers BullMQ, filas BullMQ, conexões Redis e pool Postgres ──
-    const t4 = Date.now();
-    try {
-      // 4a. Workers BullMQ (close) e Schedulers
-      const tw = Date.now();
-      stopTrelloSlackScheduler();
-      stopGdVigiaScheduler();
-      stopGdBriefingReminderScheduler();
-      stopTrafficCollectorScheduler();
-      await Promise.allSettled([
-        stopFollowupWorker(),
-        stopRagWorker(),
-        stopSlackWorker(),
-      ]);
-      console.log(`[server] [etapa 4a/4] workers BullMQ fechados (${Date.now() - tw}ms).`);
-
-      // 4b. Filas BullMQ (close)
-      const tq = Date.now();
-      await Promise.allSettled([
-        closeFollowupQueue(),
-        closeRagQueue(),
-        closeSlackQueue(),
-      ]);
-      console.log(`[server] [etapa 4b/4] filas BullMQ fechadas (${Date.now() - tq}ms).`);
-
-      // 4c. Redis (quit)
-      const tr = Date.now();
-      await Promise.allSettled([
-        closeRedisChat(),
-      ]);
-      console.log(`[server] [etapa 4c/4] conexões Redis encerradas (${Date.now() - tr}ms).`);
-
-      // 4d. Pool Postgres
-      const tp = Date.now();
-      await shutdownPgPool();
-      console.log(`[server] [etapa 4d/4] pool Postgres encerrado (${Date.now() - tp}ms).`);
-    } catch (err) {
-      console.warn(`[server] [etapa 4/4] erro durante encerramento de infraestrutura (${Date.now() - t4}ms):`, err?.message || err);
-    }
-
-    // ── ETAPA 5: Sair limpo ───────────────────────────────────────────────
     clearTimeout(forceTimer);
-    const totalElapsed = Date.now() - shutdownStart;
-    console.log(`[server] shutdown concluído em ${totalElapsed}ms.`);
+    console.log(`[server] shutdown concluído em ${Date.now() - shutdownStart}ms`, resultado.etapas, { enviosPararam: resultado.enviosPararam });
     process.exit(0);
   } catch (fatalErr) {
     console.error("[server] erro fatal durante shutdown gracioso:", fatalErr?.message || fatalErr);

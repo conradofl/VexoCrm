@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { comEnvioRegistrado, dormirInterrompivel, estaDesligando } from "./services/shutdownSignal.js";
 import { isFilterShape, normalizeFilters } from "./segmentation.js";
 import { applyMessagePlaceholders, findUnresolvedPlaceholders } from "./services/messagePlaceholders.js";
 import { validateOutboundMessage } from "./services/jsonExtractor.js";
@@ -959,7 +960,13 @@ export function countBurstSteps(enabledSteps, isReplyTrigger = false) {
   return count;
 }
 
-export async function dispatchCampaignSequence({
+// Todo envio de campanha conta como "envio em andamento" (services/shutdownSignal.js): no SIGTERM o desligamento espera,
+// com prazo, o passo em voo terminar e ser registrado antes de fechar o pool Postgres (21/11/2026).
+export function dispatchCampaignSequence(args = {}) {
+  return comEnvioRegistrado(() => dispatchCampaignSequenceSemRegistro(args));
+}
+
+async function dispatchCampaignSequenceSemRegistro({
   webhookUrl,
   webhookToken = null,
   leads = [],
@@ -973,6 +980,7 @@ export async function dispatchCampaignSequence({
   onLeadClaim = null,
   onLeadClaimRollback = null,
   onLeadSendStarting = null,
+  onLeadSequenceCut = null,
   onLeadFailed = null,
   onLeadCheckOptout = null,
   quotaGate = null,
@@ -1001,6 +1009,12 @@ export async function dispatchCampaignSequence({
   const failedPhones = new Set();
 
   for (let leadIndex = 0; leadIndex < leads.length; leadIndex += 1) {
+    // Desligamento (SIGTERM): nenhum lead novo é reivindicado. O lote fica como o boot já trata.
+    if (estaDesligando()) {
+      summary.paused = true;
+      summary.shutdown = true;
+      break;
+    }
     if (typeof shouldContinue === "function" && !(await shouldContinue({ leadIndex, phase: "lead" }))) {
       summary.paused = true;
       break;
@@ -1175,6 +1189,7 @@ export async function dispatchCampaignSequence({
     // lead não é enviado, para que no reinício "sem marca" prove que a chamada não aconteceu (claimedConference.js).
     let marcaDeEnvioGravada = false;
     let marcaDeEnvioFalhou = false;
+    let sequenciaCortada = null;
 
     for (let stepIndex = 0; stepIndex < enabledSteps.length; stepIndex += 1) {
       const step = enabledSteps[stepIndex];
@@ -1182,6 +1197,14 @@ export async function dispatchCampaignSequence({
       // Se for um passo 'after_reply' e NÃO estiver em disparo pós-resposta ativo, interrompe a rajada inicial neste lead!
       // (a mesma regra que a cota usa para saber quantas mensagens reservar: endsBurst)
       if (endsBurst(stepIndex, step, Boolean(context?.isReplyTrigger))) {
+        break;
+      }
+
+      // Desligamento (SIGTERM): o ponto seguro é o fim do passo anterior, já enviado e registrado. Passo novo não começa.
+      if (estaDesligando()) {
+        summary.paused = true;
+        summary.shutdown = true;
+        if (leadSentAnything) sequenciaCortada = { passosEnviados: stepIndex, totalPassos: countBurstSteps(enabledSteps, Boolean(context?.isReplyTrigger)) };
         break;
       }
 
@@ -1368,12 +1391,31 @@ export async function dispatchCampaignSequence({
             2
           );
         }
-        await sleep(stepDelaySeconds * 1000);
+        await dormirInterrompivel(stepDelaySeconds * 1000);
       }
     }
 
     // devolve a cota das mensagens que NÃO saíram (falha de envio, passo cortado, lote pausado no meio do lead)
     await releaseUnusedQuota();
+
+    // Sequência cortada pelo desligamento: o lead recebeu parte dos passos e não vai receber o resto (a conferência
+    // do boot fecha o run como 'sent'). Perda real: log estruturado por lead e nota no run, contada no /health.
+    if (sequenciaCortada) {
+      console.warn("[campaign-outbound] sequencia_cortada_no_desligamento", {
+        campanha: context?.campaign?.id || null,
+        lote: context?.dispatchId || context?.campaign?.dispatchId || null,
+        passosEnviados: sequenciaCortada.passosEnviados,
+        totalPassos: sequenciaCortada.totalPassos,
+        telefone: maskOutboundPhone(phone),
+      });
+      if (typeof onLeadSequenceCut === "function") {
+        try {
+          await onLeadSequenceCut({ lead, phone, leadIndex, ...sequenciaCortada });
+        } catch (cutErr) {
+          console.warn("[campaign-outbound] falha ao registrar a sequência cortada:", cutErr?.message || cutErr);
+        }
+      }
+    }
 
     if (summary.paused) break;
 
@@ -1435,7 +1477,7 @@ export async function dispatchCampaignSequence({
         typeof leadDelayProvider === "function"
           ? leadDelayProvider({ leadIndex })
           : normalizedMeta.dispatchOptions.leadDelaySeconds * 1000;
-      await sleep(leadDelayMs);
+      await dormirInterrompivel(leadDelayMs);
     }
   }
 
