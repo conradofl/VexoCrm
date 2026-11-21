@@ -20,13 +20,15 @@ vi.mock("@/lib/api", async () => {
 });
 
 function respostaJson(status: number, corpo: unknown) {
-  return {
+  const resposta = {
     ok: status >= 200 && status < 300,
     status,
     headers: { get: () => "application/json" },
     json: async () => corpo,
     text: async () => JSON.stringify(corpo),
+    clone: () => resposta,
   };
+  return resposta;
 }
 
 async function enviar(texto = "oi") {
@@ -139,6 +141,52 @@ describe("cota de IA esgotada aparece como tal", () => {
     await enviar();
     await waitFor(() => expect(screen.getByText(/^🚫 Cota de IA esgotada/)).toBeTruthy());
     expect(screen.queryByText(/Prompt não configurado/i)).toBeNull();
+  });
+});
+
+describe("chave de IA quebrada aparece como tal", () => {
+  it("LLM_CREDENTIAL_INVALID vira aviso de credencial com o provedor, não 'Prompt não configurado'", async () => {
+    fetchApiMock.mockResolvedValue(
+      respostaJson(422, {
+        success: false,
+        error: "Não foi possível gerar a resposta.",
+        reason: "Credencial inválida ou ausente no(s) provedor(es): gemini. Verifique as chaves no EasyPanel.",
+        code: "LLM_CREDENTIAL_INVALID",
+        provedores: ["gemini"],
+      })
+    );
+
+    await enviar();
+    await waitFor(() => {
+      expect(screen.getByText(/^🔑 Credencial de IA inválida/)).toBeTruthy();
+      expect(screen.getByText(/provedor\(es\): gemini/)).toBeTruthy();
+    });
+    expect(screen.queryByText(/Prompt não configurado/i)).toBeNull();
+    expect(screen.queryByText(/^Erro:/)).toBeNull();
+  });
+
+  it("outra falha continua como 'Erro:'", async () => {
+    fetchApiMock.mockResolvedValue(
+      respostaJson(422, { success: false, error: "x", reason: "Falha na execução do modelo: timeout", code: "MODEL_EMPTY_MESSAGE" })
+    );
+    await enviar();
+    await waitFor(() => expect(screen.getByText(/^Erro: .*Falha na execução do modelo/)).toBeTruthy());
+    expect(screen.queryByText(/Credencial de IA/)).toBeNull();
+  });
+
+  it("resposta que veio de outro provedor mostra o aviso da chave quebrada junto", async () => {
+    fetchApiMock.mockResolvedValue(
+      respostaJson(200, {
+        success: true,
+        response: "Oi! Como posso ajudar?",
+        avisos: ["Credencial inválida no provedor gemini: esta resposta veio de outro provedor da escada. Troque a chave no EasyPanel."],
+      })
+    );
+    await enviar();
+    await waitFor(() => {
+      expect(screen.getByText("Oi! Como posso ajudar?")).toBeTruthy();
+      expect(screen.getByText(/Credencial inválida no provedor gemini/)).toBeTruthy();
+    });
   });
 });
 

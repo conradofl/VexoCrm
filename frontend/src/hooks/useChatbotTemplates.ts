@@ -111,7 +111,8 @@ export function useLlmModels() {
       const data = await readApiJson<{ models: LlmModelOption[]; defaultModel?: string; providerStatus: LlmProviderStatus }>(res, "llm_models_fetch");
       return {
         models: data.models ?? [],
-        defaultModel: data.defaultModel || "openai/gpt-oss-120b",
+        // Sem id escrito a mao: o padrao vem do servidor, que le a escada.
+        defaultModel: data.defaultModel || "",
         providerStatus: data.providerStatus ?? { groq: false, openai: false, anthropic: false, gemini: false },
       };
     },

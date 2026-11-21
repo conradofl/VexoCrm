@@ -78,8 +78,17 @@ export function TabTeste({ clientId }: { clientId: string }) {
         const detalhe = dados?.reason || dados?.error || "A cota de IA da conta acabou.";
         setConversation((c) => [...c, { role: "bot", text: `🚫 Cota de IA esgotada — ${detalhe}` }]);
       } else {
+        // Chave de IA quebrada: o dono resolve trocando a chave, nao mexendo no prompt.
+        const codigo = await (async () => {
+          try {
+            return ((await res.clone().json()) as { code?: string } | null)?.code ?? null;
+          } catch {
+            return null;
+          }
+        })();
         const err = await readApiErrorMessage(res, "Erro");
-        setConversation((c) => [...c, { role: "bot", text: `Erro: ${err}` }]);
+        const texto = codigo === "LLM_CREDENTIAL_INVALID" ? `🔑 Credencial de IA inválida — ${err}` : `Erro: ${err}`;
+        setConversation((c) => [...c, { role: "bot", text: texto }]);
       }
     } catch (e) {
       if (!atual()) return;
