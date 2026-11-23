@@ -2728,6 +2728,9 @@ export default function LeadImports({
               recurrencePreviewInput={recurrencePreviewInput}
               onSubmit={() => void handleCreateAndDispatch({ deliberateDispatch: false })}
               onDispatchNow={() => void handleCreateAndDispatch({ deliberateDispatch: true })}
+              onSaveAndDispatchNow={async () => {
+                // Atualiza contadores ou refetch de destinatários se necessário antes da confirmação
+              }}
               isWithoutSource={isWithoutSource}
               alreadyReceivedCount={alreadyReceivedCount}
               isSubmitting={isSubmitting}

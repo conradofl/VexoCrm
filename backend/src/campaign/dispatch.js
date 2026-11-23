@@ -186,8 +186,9 @@ export function resolveDispatchLeadLimit(dispatch, { isOccurrence = false } = {}
   return Number.isInteger(limit) && limit > 0 ? limit : null;
 }
 
-export async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null }) {
-  if (!supabase) return [];
+export async function buildDispatchLeads({ clientId, importId = null, limit = null, offset = null, segmentation = null, excludeDispatchId = null, excludeCampaignId = null, supabaseClient = null }) {
+  const client = supabaseClient || supabase;
+  if (!client) return [];
 
   // Roteamento de segmentação unificada:
   //  - shape novo { filters:[...] } → catálogo do tenant + matcher genérico.
@@ -216,7 +217,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
   while (hasMore) {
     let query;
     if (importId === "__crm__") {
-      query = supabase
+      query = client
         .from("leads")
         .select("id, client_id, telefone, created_at, nome, tipo_cliente, faixa_consumo, qualificacao, cidade, estado, status, opt_out, metadata, dados")
         .eq("client_id", clientId)
@@ -228,7 +229,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
         // (campanha 3206272b, 14/10/2026: 67 envios para 50 telefones). Mesmo critério de leadListQuery.js.
         .order("id", { ascending: true });
     } else {
-      query = supabase
+      query = client
         .from("lead_import_items")
         .select("id, import_id, client_id, lead_id, telefone, normalized_data, created_at")
         .eq("client_id", clientId)
@@ -252,7 +253,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     }
 
     // Optimization: If no segmentation, no exclude, and limit <= PAGE_SIZE, we can just fetch one page.
-    if (limit && Number.isInteger(limit) && limit > 0 && !segmentation && !excludeDispatchId && (!offset || offset === 0) && limit <= PAGE_SIZE) {
+    if (limit && Number.isInteger(limit) && limit > 0 && !segmentation && !excludeDispatchId && !excludeCampaignId && (!offset || offset === 0) && limit <= PAGE_SIZE) {
       query = query.limit(limit);
       const { data, error } = await query;
       if (error) throw error;
@@ -318,11 +319,42 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
     batchLeads = batchLeads.slice(start, start + limit);
   }
 
+  // Deduplicação por campanha (excludeCampaignId): remove leads que já foram enviados ou estão em processamento
+  // em qualquer lote anterior da mesma campanha (evita re-envio e calcula pendentes reais).
+  if (excludeCampaignId) {
+    const { data: touchedRows, error: touchedError } = await client
+      .from("campaign_dispatch_runs")
+      .select("lead_id, phone, status")
+      .eq("campaign_id", excludeCampaignId)
+      .in("status", ["sent", "claimed"]);
+    if (touchedError) {
+      throw touchedError;
+    }
+    const touchedLeadIds = new Set(
+      (touchedRows || [])
+        .map((row) => row.lead_id)
+        .filter((id) => id != null)
+    );
+    const touchedPhones = new Set(
+      (touchedRows || [])
+        .map((row) => normalizeString(row.phone).replace(/\D/g, ""))
+        .filter(Boolean)
+    );
+    if (touchedLeadIds.size > 0 || touchedPhones.size > 0) {
+      batchLeads = batchLeads.filter((lead) => {
+        if (lead.id && touchedLeadIds.has(lead.id)) return false;
+        const normPhone = normalizeString(lead.telefone).replace(/\D/g, "");
+        if (normPhone && touchedPhones.has(normPhone)) return false;
+        return true;
+      });
+    }
+  }
+
   // Defeito A / Elegibilidade por disparo: remove da fila todo lead que JÁ tem registro
   // neste disparo (qualquer status: claimed/sent/failed/skipped/invalid_number) → já tocado = fora.
   // Escopo é POR DISPARO (excludeDispatchId), restrito aos alvos DESTE lote.
   if (excludeDispatchId) {
-    const { data: touchedRows, error: touchedError } = await supabase
+    const { data: touchedRows, error: touchedError } = await client
       .from("campaign_dispatch_runs")
       .select("lead_id, phone")
       .eq("dispatch_id", excludeDispatchId);
@@ -340,7 +372,7 @@ export async function buildDispatchLeads({ clientId, importId = null, limit = nu
         .filter(Boolean)
     );
     if (touchedLeadIds.size > 0 || touchedPhones.size > 0) {
-      return batchLeads.filter((lead) => {
+      batchLeads = batchLeads.filter((lead) => {
         if (lead.id && touchedLeadIds.has(lead.id)) return false;
         const normPhone = normalizeString(lead.telefone).replace(/\D/g, "");
         if (normPhone && touchedPhones.has(normPhone)) return false;

@@ -66,14 +66,15 @@ export async function recoverOrphanDispatches(pool) {
       ).catch(() => ({ rows: [{ cnt: 0 }] }));
       const failedCount = Number(failedRes.rows[0]?.cnt || 0);
 
-      // 5. O lote já terminou? Desfechos (inclusive os 'skipped' acima) contra o alvo gravado.
+      // 5. O lote já terminou? Desfechos reais confirmados contra o alvo gravado.
+      // Leads interrompidos por reinício NÃO contam como desfecho para fechamento do lote.
       const targetCount = Number(disp.target_count || 0);
       let outcomeCount = null;
       if (targetCount > 0) {
         try {
           const outcomeRes = await pool.query(
             `SELECT COUNT(*)::int AS cnt FROM public.campaign_dispatch_runs
-             WHERE dispatch_id = $1 AND status IN ('sent', 'failed', 'invalid_number', 'skipped')`,
+             WHERE dispatch_id = $1 AND status IN ('sent', 'failed', 'invalid_number')`,
             [dispatchId]
           );
           outcomeCount = Number(outcomeRes.rows[0]?.cnt || 0);
@@ -81,7 +82,7 @@ export async function recoverOrphanDispatches(pool) {
           console.warn("[boot-recovery] falha ao contar desfechos do lote; vai para 'paused':", err?.message || err);
         }
       }
-      if (outcomeCount !== null && outcomeCount >= targetCount) {
+      if (claimedCount === 0 && outcomeCount !== null && outcomeCount >= targetCount) {
         await pool.query(
           `UPDATE public.campaign_dispatches
            SET status = 'done',

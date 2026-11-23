@@ -31,7 +31,14 @@ export const AGGREGATE_STATUS_LABELS = {
  * cancelled. Pausada tem lote pendente (o próprio lote pausado) — por isso
  * conta como Ativa, nunca Encerrada.
  */
-export function isCampaignActive(dispatchStatuses) {
+export function isCampaignActive(dispatchStatuses, options = {}) {
+  const leadsPending = Number(options?.leadsPending ?? options?.pendingLeads ?? 0);
+  const leadsTotal = Number(options?.leadsTotal ?? 0);
+  const sentTotal = Number(options?.sentTotal ?? 0);
+  // Proteção contra encerramento indevido: se ainda restarem contatos não enviados, a campanha permanece ativa
+  if (leadsPending > 0 || (leadsTotal > 0 && sentTotal < leadsTotal)) {
+    return true;
+  }
   return (dispatchStatuses || []).some((s) => !FINAL_DISPATCH_STATUSES.includes(s));
 }
 
@@ -39,7 +46,7 @@ export function isCampaignActive(dispatchStatuses) {
  * Status agregado da campanha a partir do status de cada lote, por
  * precedência (primeira regra que bate, vale):
  *   1. algum lote 'running'                          → Enviando
- *   2. todo lote 'done'                               → Concluída
+ *   2. todo lote 'done' (sem contatos pendentes)     → Concluída
  *   3. algum 'cancelled' e nenhum pendente             → Cancelada
  *   4. algum 'scheduled'                               → Agendada
  *   5. algum draft/failed/interrupted                  → Aguardando disparo
@@ -52,20 +59,38 @@ export function isCampaignActive(dispatchStatuses) {
  * (running/draft/scheduled/paused/done/failed/cancelled/interrupted) — não
  * existe estado que caia fora delas.
  */
-export function aggregateDispatchStatus(dispatchStatuses) {
+export function aggregateDispatchStatus(dispatchStatuses, options = {}) {
   const statuses = Array.isArray(dispatchStatuses) ? dispatchStatuses : [];
   if (statuses.length === 0) return null;
 
+  const leadsPending = Number(options?.leadsPending ?? options?.pendingLeads ?? 0);
+  const leadsTotal = Number(options?.leadsTotal ?? 0);
+  const sentTotal = Number(options?.sentTotal ?? 0);
+  const hasUnsentContacts = leadsPending > 0 || (leadsTotal > 0 && sentTotal < leadsTotal);
+
   if (statuses.includes("running")) return "enviando";
-  if (statuses.every((s) => s === "done")) return "concluida";
+
+  // Proteção contra encerramento indevido: só pode ser "concluida" se NÃO houver contatos pendentes
+  if (statuses.every((s) => s === "done")) {
+    if (hasUnsentContacts) {
+      return statuses.includes("paused") ? "pausada" : "aguardando_disparo";
+    }
+    return "concluida";
+  }
 
   const hasPending = statuses.some((s) => PENDING_DISPATCH_STATUSES.includes(s));
-  if (statuses.includes("cancelled") && !hasPending) return "cancelada";
+  if (statuses.includes("cancelled") && !hasPending) {
+    if (hasUnsentContacts) {
+      return "aguardando_disparo";
+    }
+    return "cancelada";
+  }
   if (statuses.includes("scheduled")) return "agendada";
   if (statuses.some((s) => ["draft", "failed", "interrupted"].includes(s))) return "aguardando_disparo";
   if (statuses.includes("paused")) return "pausada";
 
   // Combinação não prevista (não deveria acontecer com os 8 status válidos).
+  if (hasUnsentContacts) return "aguardando_disparo";
   return "concluida";
 }
 

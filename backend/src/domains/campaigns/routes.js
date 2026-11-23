@@ -5040,18 +5040,18 @@ export function registerCampaignsRoutes(app, deps) {
             c.name AS campaign_name,
             c.archived_at,
             COUNT(*)::int AS lote_count,
-            SUM(COALESCE(d.sent_count, 0))::int AS sent_total,
-            SUM(COALESCE(d.failed_count, 0))::int AS failed_total,
+            SUM(GREATEST(COALESCE(d.sent_count, 0), COALESCE(r.sent_cnt, 0)))::int AS sent_total,
+            SUM(GREATEST(COALESCE(d.failed_count, 0), COALESCE(r.failed_cnt, 0)))::int AS failed_total,
             SUM(COALESCE(d.target_count, 0))::int AS leads_total,
             SUM(
-              GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
+              GREATEST(0, COALESCE(d.target_count, 0) - GREATEST(COALESCE(d.sent_count, 0), COALESCE(r.sent_cnt, 0)) - GREATEST(COALESCE(d.failed_count, 0), COALESCE(r.failed_cnt, 0)))
             ) FILTER (WHERE d.status NOT IN ('done','cancelled'))::int AS leads_pending,
             -- So o que vai rodar sem clique, com o MESMO criterio do agendador:
             -- running, scheduled e paused com marcador de janela/cota. Draft,
             -- failed e interrupted ficam fora — a estimativa nao promete termino
             -- para campanha parada esperando alguem.
             SUM(
-              GREATEST(0, COALESCE(d.target_count, 0) - COALESCE(d.sent_count, 0) - COALESCE(d.failed_count, 0))
+              GREATEST(0, COALESCE(d.target_count, 0) - GREATEST(COALESCE(d.sent_count, 0), COALESCE(r.sent_cnt, 0)) - GREATEST(COALESCE(d.failed_count, 0), COALESCE(r.failed_cnt, 0)))
             ) FILTER (
               WHERE d.status IN ('running','scheduled')
                  OR (d.status = 'paused' AND (d.error_message ILIKE '%fora da janela de envio%' OR d.error_message ILIKE '%' || $5::text || '%'))
@@ -5065,6 +5065,14 @@ export function registerCampaignsRoutes(app, deps) {
             MAX(d.updated_at) AS last_updated_at
           FROM public.campaign_dispatches d
           JOIN public.campaigns c ON c.id = d.campaign_id
+          LEFT JOIN (
+            SELECT
+              dispatch_id,
+              COUNT(*) FILTER (WHERE status = 'sent') as sent_cnt,
+              COUNT(*) FILTER (WHERE status = 'failed') as failed_cnt
+            FROM public.campaign_dispatch_runs
+            GROUP BY dispatch_id
+          ) r ON r.dispatch_id = d.id
           WHERE d.client_id = $1
           GROUP BY d.campaign_id, c.name, c.archived_at
         `,
@@ -5082,7 +5090,11 @@ export function registerCampaignsRoutes(app, deps) {
           if (archivedTime >= fifteenDaysAgo) {
             trashed.push(row);
           }
-        } else if (isCampaignActive(row.statuses)) {
+        } else if (isCampaignActive(row.statuses, {
+          leadsPending: row.leads_pending,
+          leadsTotal: row.leads_total,
+          sentTotal: row.sent_total,
+        })) {
           active.push(row);
         } else {
           ended.push(row);
@@ -5180,7 +5192,13 @@ export function registerCampaignsRoutes(app, deps) {
         const dailyLimit = instance ? resolveChipDailyLimit(instance) : 0;
         const sentToday = instance ? Number(instance.sent_count_today || 0) : 0;
         const isArchived = Boolean(row.archived_at);
-        const status = isArchived ? "arquivada" : aggregateDispatchStatus(row.statuses);
+        const status = isArchived
+          ? "arquivada"
+          : aggregateDispatchStatus(row.statuses, {
+              leadsPending: row.leads_pending,
+              leadsTotal: row.leads_total,
+              sentTotal: row.sent_total,
+            });
         const statusLabel = isArchived ? "Na Lixeira" : (AGGREGATE_STATUS_LABELS[status] || null);
         const eta = isArchived ? null : estimateDispatchCompletion({
           pendingLeads: row.leads_will_run,
@@ -6167,6 +6185,7 @@ export function registerCampaignsRoutes(app, deps) {
         limit: resolveDispatchLeadLimit(dispatch, { isOccurrence: occurrence.isOccurrence }),
         offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
         excludeDispatchId: dispatchId,
+        excludeCampaignId: dispatch.campaign_id,
       });
 
       if (pendingLeads.length === 0) {
@@ -6708,7 +6727,8 @@ export function registerCampaignsRoutes(app, deps) {
           limit: limitPerRun,
           offset: offset,
           segmentation: validation.analyticsMeta.sequence?.[0]?.segmentation || null,
-          excludeDispatchId: null
+          excludeDispatchId: null,
+          excludeCampaignId: campaignId,
         });
         targetCount = previewLeads.length;
       } catch (err) {

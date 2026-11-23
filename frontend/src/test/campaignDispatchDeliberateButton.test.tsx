@@ -259,7 +259,7 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
       expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument();
     });
 
-    const dispatchNowBtn = screen.getByRole("button", { name: /^Disparar agora$/i });
+    const dispatchNowBtn = screen.getByRole("button", { name: /^Salvar e Disparar Agora/i });
     fireEvent.click(dispatchNowBtn);
 
     // Modal de confirmação deve aparecer
@@ -299,7 +299,7 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
     });
 
     fireEvent.change(await screen.findByTestId("dispatch-cap-input"), { target: { value: "1" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar e Disparar Agora/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
 
     await waitFor(() => {
@@ -341,7 +341,7 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
       expect(screen.getByDisplayValue("Campanha Sem Origem")).toBeInTheDocument();
     });
 
-    const dispatchNowBtn = screen.getByRole("button", { name: /^Disparar agora$/i });
+    const dispatchNowBtn = screen.getByRole("button", { name: /^Salvar e Disparar Agora/i });
     expect(dispatchNowBtn).toBeDisabled();
     expect(
       screen.getByText(/Esta campanha não tem planilha de origem definida/i)
@@ -391,7 +391,7 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
     await waitFor(() => {
       expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar e Disparar Agora/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
   }
 
@@ -440,7 +440,7 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
         expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+      fireEvent.click(screen.getByRole("button", { name: /^Salvar e Disparar Agora/i }));
 
       await waitFor(() => {
         expect(screen.getByText(/Total de Destinatários/i)).toBeInTheDocument();

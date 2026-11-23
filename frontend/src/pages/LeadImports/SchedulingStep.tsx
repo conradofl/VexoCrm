@@ -104,6 +104,7 @@ interface SchedulingStepProps {
 
   onSubmit: () => void;
   onDispatchNow?: () => void;
+  onSaveAndDispatchNow?: () => void | Promise<void>;
   alreadyReceivedCount?: number;
   isWithoutSource?: boolean;
   isSubmitting: boolean;
@@ -174,6 +175,7 @@ export function SchedulingStep({
   setRecurrenceOverrunConfirmed: setRecurrenceOverrunConfirmedProp,
   recurrencePreviewInput = null,
   onSubmit,
+  onSaveAndDispatchNow,
   isSubmitting,
   editingCampaignId,
   onCancelEdit,
@@ -1132,12 +1134,17 @@ export function SchedulingStep({
             <div className="space-y-2">
               <Button
                 type="button"
-                onClick={() => setShowConfirmDispatchModal(true)}
+                onClick={async () => {
+                  if (onSaveAndDispatchNow) {
+                    await onSaveAndDispatchNow();
+                  }
+                  setShowConfirmDispatchModal(true);
+                }}
                 disabled={isSubmitting || isWithoutSource || totalLeads === 0}
                 className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow"
               >
-                <Send className="h-4 w-4" />
-                Disparar agora
+                <Zap className="h-4 w-4" />
+                Salvar e Disparar Agora
               </Button>
               {isWithoutSource && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400 text-center font-medium">
