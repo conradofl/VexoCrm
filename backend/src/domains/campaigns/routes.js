@@ -23,6 +23,7 @@
 // uma chamada dupla da funcao de registro duplicaria o timer -- a guarda impede isso.
 // Corpo do interval em si e byte-a-byte identico ao original.
 
+import { registerCampaignAgentRoutes } from "../../campaign/agentDraft.js";
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
 import { isScheduledDateInPast, BACKEND_SCHEDULE_GRACE_MS } from "../../services/campaignScheduleValidation.js";
@@ -1506,7 +1507,8 @@ export function registerCampaignsRoutes(app, deps) {
   });
 
   // POST /api/campaigns — cria campanha
-  app.post("/api/campaigns", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+  app.post("/api/campaigns", requireFirebaseAuth, requireCampaignDispatchAccess, handleCreateCampaign);
+  async function handleCreateCampaign(req, res) {
     if (!ensureDb(res)) return;
 
     const name = normalizeString(req.body?.name);
@@ -1716,10 +1718,11 @@ export function registerCampaignsRoutes(app, deps) {
       const errorMessage = httpStatus < 500 ? error.message : "Internal server error";
       sendError(res, httpStatus, errorCode, errorMessage, internalErrorPayloadDetails(error));
     }
-  });
+  }
 
   // PATCH /api/campaigns/:id — atualiza campanha
-  app.patch("/api/campaigns/:id", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+  app.patch("/api/campaigns/:id", requireFirebaseAuth, requireCampaignDispatchAccess, handleUpdateCampaign);
+  async function handleUpdateCampaign(req, res) {
     if (!ensureDb(res)) return;
 
     const id = normalizeString(req.params?.id);
@@ -2026,7 +2029,12 @@ export function registerCampaignsRoutes(app, deps) {
       console.error("campaign update error:", error);
       sendError(res, 500, "INTERNAL_ERROR", "Internal server error", internalErrorPayloadDetails(error));
     }
-  });
+  }
+
+  // Porta do agente que monta campanha (campaign/agentDraft.js): só rascunho, token por empresa. Nenhuma rota de
+  // lote, agendamento ou disparo é registrada para esse token.
+  // Fica aqui (e não no fim do arquivo) porque handleSaveCampaignPrompt é função declarada, visível desde já.
+  registerCampaignAgentRoutes(app, { supabase, ensureDb, handleCreateCampaign, handleUpdateCampaign, handleSaveCampaignPrompt });
 
   // DELETE /api/campaigns/:id — soft-delete (lixeira com retenção de 15 dias) ou hard-delete
   app.delete("/api/campaigns/:id", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
@@ -7578,7 +7586,8 @@ export function registerCampaignsRoutes(app, deps) {
   });
 
   // PUT /api/campaign-prompts — cria ou atualiza prompt de campanha por nome
-  app.put("/api/campaign-prompts", requireFirebaseAuth, async (req, res) => {
+  app.put("/api/campaign-prompts", requireFirebaseAuth, handleSaveCampaignPrompt);
+  async function handleSaveCampaignPrompt(req, res) {
     if (!ensureDb(res)) return;
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const clientId = resolveAuthorizedClientId(req, res, normalizeTenantKey(body.clientId ?? body.client_id));
@@ -7597,7 +7606,7 @@ export function registerCampaignsRoutes(app, deps) {
     } catch (err) {
       sendError(res, 500, "CAMPAIGN_PROMPT_SAVE_FAILED", err instanceof Error ? err.message : "Failed");
     }
-  });
+  }
 
   // Roteiro do agente DAQUELE disparo. Endpoint proprio, por dispatchId, porque o
   // PUT /api/campaign-prompts faz upsert por (client_id, name) — editar por nome

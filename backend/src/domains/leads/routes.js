@@ -7,6 +7,7 @@
 // inline). Rotas de n8n-settings e evolution-instances de lead-clients continuam em
 // registerAllDomainRoutes.js (domínio integrations).
 
+import { registerCampaignAgentLeadImportRoute } from "../../campaign/agentDraft.js";
 import {
   checkLeadClientTableStatus as checkDynamicLeadClientTableStatus,
   ensureLeadClientTable as ensureDynamicLeadClientTable,
@@ -3715,7 +3716,8 @@ export function registerLeadsRoutes(app, deps) {
     }
   });
 
-  app.post("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), async (req, res) => {
+  app.post("/api/lead-imports", requireFirebaseAuth, requireAppViewAccess("planilhas"), handleCreateLeadImport);
+  async function handleCreateLeadImport(req, res) {
     if (!ensureDb(res)) return;
 
     const clientId = normalizeString(req.body?.clientId);
@@ -3881,7 +3883,9 @@ export function registerLeadsRoutes(app, deps) {
         error instanceof Error ? error.message : "Failed to import spreadsheet"
       );
     }
-  });
+  }
+  // Agente que monta campanha: mesma importação, com a empresa presa à do token (campaign/agentDraft.js).
+  registerCampaignAgentLeadImportRoute(app, { handleCreateLeadImport });
 
   // ── Importação em lotes (sem teto de linhas): abrir → enviar lotes → fechar. Ver services/leadImportBatches.js ──────────
   const respondImportError = (res, error, label) => {
