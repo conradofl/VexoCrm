@@ -11,6 +11,7 @@ import { InfoTip } from "@/components/InfoTip";
 import { cn } from "@/lib/utils";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { formatSendWindowNotice } from "@/lib/sendWindow";
+import { diasDoPlano, formatBatchTime, planBatchTimes } from "@/lib/batchSchedule";
 import { resolveDispatchChipIds } from "@/lib/campaignDispatchRequest";
 import { RECURRENCE_NO_LIMIT_REASON, type RecurrenceEndType, type RecurrencePattern } from "@/lib/campaignRecurrence";
 import { RecurrencePanel, type RecurrencePanelProps } from "./RecurrencePanel";
@@ -43,6 +44,9 @@ interface SchedulingStepProps {
   setBatchSize: Dispatch<SetStateAction<string>>;
   batchIntervalHours: string;
   setBatchIntervalHours: Dispatch<SetStateAction<string>>;
+  /** Máximo de leads por dia no envio em lotes (vazio = sem máximo). Fica salvo na campanha. */
+  batchMaxPerDay?: string;
+  setBatchMaxPerDay?: Dispatch<SetStateAction<string>>;
 
   /** Qual cerebro atende quem responder a este disparo. */
   replyAgent: "passos" | "campanha" | "atendimento";
@@ -129,6 +133,8 @@ export function SchedulingStep({
   setBatchSize,
   batchIntervalHours,
   setBatchIntervalHours,
+  batchMaxPerDay = "",
+  setBatchMaxPerDay,
   replyAgent,
   setReplyAgent,
   campaignAgentPrompt,
@@ -220,6 +226,22 @@ export function SchedulingStep({
   const client = crmContext?.selectedClient;
   const sendWindow = (client?.n8n_settings as { send_window?: any } | undefined)?.send_window;
   const sendWindowNotice = useMemo(() => formatSendWindowNotice(sendWindow), [sendWindow]);
+
+  // Horários dos lotes como vão ser criados (lib/batchSchedule.ts): pula a noite e para no máximo do dia.
+  const planoDosLotes = useMemo(() => {
+    const tamanho = Number.parseInt(batchSize, 10) || 0;
+    const leads = Number(totalLeads) || 0;
+    if (!batchingEnabled || tamanho <= 0 || leads <= 0) return null;
+    const horarios = planBatchTimes({
+      start: new Date(),
+      count: Math.ceil(leads / tamanho),
+      intervalHours: Number.parseFloat(batchIntervalHours) || 1,
+      size: tamanho,
+      maxPerDay: Number.parseInt(batchMaxPerDay, 10) || null,
+      sendWindow,
+    });
+    return { horarios, dias: diasDoPlano(horarios, sendWindow) };
+  }, [batchingEnabled, batchSize, batchIntervalHours, batchMaxPerDay, totalLeads, sendWindow]);
 
   const validEvolutionInstanceIds = useMemo(() => {
     return new Set(evolutionInstanceOptions.map((i) => i.id));
@@ -521,6 +543,30 @@ export function SchedulingStep({
                   </p>
                 )}
               </div>
+
+              {setBatchMaxPerDay && (
+                <div className="space-y-2">
+                  <label htmlFor="batch-max-per-day" className="text-[10px] uppercase font-bold text-slate-500">Máximo por dia (leads)</label>
+                  <Input
+                    id="batch-max-per-day"
+                    data-testid="batch-max-per-day"
+                    type="number"
+                    min="1"
+                    placeholder="Sem máximo"
+                    value={batchMaxPerDay}
+                    onChange={(e) => setBatchMaxPerDay(e.target.value.replace(/\D/g, ""))}
+                    className="h-10 text-xs rounded-xl"
+                  />
+                </div>
+              )}
+
+              {planoDosLotes && planoDosLotes.horarios.length > 0 && (
+                <p data-testid="batch-plan-summary" className="sm:col-span-2 text-[11px] text-muted-foreground">
+                  {planoDosLotes.horarios.length} lote(s): o primeiro {formatBatchTime(planoDosLotes.horarios[0], sendWindow)}, o último{" "}
+                  {formatBatchTime(planoDosLotes.horarios[planoDosLotes.horarios.length - 1], sendWindow)}, em {planoDosLotes.dias} dia(s).
+                  Fora do horário de envio, o lote passa para a abertura seguinte.
+                </p>
+              )}
             </div>
           )}
         </div>
