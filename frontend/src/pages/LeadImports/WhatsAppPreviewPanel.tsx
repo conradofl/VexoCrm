@@ -54,9 +54,11 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
   });
 
   return (
-    <div className="lg:col-span-1 sticky top-6">
-      <Card className="border-slate-200/80 bg-slate-900 shadow-[0_20px_50px_rgba(15,23,42,0.12)] rounded-3xl overflow-hidden text-slate-100">
-        <CardHeader className="bg-slate-950/70 border-b border-white/5 py-3 px-4 flex flex-row items-center justify-between">
+    // A tela é longa e o painel fica preso ao lado: sem limite de altura, ler as últimas portas exigia rolar a página inteira.
+    // O corpo do simulador rola sozinho (cabeçalho e rodapé ficam parados).
+    <div className="lg:col-span-1 sticky top-6 self-start" data-testid="simulador-whatsapp">
+      <Card className="flex flex-col max-h-[80vh] lg:max-h-[calc(100vh-6rem)] border-slate-200/80 bg-slate-900 shadow-[0_20px_50px_rgba(15,23,42,0.12)] rounded-3xl overflow-hidden text-slate-100">
+        <CardHeader className="shrink-0 bg-slate-950/70 border-b border-white/5 py-3 px-4 flex flex-row items-center justify-between">
           <CardTitle className="text-xs uppercase font-bold tracking-wider text-slate-400">Simulador de WhatsApp</CardTitle>
           {doorIndex > 0 && (
             <span className="text-[10px] font-mono text-amber-400 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full">
@@ -64,8 +66,11 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
             </span>
           )}
         </CardHeader>
-        <CardContent className="p-4 bg-slate-900/60 min-h-[440px] flex flex-col justify-between">
-          <div className="space-y-4 flex-1">
+        <CardContent className="p-4 bg-slate-900/60 flex-1 min-h-0 flex flex-col">
+          <div
+            data-testid="simulador-rolagem"
+            className="space-y-4 flex-1 min-h-[360px] overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin] [scrollbar-color:rgb(71_85_105)_transparent]"
+          >
             {groups.length === 0 ? (
               <div className="text-center py-10 text-xs text-slate-500">
                 Nenhum passo ativo na sequência.
@@ -229,7 +234,7 @@ export function WhatsAppPreviewPanel({ campaignSequence, multiAgendaEnabled }: W
             )}
           </div>
 
-          <div className="border-t border-white/5 pt-3 mt-4 text-[10px] text-slate-500 text-center">
+          <div className="shrink-0 border-t border-white/5 pt-3 mt-4 text-[10px] text-slate-500 text-center">
             * Grupos separados pelas portas de resposta do lead.
           </div>
         </CardContent>
