@@ -19,9 +19,11 @@ export async function requireFirebaseAuth(req, res, next) {
   const token = authHeader.slice("Bearer ".length);
 
   if (!firebaseReady) {
-    // Em modo de desenvolvimento local, podemos decodificar o payload do JWT do Firebase
-    // sem validar a assinatura, permitindo testes locais funcionais sem serviceAccountKey configurado.
-    try {
+    // Em desenvolvimento local, decodifica o payload do JWT do Firebase sem validar a assinatura, para testar sem
+    // serviceAccountKey. Em produção (NODE_ENV=production, definido no Dockerfile) isso deixaria entrar qualquer token
+    // forjado: cai direto no 500 de "Firebase não configurado".
+    const aceitaTokenSemAssinatura = process.env.NODE_ENV !== "production";
+    if (aceitaTokenSemAssinatura) try {
       const parts = token.split('.');
       if (parts.length === 3) {
         const payloadBuf = Buffer.from(parts[1], 'base64');

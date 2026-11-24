@@ -147,16 +147,17 @@ export function isMaskedSecretPlaceholder(value) {
   return Boolean(text) && /^[*•]+$/.test(text);
 }
 
-/** Global bearer for n8n-facing routes (POST/GET conversation-memory*, POST n8n-error-webhook). Env overrides; default matches legacy Edge. */
+/** Bearer das rotas chamadas pelo n8n (conversation-memory*, n8n-error-webhook). Só vem de N8N_WEBHOOK_SECRET: o valor
+ * padrão antigo estava no repositório público. Sem a variável, devolve null e as rotas recusam tudo (401). */
 export function getN8nWebhookBearerSecret() {
-  return normalizeString(process.env.N8N_WEBHOOK_SECRET) || "@Vexo2026";
+  return normalizeString(process.env.N8N_WEBHOOK_SECRET);
 }
 
 export function requireN8nWebhookSecret(req, res, next) {
   const authHeader = req.headers.authorization;
   const expectedSecret = getN8nWebhookBearerSecret();
 
-  if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
+  if (!expectedSecret || !authHeader || authHeader !== `Bearer ${expectedSecret}`) {
     sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
     return;
   }

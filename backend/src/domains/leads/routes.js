@@ -4020,7 +4020,7 @@ export function registerLeadsRoutes(app, deps) {
   });
 
   // Supabase Edge `lead-webhook` parity: POST only, action create | finalize, same JSON bodies and responses.
-  // Authorization: Bearer LEAD_WEBHOOK_BEARER_TOKEN or legacy default @Vexo2026 (matches Edge constant).
+  // Authorization: Bearer LEAD_WEBHOOK_BEARER_TOKEN (sem a variável, recusa tudo).
   app.post("/api/lead-webhook", async (req, res) => {
     if (!ensureDb(res)) return;
 

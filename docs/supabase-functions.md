@@ -92,7 +92,7 @@ Arquivo fonte:
 
 ### Autenticacao
 
-- `Authorization: Bearer @Vexo2026` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
+- `Authorization: Bearer <valor fixo antigo, removido do backend>` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
 
 ### Papel no workflow
 
@@ -113,11 +113,11 @@ Arquivo fonte:
 
 ### Substituto no backend (VPS)
 
-- `POST /api/lead-webhook` em [`backend/src/server.js`](../backend/src/server.js) replica o mesmo contrato (create/finalize, JSON de sucesso/erro). Bearer: variável `LEAD_WEBHOOK_BEARER_TOKEN` ou, se ausente, o mesmo valor fixo `@Vexo2026` da Edge.
+- `POST /api/lead-webhook` em [`backend/src/server.js`](../backend/src/server.js) replica o mesmo contrato (create/finalize, JSON de sucesso/erro). Bearer: variável `LEAD_WEBHOOK_BEARER_TOKEN` ou, se ausente, o mesmo valor fixo `<valor fixo antigo, removido do backend>` da Edge.
 
 ### Autenticacao
 
-- `Authorization: Bearer @Vexo2026` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
+- `Authorization: Bearer <valor fixo antigo, removido do backend>` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
 
 ### Acoes suportadas
 
@@ -333,7 +333,7 @@ Arquivo fonte:
 
 ### Autenticacao
 
-- `Authorization: Bearer @Vexo2026` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
+- `Authorization: Bearer <valor fixo antigo, removido do backend>` (valor fixo no codigo da function; nao usa secret `EDGE_FUNCTION_BEARER_TOKEN`)
 
 ### Query
 
@@ -356,7 +356,7 @@ Arquivo fonte:
 
 ### Functions de workflow
 
-`conversation-memory`, `conversation-memory-latest`, `lead-webhook`, `n8n-planilha-webhook`, `mark-lead-dispatched`, `n8n-error-webhook` e `get-leads-disparo` esperam um bearer interno da operacao. `lead-webhook`, `mark-lead-dispatched` e `get-leads-disparo` usam token fixo `@Vexo2026` no codigo no deploy atual, nao variavel `EDGE_FUNCTION_BEARER_TOKEN`.
+`conversation-memory`, `conversation-memory-latest`, `lead-webhook`, `n8n-planilha-webhook`, `mark-lead-dispatched`, `n8n-error-webhook` e `get-leads-disparo` esperam um bearer interno da operacao. `lead-webhook`, `mark-lead-dispatched` e `get-leads-disparo` usam token fixo `<valor fixo antigo, removido do backend>` no codigo no deploy atual, nao variavel `EDGE_FUNCTION_BEARER_TOKEN`.
 
 ### Function de CRM
 
