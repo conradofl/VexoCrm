@@ -133,7 +133,9 @@ describe("GET /api/campaigns/dispatch-summary", () => {
         lote_count: 33,
         sent_total: somaEsperada,
         failed_total: 12,
-        leads_total: 660,
+        // Campanha encerrada de verdade: todo contato foi tentado
+        // (enviado + falhou = alvo). Ver campaignInterruptedResumeCounts.
+        leads_total: somaEsperada + 12,
         leads_pending: 0,
         leads_pause_target: 0,
         leads_resume_target: 0,
@@ -536,7 +538,7 @@ describe("GET /api/campaigns/dispatch-summary — término estimado só para o q
     );
     CREATE TABLE public.campaign_dispatch_runs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(), campaign_id UUID NOT NULL, client_id TEXT NOT NULL,
-      phone TEXT NOT NULL, status TEXT NOT NULL, sent_at TIMESTAMPTZ
+      dispatch_id UUID, phone TEXT NOT NULL, status TEXT NOT NULL, sent_at TIMESTAMPTZ
     );
     CREATE TABLE public.lead_messages (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id TEXT NOT NULL, phone TEXT, direction TEXT,

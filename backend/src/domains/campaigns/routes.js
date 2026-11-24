@@ -5094,6 +5094,7 @@ export function registerCampaignsRoutes(app, deps) {
           leadsPending: row.leads_pending,
           leadsTotal: row.leads_total,
           sentTotal: row.sent_total,
+          failedTotal: row.failed_total,
         })) {
           active.push(row);
         } else {
@@ -5198,6 +5199,7 @@ export function registerCampaignsRoutes(app, deps) {
               leadsPending: row.leads_pending,
               leadsTotal: row.leads_total,
               sentTotal: row.sent_total,
+              failedTotal: row.failed_total,
             });
         const statusLabel = isArchived ? "Na Lixeira" : (AGGREGATE_STATUS_LABELS[status] || null);
         const eta = isArchived ? null : estimateDispatchCompletion({
