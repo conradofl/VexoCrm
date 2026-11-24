@@ -107,6 +107,23 @@ function disponivelSql(exigirWhatsapp) {
           ${exigirWhatsapp ? "AND tem_whatsapp IS TRUE" : ""}`;
 }
 
+/**
+ * Leads que nunca vão entrar num lote e só poluem a base: WhatsApp conferido e inexistente, fixo sem WhatsApp
+ * confirmado, ou número inválido. Opt-out fica sempre (o registro é o que impede contatar de novo). É o critério
+ * "inutilizaveis" da exclusão em massa (services/leadMassDelete.js): a prévia da tela e a exclusão contam igual.
+ */
+export function inutilizaveisSql() {
+  return `${baseSql()}
+     SELECT l.id, l.nome, l.telefone, l.phone, l.tags, l.stage, l.temperature, l.created_at, l.dados->'import_ids' AS import_ids,
+            CASE WHEN m.tem_whatsapp IS FALSE THEN 'sem_whatsapp' WHEN m.classe = 'fixo' THEN 'fixo' ELSE 'invalido' END AS motivo
+       FROM marcada m
+       JOIN public.leads l ON l.id = m.id
+      WHERE NOT m.opt_out
+        AND (m.tem_whatsapp IS FALSE
+             OR (m.classe = 'fixo' AND m.tem_whatsapp IS NULL)
+             OR (m.classe = 'invalido' AND m.tem_whatsapp IS NOT TRUE))`;
+}
+
 /** Números da base, para a tela mostrar antes de separar. */
 export async function previaSeparacao(pool, { clientId }) {
   const { rows } = await pool.query(
@@ -121,6 +138,9 @@ export async function previaSeparacao(pool, { clientId }) {
             count(*) FILTER (WHERE opt_out)::int AS opt_out,
             count(*) FILTER (WHERE ja_recebeu)::int AS ja_recebeu,
             count(*) FILTER (WHERE ja_separado)::int AS ja_separado,
+            count(*) FILTER (WHERE NOT opt_out AND tem_whatsapp IS FALSE)::int AS inutil_sem_whatsapp,
+            count(*) FILTER (WHERE NOT opt_out AND classe = 'fixo' AND tem_whatsapp IS NULL)::int AS inutil_fixo_nao_conferido,
+            count(*) FILTER (WHERE NOT opt_out AND classe = 'invalido' AND tem_whatsapp IS NOT TRUE)::int AS inutil_invalido,
             count(*) FILTER (WHERE ${disponivelSql(true)})::int AS disponivel_confirmado,
             count(*) FILTER (WHERE ${disponivelSql(false)})::int AS disponivel_sem_conferir
        FROM marcada`,

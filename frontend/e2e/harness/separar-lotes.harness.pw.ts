@@ -14,6 +14,7 @@ const SHOTS = process.env.HARNESS_SHOTS_DIR || "test-results/harness";
 const PREVIA = {
   total: 2274, celular: 2224, fixo: 35, invalido: 15, whatsapp_confirmado: 719, sem_whatsapp: 5, nao_conferido: 1548,
   opt_out: 0, ja_recebeu: 0, ja_separado: 50, disponivel_confirmado: 644, disponivel_sem_conferir: 2216,
+  inutil_sem_whatsapp: 11, inutil_fixo_nao_conferido: 0, inutil_invalido: 0,
 };
 
 async function abrir(page: Page) {
@@ -65,6 +66,20 @@ async function abrir(page: Page) {
         disponiveisRestantes: 544,
       }),
     });
+  });
+  let apagou = false;
+  await page.route("**/api/leads/mass-delete/preview", (route) => {
+    pedidos.push({ metodo: "POST", url: route.request().url(), corpo: route.request().postDataJSON() });
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, preview: apagou ? { willDelete: 0, kept: 1 } : { willDelete: 11, kept: 1, keptReasons: { withMessages: 1 }, confirmation: { typedRequired: false, threshold: 500 } } }),
+    });
+  });
+  await page.route("**/api/leads/mass-delete/execute", (route) => {
+    pedidos.push({ metodo: "POST", url: route.request().url(), corpo: route.request().postDataJSON() });
+    apagou = true;
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, report: { deleted: 11 } }) });
   });
   await page.goto(PAGE_URL);
   await page.mouse.wheel(0, 600);
@@ -139,4 +154,26 @@ test("separar manda tamanho, quantidade e só confirmados, e lista as planilhas 
   const box = await criadas.boundingBox();
   expect(box!.y + box!.height).toBeLessThanOrEqual(740 + 0.5);
   await page.screenshot({ path: `${SHOTS}/separar-lotes-criadas-celular.png` });
+});
+
+test("limpar números que não servem: mostra quantos, pede confirmação e apaga só o que a prévia mostrou", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 740 });
+  const { pedidos } = await abrir(page);
+  const secao = page.getByTestId("limpeza-secao");
+  await secao.scrollIntoViewIfNeeded();
+  await expect(page.getByTestId("limpeza-resumo")).toContainText("Vai apagar 11 lead(s) de vez");
+  await expect(page.getByTestId("limpeza-resumo")).toContainText("1 fica porque já conversou");
+  await page.getByTestId("btn-limpar").click();
+  const confirmar = page.getByTestId("limpeza-confirmar");
+  await expect(confirmar).toBeVisible();
+  await expect(confirmar).toContainText("Não dá para desfazer");
+  await page.getByTestId("btn-limpar-confirmar").scrollIntoViewIfNeeded();
+  const box = await page.getByTestId("btn-limpar-confirmar").boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(740 + 0.5);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(375 + 0.5);
+  await page.screenshot({ path: `${SHOTS}/limpeza-confirmar-celular.png` });
+  await page.getByTestId("btn-limpar-confirmar").click();
+  await expect(page.getByTestId("limpeza-feita")).toContainText("11 lead(s) apagado(s)");
+  const exec = pedidos.find((p) => p.url.endsWith("/api/leads/mass-delete/execute"));
+  expect(exec?.corpo).toEqual({ clientId: "tinge-brasil", criterion: { type: "inutilizaveis" }, options: {}, expectedCount: 11 });
 });

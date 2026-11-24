@@ -20,6 +20,7 @@
 // pura e testável sem Postgres.
 
 import { SQL_CANONICAL_PHONE, toCanonicalPhone } from "./canonicalPhone.js";
+import { inutilizaveisSql } from "./leadBatchSeparation.js";
 
 /** Acima disso o usuário precisa digitar o número para confirmar. */
 export const TYPED_CONFIRMATION_THRESHOLD = 500;
@@ -52,7 +53,9 @@ export const SYSTEM_TAGS = new Set(
 );
 const ORIGIN_TAG_RE = /instagram|facebook|linkedin|tiktok|direct|messenger/i;
 
-export const CRITERION_TYPES = ["tag", "tags", "import"];
+// "inutilizaveis": sem WhatsApp conferido, fixo sem WhatsApp confirmado e número inválido (Separar lotes, Banco de Dados).
+export const UNUSABLE_CRITERION = "inutilizaveis";
+export const CRITERION_TYPES = ["tag", "tags", "import", UNUSABLE_CRITERION];
 
 export function getCriterionTags(criterion) {
   if (Array.isArray(criterion?.values) && criterion.values.length > 0) {
@@ -68,6 +71,9 @@ export function normalizeCriterion(raw) {
   const type = norm(raw?.type);
   if (!CRITERION_TYPES.includes(type)) {
     return { ok: false, message: "Critério inválido: informe type 'tag' ou 'import'." };
+  }
+  if (type === UNUSABLE_CRITERION) {
+    return { ok: true, criterion: { type: UNUSABLE_CRITERION, value: "números sem WhatsApp, fixos e inválidos" } };
   }
   if (type === "import") {
     const value = norm(raw?.value);
@@ -161,6 +167,8 @@ function normalizeImportIds(value) {
  *    um identificador de importação.
  */
 export function hasOtherImport(lead, criterion) {
+  // Número que não serve não deixa de ser inútil por estar em outra importação.
+  if (criterion.type === UNUSABLE_CRITERION) return false;
   const importIds = normalizeImportIds(lead.import_ids);
   if (criterion.type === "import") {
     return importIds.some((id) => id !== criterion.value);
@@ -397,6 +405,10 @@ export function createPgMassDeleteRepo() {
   let auditEnsured = false;
   return {
     async listCandidates(db, clientId, criterion) {
+      if (criterion.type === UNUSABLE_CRITERION) {
+        const { rows } = await db.query(inutilizaveisSql(), [clientId]);
+        return rows;
+      }
       let where;
       let param2;
       if (criterion.type === "import") {

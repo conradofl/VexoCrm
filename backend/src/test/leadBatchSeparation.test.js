@@ -28,6 +28,7 @@ import {
 } from "../services/leadBatchSeparation.js";
 import { registerLeadBatchSeparationRoutes } from "../domains/leads/batchSeparationRoutes.js";
 import { CAMPAIGN_AGENT_TOKENS_ENV, registerCampaignAgentLeadBatchRoutes } from "../campaign/agentDraft.js";
+import { createPgMassDeleteRepo, executeMassDelete, normalizeCriterion, previewMassDelete } from "../services/leadMassDelete.js";
 
 const SLOW = 60_000;
 const T = "tinge-teste";
@@ -40,7 +41,8 @@ const SCHEMA = `
   CREATE TABLE leads_clients (id text PRIMARY KEY, name text);
   CREATE TABLE leads (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL, telefone text, phone text, nome text,
-    opt_out boolean, created_at timestamptz NOT NULL DEFAULT now());
+    opt_out boolean, tags text[], stage text, temperature text, dados jsonb, created_at timestamptz NOT NULL DEFAULT now());
+  CREATE TABLE lead_messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL, lead_id uuid, phone text, created_at timestamptz NOT NULL DEFAULT now());
   CREATE TABLE lead_imports (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL REFERENCES leads_clients(id) ON DELETE CASCADE,
     source_name text NOT NULL, source_type text NOT NULL DEFAULT 'spreadsheet', total_rows integer NOT NULL DEFAULT 0,
@@ -116,9 +118,17 @@ beforeAll(async () => {
     await db.exec(sql);
   }
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'Tinge'), ($2, 'Outra')", [T, OUTRA]);
+  // Sem parâmetro, o pg de produção usa o protocolo simples (aceita vários comandos num texto, como o CREATE TABLE +
+  // CREATE INDEX da auditoria da exclusão em massa); o pglite só aceita isso no exec.
+  const consulta = async (text, params) => {
+    if (params && params.length) return db.query(text, params);
+    const resultados = await db.exec(text);
+    const ultimo = resultados[resultados.length - 1] || { rows: [] };
+    return { ...ultimo, rowCount: ultimo.affectedRows ?? ultimo.rows?.length ?? 0 };
+  };
   pool = {
-    query: (text, params) => db.query(text, params),
-    connect: async () => ({ query: (text, params) => db.query(text, params), release: () => {} }),
+    query: consulta,
+    connect: async () => ({ query: consulta, release: () => {} }),
   };
 
   const app = express();
@@ -162,7 +172,7 @@ beforeEach(async () => {
 afterEach(async () => {
   __limparConferenciasParaTeste();
   vi.restoreAllMocks();
-  for (const t of ["lead_import_items", "lead_imports", "campaign_dispatch_runs", "whatsapp_number_validations", "leads", "lead_client_evolution_instances"]) {
+  for (const t of ["lead_import_items", "lead_imports", "campaign_dispatch_runs", "whatsapp_number_validations", "lead_messages", "leads", "lead_client_evolution_instances"]) {
     await db.query(`DELETE FROM ${t}`);
   }
 });
@@ -409,5 +419,48 @@ describe("agente separa lotes pela porta dele", () => {
     expect(r.json.planilhas.map((p) => p.leads)).toEqual([2, 2]);
     const { rows } = await db.query("SELECT DISTINCT client_id, uploaded_by_email FROM lead_imports");
     expect(rows).toEqual([{ client_id: T, uploaded_by_email: "agente-campanha" }]);
+  }, SLOW);
+});
+
+describe("limpar números que não servem (critério 'inutilizaveis' da exclusão em massa)", () => {
+  it("apaga sem WhatsApp, fixo não conferido e inválido; mantém fixo com WhatsApp, opt-out, quem conversou e outra empresa", async () => {
+    const repo = createPgMassDeleteRepo();
+    await lead(T, cel(1)); await confirmar(cel(1), true); // celular com WhatsApp: fica
+    await lead(T, cel(2)); await confirmar(cel(2), false); // sem WhatsApp: sai
+    const conversou = await lead(T, cel(3)); await confirmar(cel(3), false); // sem WhatsApp, mas já conversou: fica
+    await db.query("INSERT INTO lead_messages (client_id, lead_id, phone) VALUES ($1, $2, $3)", [T, conversou, cel(3)]);
+    await lead(T, "553432145678"); await confirmar("553432145678", true); // fixo com WhatsApp: fica
+    await lead(T, "553432140000"); // fixo não conferido: sai
+    await lead(T, "5500123456789"); // inválido: sai
+    await lead(T, cel(4)); // celular ainda não conferido: fica
+    await lead(T, cel(5), { optOut: true }); await confirmar(cel(5), false); // opt-out: fica sempre
+    await lead(OUTRA, cel(6)); await confirmar(cel(6), false); // outra empresa: nunca
+
+    const previa = await previaSeparacao(pool, { clientId: T });
+    expect(previa).toMatchObject({ inutil_sem_whatsapp: 2, inutil_fixo_nao_conferido: 1, inutil_invalido: 1 });
+
+    const criterio = normalizeCriterion({ type: "inutilizaveis" });
+    expect(criterio.ok).toBe(true);
+    const vista = await previewMassDelete(repo, pool, { clientId: T, criterion: criterio.criterion, options: {} });
+    expect(vista).toMatchObject({ matched: 4, willDelete: 3, kept: 1, keptReasons: { withMessages: 1 } });
+
+    // Contagem diferente da vista: recusa e não apaga nada.
+    const errada = await executeMassDelete(repo, pool, { clientId: T, criterion: criterio.criterion, options: {}, expectedCount: 2, actor: { email: "dono@tinge.test" } });
+    expect(errada.ok).toBe(false);
+
+    const feita = await executeMassDelete(repo, pool, { clientId: T, criterion: criterio.criterion, options: {}, expectedCount: 3, actor: { email: "dono@tinge.test" } });
+    expect(feita.ok).toBe(true);
+    expect(feita.report.deleted).toBe(3);
+
+    const { rows } = await db.query("SELECT client_id, regexp_replace(telefone, '\\D', '', 'g') t FROM leads ORDER BY 2");
+    const restantes = rows.map((r) => `${r.client_id}:${r.t}`);
+    for (const fica of [`${T}:${cel(1)}`, `${T}:${cel(3)}`, `${T}:553432145678`, `${T}:${cel(4)}`, `${T}:${cel(5)}`, `${OUTRA}:${cel(6)}`]) {
+      expect(restantes).toContain(fica);
+    }
+    for (const sai of [`${T}:${cel(2)}`, `${T}:553432140000`, `${T}:5500123456789`]) {
+      expect(restantes).not.toContain(sai);
+    }
+    const auditoria = await db.query("SELECT client_id, user_email, deleted, criterion->>'type' tipo FROM lead_mass_delete_audit");
+    expect(auditoria.rows).toEqual([{ client_id: T, user_email: "dono@tinge.test", deleted: 3, tipo: "inutilizaveis" }]);
   }, SLOW);
 });
