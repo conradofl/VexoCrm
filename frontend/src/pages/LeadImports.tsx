@@ -1,3 +1,4 @@
+import { planBatchTimes } from "@/lib/batchSchedule";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -670,6 +671,8 @@ export default function LeadImports({
   const [batchingEnabled, setBatchingEnabled] = useLocalStorage(`vexo_batching_${activeClientId}`, false);
   const [batchSize, setBatchSize] = useLocalStorage(`vexo_batchSize_${activeClientId}`, "100");
   const [batchIntervalHours, setBatchIntervalHours] = useLocalStorage(`vexo_batchInterval_${activeClientId}`, "1");
+  // Máximo de leads por dia no envio em lotes (vazio = sem máximo). Salvo na campanha em dispatchOptions.batching.
+  const [batchMaxPerDay, setBatchMaxPerDay] = useLocalStorage(`vexo_batchMaxPerDay_${activeClientId}`, "");
   // Qual cerebro atende quem responder. Default "atendimento" = comportamento de
   // hoje (waitForReply false, mode disparo): campanha existente nao muda.
   const [replyAgent, setReplyAgent] = useLocalStorage<"passos" | "campanha" | "atendimento">(`vexo_replyAgent_${activeClientId}`, "atendimento");
@@ -1775,6 +1778,16 @@ export default function LeadImports({
             // o lead segue para um agente.
             waitForReply: replyAgent === "passos" ? true : dispatchOptions.waitForReply,
             aiAssisted: hasVariants,
+            // Ritmo do envio em lotes salvo na campanha: quem abrir a campanha depois (ou o rascunho do agente) já vê
+            // tamanho, frequência e máximo por dia, sem depender do que ficou no navegador.
+            batching: batchingEnabled && !isRecurring
+              ? {
+                  enabled: true,
+                  size: Number.parseInt(batchSize, 10) || 100,
+                  intervalHours: Number.parseFloat(batchIntervalHours) || 1,
+                  maxPerDay: Number.parseInt(batchMaxPerDay, 10) || null,
+                }
+              : { enabled: false },
             templateStrategy,
             templateVariantCount: hasVariants ? (campaignSequence.find(s => s.type === "text")?.textVariants?.length || 0) : 0,
           },
@@ -1889,13 +1902,26 @@ export default function LeadImports({
         let firstBatchTrigger: DispatchTriggerOutcome | null = null;
 
         let baseDate = !deliberateDispatch && newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : new Date();
+        // Horário de cada lote: pula a noite e o fim de semana fora da janela e respeita o máximo por dia
+        // (lib/batchSchedule.ts). Antes era início + i × intervalo, e os lotes da noite se amontoavam na abertura.
+        const sendWindowDaEmpresa = (selectedLeadClient?.n8n_settings as { send_window?: unknown } | undefined)?.send_window;
+        const horariosDosLotes = planBatchTimes({
+          start: baseDate,
+          count: numBatches,
+          intervalHours: interval,
+          size,
+          maxPerDay: Number.parseInt(batchMaxPerDay, 10) || null,
+          sendWindow: sendWindowDaEmpresa,
+        });
+        // "Disparar agora" fora do horário: o lote 1 vira agendado para a abertura, em vez de ser recusado.
+        const primeiroAgora = horariosDosLotes[0] && horariosDosLotes[0].getTime() - Date.now() <= 60_000;
 
         for (let i = 0; i < numBatches; i++) {
           const offset = i * size;
-          const batchDate = new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
+          const batchDate = horariosDosLotes[i] || new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
           const batchScheduledIso = batchDate.toISOString();
           let batchTriggerType = "scheduled";
-          if ((deliberateDispatch || newTriggerType === "manual") && i === 0) batchTriggerType = "manual";
+          if ((deliberateDispatch || newTriggerType === "manual") && i === 0 && primeiroAgora) batchTriggerType = "manual";
           if (!deliberateDispatch && newTriggerType === "draft") batchTriggerType = "draft";
 
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
@@ -1919,7 +1945,7 @@ export default function LeadImports({
           const dispatchId = dispatchData.dispatch.id;
 
           // Se for manual e for o primeiro lote, dispara imediatamente
-          if (i === 0 && (deliberateDispatch || newTriggerType === "manual")) {
+          if (i === 0 && batchTriggerType === "manual") {
             setSubmittingStatus(`Disparando lote 1/${numBatches}...`);
             firstBatchTrigger = await triggerDispatchWithWindowConfirm(token, dispatchId, askToForceOutsideWindow);
           }
@@ -2283,10 +2309,15 @@ export default function LeadImports({
     // SPEC 17: loteamento só se a campanha JÁ tem mais de um lote. Antes bastava c.limit_per_run existir, e ele sempre
     // existe (o "50" padrão): toda edição abria como "lotes de 50" e o Disparar agora criava "Lote 1/1" limitado a 50.
     const campaignLotes = dispatches.filter((d) => d.campaign_id === c.id && d.status !== "cancelled");
-    const hasBatchConfig = campaignLotes.length > 1;
+    // Ritmo salvo na campanha (dispatchOptions.batching) vale mais que o palpite pelos lotes existentes.
+    const ritmoSalvo = (meta.dispatchOptions as any)?.batching as
+      | { enabled?: boolean; size?: number; intervalHours?: number; maxPerDay?: number | null }
+      | undefined;
+    const hasBatchConfig = ritmoSalvo?.enabled === true || (ritmoSalvo?.enabled !== false && campaignLotes.length > 1);
     setBatchingEnabled(hasBatchConfig);
-    setBatchSize(String(c.limit_per_run || (meta.dispatchOptions as any)?.batchSize || 100));
-    setBatchIntervalHours(String((meta.dispatchOptions as any)?.batchIntervalHours || (meta as any).batchIntervalHours || "1"));
+    setBatchSize(String(ritmoSalvo?.size || c.limit_per_run || (meta.dispatchOptions as any)?.batchSize || 100));
+    setBatchIntervalHours(String(ritmoSalvo?.intervalHours || (meta.dispatchOptions as any)?.batchIntervalHours || (meta as any).batchIntervalHours || "1"));
+    setBatchMaxPerDay(ritmoSalvo?.maxPerDay ? String(ritmoSalvo.maxPerDay) : "");
 
     // Restaura Estratégia de Variações
     const hasVariants = seq.some(s => s.textVariants && s.textVariants.length > 0);
@@ -2679,6 +2710,8 @@ export default function LeadImports({
               setBatchSize={setBatchSize}
               batchIntervalHours={batchIntervalHours}
               setBatchIntervalHours={setBatchIntervalHours}
+              batchMaxPerDay={batchMaxPerDay}
+              setBatchMaxPerDay={setBatchMaxPerDay}
               replyAgent={replyAgent}
               setReplyAgent={setReplyAgent}
               campaignAgentPrompt={campaignAgentPrompt}
