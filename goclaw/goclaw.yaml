@@ -74,22 +74,14 @@ lanes:
       - "google_drive"
       - "whatsapp_evolution"
 
-  # Lane 3: Gestor de Demandas (Cron & Auditoria)
+  # Lane 3: Gestor de Demandas (Auditoria Sob Demanda — envios diários automáticos 09h/18h desarmados para economia de tokens)
   demandas_cron:
     name: "Auditor de Demandas & Prazos"
-    description: "Auditoria automática diária de cartões no Trello e relatórios no WhatsApp"
+    description: "Auditoria operacional sob demanda de cartões no Trello e relatórios no WhatsApp"
     driver: "openai"
     model: "gemini/gemini-3-flash-preview"
     systemPromptFile: "prompts/gestor_demandas_auditor.md"
-    schedules:
-      - name: "checkin_matinal"
-        cron: "0 9 * * 1-5" # 09h00 Seg a Sex
-        action: "run_morning_checkin"
-        targetChannel: "whatsapp:donos"
-      - name: "checkout_vespertino"
-        cron: "0 18 * * 1-5" # 18h00 Seg a Sex
-        action: "run_evening_checkout"
-        targetChannel: "whatsapp:donos"
+    schedules: []
 
   # Lane 4: Heloísa (Secretária Executiva & Copiloto dos Sócios)
   heloisa:

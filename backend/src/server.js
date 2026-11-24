@@ -96,8 +96,8 @@ import { closeFollowupQueue } from "./followup/queue.js";
 import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
 import { stopDueDispatchScheduler } from "./domains/campaigns/routes.js";
-import { startTrelloSlackScheduler, stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
-import { startGdVigiaScheduler, stopGdVigiaScheduler } from "./services/gdVigiaScheduler.js";
+import { stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
+import { stopGdVigiaScheduler } from "./services/gdVigiaScheduler.js";
 import { startGdBriefingReminderScheduler, stopGdBriefingReminderScheduler } from "./services/gdBriefingReminderService.js";
 import { startTrafficCollectorScheduler, stopTrafficCollectorScheduler } from "./traffic/collectorScheduler.js";
 import { loadKnownLeadsColumns } from "./services/leadUpsert.js";
@@ -779,8 +779,9 @@ let httpServer = null;
 
 function startBackgroundServices() {
   startCampaignScheduler();
-  startTrelloSlackScheduler();
-  startGdVigiaScheduler();
+  // Relatórios diários automáticos (09h00 e 18h00) permanentemente desarmados para eliminar gasto ocioso de tokens:
+  // relatórios operacionais só saem sob demanda quando solicitados à Heloísa.
+  console.log("[daily-reports] Agendadores diários automáticos (Vigia GD e Trello 09h00/18h00) DESARMADOS — apenas sob demanda.");
   startGdBriefingReminderScheduler();
   startTrafficCollectorScheduler();
   // Diário do chip (services/chipDiary.js): lê na Evolution a última queda de cada chip e grava em

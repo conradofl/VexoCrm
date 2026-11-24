@@ -180,9 +180,9 @@ const LANES_METADATA = [
   },
   {
     key: "demandas_cron",
-    nome: "Vigia GD (Auditor Cron WhatsApp)",
-    descricao: "Robô de monitoramento de prazos que roda às 09h00 e 18h00 disparando alertas no WhatsApp.",
-    tag: "Automação Cron",
+    nome: "Vigia GD (Auditor Sob Demanda)",
+    descricao: "Auditoria operacional acionada sob demanda (envios automáticos das 09h00 e 18h00 desativados para economia de tokens).",
+    tag: "Sob Demanda",
     cor: "amber",
   },
   {
