@@ -8,9 +8,8 @@
 //   { slack_channel_id, whatsapp_number, evolution_instance }
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
-import { toWhatsappNumberBr } from "../../services/canonicalPhone.js";
 import { sendError } from "../../services/httpInfra.js";
-import { extractEvolutionInstanceSlug, sendTextMessageViaEvolution } from "../../services/evolution.js";
+import { extractEvolutionInstanceSlug, sendTextMessageViaEvolution, sendTextViaEvolutionUrl } from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque buildContractPdfBuffer é function declaration (tem hoisting).
 // NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { buildContractPdfBuffer } from "./contractHandlers.js";
@@ -229,28 +228,15 @@ async function uploadPdfToSlack({ token, channelId, filename, buffer, comment })
 }
 
 async function sendWhatsapp({ number, text, instance }) {
-  const evolutionUrl = process.env.GD_EVOLUTION_URL;
-  const evolutionToken = process.env.GD_EVOLUTION_TOKEN;
-  if (!evolutionUrl || !evolutionToken || !number) return "not_configured";
-
-  let endpoint = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
-  if (!endpoint.includes("/message/sendText")) {
-    endpoint = `${endpoint}/message/sendText/${instance || process.env.GD_EVOLUTION_INSTANCE || "Teste"}`;
-  }
-
-  const payload = {
-    number: toWhatsappNumberBr(number),
-    options: { delay: 1200, presence: "composing" },
-    textMessage: { text },
+  const status = await sendTextViaEvolutionUrl({
+    url: process.env.GD_EVOLUTION_URL,
+    apiKey: process.env.GD_EVOLUTION_TOKEN,
+    instance: instance || process.env.GD_EVOLUTION_INSTANCE || "Teste",
+    number,
     text,
-  };
-
-  const r = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: evolutionToken },
-    body: JSON.stringify(payload),
   });
-  return r.ok ? "sent" : "error";
+  if (status === "not_configured") return status;
+  return status === "sent" ? "sent" : "error";
 }
 
 export async function sendContractToJuridico(req, res) {

@@ -26,6 +26,7 @@ import { redactQueueListForViewer } from "../../services/dashboardOverview.js";
 import { canAccessAppView } from "../../accessGuards.js";
 import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
+import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
@@ -182,6 +183,9 @@ export function registerInsightsRoutes(app, deps) {
     // Trava de merge/reinício (20/11/2026): activeDispatchesCount continua igual para quem já lê; restartBlockers diz
     // também o que COMEÇA nos próximos 15 min (o deploy reinicia 3 a 5 min depois do merge).
     const restartBlockers = await computeRestartBlockers(pgDatabasePool);
+    // Só sim/não e contagens (PR 4b do untangle): prova se o host/chave da Evolution vêm de env e se as instâncias
+    // padrão do código existem, antes de tirar os valores escritos no código.
+    const evolutionConfig = await computeEvolutionConfigStatus(pgDatabasePool);
 
     res.json({
       ok: true,
@@ -204,6 +208,7 @@ export function registerInsightsRoutes(app, deps) {
       uptimeSeconds: process.uptime(),
       migrations: getMigrationStatus(),
       services,
+      evolutionConfig,
     });
   });
 

@@ -26,7 +26,7 @@ import {
   GD_DONO,
 } from "./gdClientes/campos.js";
 import { buildCronograma } from "./geracaoDigitalContracts/contractMerge.js";
-import { sendTextMessageViaEvolution } from "../services/evolution.js";
+import { sendTextMessageViaEvolution, sendTextViaEvolutionUrl } from "../services/evolution.js";
 import { toWhatsappNumberBr } from "../services/canonicalPhone.js";
 
 let _evolutionSender = sendTextMessageViaEvolution;
@@ -715,7 +715,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       let dynamicInstanceName = null;
       let dynamicBaseUrl = null;
       try {
-        let queryStr = `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC`;
+        // Interno sem empresa no escopo: só chips da GD (antes: qualquer chip ativo de qualquer empresa).
+        let queryStr = `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE active = true AND client_id = 'geracao-digital' ORDER BY is_default DESC`;
         let queryParams = [];
         if (req.authAccess && req.authAccess.role !== "internal" && req.authAccess.clientIds && req.authAccess.clientIds.length > 0) {
             queryStr = `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE client_id = ANY($1) AND active = true ORDER BY is_default DESC`;
@@ -729,9 +730,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           // resultado vinha vazio e o grupo do WhatsApp simplesmente não era
           // criado, sem erro nenhum na tela. Cair para as instâncias ativas
           // evita a falha silenciosa.
+          // A reserva fica só nos chips da própria GD: antes caía em qualquer chip ativo de qualquer empresa e o
+          // briefing podia sair pelo número de outro cliente.
           if (instRes.rows.length === 0 && queryParams.length > 0) {
             instRes = await pool.query(
-              `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC`
+              `SELECT dispatch_webhook_url, name, client_id FROM public.lead_client_evolution_instances WHERE active = true AND client_id = 'geracao-digital' ORDER BY is_default DESC`
             );
           }
           if (instRes.rows.length > 0) {
@@ -774,40 +777,16 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
 
 
-      // Helper function to send WhatsApp via Evolution
-      const sendEvolution = async (number, text) => {
-        if (!evolutionUrl || !evolutionToken || !number) return "not_configured";
-        const normalizedNumber = toWhatsappNumberBr(number);
-        const payload = {
-          number: normalizedNumber,
-          options: { delay: 1200, presence: "composing" },
-          textMessage: { text },
-          text: text
-        };
-        let endpoint = evolutionUrl.endsWith("/") ? evolutionUrl.slice(0, -1) : evolutionUrl;
-
-        // Se a URL não contiver a rota de envio, adicionamos a rota com o nome da instância
-        if (!endpoint.includes("/message/sendText")) {
-          const instanceName = dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste";
-          endpoint = `${endpoint}/message/sendText/${instanceName}`;
-        }
-
-        try {
-          const evRes = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", apikey: evolutionToken },
-            body: JSON.stringify(payload),
-          });
-          if (!evRes.ok) {
-            console.error("[GeracaoDigital] Evolution Error:", await evRes.text());
-            return `failed_${evRes.status}`;
-          }
-          return "sent";
-        } catch (e) {
-          console.error("[GeracaoDigital] Evolution Network Error:", e.message);
-          return "failed_network";
-        }
-      };
+      // Envio pelo cliente único da Evolution (services/evolution.js). JID de grupo ("...@g.us") vai como veio:
+      // antes o número passava por toWhatsappNumberBr, perdia o "@g.us" e o dossiê nunca chegava ao grupo.
+      const sendEvolution = (number, text) =>
+        sendTextViaEvolutionUrl({
+          url: evolutionUrl,
+          apiKey: evolutionToken,
+          instance: dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste",
+          number,
+          text,
+        });
 
       // Helper function to create WhatsApp Group via Evolution
       const createEvolutionGroup = async (subject, membersString) => {
@@ -4020,7 +3999,8 @@ Condições: ${condicoes}`;
       if (!evolutionInstance) {
         try {
           const instRes = await client.query(
-            `SELECT name FROM public.lead_client_evolution_instances WHERE active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`
+            // Só chip da GD: antes pegava o chip ativo mais novo de qualquer empresa para avisar a diretoria.
+            `SELECT name FROM public.lead_client_evolution_instances WHERE active = true AND client_id = 'geracao-digital' ORDER BY is_default DESC, created_at DESC LIMIT 1`
           );
           if (instRes.rows.length > 0) {
             evolutionInstance = instRes.rows[0].name;
