@@ -65,12 +65,27 @@ interface ChipOption {
   connection_state?: string | null;
 }
 
+/** De onde o lote sai (backend: services/leadBatchOrigin.js). Sem origem = empresa inteira. */
+export type OrigemLote =
+  | { tipo: "empresa" }
+  | { tipo: "tag"; tag: string }
+  | { tipo: "planilha"; importId: string }
+  | { tipo: "filtro"; filtro: Record<string, unknown> };
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clientId: string;
   chips: ChipOption[];
   onSeparated?: () => void;
+  /** Tags da empresa, para "De onde tirar: uma tag". */
+  tags?: { tag: string; count?: number }[];
+  /** Planilhas da empresa, para "De onde tirar: uma planilha". */
+  planilhas?: { id: string; nome: string; linhas?: number }[];
+  /** Filtro que está na tabela agora (quando há algum), para "De onde tirar: o filtro da tela". */
+  filtroAtual?: { filtro: Record<string, unknown>; rotulo: string; total?: number } | null;
+  /** Origem com que o diálogo abre (ex.: botão "Separar lote deste filtro"). */
+  origemInicial?: OrigemLote;
 }
 
 const MOTIVO_FIM: Record<string, string> = {
@@ -107,8 +122,30 @@ function Numero({ rotulo, valor, destaque, testId }: { rotulo: string; valor: nu
   );
 }
 
-export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSeparated }: Props) {
+export function SepararLotesDialog({
+  open,
+  onOpenChange,
+  clientId,
+  chips,
+  onSeparated,
+  tags = [],
+  planilhas = [],
+  filtroAtual = null,
+  origemInicial,
+}: Props) {
   const { getIdToken } = useAuth();
+  // "De onde tirar": empresa inteira, uma tag, uma planilha ou o filtro da tela (24/11/2026).
+  const [origemTipo, setOrigemTipo] = useState<OrigemLote["tipo"]>("empresa");
+  const [origemTag, setOrigemTag] = useState("");
+  const [origemPlanilha, setOrigemPlanilha] = useState("");
+  const origem = useMemo<OrigemLote>(() => {
+    if (origemTipo === "tag" && origemTag) return { tipo: "tag", tag: origemTag };
+    if (origemTipo === "planilha" && origemPlanilha) return { tipo: "planilha", importId: origemPlanilha };
+    if (origemTipo === "filtro" && filtroAtual) return { tipo: "filtro", filtro: filtroAtual.filtro };
+    return { tipo: "empresa" };
+  }, [origemTipo, origemTag, origemPlanilha, filtroAtual]);
+  const origemIncompleta = origemTipo !== "empresa" && origem.tipo === "empresa";
+  const origemParam = origem.tipo === "empresa" ? "" : `&origem=${encodeURIComponent(JSON.stringify(origem))}`;
   const [previa, setPrevia] = useState<PreviaLotes | null>(null);
   const [conferencia, setConferencia] = useState<ConferenciaStatus>({ rodando: false });
   const [carregando, setCarregando] = useState(false);
@@ -149,7 +186,7 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
     setCarregando(true);
     setErro(null);
     try {
-      const dados = await chamar(`/api/leads/lotes/previa?clientId=${encodeURIComponent(clientId)}`);
+      const dados = await chamar(`/api/leads/lotes/previa?clientId=${encodeURIComponent(clientId)}${origemParam}`);
       setPrevia(dados.previa);
       setConferencia(dados.conferencia || { rodando: false });
       try {
@@ -166,7 +203,18 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
     } finally {
       setCarregando(false);
     }
-  }, [chamar, clientId]);
+  }, [chamar, clientId, origemParam]);
+
+  // Abriu: começa pela origem pedida (botão "Separar lote deste filtro") ou pela empresa inteira.
+  useEffect(() => {
+    if (!open) return;
+    const o = origemInicial ?? { tipo: "empresa" as const };
+    setOrigemTipo(o.tipo);
+    if (o.tipo === "tag") setOrigemTag(o.tag);
+    if (o.tipo === "planilha") setOrigemPlanilha(o.importId);
+    if (o.tipo === "tag" && !nomeBase) setNomeBase(o.tag.slice(0, 60));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -223,7 +271,14 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
     try {
       const dados = await chamar("/api/leads/lotes", {
         method: "POST",
-        body: JSON.stringify({ clientId, tamanho: t, quantidade: q, nomeBase: nomeBase.trim() || undefined, exigirWhatsapp }),
+        body: JSON.stringify({
+          clientId,
+          tamanho: t,
+          quantidade: q,
+          nomeBase: nomeBase.trim() || undefined,
+          exigirWhatsapp,
+          ...(origem.tipo === "empresa" ? {} : { origem }),
+        }),
       });
       setCriadas(dados.planilhas || []);
       onSeparated?.();
@@ -312,8 +367,78 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
           </div>
         ) : previa ? (
           <div className="space-y-5">
+            <section className="space-y-2 rounded-lg border border-primary/30 bg-primary/[0.03] p-3" data-testid="lote-origem">
+              <Label className="text-xs font-semibold">De onde tirar o lote</Label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Select
+                  value={origemTipo}
+                  onValueChange={(v) => {
+                    setOrigemTipo(v as OrigemLote["tipo"]);
+                    setCriadas(null);
+                  }}
+                >
+                  <SelectTrigger className="h-9 text-xs" data-testid="lote-origem-tipo">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="empresa" className="text-xs">Empresa inteira</SelectItem>
+                    <SelectItem value="tag" className="text-xs" disabled={tags.length === 0}>Uma tag</SelectItem>
+                    <SelectItem value="planilha" className="text-xs" disabled={planilhas.length === 0}>Uma planilha</SelectItem>
+                    <SelectItem value="filtro" className="text-xs" disabled={!filtroAtual}>
+                      {filtroAtual ? `O filtro da tela (${filtroAtual.rotulo})` : "O filtro da tela (nenhum filtro ativo)"}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {origemTipo === "tag" && (
+                  <Select
+                    value={origemTag}
+                    onValueChange={(v) => {
+                      setOrigemTag(v);
+                      if (!nomeBase.trim()) setNomeBase(v.slice(0, 60));
+                    }}
+                  >
+                    <SelectTrigger className="h-9 text-xs" data-testid="lote-origem-tag">
+                      <SelectValue placeholder="Escolha a tag" />
+                    </SelectTrigger>
+                    <SelectContent position="popper" className="max-h-72 max-w-[calc(100vw-2rem)]">
+                      {tags.map((t) => (
+                        <SelectItem key={t.tag} value={t.tag} className="whitespace-normal break-words text-xs">
+                          {t.tag}
+                          {typeof t.count === "number" ? ` (${fmt(t.count)})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {origemTipo === "planilha" && (
+                  <Select value={origemPlanilha} onValueChange={setOrigemPlanilha}>
+                    <SelectTrigger className="h-9 text-xs" data-testid="lote-origem-planilha">
+                      <SelectValue placeholder="Escolha a planilha" />
+                    </SelectTrigger>
+                    <SelectContent position="popper" className="max-h-72 max-w-[calc(100vw-2rem)]">
+                      {planilhas.map((pl) => (
+                        <SelectItem key={pl.id} value={pl.id} className="whitespace-normal break-words text-xs">
+                          {pl.nome}
+                          {typeof pl.linhas === "number" ? ` (${fmt(pl.linhas)})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground" data-testid="lote-origem-texto">
+                {origemIncompleta
+                  ? origemTipo === "tag"
+                    ? "Escolha a tag para ver quantos estão disponíveis."
+                    : "Escolha a planilha para ver quantos estão disponíveis."
+                  : origem.tipo === "empresa"
+                    ? "O lote sai de toda a base da empresa."
+                    : "Os números abaixo são só deste grupo. Quem já recebeu campanha ou já está em outro lote continua de fora."}
+              </p>
+            </section>
+
             <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Numero testId="previa-total" rotulo="Leads na base" valor={previa.total} />
+              <Numero testId="previa-total" rotulo={origem.tipo === "empresa" ? "Leads na base" : "Leads no grupo"} valor={previa.total} />
               <Numero testId="previa-confirmado" rotulo="WhatsApp confirmado" valor={previa.whatsapp_confirmado} />
               <Numero testId="previa-nao-conferido" rotulo="Ainda não conferidos" valor={previa.nao_conferido} />
               <Numero testId="previa-sem-whatsapp" rotulo="Sem WhatsApp" valor={previa.sem_whatsapp} />
@@ -421,7 +546,7 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
                 <Button
                   size="sm"
                   onClick={separar}
-                  disabled={!pedidoValido || vaiSeparar === 0 || enviando}
+                  disabled={!pedidoValido || vaiSeparar === 0 || enviando || origemIncompleta || carregando}
                   className="gap-1.5"
                   data-testid="btn-separar"
                 >

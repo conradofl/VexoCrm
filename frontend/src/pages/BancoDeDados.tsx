@@ -22,6 +22,7 @@ import {
   Rocket,
   Trash2,
   Tag as TagIcon,
+  Layers,
   X,
   FileText,
   Filter,
@@ -103,7 +104,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
-import { SepararLotesDialog } from "@/components/leads/SepararLotesDialog";
+import { SepararLotesDialog, type OrigemLote } from "@/components/leads/SepararLotesDialog";
 import { TagSelect } from "@/components/leads/TagSelect";
 import { TagMultiSelect } from "@/components/leads/TagMultiSelect";
 import { SecondNumberPanel, type SecondNumberSelection } from "@/components/leads/SecondNumberPanel";
@@ -529,6 +530,8 @@ export default function BancoDeDados() {
   // Evolution Instances for WA Extractor
   const [evolutionInstances, setEvolutionInstances] = useState<EvolutionInstanceItem[]>([]);
   const [isSepararLotesOpen, setIsSepararLotesOpen] = useState(false);
+  // "Separar lote deste filtro": o diálogo abre já com o filtro da tela como origem.
+  const [loteOrigemInicial, setLoteOrigemInicial] = useState<OrigemLote | undefined>(undefined);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2436,6 +2439,25 @@ export default function BancoDeDados() {
     setIsBulkTagModalOpen(true);
   };
 
+  // "Etiquetar os N do filtro": seleciona o filtro inteiro (pelo servidor, sem carregar linha por linha) e abre o
+  // "Adicionar tag" valendo para essa seleção. Acaba o vai e volta pelo Excel para montar grupo (24/11/2026).
+  const handleTagWholeFilter = () => {
+    setSelectionMode("criterion");
+    setCriterionTotal(listTotal);
+    setExcludedLeadIds([]);
+    setSelectedLeadIds([]);
+    setBulkTagMode("add");
+    setBulkTagValue("");
+    setTargetTagCount(null);
+    setBulkTagTargetScope("selection");
+    setIsBulkTagModalOpen(true);
+  };
+
+  const handleSeparateFromFilter = () => {
+    setLoteOrigemInicial({ tipo: "filtro", filtro: { ...listFilters } });
+    setIsSepararLotesOpen(true);
+  };
+
   const handleClearSelection = useCallback(() => {
     setSelectionMode("manual");
     setSelectedLeadIds([]);
@@ -3027,6 +3049,19 @@ export default function BancoDeDados() {
     return items;
   }, [facets, selectedTag]);
 
+  // Texto curto do filtro da tela, para o Separar lotes dizer de onde o lote sai.
+  const rotuloFiltroAtual = useMemo(() => {
+    const partes: string[] = [];
+    if (selectedTag) partes.push(`tag ${selectedTag}`);
+    if (searchQuery.trim()) partes.push(`busca "${searchQuery.trim()}"`);
+    if (activeTab !== "all") partes.push("estágio");
+    if (selectedImportId) partes.push("planilha");
+    if (selectedSource || selectedChannel !== "all") partes.push("origem");
+    if (selectedSegment) partes.push("faixa");
+    if (isStalledFilterActive) partes.push("parados");
+    return partes.length ? partes.join(", ") : "filtro";
+  }, [selectedTag, searchQuery, activeTab, selectedImportId, selectedSource, selectedChannel, selectedSegment, isStalledFilterActive]);
+
   // Checagem de filtros ativos e limpador global
   const hasActiveFilters = Boolean(
     isStalledFilterActive ||
@@ -3162,9 +3197,17 @@ export default function BancoDeDados() {
           />
           <SepararLotesDialog
             open={isSepararLotesOpen}
-            onOpenChange={setIsSepararLotesOpen}
+            onOpenChange={(aberto) => {
+              setIsSepararLotesOpen(aberto);
+              if (!aberto) setLoteOrigemInicial(undefined);
+            }}
             clientId={clientId}
             chips={evolutionInstances.filter((c) => c.active !== false)}
+            tags={availableTagItems}
+            planilhas={pastImports.map((imp) => ({ id: imp.id, nome: imp.source_name, linhas: imp.imported_rows }))}
+            filtroAtual={hasActiveFilters ? { filtro: { ...listFilters }, rotulo: rotuloFiltroAtual, total: listTotal } : null}
+            origemInicial={loteOrigemInicial}
+            onSeparated={() => refetchImports()}
           />
         </SectionHeader>
 
@@ -3818,6 +3861,34 @@ export default function BancoDeDados() {
                 >
                   <CheckSquare className="w-3.5 h-3.5" />
                   Selecionar todos desta faixa ({listTotal.toLocaleString("pt-BR")})
+                </Button>
+              </>
+            )}
+            {/* Só com o filtro já aplicado: antes disso a busca digitada ainda não chegou ao servidor e a tag ou o lote
+                valeriam para a base inteira (pego pelo teste em 24/11/2026). */}
+            {listTotal > 0 && searchQuery.trim() === (debouncedSearch || "").trim() && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTagWholeFilter}
+                  className="text-xs h-7 gap-1.5"
+                  data-testid="btn-etiquetar-filtro"
+                  title="Põe uma tag em todos os leads deste filtro, de uma vez"
+                >
+                  <TagIcon className="w-3.5 h-3.5" />
+                  Etiquetar os {listTotal.toLocaleString("pt-BR")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSeparateFromFilter}
+                  className="text-xs h-7 gap-1.5"
+                  data-testid="btn-lote-do-filtro"
+                  title="Separa um lote para campanha só com os leads deste filtro"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Separar lote deste filtro
                 </Button>
               </>
             )}

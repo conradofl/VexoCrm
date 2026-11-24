@@ -41,7 +41,7 @@ const SCHEMA = `
   CREATE TABLE leads_clients (id text PRIMARY KEY, name text);
   CREATE TABLE leads (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL, telefone text, phone text, nome text,
-    opt_out boolean, tags text[], stage text, temperature text, dados jsonb, created_at timestamptz NOT NULL DEFAULT now());
+    opt_out boolean, tags text[], stage text, temperature text, dados jsonb, raw_chat_summary text, created_at timestamptz NOT NULL DEFAULT now());
   CREATE TABLE lead_messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL, lead_id uuid, phone text, created_at timestamptz NOT NULL DEFAULT now());
   CREATE TABLE lead_imports (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text NOT NULL REFERENCES leads_clients(id) ON DELETE CASCADE,
@@ -329,6 +329,81 @@ describe("prévia e separação", () => {
     expect(r.status).toBe(200);
     expect(r.json.previa.disponivel_confirmado).toBe(7);
     expect(r.json.conferencia).toEqual({ rodando: false });
+  }, SLOW);
+});
+
+describe("lote de um grupo: tag, planilha ou filtro da tela (24/11/2026)", () => {
+  // Caso da Tinge: 685 com a tag de clientes, e o Conrado quer 100 deles para uma campanha, sem exportar para o Excel.
+  const TAG = 'LEADS - "clientes" - TINGE BRASIL';
+  async function baseComTag() {
+    // 1..5 clientes (tag) com WhatsApp; 6 cliente que já recebeu; 7..9 fora da tag; 12 cliente de outra empresa.
+    const ids = {};
+    for (let i = 1; i <= 9; i += 1) {
+      const cliente = i <= 6;
+      ids[i] = await lead(T, cel(i), { nome: cliente ? `Cliente ${i}` : `Contato ${i}`, createdAt: new Date(Date.UTC(2026, 0, i)) });
+      await confirmar(cel(i), true);
+      if (cliente) await db.query("UPDATE leads SET tags = ARRAY[$1, 'agenda-whatsapp'] WHERE id = $2", [TAG, ids[i]]);
+      else await db.query("UPDATE leads SET tags = ARRAY['agenda-whatsapp'] WHERE id = $1", [ids[i]]);
+    }
+    await db.query("INSERT INTO campaign_dispatch_runs (client_id, lead_id, phone, status) VALUES ($1, $2, $3, 'sent')", [T, ids[6], cel(6)]);
+    const outra = await lead(OUTRA, cel(12), { nome: "Cliente da outra" });
+    await confirmar(cel(12), true);
+    await db.query("UPDATE leads SET tags = ARRAY[$1] WHERE id = $2", [TAG, outra]);
+    return ids;
+  }
+  const telefonesDaPlanilha = async (importId) =>
+    (await db.query("SELECT regexp_replace(telefone, '\\D', '', 'g') t FROM lead_import_items WHERE import_id = $1 ORDER BY row_number", [importId])).rows.map((r) => r.t);
+
+  it("prévia da tag conta só os leads dela; quem já recebeu fica de fora do disponível", async () => {
+    await baseComTag();
+    const origem = encodeURIComponent(JSON.stringify({ tipo: "tag", tag: TAG }));
+    const r = await call("GET", `/api/leads/lotes/previa?clientId=${T}&origem=${origem}`, { access: DONO_T });
+    expect(r.status).toBe(200);
+    expect(r.json.previa).toMatchObject({ total: 6, ja_recebeu: 1, disponivel_confirmado: 5 });
+    expect(r.json.origem).toMatchObject({ tipo: "tag", grupo: 6, rotulo: `Tag: ${TAG}` });
+    // controle: sem origem conta a empresa inteira
+    const todo = await call("GET", `/api/leads/lotes/previa?clientId=${T}`, { access: DONO_T });
+    expect(todo.json.previa.total).toBe(9);
+  }, SLOW);
+
+  it("separa 3 da tag: só clientes, nunca quem já recebeu, fora da tag ou de outra empresa; o próximo lote não repete", async () => {
+    await baseComTag();
+    const body = { clientId: T, tamanho: 3, quantidade: 1, nomeBase: "Clientes", origem: { tipo: "tag", tag: TAG } };
+    const r1 = await call("POST", "/api/leads/lotes", { access: DONO_T, body });
+    expect(r1.status).toBe(201);
+    expect(r1.json.planilhas[0]).toMatchObject({ leads: 3 });
+    expect(r1.json.disponiveisRestantes).toBe(2);
+    expect(await telefonesDaPlanilha(r1.json.planilhas[0].id)).toEqual([cel(1), cel(2), cel(3)]);
+
+    const r2 = await call("POST", "/api/leads/lotes", { access: DONO_T, body });
+    expect(await telefonesDaPlanilha(r2.json.planilhas[0].id)).toEqual([cel(4), cel(5)]);
+    expect(r2.json.disponiveisRestantes).toBe(0);
+
+    const { rows } = await db.query("SELECT import_params FROM lead_imports WHERE id = $1", [r1.json.planilhas[0].id]);
+    expect(rows[0].import_params.loteSeparado.origem).toMatchObject({ tipo: "tag", grupo: 6 });
+  }, SLOW);
+
+  it("filtro da tela (busca 'Cliente') vale como origem, igual à tabela do Banco", async () => {
+    await baseComTag();
+    const r = await call("POST", "/api/leads/lotes", {
+      access: DONO_T,
+      body: { clientId: T, tamanho: 10, quantidade: 1, nomeBase: "Busca", origem: { tipo: "filtro", filtro: { search: "Cliente" } } },
+    });
+    expect(r.status).toBe(201);
+    expect(await telefonesDaPlanilha(r.json.planilhas[0].id)).toEqual([cel(1), cel(2), cel(3), cel(4), cel(5)]);
+  }, SLOW);
+
+  it("origem inválida é recusada sem criar planilha; tag vazia dá zero", async () => {
+    await baseComTag();
+    for (const origem of [{ tipo: "xyz" }, { tipo: "tag" }, { tipo: "planilha" }, { tipo: "filtro" }, "{nao e json"]) {
+      const r = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 3, quantidade: 1, origem } });
+      expect(r.status, JSON.stringify(origem)).toBe(400);
+    }
+    const vazia = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 3, quantidade: 1, origem: { tipo: "tag", tag: "nao-existe" } } });
+    expect(vazia.status).toBe(201);
+    expect(vazia.json.planilhas).toEqual([]);
+    const { rows } = await db.query("SELECT count(*)::int n FROM lead_imports");
+    expect(rows[0].n).toBe(0);
   }, SLOW);
 });
 
