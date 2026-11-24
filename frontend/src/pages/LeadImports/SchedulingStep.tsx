@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, ArrowRightLeft, Bot, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Save, Send, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, Archive, ArrowRightLeft, Bot, CalendarClock, Clock3, FilePlus2, Pause, Play, Plus, RefreshCw, Save, Send, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -232,8 +232,9 @@ export function SchedulingStep({
     const tamanho = Number.parseInt(batchSize, 10) || 0;
     const leads = Number(totalLeads) || 0;
     if (!batchingEnabled || tamanho <= 0 || leads <= 0) return null;
+    const inicioAgendado = newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : null;
     const horarios = planBatchTimes({
-      start: new Date(),
+      start: inicioAgendado && !Number.isNaN(inicioAgendado.getTime()) ? inicioAgendado : new Date(),
       count: Math.ceil(leads / tamanho),
       intervalHours: Number.parseFloat(batchIntervalHours) || 1,
       size: tamanho,
@@ -241,7 +242,17 @@ export function SchedulingStep({
       sendWindow,
     });
     return { horarios, dias: diasDoPlano(horarios, sendWindow) };
-  }, [batchingEnabled, batchSize, batchIntervalHours, batchMaxPerDay, totalLeads, sendWindow]);
+  }, [batchingEnabled, batchSize, batchIntervalHours, batchMaxPerDay, totalLeads, sendWindow, newTriggerType, newScheduledAt]);
+
+  // Na edição, o botão verde segue o "Momento do disparo": com "Agendado" ele agenda (antes disparava na hora e o
+  // "Salvar alterações" não guardava o agendamento).
+  const edicaoAgenda = Boolean(editingCampaignId) && newTriggerType === "scheduled";
+  const dataAgendadaTexto = useMemo(() => {
+    if (!newScheduledAt) return null;
+    const d = new Date(newScheduledAt);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }, [newScheduledAt]);
 
   const validEvolutionInstanceIds = useMemo(() => {
     return new Set(evolutionInstanceOptions.map((i) => i.id));
@@ -1186,12 +1197,20 @@ export function SchedulingStep({
                   }
                   setShowConfirmDispatchModal(true);
                 }}
-                disabled={isSubmitting || isWithoutSource || totalLeads === 0}
+                disabled={isSubmitting || isWithoutSource || totalLeads === 0 || (edicaoAgenda && !dataAgendadaTexto)}
+                data-testid="btn-edit-primary"
                 className="w-full h-11 text-xs font-bold gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow"
               >
-                <Zap className="h-4 w-4" />
-                Salvar e Disparar Agora
+                {edicaoAgenda ? <CalendarClock className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+                {edicaoAgenda ? "Salvar e Agendar Disparo" : "Salvar e Disparar Agora"}
               </Button>
+              {edicaoAgenda && (
+                <p data-testid="edit-schedule-hint" className="text-[11px] text-muted-foreground text-center">
+                  {dataAgendadaTexto
+                    ? `Os envios começam ${dataAgendadaTexto}. "Salvar Alterações" guarda só o conteúdo, sem agendar.`
+                    : "Escolha a data e a hora do agendamento."}
+                </p>
+              )}
               {isWithoutSource && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400 text-center font-medium">
                   Esta campanha não tem planilha de origem definida. Escolha a origem antes de disparar.
@@ -1249,10 +1268,12 @@ export function SchedulingStep({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base font-bold">
                 <Send className="h-5 w-5 text-emerald-600" />
-                Confirmar Disparo de Campanha
+                {edicaoAgenda ? "Confirmar Agendamento" : "Confirmar Disparo de Campanha"}
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Revise os números antes de iniciar o disparo deste lote.
+                {edicaoAgenda && dataAgendadaTexto
+                  ? `Os envios começam ${dataAgendadaTexto}. Revise os números antes de agendar.`
+                  : "Revise os números antes de iniciar o disparo deste lote."}
               </DialogDescription>
             </DialogHeader>
 
@@ -1295,7 +1316,9 @@ export function SchedulingStep({
               )}
 
               <p className="text-[11px] text-muted-foreground">
-                Deseja confirmar a criação do lote e iniciar os envios agora?
+                {edicaoAgenda
+                  ? "Deseja confirmar a criação dos lotes agendados?"
+                  : "Deseja confirmar a criação do lote e iniciar os envios agora?"}
               </p>
             </div>
 
@@ -1319,8 +1342,8 @@ export function SchedulingStep({
                   }
                 }}
               >
-                <Zap className="h-3.5 w-3.5" />
-                Confirmar e Disparar Agora
+                {edicaoAgenda ? <CalendarClock className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+                {edicaoAgenda ? "Confirmar Agendamento" : "Confirmar e Disparar Agora"}
               </Button>
             </DialogFooter>
           </DialogContent>

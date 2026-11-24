@@ -78,7 +78,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { API_BASE_URL } from "@/lib/api";
-import { pendingDispatchesForUpdate, planAfterCampaignSave } from "@/lib/campaignSaveActions";
+import { pendingDispatchesForUpdate, planAfterCampaignSave, resolveEffectiveTrigger } from "@/lib/campaignSaveActions";
 import { PendingDispatchesUpdateDialog } from "@/components/campaigns/PendingDispatchesUpdateDialog";
 import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
 import { triggerDispatchWithWindowConfirm, type DispatchTriggerOutcome } from "@/lib/dispatchTrigger";
@@ -1468,7 +1468,7 @@ export default function LeadImports({
   }, [editingCampaignId, campaignRecipientsData, selectedFile, previewRows, filteredRows, importedItemsData]);
 
   async function handleCreateAndDispatch({ deliberateDispatch = false }: { deliberateDispatch?: boolean } = {}) {
-    if (newTriggerType === "scheduled" && !deliberateDispatch) {
+    if (resolveEffectiveTrigger(newTriggerType, deliberateDispatch) === "scheduled") {
       if (!newScheduledAt) {
         toast({
           title: "Data e hora obrigatórias",
@@ -1622,7 +1622,8 @@ export default function LeadImports({
   }
 
   async function executeCreateAndDispatch({ deliberateDispatch = false }: { deliberateDispatch?: boolean } = {}) {
-    if (!deliberateDispatch && newTriggerType === "scheduled") {
+    const gatilho = resolveEffectiveTrigger(newTriggerType, deliberateDispatch);
+    if (gatilho === "scheduled") {
       if (!newScheduledAt) {
         toast({
           title: "Data e hora obrigatórias",
@@ -1845,7 +1846,7 @@ export default function LeadImports({
 
       // Salvar não dispara (ver lib/campaignSaveActions.ts): edição nunca cria lote; rascunho novo também não.
       const isEdit = Boolean(editingCampaignId) && savedCampaign.id === editingCampaignId;
-      const effectiveTrigger = deliberateDispatch ? "manual" : newTriggerType;
+      const effectiveTrigger = gatilho;
       const plano = planAfterCampaignSave({ isEdit, isRecurring: false, trigger: effectiveTrigger, deliberateDispatch });
       if (!plano.createDispatch) {
         if (isEdit) {
@@ -1886,7 +1887,7 @@ export default function LeadImports({
 
       // 2. Register Dispatch Batch Execution
       const token = await getIdToken();
-      const scheduledIso = !deliberateDispatch && newTriggerType === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
+      const scheduledIso = gatilho === "scheduled" && newScheduledAt ? campaignLocalDateTimeToUtcIso(newScheduledAt) : null;
 
       let totalLeads = 0;
       if (selectedFile || bancoAudience) {
@@ -1901,7 +1902,7 @@ export default function LeadImports({
         const numBatches = Math.ceil(totalLeads / size);
         let firstBatchTrigger: DispatchTriggerOutcome | null = null;
 
-        let baseDate = !deliberateDispatch && newTriggerType === "scheduled" && newScheduledAt ? new Date(newScheduledAt) : new Date();
+        let baseDate = gatilho === "scheduled" && scheduledIso ? new Date(scheduledIso) : new Date();
         // Horário de cada lote: pula a noite e o fim de semana fora da janela e respeita o máximo por dia
         // (lib/batchSchedule.ts). Antes era início + i × intervalo, e os lotes da noite se amontoavam na abertura.
         const sendWindowDaEmpresa = (selectedLeadClient?.n8n_settings as { send_window?: unknown } | undefined)?.send_window;
@@ -1921,8 +1922,8 @@ export default function LeadImports({
           const batchDate = horariosDosLotes[i] || new Date(baseDate.getTime() + i * interval * 60 * 60 * 1000);
           const batchScheduledIso = batchDate.toISOString();
           let batchTriggerType = "scheduled";
-          if ((deliberateDispatch || newTriggerType === "manual") && i === 0 && primeiroAgora) batchTriggerType = "manual";
-          if (!deliberateDispatch && newTriggerType === "draft") batchTriggerType = "draft";
+          if (gatilho === "manual" && i === 0 && primeiroAgora) batchTriggerType = "manual";
+          if (gatilho === "draft") batchTriggerType = "draft";
 
           const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
             method: "POST",
@@ -1971,7 +1972,7 @@ export default function LeadImports({
           });
         }
       } else {
-        const effectiveTriggerType = deliberateDispatch ? "manual" : newTriggerType;
+        const effectiveTriggerType = gatilho;
         const dispatchRes = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/dispatches`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },

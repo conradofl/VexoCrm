@@ -27,8 +27,20 @@ export function planAfterCampaignSave({
 }): AfterSavePlan {
   if (isRecurring || trigger === "draft") return { createDispatch: false, triggerNow: false };
   if (isEdit && !deliberateDispatch) return { createDispatch: false, triggerNow: false };
+  // Clique deliberado com "Agendado" escolhido cria os lotes agendados, sem disparar agora (antes o botão da edição
+  // ignorava o agendamento e disparava na hora).
+  if (trigger === "scheduled") return { createDispatch: true, triggerNow: false };
   if (trigger === "manual" || deliberateDispatch) return { createDispatch: true, triggerNow: true };
   return { createDispatch: true, triggerNow: false };
+}
+
+/**
+ * Gatilho que vale de fato. O clique deliberado ("Salvar e Disparar/Agendar" da edição) respeita o "Agendado"; com
+ * "Disparar Agora" ou "Rascunho" escolhido, ele dispara agora.
+ */
+export function resolveEffectiveTrigger(selected: CampaignTriggerChoice, deliberateDispatch?: boolean): CampaignTriggerChoice {
+  if (!deliberateDispatch) return selected;
+  return selected === "scheduled" ? "scheduled" : "manual";
 }
 
 /**

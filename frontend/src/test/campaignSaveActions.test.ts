@@ -1,6 +1,6 @@
 // Salvar campanha não dispara: plano depois do salvamento e lotes que podem ser atualizados.
 import { describe, it, expect } from "vitest";
-import { pendingDispatchesForUpdate, planAfterCampaignSave } from "@/lib/campaignSaveActions";
+import { pendingDispatchesForUpdate, planAfterCampaignSave, resolveEffectiveTrigger } from "@/lib/campaignSaveActions";
 
 describe("planAfterCampaignSave — salvar não dispara", () => {
   it("editar campanha (já disparada ou não) não cria lote, qualquer que seja o botão", () => {
@@ -12,6 +12,17 @@ describe("planAfterCampaignSave — salvar não dispara", () => {
     expect(
       planAfterCampaignSave({ isEdit: true, isRecurring: false, trigger: "manual", deliberateDispatch: true })
     ).toEqual({ createDispatch: true, triggerNow: true });
+  });
+  it("editar com 'Agendado' e clique deliberado agenda: cria os lotes sem disparar agora (Tinge, 23/11/2026)", () => {
+    const trigger = resolveEffectiveTrigger("scheduled", true);
+    expect(trigger).toBe("scheduled");
+    expect(planAfterCampaignSave({ isEdit: true, isRecurring: false, trigger, deliberateDispatch: true })).toEqual({ createDispatch: true, triggerNow: false });
+  });
+  it("clique deliberado com 'Disparar Agora' ou 'Rascunho' escolhido dispara agora; sem clique deliberado vale a escolha", () => {
+    expect(resolveEffectiveTrigger("manual", true)).toBe("manual");
+    expect(resolveEffectiveTrigger("draft", true)).toBe("manual");
+    expect(resolveEffectiveTrigger("scheduled", false)).toBe("scheduled");
+    expect(resolveEffectiveTrigger("draft", false)).toBe("draft");
   });
   it("nova + Disparar Agora cria e dispara", () => {
     expect(planAfterCampaignSave({ isEdit: false, isRecurring: false, trigger: "manual" })).toEqual({ createDispatch: true, triggerNow: true });

@@ -40,3 +40,28 @@ for (const [nome, viewport] of [
     await expect(resumo).toContainText("em 4 dia(s)");
   });
 }
+
+// Edição com "Agendado" (Tinge, 23/11/2026): o botão verde agenda e a confirmação fala em agendamento, na tela.
+for (const [nome, viewport] of [
+  ["computador", { width: 1366, height: 768 }],
+  ["celular", { width: 375, height: 740 }],
+] as const) {
+  test(`edição com Agendado mostra Salvar e Agendar e confirma agendamento no ${nome}`, async ({ page }) => {
+    await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+    await page.setViewportSize(viewport);
+    await page.goto(`${PAGE_URL}?edicao=agendado`);
+    const botao = page.getByTestId("btn-edit-primary");
+    await botao.scrollIntoViewIfNeeded();
+    await expect(botao).toHaveText(/Salvar e Agendar Disparo/);
+    await expect(page.getByTestId("edit-schedule-hint")).toContainText("08:30");
+    await botao.click();
+    const janela = page.getByRole("dialog");
+    await expect(janela).toBeVisible();
+    await expect(janela).toContainText("Confirmar Agendamento");
+    await expect(janela).not.toContainText("Disparar Agora");
+    const box = await janela.boundingBox();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 0.5);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 0.5);
+    await page.screenshot({ path: `${SHOTS}/edicao-agendada-${nome}.png` });
+  });
+}
