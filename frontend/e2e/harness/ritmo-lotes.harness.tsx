@@ -9,6 +9,9 @@ import { SchedulingStep } from "@/pages/LeadImports/SchedulingStep";
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const nada = () => {};
 
+// ?edicao=agendado abre como edição de campanha com "Agendado" escolhido (botão verde e confirmação de agendamento).
+const edicaoAgendada = new URLSearchParams(window.location.search).get("edicao") === "agendado";
+
 function Pagina() {
   const [batchingEnabled, setBatchingEnabled] = useState(true);
   const [batchSize, setBatchSize] = useState("5");
@@ -21,7 +24,8 @@ function Pagina() {
     campaignSequence: [{ id: "s1", type: "text", order: 1, text: "Olá!" }],
     dispatchOptions: { evolutionInstanceId: "chip-1", dispatchChipIds: ["chip-1"] },
     setDispatchOptions: nada,
-    newTriggerType: "manual", setNewTriggerType: nada, newScheduledAt: "", setNewScheduledAt: nada,
+    newTriggerType: edicaoAgendada ? "scheduled" : "manual", setNewTriggerType: nada,
+    newScheduledAt: edicaoAgendada ? "2026-11-24T08:30" : "", setNewScheduledAt: nada,
     batchingEnabled, setBatchingEnabled, batchSize, setBatchSize, batchIntervalHours, setBatchIntervalHours,
     batchMaxPerDay, setBatchMaxPerDay,
     dispatchCapText: "", setDispatchCapText: nada,
@@ -33,7 +37,7 @@ function Pagina() {
     setRecurrenceOverrunConfirmed: nada, recurrencePreviewInput: null,
     replyAgent: "atendimento", setReplyAgent: nada, campaignAgentPrompt: "", setCampaignAgentPrompt: nada,
     onSubmit: nada, onDispatchNow: nada, onSaveAndDispatchNow: nada, alreadyReceivedCount: 0, isWithoutSource: false,
-    isSubmitting: false, editingCampaignId: null, onCancelEdit: nada, onNovaCampanha: nada, totalLeads: 100,
+    isSubmitting: false, editingCampaignId: edicaoAgendada ? "camp-tinge" : null, onCancelEdit: nada, onNovaCampanha: nada, totalLeads: 100,
   };
   return (
     <main className="p-3 sm:p-6">
