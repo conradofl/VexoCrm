@@ -25,8 +25,6 @@ import {
   normalizeBool,
   normalizeIsoDate,
   isValidBase64,
-  getN8nWebhookBearerSecret,
-  requireN8nWebhookSecret,
   getHealthPostgresPingBudgetMs,
   postgresHealthPing,
   isMaskedSecretPlaceholder,
@@ -141,10 +139,6 @@ import {
   parseCommercialIntelligenceFilters,
 } from "./services/analytics.js";
 import {
-  sanitizePhoneLeadWebhookStyle,
-  getLeadWebhookBearerSecret,
-  sendLeadWebhookEdgeStyle,
-  validateLeadWebhookBearer,
   LEADS_OUTLIER_STATUS_CONVERSA,
   LEADS_OUTLIER_TEMPERATURE,
   LEADS_OUTLIER_SPIN_FASE,
@@ -170,8 +164,6 @@ import {
   normalizeImportedLead,
   isImportedLeadEmpty,
   buildImportPreview,
-  MAX_CONVERSATION_BYTES,
-  validateConversationMemoryPayload,
 } from "./services/leadImport.js";
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
@@ -376,7 +368,6 @@ export const BUILD_INFO = {
 const app = express();
 app.use(express.json({ limit: "15mb" }));
 const isProduction = process.env.NODE_ENV === "production";
-// MAX_CONVERSATION_BYTES: movido para ./services/httpInfra.js (Onda 3, Run C).
 // DEFAULT_CAMPAIGN_RUNNER_INTERVAL_MS e CAMPAIGN_SCHEDULER_MAX_BATCH: movidos para
 // ./campaign/scheduler.js (Onda 3, Run E) e reimportados acima.
 // DEFAULT_REQUEST_TIMEOUT_MS: movido para ./services/evolution.js (Onda 3, Run D) e reimportado
@@ -541,7 +532,6 @@ Object.assign(routeDeps, {
   LEADS_OUTLIER_STATUS_CONVERSA,
   LEADS_OUTLIER_TEMPERATURE,
   MANAGED_CLAIM_KEYS,
-  MAX_CONVERSATION_BYTES,
   MAX_LEADS_OUTLIER_BATCH,
   SYSTEM_ACCESS_PROFILES,
   __dirname,
@@ -606,9 +596,7 @@ Object.assign(routeDeps, {
   getLeadClientN8nSettingsStatus,
   getLeadClientEvolutionInstances,
   getLeadReferenceDate,
-  getLeadWebhookBearerSecret,
   getN8nOnboardingStatus,
-  getN8nWebhookBearerSecret,
   getNormalizedField,
   getPresetFallbackKey,
   getRequestBearerToken,
@@ -705,7 +693,6 @@ Object.assign(routeDeps, {
   requireFirebaseAuth,
   requireInternalAccess,
   requireInternalPageAccess,
-  requireN8nWebhookSecret,
   requireUserManagementAccess,
   resolveAuthorizedClientId,
   resolveCampaignDispatchSettings,
@@ -721,9 +708,7 @@ Object.assign(routeDeps, {
   sanitizeLeadsOutlierBehaviorMeta,
   sanitizeLeadsOutlierDados,
   sanitizePhone,
-  sanitizePhoneLeadWebhookStyle,
   sendError,
-  sendLeadWebhookEdgeStyle,
   serializeAccessProfileRecord,
   shouldExposeInternalErrorDetails,
   shouldStartCampaignScheduler,
@@ -743,8 +728,6 @@ Object.assign(routeDeps, {
   provisionLeadClientEvolutionInstance,
   deleteLeadClientEvolutionInstance,
   useDirectPostgres,
-  validateConversationMemoryPayload,
-  validateLeadWebhookBearer,
   validateLeadsOutlierRecord,
   validateN8nInboundBearer,
 });
