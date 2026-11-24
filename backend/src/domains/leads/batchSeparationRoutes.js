@@ -9,6 +9,8 @@ import {
   separarLotes,
   statusConferencia,
 } from "../../services/leadBatchSeparation.js";
+import { idsDaOrigem, lerOrigem, rotuloDaOrigem } from "../../services/leadBatchOrigin.js";
+import { resolveLeadListScope } from "../../services/leadListQuery.js";
 
 function responderErro(res, sendError, error, rotulo) {
   if (error instanceof ImportError) {
@@ -42,7 +44,14 @@ export function registerLeadBatchSeparationRoutes(app, deps) {
     const clientId = empresa(req, res, req.query?.clientId);
     if (!clientId) return;
     try {
-      res.json({ previa: await previaSeparacao(pgDatabasePool, { clientId }), conferencia: statusConferencia(clientId) });
+      // ?origem={"tipo":"tag","tag":"..."}: a prévia conta só aquele grupo (tag, planilha ou filtro da tela).
+      const origem = lerOrigem(req.query?.origem);
+      const leadIds = await idsDaOrigem(pgDatabasePool, { origem, scope: resolveLeadListScope(req, clientId) });
+      res.json({
+        previa: await previaSeparacao(pgDatabasePool, { clientId, leadIds }),
+        conferencia: statusConferencia(clientId),
+        origem: { ...origem, rotulo: rotuloDaOrigem(origem), grupo: leadIds ? leadIds.length : null },
+      });
     } catch (error) {
       responderErro(res, sendError, error, "[lotes] erro na prévia:");
     }
@@ -54,6 +63,8 @@ export function registerLeadBatchSeparationRoutes(app, deps) {
     const clientId = empresa(req, res, body.clientId);
     if (!clientId) return;
     try {
+      const origem = lerOrigem(body.origem);
+      const leadIds = await idsDaOrigem(pgDatabasePool, { origem, scope: resolveLeadListScope(req, clientId) });
       const resultado = await separarLotes(pgDatabasePool, {
         clientId,
         tamanho: body.tamanho,
@@ -61,6 +72,8 @@ export function registerLeadBatchSeparationRoutes(app, deps) {
         nomeBase: body.nomeBase,
         exigirWhatsapp: body.exigirWhatsapp !== false,
         actor: actor(req),
+        leadIds,
+        origem: origem.tipo === "empresa" ? null : { tipo: origem.tipo, rotulo: rotuloDaOrigem(origem), grupo: leadIds.length },
       });
       res.status(201).json(resultado);
     } catch (error) {

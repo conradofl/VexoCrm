@@ -60,12 +60,15 @@ function classeSql(expr) {
  * Uma linha por lead da empresa, com tudo que decide se ele pode entrar num lote. MATERIALIZED de propósito: o
  * Postgres achata CTE e reavalia os EXISTS por linha de fora (ver reference_postgres_cte_achatamento).
  */
-function baseSql() {
+function baseSql({ leadIdsIdx = null } = {}) {
+  // Origem do lote (24/11/2026): com leadIdsIdx, só os leads daquele grupo (tag, planilha ou filtro da tela) contam.
+  // "Já recebeu" e "já está em outro lote" continuam olhando a empresa inteira.
+  const grupo = leadIdsIdx ? `AND l.id::text = ANY($${leadIdsIdx}::text[])` : "";
   return `
     WITH leads_empresa AS MATERIALIZED (
       SELECT l.id, nullif(trim(l.nome), '') AS nome, ${DIGITOS_LEAD} AS d, coalesce(l.opt_out, false) AS opt_out, l.created_at
         FROM public.leads l
-       WHERE l.client_id = $1
+       WHERE l.client_id = $1 ${grupo}
     ),
     recebeu AS MATERIALIZED (
       SELECT DISTINCT r.lead_id, ${chaveSql("regexp_replace(coalesce(r.phone, ''), '\\D', '', 'g')")} AS chave
@@ -125,9 +128,10 @@ export function inutilizaveisSql() {
 }
 
 /** Números da base, para a tela mostrar antes de separar. */
-export async function previaSeparacao(pool, { clientId }) {
+export async function previaSeparacao(pool, { clientId, leadIds = null }) {
+  const grupo = Array.isArray(leadIds);
   const { rows } = await pool.query(
-    `${baseSql()}
+    `${baseSql({ leadIdsIdx: grupo ? 2 : null })}
      SELECT count(*)::int AS total,
             count(*) FILTER (WHERE classe = 'celular')::int AS celular,
             count(*) FILTER (WHERE classe = 'fixo')::int AS fixo,
@@ -144,7 +148,7 @@ export async function previaSeparacao(pool, { clientId }) {
             count(*) FILTER (WHERE ${disponivelSql(true)})::int AS disponivel_confirmado,
             count(*) FILTER (WHERE ${disponivelSql(false)})::int AS disponivel_sem_conferir
        FROM marcada`,
-    [clientId]
+    grupo ? [clientId, leadIds.map(String)] : [clientId]
   );
   return rows[0];
 }
@@ -168,7 +172,8 @@ const separandoAgora = new Set();
  * Cria até `quantidade` planilhas de até `tamanho` leads disponíveis. A última pode sair menor; não cria planilha vazia.
  * Devolve as planilhas criadas e quantos disponíveis sobraram.
  */
-export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBase, exigirWhatsapp = true, actor = {} }) {
+export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBase, exigirWhatsapp = true, actor = {}, leadIds = null, origem = null }) {
+  const grupo = Array.isArray(leadIds);
   const pedido = validarPedido({ tamanho, quantidade });
   const nome = String(nomeBase ?? "").trim().slice(0, 120) || "Lote";
   if (separandoAgora.has(clientId)) {
@@ -177,12 +182,12 @@ export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBa
   separandoAgora.add(clientId);
   try {
     const { rows: escolhidos } = await pool.query(
-      `${baseSql()}
+      `${baseSql({ leadIdsIdx: grupo ? 3 : null })}
        SELECT nome, d AS telefone FROM marcada
         WHERE ${disponivelSql(exigirWhatsapp !== false)}
         ORDER BY created_at, d
         LIMIT $2`,
-      [clientId, pedido.tamanho * pedido.quantidade]
+      grupo ? [clientId, pedido.tamanho * pedido.quantidade, leadIds.map(String)] : [clientId, pedido.tamanho * pedido.quantidade]
     );
     const { rows: numeracao } = await pool.query(
       `SELECT count(*)::int AS n FROM public.lead_imports WHERE client_id = $1 AND import_params ? 'loteSeparado'`,
@@ -208,6 +213,7 @@ export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBa
             tamanhoPedido: pedido.tamanho,
             exigirWhatsapp: exigirWhatsapp !== false,
             criadoEm,
+            ...(origem ? { origem } : {}),
           },
         },
       });
@@ -228,7 +234,7 @@ export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBa
         leads: Number(fechada?.item?.imported_rows ?? fatia.length),
       });
     }
-    const sobra = await previaSeparacao(pool, { clientId });
+    const sobra = await previaSeparacao(pool, { clientId, leadIds: grupo ? leadIds : null });
     return {
       planilhas,
       separados: planilhas.reduce((s, p) => s + p.leads, 0),

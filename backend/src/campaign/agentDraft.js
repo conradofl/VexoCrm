@@ -20,6 +20,7 @@
 import crypto from "node:crypto";
 import { ImportError } from "../services/leadImportBatches.js";
 import { previaSeparacao, separarLotes } from "../services/leadBatchSeparation.js";
+import { idsDaOrigem, lerOrigem, rotuloDaOrigem } from "../services/leadBatchOrigin.js";
 
 export const CAMPAIGN_AGENT_TOKENS_ENV = "CAMPAIGN_AGENT_TOKENS";
 export const MIN_AGENT_TOKEN_LENGTH = 32;
@@ -297,7 +298,10 @@ export function registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool }) {
       return deny(res, 403, "CAMPAIGN_AGENT_OTHER_TENANT", "Este token só mexe na própria empresa.");
     }
     try {
-      res.json({ previa: await previaSeparacao(pgDatabasePool, { clientId: req.campaignAgentTenant }) });
+      // Mesma origem da tela (tag, planilha ou filtro), sempre na empresa do token.
+      const origem = lerOrigem(req.query?.origem);
+      const leadIds = await idsDaOrigem(pgDatabasePool, { origem, scope: { clientId: req.campaignAgentTenant } });
+      res.json({ previa: await previaSeparacao(pgDatabasePool, { clientId: req.campaignAgentTenant, leadIds }) });
     } catch (error) {
       responder(res, error);
     }
@@ -306,6 +310,8 @@ export function registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool }) {
   app.post("/api/campaign-agent/lead-batches", requireCampaignAgentToken, guardTenantBody, async (req, res) => {
     if (semBanco(res)) return;
     try {
+      const origem = lerOrigem(req.body.origem);
+      const leadIds = await idsDaOrigem(pgDatabasePool, { origem, scope: { clientId: req.campaignAgentTenant } });
       const resultado = await separarLotes(pgDatabasePool, {
         clientId: req.campaignAgentTenant,
         tamanho: req.body.tamanho,
@@ -313,6 +319,8 @@ export function registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool }) {
         nomeBase: req.body.nomeBase,
         exigirWhatsapp: req.body.exigirWhatsapp !== false,
         actor: { uid: null, email: CAMPAIGN_AGENT_ACTOR },
+        leadIds,
+        origem: origem.tipo === "empresa" ? null : { tipo: origem.tipo, rotulo: rotuloDaOrigem(origem), grupo: leadIds.length },
       });
       res.status(201).json(resultado);
     } catch (error) {
