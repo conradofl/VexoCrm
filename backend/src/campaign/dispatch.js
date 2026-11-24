@@ -1373,6 +1373,26 @@ export function normalizeCampaignPendingStepIndex(value) {
   return intVal >= 0 ? intVal : null;
 }
 
+/**
+ * Resolve a sequência de passos eficaz para a progressão por resposta.
+ * Se o lote congelado tiver passos, mas a campanha ao vivo tiver sido expandida com mais etapas (ex: adicionou Porta 2,
+ * imagem, fechador na edição) ou o próximo passo do lead já ultrapassar o lote congelado, a régua atualizada da campanha
+ * prevalece. Se a campanha ao vivo tiver sido encurtada, preserva os passos do lote original (caso Container LED).
+ */
+export function resolveEffectiveCampaignSequence(loteSteps, liveSteps, nextStepIndex = null) {
+  const hasLoteSteps = Array.isArray(loteSteps) && loteSteps.length > 0;
+  const hasLiveSteps = Array.isArray(liveSteps) && liveSteps.length > 0;
+  if (!hasLoteSteps) return hasLiveSteps ? liveSteps : [];
+  if (!hasLiveSteps) return loteSteps;
+
+  const nextIdx = normalizeCampaignPendingStepIndex(nextStepIndex);
+  if (liveSteps.length > loteSteps.length || (nextIdx !== null && nextIdx >= loteSteps.length)) {
+    return liveSteps;
+  }
+
+  return loteSteps;
+}
+
 export function resolveMatchedImportItemForCampaign(importItems, campaign) {
   if (!Array.isArray(importItems) || importItems.length === 0) return null;
 
@@ -1609,10 +1629,16 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       const hasProgress = Boolean(progress && Object.keys(progress).length > 0);
 
       const lote = passosDoLote.get(normalizeString(progress?.dispatchId) || "");
-      const effectiveMeta =
-        lote && lote.campaignId === String(campaign.id)
-          ? normalizeCampaignAnalyticsMeta({ ...(campaign.analytics_meta || {}), sequence: lote.steps })
-          : analyticsMeta;
+      const nextStepIdx = normalizeCampaignPendingStepIndex(progress?.nextStepIndex);
+      const effectiveSequence = resolveEffectiveCampaignSequence(
+        lote && lote.campaignId === String(campaign.id) ? lote.steps : null,
+        campaign.analytics_meta?.sequence,
+        nextStepIdx
+      );
+      const effectiveMeta = normalizeCampaignAnalyticsMeta({
+        ...(campaign.analytics_meta || {}),
+        sequence: effectiveSequence,
+      });
 
       const stepPlan = getCampaignStepPlan(effectiveMeta || {});
       const hasAfterReplySteps = (stepPlan.replySteps || []).length > 0;
@@ -1621,7 +1647,6 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         hasAfterReplySteps ||
         progress?.waitForReply === true;
 
-      const nextStepIdx = normalizeCampaignPendingStepIndex(progress?.nextStepIndex);
       const steps = stepPlan.enabledSteps || [];
       const hasStepsRemaining = nextStepIdx !== null && nextStepIdx < steps.length;
       const isStatusWaiting =
@@ -2397,48 +2422,46 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     }
   }
 
-  let { data: campaign, error: fetchError } = await supabase
-    .from("campaigns")
-    .select("id, name, client_id, import_id, webhook_url, webhook_token, status, analytics_meta")
-    .eq("id", campaignMatch.id)
-    .maybeSingle();
-
-  if (fetchError && isMissingSchemaError(fetchError)) {
-    const fallback = await supabase
+  try {
+    let { data: campaign, error: fetchError } = await supabase
       .from("campaigns")
-      .select("id, name, client_id, import_id, webhook_url, webhook_token, status")
+      .select("id, name, client_id, import_id, webhook_url, webhook_token, status, analytics_meta")
       .eq("id", campaignMatch.id)
       .maybeSingle();
-    campaign = fallback.data ? { ...fallback.data, analytics_meta: campaignMatch.analyticsMeta || {} } : fallback.data;
-    fetchError = fallback.error;
-  }
 
-  if (fetchError) {
-    replyDispatchLocks.delete(lockKey);
-    throw fetchError;
-  }
-  if (!campaign) {
-    replyDispatchLocks.delete(lockKey);
-    return { continued: false, reason: "campaign_not_found" };
-  }
+    if (fetchError && isMissingSchemaError(fetchError)) {
+      const fallback = await supabase
+        .from("campaigns")
+        .select("id, name, client_id, import_id, webhook_url, webhook_token, status")
+        .eq("id", campaignMatch.id)
+        .maybeSingle();
+      campaign = fallback.data ? { ...fallback.data, analytics_meta: campaignMatch.analyticsMeta || {} } : fallback.data;
+      fetchError = fallback.error;
+    }
 
-  // Trava de campanha pausada: interrompe imediatamente
-  const isPaused =
-    campaign.status === "pausada" ||
-    String(campaign.status || "").toLowerCase() === "pausada" ||
-    campaignMatch?.status === "pausada" ||
-    String(campaignMatch?.status || "").toLowerCase() === "pausada";
+    if (fetchError) {
+      throw fetchError;
+    }
+    if (!campaign) {
+      return { continued: false, reason: "campaign_not_found" };
+    }
 
-  if (isPaused) {
-    replyDispatchLocks.delete(lockKey);
-    console.log("[continueCampaignLeadFromReply] Campanha pausada — interrompendo avanço de lead:", {
-      clientId,
-      campaignId: campaign.id,
-      campaignName: campaign.name,
-      status: campaign.status,
-    });
-    return { continued: false, reason: "campaign_paused" };
-  }
+    // Trava de campanha pausada: interrompe imediatamente
+    const isPaused =
+      campaign.status === "pausada" ||
+      String(campaign.status || "").toLowerCase() === "pausada" ||
+      campaignMatch?.status === "pausada" ||
+      String(campaignMatch?.status || "").toLowerCase() === "pausada";
+
+    if (isPaused) {
+      console.log("[continueCampaignLeadFromReply] Campanha pausada — interrompendo avanço de lead:", {
+        clientId,
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        status: campaign.status,
+      });
+      return { continued: false, reason: "campaign_paused" };
+    }
 
   const leadImportItem = campaignMatch.leadImportItem || null;
   const progress = leadImportItem?.progress || {};
@@ -2515,11 +2538,14 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   }
 
   const liveCampaignMeta = campaign.analytics_meta || {};
+  const effectiveSequence = resolveEffectiveCampaignSequence(
+    dispatchSnapshot?.steps,
+    liveCampaignMeta.sequence,
+    nextIdxBase
+  );
   const effectiveMeta = {
     ...liveCampaignMeta,
-    ...(dispatchSnapshot?.steps && Array.isArray(dispatchSnapshot.steps) && dispatchSnapshot.steps.length > 0
-      ? { sequence: dispatchSnapshot.steps }
-      : {}),
+    sequence: effectiveSequence,
     dispatchOptions: {
       ...(liveCampaignMeta.dispatchOptions || {}),
       ...(dispatchSnapshot?.dispatch_options || {}),
@@ -3234,20 +3260,23 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     });
   }
 
-  return {
-    continued: summary.successCount > 0,
-    finalized: finalizedCurrentLead,
-    campaignFinalized: campaignFinalization.finalized === true,
-    campaignId: campaign.id,
-    campaignName: campaign.name,
-    sentStepIndex: actuallySentStepIndex,
-    nextStepIndex: pendingNextStepIndex,
-    remainingSteps: Math.max(steps.length - (actuallySentStepIndex + 1), 0),
-    nextLeadStart,
-    n8nQualification,
-    handoff,
-    summary,
-  };
+    return {
+      continued: summary.successCount > 0,
+      finalized: finalizedCurrentLead,
+      campaignFinalized: campaignFinalization.finalized === true,
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      sentStepIndex: actuallySentStepIndex,
+      nextStepIndex: pendingNextStepIndex,
+      remainingSteps: Math.max(steps.length - (actuallySentStepIndex + 1), 0),
+      nextLeadStart,
+      n8nQualification,
+      handoff,
+      summary,
+    };
+  } finally {
+    replyDispatchLocks.delete(lockKey);
+  }
 }
 
 export async function maybeFinalizeCampaignAfterReply({ campaignId, clientId, triggerSource = "reply_webhook" }) {
