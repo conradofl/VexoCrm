@@ -17,6 +17,7 @@
 // Funciona 100% com ou sem o índice.
 
 import { mergeProcedencia } from "./leadProcedencia.js";
+import { phoneDigits } from "./canonicalPhone.js";
 
 /**
  * Valida se uma string é um nome humano real (e não telefone, placeholder ou vazio).
@@ -47,7 +48,7 @@ export function isRealName(n) {
  * @returns {string}
  */
 export function normalizeLeadPhoneKey(phone) {
-  return String(phone || "").trim().replace(/^\+/, "").replace(/\D/g, "");
+  return phoneDigits(phone);
 }
 
 /**

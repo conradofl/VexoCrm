@@ -8,6 +8,7 @@
 //   { slack_channel_id, whatsapp_number, evolution_instance }
 import { pgDatabasePool as db } from "../../services/database.js";
 import { resolveTenantUuid } from "./tenantResolver.js";
+import { toWhatsappNumberBr } from "../../services/canonicalPhone.js";
 import { sendError } from "../../services/httpInfra.js";
 import { extractEvolutionInstanceSlug, sendTextMessageViaEvolution } from "../../services/evolution.js";
 // ATENÇÃO (import circular): funciona porque buildContractPdfBuffer é function declaration (tem hoisting).
@@ -227,12 +228,6 @@ async function uploadPdfToSlack({ token, channelId, filename, buffer, comment })
   }
 }
 
-function normalizeWhatsapp(num) {
-  const clean = String(num || "").replace(/\D/g, "");
-  if (clean.length === 10 || clean.length === 11) return "55" + clean;
-  return clean;
-}
-
 async function sendWhatsapp({ number, text, instance }) {
   const evolutionUrl = process.env.GD_EVOLUTION_URL;
   const evolutionToken = process.env.GD_EVOLUTION_TOKEN;
@@ -244,7 +239,7 @@ async function sendWhatsapp({ number, text, instance }) {
   }
 
   const payload = {
-    number: normalizeWhatsapp(number),
+    number: toWhatsappNumberBr(number),
     options: { delay: 1200, presence: "composing" },
     textMessage: { text },
     text,

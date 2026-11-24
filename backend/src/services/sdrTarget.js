@@ -17,6 +17,7 @@
 // nao em memoria — servidor reinicia, a volta continua de onde parou.
 
 import { advanceSdrRotationCursor } from "./sdrRotationState.js";
+import { phoneDigits } from "./canonicalPhone.js";
 
 export const SDR_MOTIVOS = {
   OK: "ok",
@@ -37,7 +38,7 @@ export function isValidSdrNumber(value) {
 }
 
 export function normalizeSdrNumber(value) {
-  return String(value ?? "").replace(/\D/g, "");
+  return phoneDigits(value);
 }
 
 /**

@@ -3,7 +3,7 @@
 import crypto from "crypto";
 import { query, getSupabase } from "./db.js";
 import { getFollowupQueue } from "./queue.js";
-import { sanitizePhone } from "../services/leadImport.js";
+import { sanitizePhoneE164 } from "../services/leadImport.js";
 import {
   adjustDateToSendWindow,
   createDateInTimezone,
@@ -401,11 +401,6 @@ export function verifyHmac(secret, rawBody, sigHeader) {
   }
 }
 
-function normalizePhone(raw) {
-  const sanitized = sanitizePhone(raw);
-  if (!sanitized) return null;
-  return sanitized.startsWith("+") ? sanitized : `+${sanitized}`;
-}
 
 function toMs(value, unit) {
   const v = Number(value);
@@ -654,7 +649,7 @@ export async function enrollLead(
     lead = null,
   }
 ) {
-  const phone = normalizePhone(rawPhone);
+  const phone = sanitizePhoneE164(rawPhone);
 
   // Opt-out: quem pediu para sair não é inscrito em cadência (nenhuma linha é criada). O worker confere de novo no envio.
   // Erro de leitura SOBE: a inscrição falha em vez de entrar sem checagem.

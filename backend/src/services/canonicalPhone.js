@@ -50,6 +50,23 @@ export const SQL_CANONICAL_PHONE_SPELLINGS = (col) => `array_remove(ARRAY[
 export const SQL_CANONICAL_PHONE_JID = (col) =>
   SQL_CANONICAL_PHONE(`regexp_replace(${col}, '@(s\\.whatsapp\\.net|c\\.us)$', '')`);
 
+/** Só os dígitos de um telefone (sem "+", máscara ou sufixo). Uma regra para vários nomes antigos. */
+export function phoneDigits(raw) {
+  if (raw === null || raw === undefined) return "";
+  return String(raw).replace(/\D/g, "");
+}
+
+/**
+ * Número para a Evolution no jeito antigo da GD, Heloísa, jurídico e Slack: só dígitos e
+ * "55" na frente quando vier com 10 ou 11 dígitos (DDD + número). NÃO põe o 9 nem trata
+ * zero na frente (isso é toCanonicalPhone). Era copiado em 4 arquivos.
+ */
+export function toWhatsappNumberBr(raw) {
+  const digits = phoneDigits(raw);
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  return digits;
+}
+
 /**
  * Normaliza um telefone bruto para o formato canônico brasileiro no JavaScript.
  * Espelha fielmente a expressão SQL_CANONICAL_PHONE para garantir paridade exata
