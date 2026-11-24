@@ -1,43 +1,9 @@
-export const INTERNAL_PAGE_ORDER = [
-  "dashboard",
-  "planilhas",
-  "whatsapp",
-  "agente",
-  "usuarios",
-  "empresas",
-  "campanhas",
-  "inteligencia-comercial",
-  "chatbot-kanban",
-  "chatbot-config",
-  "followup",
-  "fila-de-followup",
-  "followup-empresas",
-  "followup-campanhas",
-  "followup-analytics",
-  "followup-sugestoes",
-  "chatbot-docs",
-  "onboarding-wizard",
-  "onboarding-agent",
-  "conexoes",
-  "disparos",
-  "aquecimento",
-  "apresentacao",
-  "apresentacao-gd",
-  "briefings-gd",
-  "propostas-gd",
-  "contratos-gd",
-  "pacotes-gd",
-  "condicoes-gd",
-  "integracoes",
-  "eventos",
-  "relacionamento",
-  "livpub",
-  "banco-de-dados",
-  "leads-parados",
-  "trafego",
-] as const;
+import { INTERNAL_PAGES, getInternalPageEntry, findFirstOpenableInternalPage, type InternalPageKey } from "./pages";
 
-export type InternalPage = (typeof INTERNAL_PAGE_ORDER)[number];
+// A lista de páginas mora em lib/pages.ts (registro único: chave, URL, guarda da rota, aba).
+export const INTERNAL_PAGE_ORDER: readonly InternalPageKey[] = INTERNAL_PAGES.map((entry) => entry.key);
+
+export type InternalPage = InternalPageKey;
 export type AccessView = "dashboard" | "leads" | "planilhas" | "whatsapp";
 export type AccessRole = "internal" | "client" | "pending";
 export type AccessScope = "all_clients" | "assigned_clients" | "no_client_access";
@@ -682,15 +648,8 @@ export function getDefaultInternalRoute(
   internalPages: InternalPage[],
   isAdmin = false
 ): string {
-  const pages = isAdmin ? [...INTERNAL_PAGE_ORDER] : internalPages;
-
-  for (const page of INTERNAL_PAGE_ORDER) {
-    if (pages.includes(page)) {
-      return `/crm/${page}`;
-    }
-  }
-
-  return "/crm/dashboard";
+  const target = findFirstOpenableInternalPage((page) => isAdmin || internalPages.includes(page));
+  return target ? target.path : "/crm/dashboard";
 }
 
 export function getDefaultClientRoute(clientId: string, allowedViews: AccessView[]): string {
@@ -743,47 +702,9 @@ export function isInternalPageAllowedForClient(
     return allowedTabs.includes("followup") || allowedTabs.includes("campanhas");
   }
 
-  const pageToTabKey: Record<string, string> = {
-    dashboard: "dashboard",
-    "banco-de-dados": "leads",
-    planilhas: "campanhas",
-    whatsapp: "conversas",
-    usuarios: "usuarios",
-    empresas: "empresas",
-    campanhas: "campanhas",
-    calendario: "followup",
-    agenda: "followup",
-    "inteligencia-comercial": "inteligencia",
-    "chatbot-kanban": "chatbot-kanban",
-    "chatbot-config": "chatbot",
-    followup: "followup",
-    "fila-de-followup": "followup",
-    "followup-empresas": "followup",
-    "followup-campanhas": "followup",
-    "followup-analytics": "followup",
-    "followup-sugestoes": "followup",
-    "chatbot-docs": "chatbot-docs",
-    "onboarding-wizard": "onboarding",
-    apresentacao: "apresentacao",
-    conexoes: "conexoes",
-    aquecimento: "aquecimento",
-    "apresentacao-gd": "apresentacao-gd",
-    "briefings-gd": "briefings-gd",
-    "propostas-gd": "propostas-gd",
-    "contratos-gd": "contratos-gd",
-    "pacotes-gd": "pacotes-gd",
-    "condicoes-gd": "condicoes-gd",
-    eventos: "eventos",
-    relacionamento: "relacionamento",
-    livpub: "livpub",
-    "inbound-agents": "inbound-agents",
-    integracoes: "integracoes",
-    agente: "inbound-agents",
-  };
-
-  const tabKey = pageToTabKey[page];
+  // Chaves que não são página interna mas chegam aqui como alias de rota.
+  const tabKey = page === "inbound-agents" ? "inbound-agents" : getInternalPageEntry(page)?.tenantTab;
   if (!tabKey) return true;
-  if (tabKey === "empresas") return true;
 
   return allowedTabs.includes(tabKey);
 }

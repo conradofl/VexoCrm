@@ -8,7 +8,8 @@ import { ClientPortalLayout } from "@/components/ClientPortalLayout";
 import { EmptyState } from "@/components/EmptyState";
 import { MainLayout } from "@/components/MainLayout";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { INTERNAL_PAGE_ORDER, getDefaultClientRoute, isInternalPageAllowedForClient } from "@/lib/access";
+import { getDefaultClientRoute, isInternalPageAllowedForClient } from "@/lib/access";
+import { findFirstOpenableInternalPage } from "@/lib/pages";
 import { isCrmDomain } from "./lib/domainRouting";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -57,7 +58,7 @@ import GeracaoDigitalProposalPresentation from "./pages/GeracaoDigitalProposalPr
 import GeracaoDigitalImplementationBriefing from "./pages/GeracaoDigitalImplementationBriefing";
 import ComercialVexo from "./pages/ComercialVexo";
 import GeracaoDigitalPortalCliente from "./pages/GeracaoDigitalPortalCliente";
-import { OPERATOR_MODULES, isOperatorModuleAllowed } from "./lib/operatorPermissions";
+import { OPERATOR_MODULES, isOperatorModuleAllowed, isOperatorAccess } from "./lib/operatorPermissions";
 
 const queryClient = new QueryClient();
 
@@ -66,7 +67,7 @@ function InternalIndexRedirect() {
   const crmClient = useOptionalCrmClient();
   const allowedTabs = crmClient?.selectedClient?.n8n_settings?.allowed_tabs;
 
-  const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+  const isOperator = isOperatorAccess(isInternalUser, isAdminUser, accessProfile);
   if (isOperator) {
     const firstAllowed = OPERATOR_MODULES.find((m) => isOperatorModuleAllowed(m.id, accessProfile));
     if (firstAllowed) {
@@ -74,8 +75,11 @@ function InternalIndexRedirect() {
     }
   }
 
-  const target = INTERNAL_PAGE_ORDER.find(
-    (page) => canAccessInternalPage(page) && isInternalPageAllowedForClient(page, allowedTabs)
+  // Só páginas que o usuário consegue abrir de fato (página + guarda da rota de destino),
+  // senão o guarda manda de volta para /crm e vira laço.
+  const target = findFirstOpenableInternalPage(
+    (page) => canAccessInternalPage(page),
+    (page) => isInternalPageAllowedForClient(page, allowedTabs)
   );
 
   if (!target) {
@@ -89,37 +93,7 @@ function InternalIndexRedirect() {
     );
   }
 
-  const pageToPath: Record<string, string> = {
-    dashboard: "dashboard",
-    leads: "leads",
-    planilhas: "planilhas",
-    whatsapp: "whatsapp",
-    agente: "agente",
-    usuarios: "usuarios",
-    empresas: "empresas",
-    campanhas: "planilhas",
-    "inteligencia-comercial": "inteligencia-comercial",
-    "chatbot-kanban": "chatbot",
-    "chatbot-config": "chatbot-settings",
-    "fila-de-followup": "followup",
-    "followup-empresas": "followup",
-    "followup-campanhas": "followup",
-    "followup-analytics": "followup",
-    "followup-sugestoes": "followup",
-    "chatbot-docs": "chatbot-docs",
-    "onboarding-wizard": "onboarding",
-    conexoes: "conexoes",
-    aquecimento: "aquecimento",
-    relatorios: "relatorios",
-    "inbound-agents": "inbound-agents",
-    calendario: "calendario",
-    agenda: "calendario",
-    "leads-parados": "leads-parados",
-    trafego: "trafego",
-  };
-
-  const path = pageToPath[target] || target;
-  return <Navigate to={path} replace />;
+  return <Navigate to={target.path} replace />;
 }
 
 function ClientIndexRedirect() {

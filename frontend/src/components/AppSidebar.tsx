@@ -13,6 +13,7 @@ import {
   isOperatorModuleAllowed,
   getModuleIdFromSidebarItemKey,
   getModuleIdFromPath,
+  isOperatorAccess,
 } from "@/lib/operatorPermissions";
 import { 
   OPERACAO_ITEMS, 
@@ -145,7 +146,7 @@ export function AppSidebar() {
   const isSidebarItemModularlyLocked = (item: (typeof OPERACAO_ITEMS)[number]): boolean =>
     isModuleLocked(crmClient?.selectedClient, item.key || item.page, chipLimits);
 
-  const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+  const isOperator = isOperatorAccess(isInternalUser, isAdminUser, accessProfile);
   const isManager = isInternalUser && (accessProfile?.accessPreset === "gestor" || accessProfile?.approvalLevel === "manager" || accessProfile?.approvalLevel === "director");
 
   const filterItems = (items: typeof OPERACAO_ITEMS) => {
