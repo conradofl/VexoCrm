@@ -16,6 +16,7 @@ import {
   Database,
   Tag,
   X,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -36,6 +37,8 @@ interface BancoActionsBarProps {
   onExportCSV: () => void;
   // 3) o que AGE sobre a base
   onCreateCampaign: () => void;
+  /** Separar a base em lotes (planilhas) para campanha: tira fixo, sem WhatsApp, quem já recebeu e quem já está em lote. */
+  onSeparateBatches?: () => void;
   onNewLead: () => void;
   onManageTags?: () => void;
   hasFilteredLeads?: boolean;
@@ -68,6 +71,7 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
     onExportXLSX,
     onExportCSV,
     onCreateCampaign,
+    onSeparateBatches,
     onNewLead,
     onManageTags,
     hasFilteredLeads = false,
@@ -161,6 +165,13 @@ export function BancoActionsBar(props: BancoActionsBarProps) {
           <Rocket className="w-3.5 h-3.5" />
           Criar campanha
         </Button>
+
+        {onSeparateBatches && (
+          <Button variant="outline" size="sm" data-testid="btn-separate-batches" onClick={onSeparateBatches} className="gap-2 text-xs">
+            <Layers className="w-3.5 h-3.5" />
+            Separar lotes
+          </Button>
+        )}
 
         {onManageTags && (
           <Button

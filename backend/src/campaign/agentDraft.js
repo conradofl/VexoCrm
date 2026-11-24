@@ -18,6 +18,8 @@
 // A resposta nunca devolve token: o handler de campanha já mascara webhook_token.
 
 import crypto from "node:crypto";
+import { ImportError } from "../services/leadImportBatches.js";
+import { previaSeparacao, separarLotes } from "../services/leadBatchSeparation.js";
 
 export const CAMPAIGN_AGENT_TOKENS_ENV = "CAMPAIGN_AGENT_TOKENS";
 export const MIN_AGENT_TOKEN_LENGTH = 32;
@@ -274,4 +276,47 @@ export function registerCampaignAgentRoutes(app, { supabase, ensureDb, handleCre
 /** Importação da base de leads pelo agente: o mesmo handler da tela, com a empresa presa à do token. */
 export function registerCampaignAgentLeadImportRoute(app, { handleCreateLeadImport }) {
   app.post("/api/campaign-agent/lead-imports", requireCampaignAgentToken, guardTenantBody, handleCreateLeadImport);
+}
+
+/**
+ * Separar lotes pelo agente: o mesmo serviço do Banco de Dados (services/leadBatchSeparation.js), preso à empresa do
+ * token. Só cria planilhas; não confere WhatsApp (isso usa chip e é decisão da tela) e não cria campanha nem lote de envio.
+ */
+export function registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool }) {
+  const semBanco = (res) => (pgDatabasePool ? false : (deny(res, 503, "DATABASE_UNAVAILABLE", "Banco de dados indisponível."), true));
+  const responder = (res, error) => {
+    if (error instanceof ImportError) return deny(res, error.status, error.code, error.message);
+    console.error("[campaign-agent] erro ao separar lotes:", error);
+    return deny(res, 500, "LEAD_BATCH_FAILED", "Falha ao separar lotes.");
+  };
+
+  app.get("/api/campaign-agent/lead-batches/preview", requireCampaignAgentToken, async (req, res) => {
+    if (semBanco(res)) return;
+    const pedido = String(req.query?.clientId ?? "").trim();
+    if (pedido && pedido !== req.campaignAgentTenant) {
+      return deny(res, 403, "CAMPAIGN_AGENT_OTHER_TENANT", "Este token só mexe na própria empresa.");
+    }
+    try {
+      res.json({ previa: await previaSeparacao(pgDatabasePool, { clientId: req.campaignAgentTenant }) });
+    } catch (error) {
+      responder(res, error);
+    }
+  });
+
+  app.post("/api/campaign-agent/lead-batches", requireCampaignAgentToken, guardTenantBody, async (req, res) => {
+    if (semBanco(res)) return;
+    try {
+      const resultado = await separarLotes(pgDatabasePool, {
+        clientId: req.campaignAgentTenant,
+        tamanho: req.body.tamanho,
+        quantidade: req.body.quantidade,
+        nomeBase: req.body.nomeBase,
+        exigirWhatsapp: req.body.exigirWhatsapp !== false,
+        actor: { uid: null, email: CAMPAIGN_AGENT_ACTOR },
+      });
+      res.status(201).json(resultado);
+    } catch (error) {
+      responder(res, error);
+    }
+  });
 }

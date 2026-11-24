@@ -103,6 +103,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BancoActionsBar } from "@/components/leads/BancoActionsBar";
+import { SepararLotesDialog } from "@/components/leads/SepararLotesDialog";
 import { TagSelect } from "@/components/leads/TagSelect";
 import { TagMultiSelect } from "@/components/leads/TagMultiSelect";
 import { SecondNumberPanel, type SecondNumberSelection } from "@/components/leads/SecondNumberPanel";
@@ -527,6 +528,7 @@ export default function BancoDeDados() {
 
   // Evolution Instances for WA Extractor
   const [evolutionInstances, setEvolutionInstances] = useState<EvolutionInstanceItem[]>([]);
+  const [isSepararLotesOpen, setIsSepararLotesOpen] = useState(false);
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -3145,6 +3147,7 @@ export default function BancoDeDados() {
             onExportXLSX={handleExportXLSX}
             onExportCSV={handleExportCSV}
             onCreateCampaign={handleOpenCampaignWizard}
+            onSeparateBatches={() => setIsSepararLotesOpen(true)}
             onNewLead={() => setIsCreateModalOpen(true)}
             onManageTags={handleOpenManageTagsQuickAction}
             hasFilteredLeads={listTotal > 0 || (facets?.baseTotal ?? 0) > 0}
@@ -3156,6 +3159,12 @@ export default function BancoDeDados() {
             clientId={clientId}
             canManageBulk={canMassDelete}
             isCriterionSelection={selectionMode === "criterion"}
+          />
+          <SepararLotesDialog
+            open={isSepararLotesOpen}
+            onOpenChange={setIsSepararLotesOpen}
+            clientId={clientId}
+            chips={evolutionInstances.filter((c) => c.active !== false)}
           />
         </SectionHeader>
 

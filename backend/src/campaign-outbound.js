@@ -737,8 +737,11 @@ export function buildTextPayload(phone, step, context = {}) {
   };
 }
 
-function buildImagePayload(phone, step, context = {}) {
-  const parsedImage = parseDataUrl(step.image?.dataUrl || "");
+export function buildImagePayload(phone, step, context = {}) {
+  const imageUrl = step.image?.url || step.imageUrl || step.mediaUrl || step.media_url || null;
+  const dataUrl = step.image?.dataUrl || (typeof step.dataUrl === "string" && step.dataUrl.startsWith("data:") ? step.dataUrl : null);
+  const parsedImage = parseDataUrl(dataUrl || (typeof imageUrl === "string" && imageUrl.startsWith("data:") ? imageUrl : ""));
+  const rawMedia = parsedImage?.base64 || (imageUrl && !imageUrl.startsWith("data:") ? imageUrl : null) || step.image?.base64 || null;
 
   const textWithButtons = formatStepTextWithButtons(step.text || "", step.buttons, context, phone);
 
@@ -752,22 +755,22 @@ function buildImagePayload(phone, step, context = {}) {
     txt: textWithButtons,
     caption: textWithButtons,
     // Mesmo motivo do payload de texto: sem sendButtons, o campo nao tem consumidor.
-    fileName: step.image?.name || null,
-    filename: step.image?.name || null,
-    mimeType: parsedImage?.mimeType || step.image?.type || null,
-    mimetype: parsedImage?.mimeType || step.image?.type || null,
+    fileName: step.image?.name || "imagem.jpg",
+    filename: step.image?.name || "imagem.jpg",
+    mimeType: parsedImage?.mimeType || step.image?.type || "image/jpeg",
+    mimetype: parsedImage?.mimeType || step.image?.type || "image/jpeg",
     mediatype: "image",
-    base64: parsedImage?.base64 || null,
-    mediaBase64: parsedImage?.base64 || null,
-    media: parsedImage?.base64 || null,
-    dataUrl: step.image?.dataUrl || null,
+    base64: rawMedia,
+    mediaBase64: rawMedia,
+    media: rawMedia,
+    dataUrl: dataUrl || imageUrl || null,
     image: step.image || null,
     mediaObject: step.image
       ? {
-          fileName: step.image.name,
-          mimeType: parsedImage?.mimeType || step.image.type,
-          base64: parsedImage?.base64 || null,
-          dataUrl: step.image.dataUrl,
+          fileName: step.image.name || "imagem.jpg",
+          mimeType: parsedImage?.mimeType || step.image.type || "image/jpeg",
+          base64: rawMedia,
+          dataUrl: dataUrl || imageUrl,
           size: step.image.size,
         }
       : null,
