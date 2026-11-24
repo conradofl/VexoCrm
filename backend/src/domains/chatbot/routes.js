@@ -124,6 +124,16 @@ import { getCampaignStepPlan, normalizeCampaignAnalyticsMeta } from "../../campa
 import { normalizeCampaignPendingStepIndex } from "../../campaign/dispatch.js";
 import { parseSimulationState } from "./simulationState.js";
 
+function isTerminalCampaignProgressState(progress) {
+  if (!progress || typeof progress !== "object") return false;
+  const keys = Object.keys(progress);
+  if (keys.length === 0) return false;
+  if (progress.status === "finalizado" || progress.status === "erro" || Boolean(progress.completedAt)) {
+    return true;
+  }
+  return normalizeCampaignPendingStepIndex(progress.nextStepIndex) === null;
+}
+
 export async function resolvePendingCampaignRunForPhone({
   clientId,
   phone,
@@ -133,15 +143,17 @@ export async function resolvePendingCampaignRunForPhone({
 }) {
   if (!clientId || !phone) return null;
 
-  // 1. Prioridade A: Se findCampaignReplyMatches já encontrou match em waitForReplyMatches
+  // 1. Prioridade A: Se findCampaignReplyMatches já encontrou match com progresso ativo pendente
   if (campaignReplyContext?.waitForReplyMatches && campaignReplyContext.waitForReplyMatches.length > 0) {
-    const candidate = campaignReplyContext.waitForReplyMatches[0];
-    const stepPlan = getCampaignStepPlan(candidate.analyticsMeta || {});
-    if (stepPlan.shouldUseReplyFlow) {
+    for (const candidate of campaignReplyContext.waitForReplyMatches) {
+      if (!candidate || candidate.status === "pausada" || candidate.supersededByCompletedCampaign) continue;
+      const stepPlan = getCampaignStepPlan(candidate.analyticsMeta || {});
+      if (!stepPlan.shouldUseReplyFlow) continue;
       const steps = stepPlan.enabledSteps || [];
       const currentProgress = candidate.leadImportItem?.progress || {};
-      const nextIdx = normalizeCampaignPendingStepIndex(currentProgress.nextStepIndex) ?? 1;
-      if (nextIdx < steps.length) {
+      if (isTerminalCampaignProgressState(currentProgress)) continue;
+      const nextIdx = normalizeCampaignPendingStepIndex(currentProgress.nextStepIndex);
+      if (nextIdx !== null && nextIdx < steps.length) {
         return {
           ...candidate,
           leadImportItem: {
@@ -150,7 +162,7 @@ export async function resolvePendingCampaignRunForPhone({
             progress: {
               ...currentProgress,
               waitForReply: true,
-              status: "aguardando_usuario",
+              status: currentProgress.status || "aguardando_usuario",
               nextStepIndex: nextIdx,
             },
           },
@@ -159,7 +171,7 @@ export async function resolvePendingCampaignRunForPhone({
     }
   }
 
-  // 2. Prioridade B: Consulta campaign_dispatch_runs para este telefone
+  // 2. Prioridade B: Consulta campaign_dispatch_runs para este telefone (somente campanhas ativas não arquivadas)
   const phoneVariants = Array.from(buildPhoneLookupVariants(phone) || [phone]);
   if (phoneVariants.length === 0) return null;
 
@@ -168,18 +180,24 @@ export async function resolvePendingCampaignRunForPhone({
     try {
       const { rows } = await pgDatabasePool.query(
         `SELECT r.id AS run_id, r.dispatch_id, r.campaign_id, r.phone, r.lead_id, r.lead_import_item_id, r.status, r.sent_at,
-                c.id AS camp_id, c.name AS camp_name, c.client_id, c.analytics_meta, c.status AS camp_status, c.mode AS camp_mode
+                c.id AS camp_id, c.name AS camp_name, c.client_id, c.analytics_meta, c.status AS camp_status, c.mode AS camp_mode, c.archived_at
          FROM public.campaign_dispatch_runs r
          JOIN public.campaigns c ON c.id = r.campaign_id
          WHERE r.client_id = $1
            AND r.phone = ANY($2::text[])
            AND r.status = 'sent'
+           AND c.archived_at IS NULL
+           AND COALESCE(LOWER(c.status), '') NOT IN ('pausada', 'cancelled', 'draft')
          ORDER BY r.sent_at DESC
          LIMIT 1`,
         [clientId, phoneVariants]
       );
       if (rows && rows.length > 0) {
-        pendingRun = rows[0];
+        const candidateRow = rows[0];
+        const rowStatus = String(candidateRow.camp_status || "").toLowerCase();
+        if (!candidateRow.archived_at && !["pausada", "cancelled", "draft"].includes(rowStatus)) {
+          pendingRun = candidateRow;
+        }
       }
     } catch (err) {
       console.warn("[resolvePendingCampaignRunForPhone] pool error:", err?.message || err);
@@ -201,10 +219,11 @@ export async function resolvePendingCampaignRunForPhone({
         const run = runs[0];
         const { data: camp } = await supabase
           .from("campaigns")
-          .select("id, name, client_id, analytics_meta, status, mode")
+          .select("id, name, client_id, analytics_meta, status, mode, archived_at")
           .eq("id", run.campaign_id)
           .maybeSingle();
-        if (camp) {
+        const campStatus = String(camp?.status || "").toLowerCase();
+        if (camp && !camp.archived_at && !["pausada", "cancelled", "draft"].includes(campStatus)) {
           pendingRun = {
             run_id: run.id,
             dispatch_id: run.dispatch_id,
@@ -234,6 +253,98 @@ export async function resolvePendingCampaignRunForPhone({
     if (stepPlan.shouldUseReplyFlow) {
       const steps = stepPlan.enabledSteps || [];
       if (steps.length > 1) {
+        const campId = String(pendingRun.camp_id);
+        const dispatchId = pendingRun.dispatch_id ? String(pendingRun.dispatch_id) : null;
+
+        // Trava A: Verifica em lead_messages se a progressão por resposta já foi disparada para este lote/campanha
+        if (pgDatabasePool) {
+          try {
+            const { rows: alreadySentRows } = await pgDatabasePool.query(
+              `SELECT 1 FROM public.lead_messages
+               WHERE client_id = $1
+                 AND campaign_id = $2
+                 AND phone = ANY($3::text[])
+                 AND direction = 'outbound'
+                 AND meta->>'source' = 'campaign_reply_progression'
+                 AND ($4::text IS NULL OR dispatch_id = $4 OR meta->>'dispatchId' = $4)
+               LIMIT 1`,
+              [clientId, campId, phoneVariants, dispatchId]
+            );
+            if (alreadySentRows && alreadySentRows.length > 0) {
+              return null;
+            }
+          } catch {
+            // fallback gracioso se coluna/tabela não existir em mock
+          }
+        }
+
+        // Trava B: Verifica progresso real em lead_import_items e leads.dados antes de assumir nextStepIndex: 1
+        let resolvedItemId = pendingRun.lead_import_item_id || pendingRun.lead_id || null;
+        let resolvedProgress = null;
+        const progressSnapshots = [];
+
+        if (pgDatabasePool) {
+          try {
+            const { rows: itemRows } = await pgDatabasePool.query(
+              `SELECT id, normalized_data FROM public.lead_import_items
+               WHERE client_id = $1 AND (telefone = ANY($2::text[]) OR ($3::text IS NOT NULL AND id::text = $3))`,
+              [clientId, phoneVariants, pendingRun.lead_import_item_id ? String(pendingRun.lead_import_item_id) : null]
+            );
+            for (const r of itemRows || []) {
+              const p = r?.normalized_data?.campaign_progress?.[campId];
+              if (p && typeof p === "object") progressSnapshots.push({ id: r.id, progress: p });
+            }
+          } catch {
+            // fallback gracioso
+          }
+          try {
+            const { rows: leadRows } = await pgDatabasePool.query(
+              `SELECT id, dados FROM public.leads
+               WHERE client_id = $1 AND (telefone = ANY($2::text[]) OR ($3::text IS NOT NULL AND id::text = $3))`,
+              [clientId, phoneVariants, pendingRun.lead_id ? String(pendingRun.lead_id) : null]
+            );
+            for (const r of leadRows || []) {
+              const p = r?.dados?.campaign_progress?.[campId];
+              if (p && typeof p === "object") progressSnapshots.push({ id: r.id, progress: p });
+            }
+          } catch {
+            // fallback gracioso
+          }
+        }
+
+        if (progressSnapshots.length === 0 && supabase && resolvedItemId) {
+          try {
+            const { data: item } = await supabase
+              .from("lead_import_items")
+              .select("id, normalized_data")
+              .eq("client_id", clientId)
+              .eq("id", resolvedItemId)
+              .maybeSingle();
+            const p = item?.normalized_data?.campaign_progress?.[campId];
+            if (p && typeof p === "object") progressSnapshots.push({ id: item.id, progress: p });
+          } catch {
+            // fallback gracioso
+          }
+        }
+
+        for (const snap of progressSnapshots) {
+          const sameOrUnsetDispatch = !dispatchId || !snap.progress.dispatchId || String(snap.progress.dispatchId) === dispatchId;
+          if (sameOrUnsetDispatch && isTerminalCampaignProgressState(snap.progress)) {
+            return null;
+          }
+          if (!resolvedProgress && normalizeCampaignPendingStepIndex(snap.progress.nextStepIndex) !== null) {
+            resolvedItemId = snap.id || resolvedItemId;
+            resolvedProgress = snap.progress;
+          }
+        }
+
+        const effectiveNextIdx = resolvedProgress
+          ? normalizeCampaignPendingStepIndex(resolvedProgress.nextStepIndex)
+          : 1;
+        if (effectiveNextIdx === null || effectiveNextIdx >= steps.length) {
+          return null;
+        }
+
         return {
           id: pendingRun.camp_id,
           name: pendingRun.camp_name,
@@ -241,13 +352,14 @@ export async function resolvePendingCampaignRunForPhone({
           analyticsMeta,
           mode: pendingRun.camp_mode || "disparo",
           leadImportItem: {
-            id: pendingRun.lead_import_item_id || null,
+            id: resolvedItemId,
             progress: {
+              ...(resolvedProgress || {}),
               campaignId: pendingRun.camp_id,
-              dispatchId: pendingRun.dispatch_id || null,
+              dispatchId: dispatchId || resolvedProgress?.dispatchId || null,
               waitForReply: true,
-              status: "aguardando_usuario",
-              nextStepIndex: 1,
+              status: resolvedProgress?.status || "aguardando_usuario",
+              nextStepIndex: effectiveNextIdx,
             },
           },
         };
@@ -3681,18 +3793,24 @@ export function registerChatbotRoutes(app, deps) {
         ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
       ];
 
-      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar (não pausada)
+      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar (não pausada nem superada por campanha já concluída)
       let activeWaitCampaign = allCandidates.find((c) => {
-        if (!c || c.status === "pausada") return false;
+        if (!c || c.status === "pausada" || c.supersededByCompletedCampaign) return false;
         const progress = c.leadImportItem?.progress || {};
         const hasProgress = progress && Object.keys(progress).length > 0;
         if (!hasProgress) return false;
+        if (progress.status === "finalizado" || progress.status === "erro" || Boolean(progress.completedAt)) return false;
         const nextStepIndex = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
         if (nextStepIndex === null) return false;
         const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
         const steps = stepPlan.enabledSteps || [];
         return nextStepIndex < steps.length;
-      }) || (campaignReplyContext.processingWaitForReplyMatches?.[0]?.status !== "pausada" ? campaignReplyContext.processingWaitForReplyMatches?.[0] : null) || null;
+      }) || (
+        campaignReplyContext.processingWaitForReplyMatches?.[0]?.status !== "pausada" &&
+        !campaignReplyContext.processingWaitForReplyMatches?.[0]?.supersededByCompletedCampaign
+          ? campaignReplyContext.processingWaitForReplyMatches?.[0]
+          : null
+      ) || null;
 
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
@@ -3992,6 +4110,10 @@ export function registerChatbotRoutes(app, deps) {
           supabase,
         });
 
+        if (pendingCampaignMatch && (await conversaPausadaPorGente(clientId, phone))) {
+          responder({ status: "skipped_human_pause", motivo: "atendimento_humano" }, { clientId, phone: maskPhoneForLog(phone) });
+          return;
+        }
         if (pendingCampaignMatch && (await barrarSeAtrasada())) return;
         if (pendingCampaignMatch) {
           console.log("[campaign-routing] bypass chatbot_disabled: lead tem campanha aguardando resposta", {

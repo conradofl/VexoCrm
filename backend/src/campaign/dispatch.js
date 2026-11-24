@@ -1315,6 +1315,55 @@ async function updateCrmLeadCampaignProgress({ clientId, leadId, campaignId, pro
   return { id: lead.id, normalized_data: dados, status_conversa: null, ultima_interacao_bot: null, ultima_interacao_usuario: null };
 }
 
+async function finalizeAllPhoneRowsForCampaign({ clientId, phone, campaignId, progressPatch = {} }) {
+  if (!supabase || !clientId || !phone || !campaignId) return;
+  const phoneVariants = buildPhoneLookupVariants(phone);
+  if (phoneVariants.length === 0) return;
+
+  try {
+    const { data: items } = await supabase
+      .from("lead_import_items")
+      .select("id, normalized_data")
+      .eq("client_id", clientId)
+      .in("telefone", phoneVariants);
+    for (const row of items || []) {
+      const existing = extractCampaignProgress(row?.normalized_data || {}, campaignId);
+      if (existing && Object.keys(existing).length > 0 && existing.status !== "finalizado") {
+        await updateLeadImportItemCampaignProgress({
+          clientId,
+          leadImportItemId: row.id,
+          campaignId,
+          progressPatch: { ...existing, ...progressPatch, status: "finalizado", nextStepIndex: null },
+          statusConversa: "finalizado",
+        }).catch(() => {});
+      }
+    }
+  } catch {
+    // fallback gracioso
+  }
+
+  try {
+    const { data: crmRows } = await supabase
+      .from("leads")
+      .select("id, dados")
+      .eq("client_id", clientId)
+      .in("telefone", phoneVariants);
+    for (const lead of crmRows || []) {
+      const existing = extractCampaignProgress(lead?.dados || {}, campaignId);
+      if (existing && Object.keys(existing).length > 0 && existing.status !== "finalizado") {
+        await updateCrmLeadCampaignProgress({
+          clientId,
+          leadId: lead.id,
+          campaignId,
+          progressPatch: { ...existing, ...progressPatch, status: "finalizado", nextStepIndex: null },
+        }).catch(() => {});
+      }
+    }
+  } catch {
+    // fallback gracioso
+  }
+}
+
 export async function updateLeadConversationState({
   clientId,
   phone,
@@ -1397,16 +1446,41 @@ export function resolveMatchedImportItemForCampaign(importItems, campaign) {
   if (!Array.isArray(importItems) || importItems.length === 0) return null;
 
   // A.1: Casamento direto por progresso como fonte primária.
-  // Prioriza o item que está aguardando resposta do usuário.
+  // Se uma linha duplicada do MESMO telefone já concluiu esta campanha/lote (finalizado/erro),
+  // ela prevalece sobre linhas duplicadas órfãs que tenham ficado presas em aguardando_usuario,
+  // exceto quando há um novo dispatchId iniciado DEPOIS da conclusão anterior.
+  const completedItem = importItems.find((item) => {
+    const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
+    return p && (p.status === "finalizado" || p.status === "erro" || Boolean(p.completedAt));
+  });
+
   const withReplyProgress = importItems.find((item) => {
     const p = extractCampaignProgress(item.normalized_data || {}, campaign.id);
     return (
       p &&
       p.waitForReply === true &&
-      p.status === "aguardando_usuario"
+      (p.status === "aguardando_usuario" || p.status === "pendente" || p.status === "aguardando_resposta") &&
+      normalizeCampaignPendingStepIndex(p.nextStepIndex) !== null
     );
   });
+
+  if (completedItem && withReplyProgress) {
+    const compProg = extractCampaignProgress(completedItem.normalized_data || {}, campaign.id) || {};
+    const waitProg = extractCampaignProgress(withReplyProgress.normalized_data || {}, campaign.id) || {};
+    const compTs = toComparableCampaignTimestamp(compProg.completedAt || compProg.lastReplyAt || compProg.updatedAt);
+    const waitTs = toComparableCampaignTimestamp(waitProg.startedAt || waitProg.dispatchedAt || waitProg.updatedAt);
+    const isNewerDistinctBatch =
+      Boolean(waitProg.dispatchId) &&
+      Boolean(compProg.dispatchId) &&
+      String(waitProg.dispatchId) !== String(compProg.dispatchId) &&
+      Boolean(waitTs) &&
+      Boolean(compTs) &&
+      waitTs > compTs;
+    return isNewerDistinctBatch ? withReplyProgress : completedItem;
+  }
+
   if (withReplyProgress) return withReplyProgress;
+  if (completedItem) return completedItem;
 
   // Depois qualquer item que tenha progresso registrado para esta campanha.
   const withAnyProgress = importItems.find((item) => {
@@ -1655,8 +1729,14 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
         progress?.status === "aguardando_resposta" ||
         progress?.status === "enviando_proximas_etapas";
 
+      const isTerminalProgress =
+        progress?.status === "finalizado" ||
+        progress?.status === "erro" ||
+        Boolean(progress?.completedAt);
+
       const hasPendingProgress =
         hasProgress &&
+        !isTerminalProgress &&
         hasStepsRemaining &&
         (isStatusWaiting || hasStepsRemaining);
 
@@ -1743,7 +1823,31 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
       return rightDate.localeCompare(leftDate);
     });
 
-  const waitForReplyMatches = matches.filter((campaign) => campaign.waitForReply || campaign.hasPendingProgress);
+  // Se o telefone já concluiu uma campanha mais recente (ex: respondeu hoje à Campanha 10),
+  // campanhas antigas que ficaram em aguardando_usuario no passado (Campanhas 1..9) são superadas
+  // e não disparam em cascata uma por mensagem futura do contato.
+  let latestCompletedTs = "";
+  for (const m of matches) {
+    const p = m.leadImportItem?.progress;
+    if (p && (p.status === "finalizado" || p.status === "erro" || Boolean(p.completedAt))) {
+      const ts = toComparableCampaignTimestamp(p.completedAt || p.lastReplyAt || p.updatedAt || m.lastTriggeredAt);
+      if (ts && ts > latestCompletedTs) latestCompletedTs = ts;
+    }
+  }
+  if (latestCompletedTs) {
+    for (const m of matches) {
+      if (m.hasPendingProgress) {
+        const p = m.leadImportItem?.progress || {};
+        const startTs = toComparableCampaignTimestamp(p.startedAt || p.dispatchedAt || p.updatedAt || m.lastTriggeredAt);
+        if (!startTs || startTs <= latestCompletedTs) {
+          m.hasPendingProgress = false;
+          m.supersededByCompletedCampaign = true;
+        }
+      }
+    }
+  }
+
+  const waitForReplyMatches = matches.filter((campaign) => (campaign.waitForReply && !campaign.supersededByCompletedCampaign) || campaign.hasPendingProgress);
   const processingWaitForReplyMatches = matches.filter((campaign) => campaign.hasPendingProgress === true);
 
   // Campanha com período ativo que contém este telefone — define qual prompt usar
@@ -2483,8 +2587,14 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     hasStepsRemaining ||
     (campaignMatch.analyticsMeta?.sequence && campaignMatch.analyticsMeta.sequence.some((s) => s.enabled && s.triggerMode === "after_reply"));
 
+  const isTerminalProgress =
+    progress.status === "finalizado" ||
+    progress.status === "erro" ||
+    Boolean(progress.completedAt);
+
   const hasPendingProgress =
     Boolean(progress) &&
+    !isTerminalProgress &&
     (isWaitForReply || hasStepsRemaining) &&
     (isStatusWaiting || hasStepsRemaining) &&
     nextIdxBase !== null;
@@ -2928,6 +3038,45 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     };
   }
 
+  // Trava idempotente contra re-disparo da mesma etapa (ex: contato com linhas duplicadas ou bypass sem item_id)
+  const firstRemainingStepId = remainingSteps[0]?.id ? String(remainingSteps[0].id) : null;
+  if (pgDatabasePool && firstRemainingStepId) {
+    try {
+      const phoneVariants = Array.from(buildPhoneLookupVariants(phone) || [phone]);
+      const effectiveDispId = dispatchId || progress?.dispatchId ? String(dispatchId || progress.dispatchId) : null;
+      const { rows: dupStepRows } = await pgDatabasePool.query(
+        `SELECT 1 FROM public.lead_messages
+         WHERE client_id = $1
+           AND campaign_id = $2
+           AND phone = ANY($3::text[])
+           AND direction = 'outbound'
+           AND meta->>'source' = 'campaign_reply_progression'
+           AND meta->>'stepId' = $4
+           AND ($5::text IS NULL OR dispatch_id = $5 OR meta->>'dispatchId' = $5)
+         LIMIT 1`,
+        [clientId, String(campaign.id), phoneVariants, firstRemainingStepId, effectiveDispId]
+      );
+      if (dupStepRows && dupStepRows.length > 0) {
+        logCampaignReplyFlow("warn", "reply_step_already_dispatched_idempotent_abort", {
+          clientId,
+          campaignId: campaign.id,
+          phone: maskPhoneForLog(phone),
+          stepId: firstRemainingStepId,
+          dispatchId: effectiveDispId,
+        });
+        await finalizeAllPhoneRowsForCampaign({
+          clientId,
+          phone,
+          campaignId: campaign.id,
+          progressPatch: { updatedAt: repliedAt, lastReplyAt: repliedAt, completedAt: repliedAt },
+        });
+        return { continued: false, finalized: true, reason: "step_already_dispatched_for_lead" };
+      }
+    } catch {
+      // fallback gracioso se coluna/tabela não existir em mock
+    }
+  }
+
   logCampaignReplyFlow("info", "reply_received_advancing_sequence", {
     clientId,
     campaignId: campaign.id,
@@ -3219,21 +3368,29 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       summary,
     });
 
+    const finalPatch = {
+      status: "finalizado",
+      leadStatus: n8nQualification.ok ? "qualificado_em_n8n" : "sequencia_concluida",
+      nextStepIndex: null,
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      n8nQualification,
+    };
     if (leadImportItem?.id) {
       await updateLeadImportItemCampaignProgress({
         clientId,
         leadImportItemId: leadImportItem.id,
         campaignId: campaign.id,
-        progressPatch: {
-          status: "finalizado",
-          leadStatus: n8nQualification.ok ? "qualificado_em_n8n" : "sequencia_concluida",
-          nextStepIndex: null,
-          updatedAt: new Date().toISOString(),
-          n8nQualification,
-        },
+        progressPatch: finalPatch,
         statusConversa: "finalizado",
       });
     }
+    await finalizeAllPhoneRowsForCampaign({
+      clientId,
+      phone,
+      campaignId: campaign.id,
+      progressPatch: finalPatch,
+    });
   }
 
   let campaignFinalization = { finalized: false };
