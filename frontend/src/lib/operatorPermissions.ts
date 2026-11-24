@@ -185,6 +185,15 @@ export const DEFAULT_OPERATOR_MODULE_IDS: OperatorModuleId[] = [
   "onboarding",
 ];
 
+/** Usuário interno com perfil de operador (não admin): menu e rotas seguem OPERATOR_MODULES. */
+export function isOperatorAccess(
+  isInternalUser: boolean,
+  isAdminUser: boolean,
+  profile: { accessPreset?: string | null; approvalLevel?: string | null } | null | undefined
+): boolean {
+  return isInternalUser && !isAdminUser && (profile?.accessPreset === "operador" || profile?.approvalLevel === "operator");
+}
+
 export function deriveOperatorModulesFromPages(pages: string[] = []): OperatorModuleId[] {
   const pageSet = new Set((pages || []).filter(Boolean));
   const result: OperatorModuleId[] = [];

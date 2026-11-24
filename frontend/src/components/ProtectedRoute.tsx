@@ -1,9 +1,10 @@
 import { type AccessRole, type AccessView, useAuth } from "@/contexts/AuthContext";
-import { type InternalPage, INTERNAL_PAGE_ORDER, isPathAllowedForClient, isInternalPageAllowedForClient, getInheritedPlanPages } from "@/lib/access";
+import { type InternalPage, isPathAllowedForClient, isInternalPageAllowedForClient, getInheritedPlanPages } from "@/lib/access";
 import { resolveTenantPlan } from "@/lib/planTier";
 import { Navigate, useLocation } from "react-router-dom";
+import { findFirstOpenableInternalPage } from "@/lib/pages";
 import { useOptionalCrmClient } from "@/hooks/useCrmClient";
-import { OPERATOR_MODULES, isOperatorModuleAllowed, getModuleIdFromPath } from "@/lib/operatorPermissions";
+import { OPERATOR_MODULES, isOperatorModuleAllowed, getModuleIdFromPath, isOperatorAccess } from "@/lib/operatorPermissions";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -68,7 +69,7 @@ export default function ProtectedRoute({
   }
 
   const isInternalUser = accessRole === "internal";
-  const isOperator = isInternalUser && !isAdminUser && (accessProfile?.accessPreset === "operador" || accessProfile?.approvalLevel === "operator");
+  const isOperator = isOperatorAccess(isInternalUser, isAdminUser, accessProfile);
 
   // Trava rigorosa para operadores: se a rota atual corresponde a um módulo bloqueado, redireciona
   if (isOperator) {
@@ -90,37 +91,12 @@ export default function ProtectedRoute({
   }
 
   if (location.pathname.startsWith("/crm") && (!isInternalUser && !isPathAllowedForClient(location.pathname, allowedTabs))) {
-    const targetPage = INTERNAL_PAGE_ORDER.find(
-      (page) => canAccessInternalPage(page) && (isInternalUser || isInternalPageAllowedForClient(page, allowedTabs))
+    const target = findFirstOpenableInternalPage(
+      (page) => canAccessInternalPage(page),
+      (page) => isInternalUser || isInternalPageAllowedForClient(page, allowedTabs)
     );
-    if (targetPage) {
-      const pageToPath: Record<string, string> = {
-        dashboard: "dashboard",
-        leads: "leads",
-        planilhas: "planilhas",
-        whatsapp: "whatsapp",
-        agente: "agente",
-        usuarios: "usuarios",
-        empresas: "empresas",
-        campanhas: "planilhas",
-        "inteligencia-comercial": "inteligencia-comercial",
-        "chatbot-kanban": "chatbot",
-        "chatbot-config": "chatbot-settings",
-        "fila-de-followup": "followup",
-        "followup-empresas": "followup",
-        "followup-campanhas": "followup",
-        "followup-analytics": "followup",
-        "followup-sugestoes": "followup",
-        "chatbot-docs": "chatbot-docs",
-        "onboarding-wizard": "onboarding",
-        conexoes: "conexoes",
-        aquecimento: "aquecimento",
-        relatorios: "relatorios",
-        apresentacao: "apresentacao",
-        "apresentacao-gd": "apresentacao-gd",
-      };
-      const path = pageToPath[targetPage] || targetPage;
-      return <Navigate to={`/crm/${path}`} replace />;
+    if (target && isPathAllowedForClient(target.path, allowedTabs)) {
+      return <Navigate to={target.path} replace />;
     }
     return <Navigate to="/crm" replace />;
   }
