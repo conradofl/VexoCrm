@@ -227,7 +227,7 @@ describe("recusa do servidor ao registrar o lote chega ao toast", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Ver detalhes de Campanha em Edição/i }));
     fireEvent.click(await screen.findByRole("button", { name: /^Editar$/i }));
     await waitFor(() => expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar e Disparar Agora$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
   }
 

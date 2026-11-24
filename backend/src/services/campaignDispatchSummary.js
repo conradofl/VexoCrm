@@ -35,8 +35,11 @@ export function isCampaignActive(dispatchStatuses, options = {}) {
   const leadsPending = Number(options?.leadsPending ?? options?.pendingLeads ?? 0);
   const leadsTotal = Number(options?.leadsTotal ?? 0);
   const sentTotal = Number(options?.sentTotal ?? 0);
-  // Proteção contra encerramento indevido: se ainda restarem contatos não enviados, a campanha permanece ativa
-  if (leadsPending > 0 || (leadsTotal > 0 && sentTotal < leadsTotal)) {
+  const failedTotal = Number(options?.failedTotal ?? 0);
+  // Proteção contra encerramento indevido: se ainda restarem contatos não
+  // tentados, a campanha permanece ativa. Falha conta como tentado: contato
+  // que falhou não volta para a fila, então não pode segurar a campanha.
+  if (leadsPending > 0 || (leadsTotal > 0 && sentTotal + failedTotal < leadsTotal)) {
     return true;
   }
   return (dispatchStatuses || []).some((s) => !FINAL_DISPATCH_STATUSES.includes(s));
@@ -66,7 +69,8 @@ export function aggregateDispatchStatus(dispatchStatuses, options = {}) {
   const leadsPending = Number(options?.leadsPending ?? options?.pendingLeads ?? 0);
   const leadsTotal = Number(options?.leadsTotal ?? 0);
   const sentTotal = Number(options?.sentTotal ?? 0);
-  const hasUnsentContacts = leadsPending > 0 || (leadsTotal > 0 && sentTotal < leadsTotal);
+  const failedTotal = Number(options?.failedTotal ?? 0);
+  const hasUnsentContacts = leadsPending > 0 || (leadsTotal > 0 && sentTotal + failedTotal < leadsTotal);
 
   if (statuses.includes("running")) return "enviando";
 

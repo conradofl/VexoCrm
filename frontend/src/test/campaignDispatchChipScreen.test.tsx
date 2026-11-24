@@ -205,7 +205,7 @@ describe("Chip marcado na tela é o chip que sai no POST", () => {
   }
 
   async function dispararECapturar() {
-    fireEvent.click(screen.getByRole("button", { name: /^Disparar agora$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar e Disparar Agora$/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
     await waitFor(() => expect(lotesCriados.length).toBe(1));
     return lotesCriados[0];

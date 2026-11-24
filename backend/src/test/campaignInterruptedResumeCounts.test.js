@@ -180,5 +180,17 @@ describe("campaignInterruptedResumeCounts — Contabilização de Lotes Interrom
 
       expect(status).toBe("concluida");
     });
+
+    it("falha conta como tentado: lotes 'done' com enviados + falhas = total encerram a campanha", () => {
+      const opts = { leadsPending: 0, leadsTotal: 53, sentTotal: 40, failedTotal: 13 };
+      expect(isCampaignActive(["done"], opts)).toBe(false);
+      expect(aggregateDispatchStatus(["done"], opts)).toBe("concluida");
+    });
+
+    it("sobra de contato nunca tentado segura a campanha mesmo contando as falhas", () => {
+      const opts = { leadsPending: 0, leadsTotal: 53, sentTotal: 40, failedTotal: 5 };
+      expect(isCampaignActive(["done"], opts)).toBe(true);
+      expect(aggregateDispatchStatus(["done"], opts)).toBe("aguardando_disparo");
+    });
   });
 });
