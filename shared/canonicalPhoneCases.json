@@ -1,0 +1,107 @@
+[
+  {
+    "caso": "celular completo",
+    "entrada": "5534991093607",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "celular com máscara",
+    "entrada": "(34) 99109-3607",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "celular com +55 e espaços",
+    "entrada": "+55 34 99109-3607",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "celular sem 55",
+    "entrada": "34991093607",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "celular sem 55 e sem o 9",
+    "entrada": "3491093607",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "celular com 55 sem o 9",
+    "entrada": "553491093607",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "fixo sem 55",
+    "entrada": "3432345678",
+    "canonico": "553432345678"
+  },
+  {
+    "caso": "fixo com 55",
+    "entrada": "553432345678",
+    "canonico": "553432345678"
+  },
+  {
+    "caso": "JID de telefone",
+    "entrada": "5534991093607@s.whatsapp.net",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "JID c.us",
+    "entrada": "553491093607@c.us",
+    "canonico": "5534991093607"
+  },
+  {
+    "caso": "grupo fica como está",
+    "entrada": "120363000000000000@g.us",
+    "canonico": "120363000000000000@g.us"
+  },
+  {
+    "caso": "LID fica como está",
+    "entrada": "123456789012345@lid",
+    "canonico": "123456789012345@lid"
+  },
+  {
+    "caso": "zero na frente (não trata)",
+    "entrada": "034991093607",
+    "canonico": "034991093607"
+  },
+  {
+    "caso": "8 dígitos sem DDD (não trata)",
+    "entrada": "91093607",
+    "canonico": "91093607"
+  },
+  {
+    "caso": "9 dígitos sem DDD (não trata)",
+    "entrada": "991093607",
+    "canonico": "991093607"
+  },
+  {
+    "caso": "celular 9 seguido de 5 com 55 (12 díg, não é celular)",
+    "entrada": "553450000005",
+    "canonico": "553450000005"
+  },
+  {
+    "caso": "internacional",
+    "entrada": "14155550123",
+    "canonico": "14155550123"
+  },
+  {
+    "caso": "vazio",
+    "entrada": "",
+    "canonico": ""
+  },
+  {
+    "caso": "só letras",
+    "entrada": "abc",
+    "canonico": ""
+  },
+  {
+    "caso": "DDD 11 sem 55 e sem o 9",
+    "entrada": "1188887777",
+    "canonico": "5511988887777"
+  },
+  {
+    "caso": "13 dígitos com 9",
+    "entrada": "5511988887777",
+    "canonico": "5511988887777"
+  }
+]

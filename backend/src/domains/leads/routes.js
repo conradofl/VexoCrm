@@ -30,6 +30,7 @@ import {
 import { hasAccessPermission } from "../../accessGuards.js";
 import { requireContractedModulePage } from "../../access/modularGate.js";
 import { upsertLeadByPhone, upsertLeadsBatchByPhone } from "../../services/leadUpsert.js";
+import { sanitizePhoneE164 } from "../../services/leadImport.js";
 import { analyzeImportDuplicates } from "../../services/leadImportDeduplication.js";
 import { summarizeChatWithAI } from "./chatInsight.js";
 import {
@@ -128,12 +129,6 @@ export function errorCause(error) {
   }
   if (error.name && error.name !== "Error") cause.name = String(error.name);
   return cause;
-}
-
-function sanitizePhoneE164(phoneInput, defaultDdd = null) {
-  const s = sanitizePhone(phoneInput, defaultDdd);
-  if (!s) return null;
-  return s.startsWith("+") ? s : `+${s}`;
 }
 
 // Cache em memória de sessões de extração WA com TTL curto (5 minutos).

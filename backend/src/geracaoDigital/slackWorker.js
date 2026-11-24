@@ -1,6 +1,7 @@
 import { Worker } from "bullmq";
 import { pgDatabasePool as pool } from "../services/database.js";
 import { QUEUE_NAME, getRedisConnection } from "./slackQueue.js";
+import { toWhatsappNumberBr } from "../services/canonicalPhone.js";
 
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 
@@ -21,12 +22,7 @@ async function processSlackJob(job) {
   } = job.data;
 
   // Normaliza o número
-  const normalizeWhatsapp = (num) => {
-    let clean = (num || "").replace(/\D/g, "");
-    if (clean.length === 10 || clean.length === 11) return "55" + clean;
-    return clean;
-  };
-  const jid = normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net";
+  const jid = toWhatsappNumberBr(whatsappNumber) + "@s.whatsapp.net";
 
   // Check se já existe mapeamento para log
   const checkRes = await pool.query(

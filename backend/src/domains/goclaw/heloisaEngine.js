@@ -10,6 +10,7 @@
  */
 
 import { pgDatabasePool } from "../../services/database.js";
+import { phoneDigits } from "../../services/canonicalPhone.js";
 import {
   sendTextMessageViaEvolution,
   createEvolutionGroup,
@@ -55,9 +56,7 @@ export const DIRETORES_AUTORIZADOS = {
 };
 
 export function normalizarTelefoneHeloisa(rawPhone) {
-  if (!rawPhone) return "";
-  const limpo = String(rawPhone).replace(/\D/g, "");
-  return limpo;
+  return phoneDigits(rawPhone);
 }
 
 /**

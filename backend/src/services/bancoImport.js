@@ -8,7 +8,7 @@
 // Cada lote grava os LEADS primeiro e só depois registra o lote (itens + ponto de retomada): se algo cair entre os dois, o ponto
 // de retomada ainda não avançou, o lote é reenviado e o upsert por telefone é idempotente (import_ids é união, não duplica).
 
-import { normalizeImportedLead as defaultNormalizeImportedLead, sanitizePhone } from "./leadImport.js";
+import { normalizeImportedLead as defaultNormalizeImportedLead, sanitizePhoneE164 } from "./leadImport.js";
 import { resolveImportOrigin } from "./importOrigin.js";
 import { normalizeString } from "../textNormalize.js";
 import { upsertLeadsBatchByPhone } from "./leadUpsert.js";
@@ -16,12 +16,6 @@ import { markExtraPhoneCollisions } from "./leadExtraPhones.js";
 import { IMPORT_BATCH_SIZE, appendLeadImportBatch, closeLeadImport, extractMappingItems, openLeadImport, ImportError } from "./leadImportBatches.js";
 
 export const BANCO_IMPORT_MODE = "banco";
-
-function sanitizePhoneE164(phoneInput, defaultDdd = null) {
-  const s = sanitizePhone(phoneInput, defaultDdd);
-  if (!s) return null;
-  return s.startsWith("+") ? s : `+${s}`;
-}
 
 /** "tag1, tag2" ou ["tag1"] → ["tag1","tag2"] */
 export function normalizeImportTags(raw) {

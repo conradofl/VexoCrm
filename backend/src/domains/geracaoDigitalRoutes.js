@@ -27,6 +27,7 @@ import {
 } from "./gdClientes/campos.js";
 import { buildCronograma } from "./geracaoDigitalContracts/contractMerge.js";
 import { sendTextMessageViaEvolution } from "../services/evolution.js";
+import { toWhatsappNumberBr } from "../services/canonicalPhone.js";
 
 let _evolutionSender = sendTextMessageViaEvolution;
 export function _setEvolutionSenderForTesting(fn) {
@@ -476,12 +477,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         console.warn("[gd-setup] Não foi possível verificar auth.test do Slack:", e.message);
       }
 
-      const normalizeWhatsapp = (num) => {
-        let clean = (num || "").replace(/\D/g, "");
-        if (clean.length === 10 || clean.length === 11) return "55" + clean;
-        return clean;
-      };
-      const jid = whatsappGroupId ? whatsappGroupId : (normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net");
+      const jid = whatsappGroupId ? whatsappGroupId : (toWhatsappNumberBr(whatsappNumber) + "@s.whatsapp.net");
 
       const slug = (clientName || "cliente-sem-nome")
         .toLowerCase()
@@ -777,16 +773,11 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         console.warn("[GeracaoDigital] ResendProvider not loaded", err);
       }
 
-      const normalizeWhatsapp = (num) => {
-          let clean = (num || "").replace(/\D/g, '');
-          if (clean.length === 10 || clean.length === 11) return '55' + clean;
-          return clean;
-      };
 
       // Helper function to send WhatsApp via Evolution
       const sendEvolution = async (number, text) => {
         if (!evolutionUrl || !evolutionToken || !number) return "not_configured";
-        const normalizedNumber = normalizeWhatsapp(number);
+        const normalizedNumber = toWhatsappNumberBr(number);
         const payload = {
           number: normalizedNumber,
           options: { delay: 1200, presence: "composing" },
@@ -834,10 +825,10 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         const members = membersString.split(",").map(m => m.trim()).filter(Boolean);
         const participants = [];
         if (whatsappNumber) {
-          participants.push(normalizeWhatsapp(whatsappNumber) + "@s.whatsapp.net");
+          participants.push(toWhatsappNumberBr(whatsappNumber) + "@s.whatsapp.net");
         }
         members.forEach(m => {
-          participants.push(normalizeWhatsapp(m) + "@s.whatsapp.net");
+          participants.push(toWhatsappNumberBr(m) + "@s.whatsapp.net");
         });
 
         // Unique participants

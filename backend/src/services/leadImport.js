@@ -341,6 +341,13 @@ export function sanitizePhone(value, defaultDdd = null) {
   return null;
 }
 
+/** sanitizePhone com "+" na frente (E.164). null quando o telefone não é válido. */
+export function sanitizePhoneE164(phoneInput, defaultDdd = null) {
+  const s = sanitizePhone(phoneInput, defaultDdd);
+  if (!s) return null;
+  return s.startsWith("+") ? s : `+${s}`;
+}
+
 export function buildPhoneLookupVariants(value) {
   if (!value) return [];
   const rawStr = String(value).trim();
