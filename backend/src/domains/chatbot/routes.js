@@ -3039,7 +3039,7 @@ export function registerChatbotRoutes(app, deps) {
    * Processa mensagens para o chatbot hardcoded (ex: Outlier Qualification)
    * Body: { clientId, phone, message }
    */
-  app.post("/api/hardcoded-chat", async (req, res) => {
+  app.post("/api/hardcoded-chat", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
 
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -3053,6 +3053,7 @@ export function registerChatbotRoutes(app, deps) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId or phone");
       return;
     }
+    if (!resolveAuthorizedClientId(req, res, clientId)) return;
 
     try {
       console.log("[hardcoded-chat] Initializing chatbot");
@@ -4158,7 +4159,10 @@ export function registerChatbotRoutes(app, deps) {
       const diagnosticoIa = {};
       try {
 
-          const chatbotModel = body.modelOverride || tenantSettings?.chatbot_model;
+          // modelOverride só vale na autochamada interna (domains/campaigns/routes.js, fetch em localhost). Vindo da rede,
+          // o webhook não tem autenticação e o corpo não pode escolher o modelo.
+          const chamadaLocal = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket?.remoteAddress);
+          const chatbotModel = (chamadaLocal && body.modelOverride) || tenantSettings?.chatbot_model;
           const promptType = chatbotPromptTypeOverride || "padrao";
           const aiResponse = await processBatch({
             clientId,
@@ -5195,7 +5199,7 @@ export function registerChatbotRoutes(app, deps) {
    * Extrai briefing de uma conversa finalizada
    * Útil para recuperar briefing de leads antigos
    */
-  app.post("/api/hardcoded-chat-extract", async (req, res) => {
+  app.post("/api/hardcoded-chat-extract", requireFirebaseAuth, async (req, res) => {
     if (!ensureDb(res)) return;
 
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -5206,6 +5210,7 @@ export function registerChatbotRoutes(app, deps) {
       sendError(res, 400, "INVALID_BODY", "Missing clientId or phone");
       return;
     }
+    if (!resolveAuthorizedClientId(req, res, clientId)) return;
 
     try {
       // Buscar conversa mais recente

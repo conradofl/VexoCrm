@@ -26,9 +26,10 @@ export function sanitizePhoneLeadWebhookStyle(value) {
   return digits || null;
 }
 
-/** Segredo Bearer do POST /api/lead-webhook (paridade Edge). Em produção, sobrescrever com LEAD_WEBHOOK_BEARER_TOKEN. */
+/** Segredo Bearer do POST /api/lead-webhook. Só vem de LEAD_WEBHOOK_BEARER_TOKEN: o valor padrão antigo estava no
+ * repositório público. Sem a variável, devolve null e a rota recusa tudo (401). */
 export function getLeadWebhookBearerSecret() {
-  return normalizeString(process.env.LEAD_WEBHOOK_BEARER_TOKEN) || "@Vexo2026";
+  return normalizeString(process.env.LEAD_WEBHOOK_BEARER_TOKEN);
 }
 
 /** Resposta JSON no mesmo estilo da Edge (sem cache no browser/proxy). */
@@ -37,11 +38,11 @@ export function sendLeadWebhookEdgeStyle(res, status, payload) {
   res.status(status).json(payload);
 }
 
-/** Confere Authorization: Bearer contra o segredo fixo do lead-webhook. */
+/** Confere Authorization: Bearer contra LEAD_WEBHOOK_BEARER_TOKEN. */
 export function validateLeadWebhookBearer(req, res) {
   const token = getRequestBearerToken(req);
   const expected = getLeadWebhookBearerSecret();
-  if (!token || token !== expected) {
+  if (!expected || !token || token !== expected) {
     sendLeadWebhookEdgeStyle(res, 401, { success: false, error: "Unauthorized" });
     return false;
   }
