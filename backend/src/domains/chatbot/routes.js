@@ -64,6 +64,7 @@ import {
   withStatementTimeout,
   WORK_STATE_QUERY_TIMEOUT_MS,
 } from "../../services/inboxWorkState.js";
+import { campaignPhonesSql, listInboxCampaigns, parseCampaignFilter } from "../../services/inboxCampaignFilter.js";
 
 import { classifyConversation } from "../../services/whatsappChatClassifier.js";
 import { isHeloisaActive, isHeloisaAuthorizedSender, isHeloisaAuthorizedSenderAsync, processarMensagemHeloisa } from "../goclaw/heloisaEngine.js";
@@ -759,6 +760,20 @@ export function registerChatbotRoutes(app, deps) {
     }
   });
 
+  // Campanhas que já mandaram mensagem, para o filtro "Campanha" da coluna de Conversas.
+  app.get("/api/whatsapp/chats/campaigns", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
+    if (!ensureDb(res)) return;
+    const clientId = resolveAuthorizedClientId(req, res, normalizeString(req.query.clientId));
+    if (!clientId) return;
+    try {
+      const items = await listInboxCampaigns((sql, params) => pgDatabasePool.query(sql, params), clientId);
+      res.json({ items });
+    } catch (err) {
+      console.error("[whatsapp/chats/campaigns] Falha ao listar campanhas:", { message: err?.message, clientId });
+      sendError(res, 500, "INBOX_CAMPAIGNS_FAILED", "Não foi possível carregar as campanhas.");
+    }
+  });
+
   app.get("/api/whatsapp/chats", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     if (!ensureDb(res)) return;
     try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS instance_name VARCHAR(150);").catch(() => {}); } catch(e) {}
@@ -810,6 +825,13 @@ export function registerChatbotRoutes(app, deps) {
       const instanceAliases = await resolveInstanceNameAliases(clientId, rawInstanceName);
       const leadsTable = leadsTableName(clientId);
 
+      // Filtro "Campanha" (inboxCampaignFilter.js): só conversas de quem recebeu a campanha.
+      const campaignId = parseCampaignFilter(_req.query.campaignId);
+      if (campaignId === undefined) {
+        sendError(res, 400, "INVALID_CAMPAIGN_ID", "Campanha inválida.");
+        return;
+      }
+
       // Pausa manual vencida não aparece como pausada em lugar nenhum da tela: mesma
       // fonte do prazo e mesma expressão do portão (agentMuteGuard), inclusive no erro.
       const inboxTenantSettings = await getLeadClientN8nSettings(clientId).catch(() => null);
@@ -835,6 +857,7 @@ export function registerChatbotRoutes(app, deps) {
         robotChips: robotInfo.robotChips,
         chipAliases: instanceAliases,
         pauseExpiredSql,
+        campaignId,
       };
 
       const queryParams = [clientId];
@@ -849,6 +872,12 @@ export function registerChatbotRoutes(app, deps) {
 
       let tabCondition = "";
       let searchFilter = "";
+      // Lista antiga (busca, grupos, arquivadas...): o mesmo filtro de campanha, na conversa canônica.
+      let campaignFilter = "";
+      if (campaignId) {
+        queryParams.push(campaignId);
+        campaignFilter = `AND m.phone IN ${campaignPhonesSql(queryParams.length)}`;
+      }
 
       if (search) {
         queryParams.push(`%${search}%`);
@@ -1159,6 +1188,7 @@ export function registerChatbotRoutes(app, deps) {
           WHERE 1=1
           ${tabCondition}
           ${searchFilter}
+          ${campaignFilter}
         `;
 
         lastQueryInfo = { step: "countQuery (total da aba atual)", sql: countQueryText, params: queryParams };
@@ -1245,6 +1275,7 @@ export function registerChatbotRoutes(app, deps) {
           WHERE 1=1
           ${tabCondition}
           ${searchFilter}
+          ${campaignFilter}
           ORDER BY m.effective_timestamp DESC NULLS LAST, m.id DESC
           LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}
         `;

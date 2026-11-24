@@ -113,6 +113,7 @@ import {
   type ReplyChipAlternative,
   type SendWhatsAppMediaParams,
   useWhatsAppChats,
+  useInboxCampaigns,
   useWhatsAppMessages,
   useClearWhatsAppChats,
   useUpdateChatState,
@@ -153,6 +154,7 @@ import { isLeadStalled, computeLeadDaysIdle } from "@/lib/leads/stalledLeads";
 import { useLeadReactivationSettings } from "@/hooks/useLeadReactivation";
 import {
   ConversationListItem,
+  InboxCampaignFilterBar,
   InboxFooterFilters,
   InboxOrderRow,
   InboxSearchRow,
@@ -386,6 +388,8 @@ export default function WhatsAppInbox({
 
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [selectedInstanceNames, setSelectedInstanceNames] = useState<string[]>([]);
+  // Filtro "Campanha" da coluna: só conversas de quem recebeu a campanha escolhida.
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [compositionMode, setCompositionMode] = useState<"whatsapp" | "internal_note">("whatsapp");
   const [inboxTab, setInboxTab] = useState<InboxTab>("esperam");
@@ -540,7 +544,17 @@ export default function WhatsAppInbox({
   const chatsQuery = useWhatsAppChats(clientId, instanceFilter, canLoadInbox, {
     tab: inboxTab,
     search: debouncedSearch,
+    campaignId: selectedCampaignId,
   });
+  const inboxCampaignsQuery = useInboxCampaigns(clientId, canLoadInbox);
+  const inboxCampaignOptions = inboxCampaignsQuery.data ?? [];
+  const selectedCampaign = selectedCampaignId
+    ? inboxCampaignOptions.find((c) => c.id === selectedCampaignId) ?? null
+    : null;
+  // Campanha é da empresa: trocou de empresa, o filtro não vale mais.
+  useEffect(() => {
+    setSelectedCampaignId(null);
+  }, [clientId]);
   const updateChatState = useUpdateChatState(clientId);
   const bulkUpdateChatState = useBulkUpdateChatState(clientId);
   const attendChat = useAttendChat(clientId);
@@ -2462,11 +2476,23 @@ export default function WhatsAppInbox({
               chipOptions={chipOptions}
               chipAgents={chatsQuery.chipAgents}
               onChipChange={(val) => setSelectedInstanceNames(val ? [val] : [])}
+              campaignValue={selectedCampaignId}
+              campaignOptions={inboxCampaignOptions}
+              onCampaignChange={setSelectedCampaignId}
               otherLists={otherLists}
               activeTab={inboxTab}
               onTabChange={setInboxTab}
               onNewConversation={() => setNewConversationOpen(true)}
             />
+
+            {selectedCampaignId && (
+              <InboxCampaignFilterBar
+                name={selectedCampaign?.name || campaignNames.get(selectedCampaignId) || "Campanha"}
+                sent={selectedCampaign?.sent ?? null}
+                onEdit={() => setFiltersOpen(true)}
+                onClear={() => setSelectedCampaignId(null)}
+              />
+            )}
 
             <div className="px-4 pt-3">
               <InboxStateTabs active={inboxTab} counts={chatsQuery.counts?.work} onChange={setInboxTab} />

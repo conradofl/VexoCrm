@@ -22,6 +22,7 @@
 
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_SPELLINGS } from "./canonicalPhone.js";
 import { CHAT_STATE_PERSONAL, SQL_AUTOMATION_MATCH, SQL_NUMBER_CHANGE_MATCH, SQL_WORK_QUEUE_MATCH } from "./inboxSqlMatchers.js";
+import { campaignPhonesSql } from "./inboxCampaignFilter.js";
 
 export const WORK_STATES = ["esperam", "com_lead", "robo", "esfriaram"];
 export const AWAITING_WINDOW_DAYS = 7;
@@ -63,10 +64,12 @@ if (SQL_CANONICAL_FROM_DIGITS.includes("regexp_replace") || !SQL_CANONICAL_FROM_
  * respondido pelo chip B, ele foi respondido. Mensagem sem chip gravado não coloca a
  * conversa dentro de chip nenhum (o filtro antigo somava todas elas em qualquer chip).
  */
-export function buildWorkConvCte({ hasChipScope = false, pauseExpiredSql = "false" } = {}) {
-  const chipScope = hasChipScope
-    ? "WHERE canonical_phone IN (SELECT canonical_phone FROM pre_canonical WHERE instance_name = ANY($4))"
-    : "";
+export function buildWorkConvCte({ hasChipScope = false, pauseExpiredSql = "false", campaignIdx = null } = {}) {
+  // Escopo de campanha (inboxCampaignFilter.js): só conversas de quem recebeu a campanha. Soma com o de chip.
+  const scopes = [];
+  if (hasChipScope) scopes.push("canonical_phone IN (SELECT canonical_phone FROM pre_canonical WHERE instance_name = ANY($4))");
+  if (campaignIdx) scopes.push(`canonical_phone IN ${campaignPhonesSql(campaignIdx)}`);
+  const chipScope = scopes.length > 0 ? `WHERE ${scopes.join("\n        AND ")}` : "";
 
   return `
     msg AS (
@@ -167,11 +170,16 @@ export function workStateOrderSql(state) {
     : "w.effective_timestamp DESC NULLS LAST, w.id DESC";
 }
 
-function baseParams({ clientId, now, robotChips, chipAliases }) {
+function baseParams({ clientId, now, robotChips, chipAliases, campaignId = null }) {
   const params = [clientId, (now instanceof Date ? now : new Date(now || Date.now())).toISOString(), robotChips || []];
   const hasChipScope = Array.isArray(chipAliases) && chipAliases.length > 0;
   if (hasChipScope) params.push(chipAliases);
-  return { params, hasChipScope };
+  let campaignIdx = null;
+  if (campaignId) {
+    params.push(campaignId);
+    campaignIdx = params.length;
+  }
+  return { params, hasChipScope, campaignIdx };
 }
 
 /**
@@ -221,7 +229,7 @@ function arrivedNowRowsSql(leadsTable) {
     )`;
 }
 
-export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql = "false", arrivedNow = null } = {}) {
+export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql = "false", arrivedNow = null, campaignIdx = null } = {}) {
   const states = WORK_STATES.map(
     (state) => `count(*) FILTER (WHERE c.in_queue AND c.work_state = '${state}')::integer AS ${state}`
   ).join(",\n      ");
@@ -232,7 +240,7 @@ export function buildWorkStateCountsSql({ hasChipScope = false, pauseExpiredSql 
       ${arrivedNowRowsSql(arrivedNow.leadsTable || "leads")} AS arrived_now,`
     : "";
   return `
-    WITH ${buildWorkConvCte({ hasChipScope, pauseExpiredSql })}
+    WITH ${buildWorkConvCte({ hasChipScope, pauseExpiredSql, campaignIdx })}
     SELECT${arrived}
       ${states},
       count(*) FILTER (
@@ -293,9 +301,9 @@ export async function withStatementTimeout(pool, timeoutMs, fn) {
  * @param {(sql: string, params: any[]) => Promise<{rows: any[]}>} query
  * @returns {Promise<{work: Record<string, number>, waitingOverThreshold: number, groups: number, archived: number, personal: number, automations: number, paused: number}>}
  */
-export async function fetchInboxCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql, arrivedNow = null } = {}) {
-  const { params, hasChipScope } = baseParams({ clientId, now, robotChips, chipAliases });
-  const { rows } = await query(buildWorkStateCountsSql({ hasChipScope, pauseExpiredSql, arrivedNow }), params);
+export async function fetchInboxCounts(query, { clientId, now, robotChips, chipAliases, pauseExpiredSql, arrivedNow = null, campaignId = null } = {}) {
+  const { params, hasChipScope, campaignIdx } = baseParams({ clientId, now, robotChips, chipAliases, campaignId });
+  const { rows } = await query(buildWorkStateCountsSql({ hasChipScope, pauseExpiredSql, arrivedNow, campaignIdx }), params);
   const row = rows[0] || {};
   const int = (v) => Number(v) || 0;
   const extra = arrivedNow
@@ -327,10 +335,10 @@ export async function fetchWorkStateCounts(query, options = {}) {
  * SQL da página de um estado. Separado de fetchWorkStatePage para o mesmo texto servir à
  * rota e ao script de EXPLAIN que mede a consulta em produção.
  */
-export function buildWorkStatePageSql({ hasChipScope = false, pauseExpiredSql = "false", state, leadsTable = "leads", stateIdx, limitIdx, offsetIdx }) {
+export function buildWorkStatePageSql({ hasChipScope = false, pauseExpiredSql = "false", state, leadsTable = "leads", stateIdx, limitIdx, offsetIdx, campaignIdx = null }) {
   const order = workStateOrderSql(state);
   return `
-    WITH ${buildWorkConvCte({ hasChipScope, pauseExpiredSql })},
+    WITH ${buildWorkConvCte({ hasChipScope, pauseExpiredSql, campaignIdx })},
     page AS (
       SELECT w.*
       FROM work_conv w
@@ -394,16 +402,16 @@ export function buildWorkStatePageSql({ hasChipScope = false, pauseExpiredSql = 
  */
 export async function fetchWorkStatePage(
   query,
-  { clientId, state, now, robotChips, chipAliases, pauseExpiredSql, limit = 40, offset = 0, leadsTable = "leads" } = {}
+  { clientId, state, now, robotChips, chipAliases, pauseExpiredSql, limit = 40, offset = 0, leadsTable = "leads", campaignId = null } = {}
 ) {
   if (!isWorkStateTab(state)) throw new Error(`Estado de trabalho desconhecido: ${state}`);
-  const { params, hasChipScope } = baseParams({ clientId, now, robotChips, chipAliases });
+  const { params, hasChipScope, campaignIdx } = baseParams({ clientId, now, robotChips, chipAliases, campaignId });
   params.push(state, limit, offset);
   const stateIdx = params.length - 2;
   const limitIdx = params.length - 1;
   const offsetIdx = params.length;
 
-  const sql = buildWorkStatePageSql({ hasChipScope, pauseExpiredSql, state, leadsTable, stateIdx, limitIdx, offsetIdx });
+  const sql = buildWorkStatePageSql({ hasChipScope, pauseExpiredSql, state, leadsTable, stateIdx, limitIdx, offsetIdx, campaignIdx });
   const { rows } = await query(sql, params);
   return rows;
 }

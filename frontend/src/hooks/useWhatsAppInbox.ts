@@ -226,23 +226,53 @@ export async function fetchWithTimeout(
   }
 }
 
+export interface InboxCampaignOption {
+  id: string;
+  name: string;
+  /** Quantos números receberam a campanha. */
+  sent: number;
+  lastSentAt: string | null;
+}
+
+/** Campanhas da empresa que já mandaram mensagem, mais recente primeiro (filtro "Campanha" da coluna). */
+export function useInboxCampaigns(clientId: string | null, enabled = true) {
+  const { getIdToken } = useAuth();
+  return useQuery({
+    queryKey: ["whatsapp-chats-campaigns", clientId],
+    enabled: enabled && !!clientId,
+    staleTime: 60_000,
+    queryFn: async (): Promise<InboxCampaignOption[]> => {
+      const token = await getIdToken();
+      if (!token) throw new Error("Usuario nao autenticado.");
+      const params = new URLSearchParams({ clientId: String(clientId) });
+      const res = await fetch(`${API_BASE_URL}/api/whatsapp/chats/campaigns?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = await parseApiResponse<{ items: InboxCampaignOption[] }>(res);
+      return Array.isArray(payload?.items) ? payload.items : [];
+    },
+  });
+}
+
 export function useWhatsAppChats(
   clientId: string | null,
   instanceName: string | null,
   enabled: boolean,
-  options?: { tab?: string; search?: string }
+  options?: { tab?: string; search?: string; campaignId?: string | null }
 ) {
   const { getIdToken } = useAuth();
   const isVisible = useDocumentVisibility();
   const [olderPagesEnabled, setOlderPagesEnabled] = useState(false);
   const tab = options?.tab || "ativa";
   const search = options?.search || "";
+  // Filtro "Campanha": só conversas de quem recebeu aquela campanha (o servidor decide quem é).
+  const campaignId = options?.campaignId || null;
 
   useEffect(() => {
     if (!enabled) {
       setOlderPagesEnabled(false);
     }
-  }, [enabled, tab, search]);
+  }, [enabled, tab, search, campaignId]);
 
   const fetchChatsPage = async (offset: number, signal?: AbortSignal): Promise<WhatsAppChatsPage> => {
     const token = await getIdToken();
@@ -268,6 +298,10 @@ export function useWhatsAppChats(
       params.append("search", search.trim());
     }
 
+    if (campaignId) {
+      params.append("campaignId", campaignId);
+    }
+
     // O sinal vem do React Query: trocar de aba, de chip ou de empresa, ou sair da tela, CANCELA
     // o pedido anterior em vez de deixá-lo rodando atrás do novo.
     const res = await fetchWithTimeout(
@@ -285,7 +319,7 @@ export function useWhatsAppChats(
     !(err instanceof ChatsRequestTimeoutError) && failureCount < 1;
 
   const recentChatsQuery = useQuery({
-    queryKey: ["whatsapp-chats", clientId, instanceName, tab, search, "recent"],
+    queryKey: ["whatsapp-chats", clientId, instanceName, tab, search, campaignId, "recent"],
     enabled: enabled && !!clientId,
     queryFn: async ({ signal }) => fetchChatsPage(0, signal),
     retry: retryChats,
@@ -295,7 +329,7 @@ export function useWhatsAppChats(
   });
 
   const olderChatsQuery = useInfiniteQuery({
-    queryKey: ["whatsapp-chats", clientId, instanceName, tab, search, "older"],
+    queryKey: ["whatsapp-chats", clientId, instanceName, tab, search, campaignId, "older"],
     enabled: enabled && olderPagesEnabled && !!clientId,
     initialPageParam: 40,
     queryFn: async ({ pageParam, signal }) => fetchChatsPage(pageParam, signal),
