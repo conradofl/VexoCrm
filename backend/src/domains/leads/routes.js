@@ -7,7 +7,8 @@
 // inline). Rotas de n8n-settings e evolution-instances de lead-clients continuam em
 // registerAllDomainRoutes.js (domínio integrations).
 
-import { registerCampaignAgentLeadImportRoute } from "../../campaign/agentDraft.js";
+import { registerCampaignAgentLeadBatchRoutes, registerCampaignAgentLeadImportRoute } from "../../campaign/agentDraft.js";
+import { registerLeadBatchSeparationRoutes } from "./batchSeparationRoutes.js";
 import {
   checkLeadClientTableStatus as checkDynamicLeadClientTableStatus,
   ensureLeadClientTable as ensureDynamicLeadClientTable,
@@ -3886,6 +3887,9 @@ export function registerLeadsRoutes(app, deps) {
   }
   // Agente que monta campanha: mesma importação, com a empresa presa à do token (campaign/agentDraft.js).
   registerCampaignAgentLeadImportRoute(app, { handleCreateLeadImport });
+  // Separar lotes e conferir WhatsApp no Banco de Dados (services/leadBatchSeparation.js); o agente separa pelo token.
+  registerLeadBatchSeparationRoutes(app, { pgDatabasePool, requireFirebaseAuth, requireBancoDeDados, resolveAuthorizedClientId, sendError, normalizeTenantKey });
+  registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool });
 
   // ── Importação em lotes (sem teto de linhas): abrir → enviar lotes → fechar. Ver services/leadImportBatches.js ──────────
   const respondImportError = (res, error, label) => {
