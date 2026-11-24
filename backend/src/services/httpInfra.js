@@ -5,8 +5,6 @@
 // porque depende de getLeadClientN8nSettings (grupo F, ainda não extraído — Run D).
 // Movê-la criaria um novo ciclo server.js <-> httpInfra.js. Mover junto quando F for extraído.
 //
-// validateConversationMemoryPayload + MAX_CONVERSATION_BYTES vivem em ./leadImport.js
-// (dependem de sanitizePhone; mantém o grafo de imports acíclico).
 
 import { supabase, useDirectPostgres } from "./database.js";
 import { normalizeString } from "../textNormalize.js";
@@ -145,24 +143,6 @@ export function isValidBase64(value) {
 export function isMaskedSecretPlaceholder(value) {
   const text = normalizeString(value);
   return Boolean(text) && /^[*•]+$/.test(text);
-}
-
-/** Bearer das rotas chamadas pelo n8n (conversation-memory*, n8n-error-webhook). Só vem de N8N_WEBHOOK_SECRET: o valor
- * padrão antigo estava no repositório público. Sem a variável, devolve null e as rotas recusam tudo (401). */
-export function getN8nWebhookBearerSecret() {
-  return normalizeString(process.env.N8N_WEBHOOK_SECRET);
-}
-
-export function requireN8nWebhookSecret(req, res, next) {
-  const authHeader = req.headers.authorization;
-  const expectedSecret = getN8nWebhookBearerSecret();
-
-  if (!expectedSecret || !authHeader || authHeader !== `Bearer ${expectedSecret}`) {
-    sendError(res, 401, "UNAUTHORIZED", "Unauthorized");
-    return;
-  }
-
-  next();
 }
 
 /** Keep /health fast so Docker HEALTHCHECK does not kill the container when Postgres is slow or unreachable. */

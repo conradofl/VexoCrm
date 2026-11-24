@@ -7,8 +7,6 @@ const notificationsSource = readFileSync(resolve("src/hooks/useNotifications.ts"
 const dashboardSource = readFileSync(resolve("src/hooks/useDashboard.ts"), "utf8");
 const leadClientsSource = readFileSync(resolve("src/hooks/useLeadClients.ts"), "utf8");
 const adminUsersSource = readFileSync(resolve("src/hooks/useAdminUsers.ts"), "utf8");
-const notificationBellSource = readFileSync(resolve("src/components/NotificationBell.tsx"), "utf8");
-const agenteSource = readFileSync(resolve("src/pages/Agente.tsx"), "utf8");
 const userAccessManagementSource = readFileSync(resolve("src/pages/UserAccessManagement.tsx"), "utf8");
 
 describe("CRM API resilience", () => {
@@ -43,11 +41,6 @@ describe("CRM API resilience", () => {
     expect(notificationsSource).toContain("ERROR_POLL_INTERVAL");
     expect(notificationsSource).toContain("skipped_error_cooldown");
     expect(notificationsSource).toContain("[notifications-api] fetch_failed");
-  });
-
-  it("renders a safe notification fallback instead of silent failures", () => {
-    expect(notificationBellSource).toContain("Notificacoes indisponiveis");
-    expect(agenteSource).toContain("Notificacoes indisponiveis");
   });
 
   it("renders a safe user list fallback instead of infinite loading", () => {

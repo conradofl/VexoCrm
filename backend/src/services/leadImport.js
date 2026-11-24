@@ -5,49 +5,16 @@
 // sanitizePhone é consumida também pelo grupo D (campaign engine) e pelo G (analytics.js),
 // que importam daqui.
 
-import { gunzipSync } from "zlib";
 import { normalizeString } from "../textNormalize.js";
-import { sendError, ensureDb, getRequestBearerToken, normalizeBool, normalizeIsoDate, isValidBase64 } from "./httpInfra.js";
+import { sendError, ensureDb, normalizeBool, normalizeIsoDate } from "./httpInfra.js";
 import { supabase } from "./database.js";
 import { leadsTableName } from "./tenant.js";
 
 // ---------------------------------------------------------------------------
-// Webhook estilo Edge `lead-webhook` + validação de import do chat outlier
+// Validação de import do chat outlier
 // ---------------------------------------------------------------------------
-// - sanitizePhoneLeadWebhookStyle / Bearer: paridade com a Edge (telefone só dígitos; sem expandir +55).
 // - validateLeadsOutlierRecord: monta uma linha para INSERT em `public.leads_outlier` a partir do JSON do outro chat.
 // ---------------------------------------------------------------------------
-
-/** Telefone só com dígitos — alinhado à Edge `lead-webhook` (sem normalização BR tipo +55). */
-export function sanitizePhoneLeadWebhookStyle(value) {
-  const normalized = normalizeString(value);
-  if (!normalized) return null;
-  const digits = normalized.replace(/\D/g, "");
-  return digits || null;
-}
-
-/** Segredo Bearer do POST /api/lead-webhook. Só vem de LEAD_WEBHOOK_BEARER_TOKEN: o valor padrão antigo estava no
- * repositório público. Sem a variável, devolve null e a rota recusa tudo (401). */
-export function getLeadWebhookBearerSecret() {
-  return normalizeString(process.env.LEAD_WEBHOOK_BEARER_TOKEN);
-}
-
-/** Resposta JSON no mesmo estilo da Edge (sem cache no browser/proxy). */
-export function sendLeadWebhookEdgeStyle(res, status, payload) {
-  res.set("Cache-Control", "no-store");
-  res.status(status).json(payload);
-}
-
-/** Confere Authorization: Bearer contra LEAD_WEBHOOK_BEARER_TOKEN. */
-export function validateLeadWebhookBearer(req, res) {
-  const token = getRequestBearerToken(req);
-  const expected = getLeadWebhookBearerSecret();
-  if (!expected || !token || token !== expected) {
-    sendLeadWebhookEdgeStyle(res, 401, { success: false, error: "Unauthorized" });
-    return false;
-  }
-  return true;
-}
 
 /** Valores permitidos de `status_conversa` para `leads_outlier` (import do chat outlier). */
 export const LEADS_OUTLIER_STATUS_CONVERSA = new Set(["aguardando_usuario", "em_atendimento", "finalizado"]);
@@ -850,94 +817,4 @@ export function buildImportPreview(items) {
     imported: item.imported,
     skipReason: item.skipReason,
   }));
-}
-
-// ---------------------------------------------------------------------------
-// Payload de memória de conversa (POST /api/conversation-memory)
-// ---------------------------------------------------------------------------
-
-/** Max decompressed conversation size for POST /api/conversation-memory (after gzip decode). */
-export const MAX_CONVERSATION_BYTES = 5 * 1024 * 1024;
-
-export function validateConversationMemoryPayload(req, res, next) {
-  const body = req.body || {};
-  const telefone = sanitizePhone(body.telefone);
-  const conversationCompressed = normalizeString(body.conversation_compressed);
-  const tamanhoOriginal = body.tamanho_original;
-  const timestamp = normalizeString(body.timestamp);
-
-  if (!telefone || !conversationCompressed || tamanhoOriginal === undefined || !timestamp) {
-    sendError(
-      res,
-      400,
-      "INVALID_BODY",
-      "Missing required fields: telefone, conversation_compressed, tamanho_original, timestamp"
-    );
-    return;
-  }
-
-  if (!Number.isInteger(tamanhoOriginal) || tamanhoOriginal <= 0) {
-    sendError(res, 400, "INVALID_BODY", "tamanho_original must be a positive integer");
-    return;
-  }
-
-  if (!isValidBase64(conversationCompressed)) {
-    sendError(res, 400, "INVALID_BODY", "conversation_compressed must be valid base64");
-    return;
-  }
-
-  const parsedTimestamp = new Date(timestamp);
-  if (Number.isNaN(parsedTimestamp.getTime())) {
-    sendError(res, 400, "INVALID_BODY", "timestamp must be a valid ISO date");
-    return;
-  }
-
-  let compressedBuffer;
-  let decompressedBuffer;
-
-  try {
-    compressedBuffer = Buffer.from(conversationCompressed, "base64");
-    if (compressedBuffer.length === 0) {
-      sendError(res, 400, "INVALID_BODY", "conversation_compressed must decode to non-empty bytes");
-      return;
-    }
-    decompressedBuffer = gunzipSync(compressedBuffer);
-  } catch (error) {
-    console.error("conversation memory validation failed:", {
-      event: "conversation_memory_validation_failed",
-      reason: "invalid_gzip_or_base64",
-      message: error instanceof Error ? error.message : String(error),
-    });
-    sendError(res, 400, "INVALID_BODY", "conversation_compressed must be valid gzip+base64");
-    return;
-  }
-
-  if (decompressedBuffer.length > MAX_CONVERSATION_BYTES) {
-    sendError(
-      res,
-      413,
-      "PAYLOAD_TOO_LARGE",
-      "Decompressed conversation exceeds 5MB limit"
-    );
-    return;
-  }
-
-  if (decompressedBuffer.length !== tamanhoOriginal) {
-    sendError(
-      res,
-      400,
-      "INVALID_BODY",
-      "tamanho_original does not match decompressed conversation size"
-    );
-    return;
-  }
-
-  req.conversationMemory = {
-    telefone,
-    conversationCompressed,
-    tamanhoOriginal,
-    timestamp: parsedTimestamp.toISOString(),
-  };
-
-  next();
 }
