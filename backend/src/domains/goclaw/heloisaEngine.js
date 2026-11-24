@@ -521,13 +521,13 @@ export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantI
  */
 export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
   try {
-    const url = `${(baseUrl || "https://vexo-evolution-api.xdvm8y.easypanel.host").replace(/\/+$/, "")}/instance/fetchInstances`;
+    const url = `${(baseUrl || "").replace(/\/+$/, "")}/instance/fetchInstances`;
     const key =
       apiKey ||
       process.env.EVOLUTION_API_KEY ||
       process.env.GD_EVOLUTION_API_TOKEN ||
       process.env.GD_EVOLUTION_TOKEN ||
-      "429683C4C977415CAAFCCE10F7D57E11";
+      "";
 
     const headers = {
       Accept: "application/json",
@@ -604,10 +604,10 @@ export async function enviarMensagemWhatsAppComFallback({
   }
   const defaultBaseUrl =
     (process.env.EVOLUTION_API_URL || "").trim().replace(/\/+$/, "") ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+    "";
   const defaultApiKey =
     process.env.EVOLUTION_API_KEY ||
-    "429683C4C977415CAAFCCE10F7D57E11";
+    "";
 
   const candidateMap = new Map();
 
