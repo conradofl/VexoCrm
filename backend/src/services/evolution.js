@@ -23,6 +23,7 @@ import { registerSystemSentMessageId } from "./systemSentMessages.js";
 import { pgDatabasePool } from "./database.js";
 import { normalizeString } from "../textNormalize.js";
 import { normalizeTenantKey, normalizeHttpUrl } from "./tenant.js";
+import { toWhatsappNumberBr } from "./canonicalPhone.js";
 import { isMaskedSecretPlaceholder } from "./httpInfra.js";
 import { upsertLeadByPhone } from "./leadUpsert.js";
 import { ensureEvolutionInstanceDailyUsageTable } from "./chipQuota.js";
@@ -2373,6 +2374,48 @@ export async function sendTextMessageViaEvolution({
       waMessageId: null,
       raw: resText,
     };
+  }
+}
+
+/**
+ * Envio de texto para quem guarda a Evolution como UMA URL (env GD_EVOLUTION_URL ou
+ * dispatch_webhook_url), com ou sem "/message/sendText/<instância>" no fim, e chave própria.
+ * Era o fetch cru copiado na GD e no jurídico; agora passa por sendTextMessageViaEvolution
+ * (guarda de teste, registro do id enviado e master key de reserva no 401/403).
+ *
+ * - O número vai como veio quando é JID de grupo ("...@g.us"); senão vira dígitos com 55
+ *   (toWhatsappNumberBr), como antes.
+ * - Devolve "sent", "not_configured", "failed_<status HTTP>" ou "failed_network" (nunca lança),
+ *   que é o que as telas da GD já mostram.
+ */
+export async function sendTextViaEvolutionUrl({ url, apiKey, instance = null, number, text, delay = 1200 }) {
+  if (!url || !apiKey || !number) return "not_configured";
+  let base = String(url).trim().replace(/\/+$/, "");
+  let instanceName = instance || null;
+  const marker = "/message/sendText";
+  const idx = base.indexOf(marker);
+  if (idx >= 0) {
+    const fromUrl = base.slice(idx + marker.length).replace(/^\/+/, "").split("/")[0];
+    if (fromUrl) instanceName = decodeURIComponent(fromUrl);
+    base = base.slice(0, idx);
+  }
+  if (!instanceName) return "not_configured";
+  const target = String(number).toLowerCase().endsWith("@g.us") ? String(number) : toWhatsappNumberBr(number);
+  if (!target) return "not_configured";
+  try {
+    await sendTextMessageViaEvolution({
+      instanceName,
+      number: target,
+      text,
+      webhookToken: apiKey,
+      baseUrl: base,
+      delay,
+    });
+    return "sent";
+  } catch (err) {
+    const status = String(err?.message || "").match(/^Evolution HTTP (\d{3})/)?.[1];
+    console.error("[sendTextViaEvolutionUrl] falha:", err?.message || err);
+    return status ? `failed_${status}` : "failed_network";
   }
 }
 
