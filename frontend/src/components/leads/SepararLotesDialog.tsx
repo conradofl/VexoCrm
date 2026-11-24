@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Layers, Loader2, PhoneOff, ShieldCheck, Square, Users } from "lucide-react";
+import { CheckCircle2, Download, Layers, Loader2, PhoneOff, ShieldCheck, Square, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,20 @@ export interface PreviaLotes {
   ja_separado: number;
   disponivel_confirmado: number;
   disponivel_sem_conferir: number;
+  inutil_sem_whatsapp?: number;
+  inutil_fixo_nao_conferido?: number;
+  inutil_invalido?: number;
 }
+
+/** Prévia da exclusão em massa com o critério "inutilizaveis" (backend: services/leadMassDelete.js). */
+interface PreviaLimpeza {
+  willDelete: number;
+  kept: number;
+  keptReasons?: { withMessages?: number };
+  confirmation?: { typedRequired?: boolean; threshold?: number };
+}
+
+const CRITERIO_LIMPEZA = { type: "inutilizaveis" } as const;
 
 export interface ConferenciaStatus {
   rodando: boolean;
@@ -107,6 +120,11 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
   const [exigirWhatsapp, setExigirWhatsapp] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [criadas, setCriadas] = useState<PlanilhaCriada[] | null>(null);
+  const [limpeza, setLimpeza] = useState<PreviaLimpeza | null>(null);
+  const [confirmandoLimpeza, setConfirmandoLimpeza] = useState(false);
+  const [numeroDigitado, setNumeroDigitado] = useState("");
+  const [apagando, setApagando] = useState(false);
+  const [apagados, setApagados] = useState<number | null>(null);
 
   const chipsConectados = useMemo(
     () => chips.filter((c) => !c.connection_state || c.connection_state === "open"),
@@ -134,6 +152,15 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
       const dados = await chamar(`/api/leads/lotes/previa?clientId=${encodeURIComponent(clientId)}`);
       setPrevia(dados.previa);
       setConferencia(dados.conferencia || { rodando: false });
+      try {
+        const vista = await chamar("/api/leads/mass-delete/preview", {
+          method: "POST",
+          body: JSON.stringify({ clientId, criterion: CRITERIO_LIMPEZA, options: {} }),
+        });
+        setLimpeza(vista.preview || null);
+      } catch {
+        setLimpeza(null);
+      }
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha ao carregar a base");
     } finally {
@@ -144,6 +171,9 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
   useEffect(() => {
     if (!open) return;
     setCriadas(null);
+    setConfirmandoLimpeza(false);
+    setNumeroDigitado("");
+    setApagados(null);
     void carregar();
   }, [open, carregar]);
 
@@ -202,6 +232,54 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
       setErro(e instanceof Error ? e.message : "Falha ao separar os lotes");
     } finally {
       setEnviando(false);
+    }
+  };
+
+  const baixarListaLimpeza = async () => {
+    setErro(null);
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`${API_BASE_URL}/api/leads/mass-delete/export`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, criterion: CRITERIO_LIMPEZA, options: {} }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res, "Não foi possível baixar a lista"));
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `numeros-que-nao-servem-${clientId}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao baixar a lista");
+    }
+  };
+
+  const apagarInutilizaveis = async () => {
+    if (!limpeza) return;
+    setErro(null);
+    setApagando(true);
+    try {
+      const dados = await chamar("/api/leads/mass-delete/execute", {
+        method: "POST",
+        body: JSON.stringify({
+          clientId,
+          criterion: CRITERIO_LIMPEZA,
+          options: {},
+          expectedCount: limpeza.willDelete,
+          confirmation: numeroDigitado || undefined,
+        }),
+      });
+      setApagados(Number(dados?.report?.deleted ?? 0));
+      setConfirmandoLimpeza(false);
+      setNumeroDigitado("");
+      onSeparated?.();
+      void carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Falha ao apagar");
+    } finally {
+      setApagando(false);
     }
   };
 
@@ -372,6 +450,92 @@ export function SepararLotesDialog({ open, onOpenChange, clientId, chips, onSepa
                 </p>
               </section>
             )}
+
+            <section className="space-y-2 rounded-lg border border-border p-3" data-testid="limpeza-secao">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Trash2 className="h-4 w-4 text-destructive" />
+                Limpar números que não servem
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Sem WhatsApp (já conferido): <strong>{fmt(previa.inutil_sem_whatsapp)}</strong> · Fixo ainda não conferido:{" "}
+                <strong>{fmt(previa.inutil_fixo_nao_conferido)}</strong> · Número inválido: <strong>{fmt(previa.inutil_invalido)}</strong>.
+                Opt-out nunca é apagado.
+              </p>
+              {(previa.inutil_fixo_nao_conferido || 0) > 0 && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  Alguns fixos têm WhatsApp Business. Se quiser salvar esses, confira os números antes de apagar.
+                </p>
+              )}
+              {apagados !== null && (
+                <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400" data-testid="limpeza-feita">
+                  {fmt(apagados)} lead(s) apagado(s) da base.
+                </p>
+              )}
+              {limpeza && limpeza.willDelete > 0 ? (
+                <>
+                  <p className="text-xs" data-testid="limpeza-resumo">
+                    Vai apagar <strong>{fmt(limpeza.willDelete)}</strong> lead(s) de vez.
+                    {limpeza.kept === 1 ? " 1 fica porque já conversou com a empresa." : limpeza.kept > 1 ? ` ${fmt(limpeza.kept)} ficam porque já conversaram com a empresa.` : ""}
+                  </p>
+                  {!confirmandoLimpeza ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={baixarListaLimpeza} className="h-8 gap-1.5 text-xs">
+                        <Download className="h-3.5 w-3.5" /> Baixar a lista antes
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setConfirmandoLimpeza(true)}
+                        className="h-8 gap-1.5 border-destructive/50 text-xs text-destructive hover:bg-destructive/10"
+                        data-testid="btn-limpar"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Apagar {fmt(limpeza.willDelete)} números
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-2.5" data-testid="limpeza-confirmar">
+                      <p className="text-xs font-semibold text-destructive">
+                        Isso apaga {fmt(limpeza.willDelete)} lead(s) de vez. Não dá para desfazer, só reimportando a lista baixada.
+                      </p>
+                      {limpeza.confirmation?.typedRequired && (
+                        <div className="space-y-1">
+                          <Label htmlFor="limpeza-numero" className="text-xs">
+                            Digite {limpeza.willDelete} para confirmar
+                          </Label>
+                          <Input
+                            id="limpeza-numero"
+                            inputMode="numeric"
+                            value={numeroDigitado}
+                            onChange={(e) => setNumeroDigitado(e.target.value.replace(/\D/g, ""))}
+                            className="h-8"
+                          />
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setConfirmandoLimpeza(false)} className="h-8 text-xs" disabled={apagando}>
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={apagarInutilizaveis}
+                          disabled={apagando || (Boolean(limpeza.confirmation?.typedRequired) && numeroDigitado !== String(limpeza.willDelete))}
+                          className="h-8 gap-1.5 text-xs"
+                          data-testid="btn-limpar-confirmar"
+                        >
+                          {apagando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                          Apagar de vez
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground" data-testid="limpeza-vazia">
+                  {limpeza ? "Nada para limpar: todos os números da base servem." : "Não foi possível calcular a limpeza agora."}
+                </p>
+              )}
+            </section>
 
             {previa.fixo > 0 && (
               <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
