@@ -12,19 +12,20 @@ import {
   Clock3,
   Hourglass,
   ListChecks,
+  Megaphone,
   Phone,
   Search,
   Send,
   ShieldAlert,
   SlidersHorizontal,
   UserX,
-  Users, MessageSquarePlus } from "lucide-react";
+  Users, MessageSquarePlus, X } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { formatWaitLabel, formatWaitTime, waitUrgency, type WaitUrgency } from "@/lib/inbox/waitTime";
-import type { ChipAgentInfo, WorkStateCounts } from "@/hooks/useWhatsAppInbox";
+import type { ChipAgentInfo, InboxCampaignOption, WorkStateCounts } from "@/hooks/useWhatsAppInbox";
 
 export type InboxTab =
   | "esperam"
@@ -158,6 +159,9 @@ export function InboxSearchRow({
   chipOptions,
   chipAgents,
   onChipChange,
+  campaignValue = null,
+  campaignOptions = [],
+  onCampaignChange,
   otherLists,
   activeTab,
   onTabChange,
@@ -171,6 +175,10 @@ export function InboxSearchRow({
   chipOptions: ChipOption[];
   chipAgents: Record<string, ChipAgentInfo>;
   onChipChange: (value: string | null) => void;
+  /** Filtro "Campanha": id da campanha escolhida (null = todas). Sem onCampaignChange, o seletor não aparece. */
+  campaignValue?: string | null;
+  campaignOptions?: InboxCampaignOption[];
+  onCampaignChange?: (value: string | null) => void;
   otherLists: FooterFilter[];
   activeTab: InboxTab;
   onTabChange: (tab: InboxTab) => void;
@@ -178,7 +186,7 @@ export function InboxSearchRow({
   onNewConversation?: () => void;
 }) {
   const agentText = chipValue ? describeChipAgent(chipAgents[chipValue.toLowerCase()] ?? chipAgents[chipValue]) : "";
-  const hasFilter = Boolean(chipValue) || otherLists.some((f) => f.key === activeTab);
+  const hasFilter = Boolean(chipValue) || Boolean(campaignValue) || otherLists.some((f) => f.key === activeTab);
 
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-4 pb-3 pt-4">
@@ -252,6 +260,33 @@ export function InboxSearchRow({
             )}
           </div>
 
+          {onCampaignChange && (
+            <div className="space-y-1.5" data-testid="inbox-campaign-scope">
+              <label htmlFor="inbox-campaign-scope-trigger" className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Campanha
+              </label>
+              <Select value={campaignValue || "all"} onValueChange={(val) => onCampaignChange(val === "all" ? null : val)}>
+                <SelectTrigger id="inbox-campaign-scope-trigger" className="h-9 w-full rounded-lg text-xs" data-testid="inbox-campaign-trigger">
+                  <SelectValue placeholder="Todas as conversas" />
+                </SelectTrigger>
+                {/* Nome de campanha é comprido: a lista fica na largura do campo e o nome quebra linha (no celular passava da borda). */}
+                <SelectContent position="popper" className="max-h-[320px] w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-2rem)]">
+                  <SelectItem value="all">Todas as conversas</SelectItem>
+                  {campaignOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id} className="whitespace-normal break-words py-2 text-xs leading-snug">
+                      {opt.name} · {opt.sent} {opt.sent === 1 ? "recebeu" : "receberam"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {campaignOptions.length === 0
+                  ? "Nenhuma campanha enviou mensagem ainda."
+                  : "Mostra só as conversas de quem recebeu a campanha."}
+              </p>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Outras listas</p>
             <div className="flex flex-wrap gap-1.5">
@@ -288,6 +323,50 @@ export function InboxSearchRow({
           </div>
         </PopoverContent>
       </Popover>
+    </div>
+  );
+}
+
+/**
+ * Faixa do filtro "Campanha" ativo: diz qual campanha está filtrando e tira o filtro com um toque.
+ * Sem ela, a lista filtrada parecia a lista inteira com menos gente.
+ */
+export function InboxCampaignFilterBar({
+  name,
+  sent,
+  onEdit,
+  onClear,
+}: {
+  name: string;
+  sent?: number | null;
+  onEdit: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div
+      className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs dark:border-indigo-500/40 dark:bg-indigo-500/10"
+      data-testid="inbox-campaign-filter-bar"
+    >
+      <Megaphone className="h-3.5 w-3.5 shrink-0 text-indigo-600 dark:text-indigo-300" aria-hidden="true" />
+      <button
+        type="button"
+        onClick={onEdit}
+        title="Trocar a campanha"
+        className="min-w-0 flex-1 cursor-pointer truncate text-left font-semibold text-indigo-700 hover:underline dark:text-indigo-200"
+      >
+        Campanha: {name}
+        {typeof sent === "number" && <span className="font-normal text-indigo-600/80 dark:text-indigo-300/80"> · {sent} {sent === 1 ? "recebeu" : "receberam"}</span>}
+      </button>
+      <button
+        type="button"
+        onClick={onClear}
+        aria-label="Tirar o filtro de campanha"
+        title="Tirar o filtro de campanha"
+        data-testid="inbox-campaign-filter-clear"
+        className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-md text-indigo-600 hover:bg-indigo-100 dark:text-indigo-300 dark:hover:bg-indigo-500/20"
+      >
+        <X className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
     </div>
   );
 }
