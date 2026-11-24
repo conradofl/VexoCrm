@@ -242,14 +242,18 @@ export function useDeleteFupCompanyPermanently() {
   const { getIdToken } = useAuth();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async (payload: string | { id: string; force?: boolean }) => {
+      const id = typeof payload === "string" ? payload : payload.id;
+      const force = typeof payload === "object" ? Boolean(payload.force) : false;
       const token = await getIdToken();
       if (!token) throw new Error("Usuário não autenticado.");
-      const res = await fetchApi(`/api/followup/companies/${id}/permanent`, {
+      const url = `/api/followup/companies/${id}/permanent${force ? "?force=true" : ""}`;
+      const res = await fetchApi(url, {
         method: "DELETE",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: force ? JSON.stringify({ force: true }) : undefined,
       });
-      if (res.ok) return readApiJson<{ success: boolean }>(res, "excluir agente");
+      if (res.ok) return readApiJson<{ success: boolean; forced?: boolean }>(res, "excluir agente");
       if (res.status === 409) {
         const body = await res.clone().json().catch(() => null);
         if (body?.error?.code === "AGENT_HAS_DEPENDENTS") {
@@ -261,7 +265,10 @@ export function useDeleteFupCompanyPermanently() {
       }
       throw new Error(await readApiErrorMessage(res, "Erro ao excluir agente"));
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["fup-companies"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["fup-companies"] });
+      qc.invalidateQueries({ queryKey: ["archived-fup-companies"] });
+    },
   });
 }
 

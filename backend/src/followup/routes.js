@@ -667,11 +667,17 @@ function normalizeInstanceList(list, fallback) {
   router.delete("/companies/:id/permanent", requireFirebaseAuth, requireInternalPageAccess("planilhas"), async (req, res) => {
     const id = str(req.params.id);
     if (!id) return sendErr(res, 400, "MISSING_ID", "id inválido");
+    const force =
+      req.query?.force === "true" ||
+      req.query?.force === true ||
+      req.body?.force === true ||
+      req.body?.force === "true";
     try {
       const result = await deleteAgentPermanently({
         pool: getPool(),
         id,
         canAccessTenant: (tenantId) => hasTenantAccess(req, tenantId),
+        force,
       });
       if (result.status === "not_found") {
         return sendErr(res, 404, "NOT_FOUND", "Agente não encontrado");
@@ -689,8 +695,21 @@ function normalizeInstanceList(list, fallback) {
           },
         });
       }
-      console.log("[followup/routes] agente excluído definitivamente:", id, "tenant:", result.agent.tenant_id, "por:", req.user?.uid || "desconhecido");
-      return res.json({ success: true, deleted: { id: result.agent.id, name: result.agent.name } });
+      console.log(
+        "[followup/routes] agente excluído definitivamente:",
+        id,
+        "tenant:",
+        result.agent.tenant_id,
+        "forced:",
+        Boolean(result.forced),
+        "por:",
+        req.user?.uid || "desconhecido"
+      );
+      return res.json({
+        success: true,
+        deleted: { id: result.agent.id, name: result.agent.name },
+        ...(result.forced ? { forced: true } : {}),
+      });
     } catch (err) {
       return sendErr(res, 500, "COMPANY_DELETE_FAILED", err.message);
     }

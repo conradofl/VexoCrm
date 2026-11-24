@@ -907,7 +907,7 @@ export default function InboundAgentConfig() {
                         ? "Escolha um número para poder ligar este agente."
                         : "Se ligado, a IA responde automaticamente às mensagens recebidas nos números acima."}
                     </p>
-                    {numerosVinculados.length > 0 && tenantN8nSettings?.chatbot_enabled === false && (
+                    {inboundEnabled && numerosVinculados.length > 0 && tenantN8nSettings?.chatbot_enabled === false && (
                       <p className="text-xs text-amber-700 dark:text-amber-400">
                         O robô geral da empresa está desligado, mas este agente responderá normalmente por ter chip próprio.
                       </p>
@@ -1559,6 +1559,19 @@ function DeleteAgentPermanentlyButton({
     });
   };
 
+  const handleForceDelete = () => {
+    deleteMutation.mutate({ id: agent.id, force: true }, {
+      onSuccess: () => {
+        toast({ title: "Agente excluído", description: `"${agent.name}" e seus dados foram excluídos definitivamente.` });
+        handleOpenChange(false);
+        onGone();
+      },
+      onError: (err: any) => {
+        toast({ title: "Erro ao excluir", description: err?.message, variant: "destructive" });
+      },
+    });
+  };
+
   const handleArchiveInstead = () => {
     archiveMutation.mutate(agent.id, {
       onSuccess: () => {
@@ -1593,31 +1606,41 @@ function DeleteAgentPermanentlyButton({
         {refusal ? (
           <>
             <AlertDialogHeader>
-              <AlertDialogTitle>Não dá para excluir "{agent.name}"</AlertDialogTitle>
+              <AlertDialogTitle>Excluir "{agent.name}" com dados vinculados?</AlertDialogTitle>
               <AlertDialogDescription className="text-xs text-muted-foreground space-y-2">
                 <span className="block">
                   Este agente ainda carrega{" "}
                   <strong className="text-foreground">{describeAgentDependents(refusal) || "dados vinculados"}</strong>.
-                  Excluir apagaria isso junto, por isso o sistema recusa.
+                </span>
+                <span className="block text-amber-700 dark:text-amber-400 font-medium">
+                  Se você excluir definitivamente, o sistema desvinculará e apagará esses dados para liberar a exclusão do agente.
                 </span>
                 <span className="block">
                   {alreadyArchived
                     ? "Ele já está arquivado: continua fora da lista de agentes e nada é apagado."
-                    : "Você pode arquivar: o agente some da lista e nada é apagado."}
+                    : "Você também pode arquivar: o agente some da lista e nada é apagado."}
                 </span>
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="h-8 text-xs">Fechar</AlertDialogCancel>
+            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+              <AlertDialogCancel className="h-8 text-xs">Cancelar</AlertDialogCancel>
               {!alreadyArchived && (
-                <AlertDialogAction
+                <Button
+                  variant="outline"
                   onClick={(e) => { e.preventDefault(); handleArchiveInstead(); }}
-                  disabled={archiveMutation.isPending}
+                  disabled={archiveMutation.isPending || deleteMutation.isPending}
                   className="h-8 text-xs"
                 >
                   {archiveMutation.isPending ? "Arquivando..." : "Arquivar em vez disso"}
-                </AlertDialogAction>
+                </Button>
               )}
+              <AlertDialogAction
+                onClick={(e) => { e.preventDefault(); handleForceDelete(); }}
+                disabled={deleteMutation.isPending || archiveMutation.isPending}
+                className="h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white"
+              >
+                {deleteMutation.isPending ? "Excluindo..." : "Excluir mesmo assim"}
+              </AlertDialogAction>
             </AlertDialogFooter>
           </>
         ) : (

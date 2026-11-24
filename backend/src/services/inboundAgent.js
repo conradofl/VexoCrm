@@ -152,10 +152,12 @@ export async function resolveInboundAgentConfig({ supabase, clientId, instanceNa
   const isGenericRow = (row) => instancesOfRow(row).length === 0;
   const genericFallbackRow = data.length === 1 && isGenericRow(data[0]) ? data[0] : null;
 
-  const byInstance =
-    candidatas.find((row) => row.inbound_enabled === true) ||
-    candidatas[0] ||
-    genericFallbackRow;
+  // Se houver candidatas para este chip, ordena pela mais recente e respeita seu estado (enabled/disabled).
+  // NÃO busca outra candidata com enabled=true para não ignorar o desligamento do usuário!
+  const sortedCandidatas = [...candidatas].sort(
+    (a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+  );
+  const byInstance = sortedCandidatas[0] || genericFallbackRow;
   if (!byInstance) return null;
 
   return buildInboundAgentConfig(byInstance);

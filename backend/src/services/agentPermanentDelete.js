@@ -25,13 +25,12 @@ export async function listAgentReferences(client) {
             con.conname                                  AS constraint_name,
             con.confdeltype::text                        AS on_delete,
             array_length(con.conkey, 1)                  AS key_columns,
-            (SELECT quote_ident(att.attname)
-               FROM pg_attribute att
-              WHERE att.attrelid = con.conrelid
-                AND att.attnum = con.conkey[1])          AS quoted_column
+            att.attnotnull                               AS is_not_null,
+            quote_ident(att.attname)                     AS quoted_column
        FROM pg_constraint con
        JOIN pg_class cls ON cls.oid = con.conrelid
        JOIN pg_namespace ns ON ns.oid = cls.relnamespace
+       JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
       WHERE con.contype = 'f'
         AND con.confrelid = to_regclass('public.followup_companies')
       ORDER BY cls.relname, con.conname`
@@ -44,13 +43,14 @@ export async function listAgentReferences(client) {
  * @param {{ connect: Function }} args.pool
  * @param {string} args.id
  * @param {(tenantId: string|null) => boolean} args.canAccessTenant — escopo do usuário autenticado
+ * @param {boolean} [args.force=false] — se true, desvincula/apaga dependentes e conclui a exclusão
  * @returns {Promise<
  *   | { status: "not_found" }
  *   | { status: "has_dependents", agent: object, dependents: Array<{table: string, count: number, onDelete: string}> }
- *   | { status: "deleted", agent: object }
+ *   | { status: "deleted", agent: object, forced?: boolean }
  * >}
  */
-export async function deleteAgentPermanently({ pool, id, canAccessTenant }) {
+export async function deleteAgentPermanently({ pool, id, canAccessTenant, force = false }) {
   if (typeof canAccessTenant !== "function") {
     throw new Error("deleteAgentPermanently: canAccessTenant é obrigatório");
   }
@@ -102,13 +102,44 @@ export async function deleteAgentPermanently({ pool, id, canAccessTenant }) {
     }
 
     if (dependents.length > 0) {
-      await client.query("ROLLBACK");
-      return { status: "has_dependents", agent, dependents };
+      if (!force) {
+        await client.query("ROLLBACK");
+        return { status: "has_dependents", agent, dependents };
+      }
+
+      // Forçar exclusão: desvincula ou apaga dependentes para permitir exclusão limpa
+      // 1. Limpeza de agendamentos filhos se a tabela existir
+      const { rows: schCheck } = await client.query(
+        `SELECT to_regclass('followup_schedules') IS NOT NULL AS has_table`
+      );
+      if (schCheck[0]?.has_table) {
+        await client.query(
+          `DELETE FROM followup_schedules 
+            WHERE company_id = $1 
+               OR campaign_id IN (SELECT id FROM followup_campaigns WHERE company_id = $1)`,
+          [id]
+        );
+      }
+
+      // 2. Para cada referência descoberta no catálogo:
+      for (const ref of await listAgentReferences(client)) {
+        if (!ref.is_not_null && ref.on_delete === "n") {
+          await client.query(
+            `UPDATE ${ref.qualified_table} SET ${ref.quoted_column} = NULL WHERE ${ref.quoted_column} = $1`,
+            [id]
+          );
+        } else {
+          await client.query(
+            `DELETE FROM ${ref.qualified_table} WHERE ${ref.quoted_column} = $1`,
+            [id]
+          );
+        }
+      }
     }
 
     await client.query(`DELETE FROM public.followup_companies WHERE id = $1`, [id]);
     await client.query("COMMIT");
-    return { status: "deleted", agent };
+    return { status: "deleted", agent, forced: force && dependents.length > 0 };
   } catch (err) {
     await client.query("ROLLBACK").catch((rollbackErr) => {
       console.error("[agentPermanentDelete] rollback falhou:", rollbackErr?.message || rollbackErr);

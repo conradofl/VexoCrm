@@ -248,6 +248,20 @@ describe("Heloísa só atende e responde pelos chips da Geração Digital", () =
     expect(processarMensagemHeloisa.mock.calls[0][0]).toMatchObject({ phone: DIRETOR });
   });
 
+  it("chip comum da GD (sem ser a instância da Heloísa): 'ola' ou 'teste' de diretor NÃO aciona a Heloísa", async () => {
+    const t = setup({ tenant: "geracao-digital" });
+    const r = await t.webhook(mensagem({ clientId: "geracao-digital", text: "teste", instance: "geracao-digital-chip-comercial" }));
+    expect(processarMensagemHeloisa).not.toHaveBeenCalled();
+    expect(r?.handled).not.toBe("heloisa");
+  });
+
+  it("chip comum da GD: com prefixo 'Heloísa' de diretor ACIONA a Heloísa normalmente", async () => {
+    const t = setup({ tenant: "geracao-digital" });
+    const r = await t.webhook(mensagem({ clientId: "geracao-digital", text: "Heloísa, auditar campanhas", instance: "geracao-digital-chip-comercial" }));
+    expect(processarMensagemHeloisa).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ handled: "heloisa" });
+  });
+
   it("mensagem que a Heloísa atende também fica gravada e aparece em Conversas do chip da GD", async () => {
     const t = setup({ tenant: "geracao-digital" });
     await t.webhook(mensagem({ clientId: "geracao-digital", text: "Heloísa, cadastra o cliente novo", instance: "vexo-adm-vexo-atende" }));

@@ -102,10 +102,18 @@ describe("DELETE /companies/:id/permanent — exclusão definitiva de agente", (
     return rows[0].n;
   }
 
-  async function excluir(id, clientIds = [TENANT_A]) {
+  async function excluir(id, clientIds = [TENANT_A], options = {}) {
     const handler = getRouteHandler("/companies/:id/permanent", "delete");
     const res = fakeRes();
-    await handler({ params: { id }, authAccess: acessoDoTenant(clientIds) }, res);
+    await handler(
+      {
+        params: { id },
+        query: options.query || {},
+        body: options.body || {},
+        authAccess: acessoDoTenant(clientIds),
+      },
+      res
+    );
     return res;
   }
 
@@ -180,6 +188,30 @@ describe("DELETE /companies/:id/permanent — exclusão definitiva de agente", (
     expect(res.body.error.archived).toBe(true);
     expect(await contar("followup_companies", "id = $1", [AGENTE_COM_RESPOSTA])).toBe(1);
     expect(await contar("followup_replies")).toBe(1);
+  });
+
+  it("com force=true (via query ou body): exclui agente mesmo com campanhas e jornadas", async () => {
+    const res = await excluir(AGENTE_COM_CAMPANHA, [TENANT_A], { query: { force: "true" } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      success: true,
+      deleted: { id: AGENTE_COM_CAMPANHA, name: "Agente com campanha" },
+      forced: true,
+    });
+    expect(await contar("followup_companies", "id = $1", [AGENTE_COM_CAMPANHA])).toBe(0);
+    expect(await contar("followup_campaigns", "company_id = $1", [AGENTE_COM_CAMPANHA])).toBe(0);
+    expect(await contar("fup_journeys", "company_id = $1", [AGENTE_COM_CAMPANHA])).toBe(0);
+  });
+
+  it("com force=true: exclui agente com dependentes sem cascade (followup_replies e agendamentos)", async () => {
+    const res = await excluir(AGENTE_COM_RESPOSTA, [TENANT_A], { body: { force: true } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.forced).toBe(true);
+    expect(await contar("followup_companies", "id = $1", [AGENTE_COM_RESPOSTA])).toBe(0);
+    expect(await contar("followup_replies", "company_id = $1", [AGENTE_COM_RESPOSTA])).toBe(0);
   });
 
   it("agente de outro tenant: 404 (não 403) e continua existindo", async () => {

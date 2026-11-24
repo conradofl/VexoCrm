@@ -3424,26 +3424,36 @@ export function registerChatbotRoutes(app, deps) {
 
     // ── INTERCEPTADOR HELOÍSA (COPILOTO EXECUTIVO WHATSAPP) ──
     const isHeloisaTarget =
-      (instanceName && instanceName.toLowerCase().includes("heloisa")) ||
+      (instanceName && (
+        instanceName.toLowerCase().includes("heloisa") ||
+        instanceName.toLowerCase().includes("atende") ||
+        instanceName.toLowerCase() === "geracao-digital-teste-vexo"
+      )) ||
       req.query?.lane === "heloisa" ||
       req.query?.agent === "heloisa";
     const isDirector = (await isHeloisaAuthorizedSenderAsync(phone, pgDatabasePool)) || isHeloisaAuthorizedSender(phone);
     const hasHeloisaPrefix = /^(helo[ií]sa|[!\/]h)\b/i.test(messageData?.text || "");
     const isPersonal = isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName);
 
-    // Se o remetente for Diretor autorizado, intercepta 100% das mensagens (áudio ou texto)
-    // para a Heloísa, sem exigir prefixo "heloísa". Se for terceiro/lead, só se o alvo explícito for heloisa.
-    // Chips pessoais não são interceptados para manter comunicação humana livre de robôs.
-    // CONFIGURAÇÃO LIGA/DESLIGA: Se a Heloísa estiver desativada pelo administrador, não intercepta.
-    // A Heloísa só atende e responde pelos chips da Geração Digital (19/11/2026: o "teste 2" do Conrado para o chip da
-    // Container LED foi interceptado e respondido pelo chip do cliente). Em chip de outra empresa, mensagem de usuário
-    // autorizado segue o caminho normal: Conversas e os portões do agente daquela empresa.
+    // Heloísa só atende e responde pelos chips autorizados da GD / Vexo (EMPRESAS_DA_HELOISA).
+    // Na instância dedicada (vexo-adm-vexo-atende ou lane=heloisa), intercepta 100% das mensagens de diretor sem exigir prefixo.
+    // Em chip comum/comercial (ex: chip WhatsApp da GD ou Caio), SÓ intercepta se houver prefixo explícito ("Heloísa", "!h", "/h")
+    // para não sequestrar conversas humanas entre diretores nem testes de robôs desligados.
     const chipDaHeloisa = EMPRESAS_DA_HELOISA.has(String(clientId || "").toLowerCase());
-    if (reprocesso && !fromMe && !isPersonal && chipDaHeloisa && (isDirector || isHeloisaTarget)) {
+    const deveInterceptarHeloisa =
+      chipDaHeloisa &&
+      !fromMe &&
+      !isPersonal &&
+      (
+        (isHeloisaTarget && (isDirector || hasHeloisaPrefix)) ||
+        (!isHeloisaTarget && hasHeloisaPrefix && isDirector)
+      );
+
+    if (reprocesso && deveInterceptarHeloisa) {
       descartar("heloisa_fora_da_varredura", { clientId, phone: maskPhoneForLog(phone) });
       return;
     }
-    if (!fromMe && !isPersonal && chipDaHeloisa && (isDirector || isHeloisaTarget)) {
+    if (deveInterceptarHeloisa) {
       // Comando com mais de 30 min (fila solta pela Evolution depois de horas presa) não é executado: a Heloísa
       // marcaria reunião, cadastraria cliente ou cobraria em cima de um pedido velho. A mensagem já está gravada.
       const comandoAtrasado = mensagemAtrasada(messageData.messageTimestamp);
