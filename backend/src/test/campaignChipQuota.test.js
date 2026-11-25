@@ -525,7 +525,7 @@ describe("os outros dois chamadores de dispatchCampaignSequence: envio direto e 
       continueCampaignLeadFromReply: async () => {}, ensureDb: () => true, executeCampaignDispatch: async () => {},
       findCampaignReplyMatches: async () => [], getClientName: async () => "T",
       getLeadClientEvolutionInstances: async () => [outroChip(), chip],
-      getLeadClientN8nSettings: async () => ({}),
+      getLeadClientN8nSettings: async () => ({ send_window_enabled: false }),
       getRequestId: () => "req-1", getSafeDispatchSettingsLog: () => ({}), internalErrorPayloadDetails: () => ({}),
       isMissingSchemaError: () => false, isProduction: false, logCampaignReplyFlow: () => {}, logDirectDispatch: () => {},
       maskPhoneForLog: (p) => p, normalizeIsoDate: (d) => d, leadsTableName: "lead_import_items",
