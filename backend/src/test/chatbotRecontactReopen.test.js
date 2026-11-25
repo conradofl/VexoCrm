@@ -22,12 +22,12 @@ function makeSupabase({ leadRow }) {
     update: (payload) => {
       updates.push(payload);
       const chain = {
-        eq: () => chain,
+        eq: () => chain, in: () => chain,
         then: (resolve) => resolve({ error: null }),
       };
       return chain;
     },
-    eq: () => api,
+    eq: () => api, in: () => api,
     maybeSingle: () => Promise.resolve({ data: null }),
     single: () => Promise.resolve({ data: null }),
   };

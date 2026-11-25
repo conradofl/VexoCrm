@@ -88,6 +88,10 @@ function buildMockSupabase({ dynamicPrompt = PROMPT_PADRAO, campaignPrompt = PRO
                 order: () => ({
                   limit: () => Promise.resolve({ data: leadRow ? [leadRow] : [] }),
                 }),
+              }), in: () => ({
+                order: () => ({
+                  limit: () => Promise.resolve({ data: leadRow ? [leadRow] : [] }),
+                }),
               }),
             }),
           }),
@@ -115,7 +119,7 @@ function buildMockSupabase({ dynamicPrompt = PROMPT_PADRAO, campaignPrompt = PRO
 
       return {
         select: () => api,
-        eq: () => api,
+        eq: () => api, in: () => api,
         maybeSingle: () => Promise.resolve({ data: null }),
       };
     },

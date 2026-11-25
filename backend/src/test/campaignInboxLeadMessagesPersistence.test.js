@@ -20,6 +20,12 @@ describe("Persistência de Mensagens de Campanha e Chatbot no Inbox (lead_messag
                     maybeSingle: () => Promise.resolve({ data: { id: "lead-crm-123", source_campaign_id: "camp-001" }, error: null }),
                   }),
                 }),
+              }), in: () => ({
+                order: () => ({
+                  limit: () => ({
+                    maybeSingle: () => Promise.resolve({ data: { id: "lead-crm-123", source_campaign_id: "camp-001" }, error: null }),
+                  }),
+                }),
               }),
             }),
           }),
@@ -88,6 +94,19 @@ describe("Persistência de Mensagens de Campanha e Chatbot no Inbox (lead_messag
           select: () => ({
             eq: () => ({
               eq: () => ({
+                order: () => ({
+                  limit: () => Promise.resolve({
+                    data: [{
+                      id: "lead-crm-123",
+                      dados: {},
+                      historico: null,
+                      status_conversa: "em_atendimento",
+                      finalizado: false,
+                      updated_at: new Date().toISOString(),
+                    }],
+                  }),
+                }),
+              }), in: () => ({
                 order: () => ({
                   limit: () => Promise.resolve({
                     data: [{

@@ -61,6 +61,7 @@ import { isPhoneOptedOut } from "../services/optOut.js";
 import { buildQuotaGateForWebhook } from "../services/campaignQuotaGate.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
 import { evaluateReplySendGate } from "./sendGate.js";
+import { phoneSpellingsOf } from "../services/canonicalPhone.js";
 
 const { appendLeadMessage } = createLeadMessaging({
   supabase,
@@ -1382,7 +1383,7 @@ export async function updateLeadConversationState({
     .from(leadsTableName(clientId))
     .update(leadUpdatePayload)
     .eq("client_id", clientId)
-    .eq("telefone", phone);
+    .in("telefone", phoneSpellingsOf(phone));
 
   if (error && isMissingSchemaError(error)) {
     logCampaignReplyFlow("warn", "conversation_columns_missing_leads_fallback", {
@@ -2046,7 +2047,7 @@ export async function markCampaignLeadWaitingReply({
       .from("lead_import_items")
       .update(updatePayload)
       .eq("client_id", clientId)
-      .eq("telefone", phone);
+      .in("telefone", phoneSpellingsOf(phone));
     if (error) throw error;
   }
 
@@ -3618,13 +3619,13 @@ export async function hasCampaignLeadReplied({ clientId, lead, phone, dispatched
       .from("lead_import_items")
       .select("id, status_conversa, ultima_interacao_usuario")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .in("telefone", phoneSpellingsOf(phone))
       .limit(1),
     supabase
       .from(leadsTableName(clientId))
       .select("id, status_conversa, ultima_interacao_usuario")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .in("telefone", phoneSpellingsOf(phone))
       .limit(1),
   ];
 

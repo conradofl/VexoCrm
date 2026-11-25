@@ -1,3 +1,4 @@
+import { phoneSpellingsOf } from "./services/canonicalPhone.js";
 /**
  * Hardcoded Chatbot Engine
  * Fluxo de conversa fixo em código (estável), dados variáveis salvos incrementalmente em tempo real
@@ -74,7 +75,7 @@ async function getChatMemoryFromPostgres(phone, clientId) {
       .from(leadsTable(clientId))
       .select("*")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .in("telefone", phoneSpellingsOf(phone))
       .order("updated_at", { ascending: false })
       .limit(1);
 
@@ -124,7 +125,7 @@ export async function setChatMemory(phone, clientId, memory, ttlSeconds = 86400)
       .from(leadsTable(clientId))
       .select("id, mensagem")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .in("telefone", phoneSpellingsOf(phone))
       .order("created_at", { ascending: false })
       .limit(1);
 

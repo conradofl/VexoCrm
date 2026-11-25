@@ -19,7 +19,7 @@ import { saveMediaBuffer } from "./services/storage.js";
 import { findRagContextForQuestion, buildRagContextBlock, DEFAULT_RAG_TRANSFER_MESSAGE } from "./rag/chatSearch.js";
 import { loadAgentAudioCatalog, normalizeAudioChoice, resolveAudioChoice } from "./audioLibrary/agentAudio.js";
 import { pgDatabasePool as audioLibraryDb } from "./services/database.js";
-import { toCanonicalPhoneFromJid } from "./services/canonicalPhone.js";
+import { toCanonicalPhoneFromJid, phoneSpellingsOf } from "./services/canonicalPhone.js";
 import {
   GROQ_BASE,
   GROQ_WHISPER_MODEL,
@@ -1708,7 +1708,7 @@ export async function processBatch({
         // era apagada justamente no turno em que se queria protege-la.
         .select("id, dados, historico, status, lead_source, status_conversa, finalizado, updated_at, lead_temperature, stage, stage_source, raw_chat_summary")
         .eq("client_id", clientId)
-        .eq("telefone", phone)
+        .in("telefone", phoneSpellingsOf(phone))
         .order("created_at", { ascending: false })
         .limit(1);
 

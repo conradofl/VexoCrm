@@ -175,3 +175,33 @@ export function variantesDeBuscaPorTelefone(texto) {
   else if (d.length === 8 && /^[6-9]/.test(d)) formas.push(`9${d}`);
   return formas;
 }
+
+/**
+ * Grafias em que o MESMO telefone pode estar gravado, para buscar por igualdade (`telefone IN (...)`) em vez de só a
+ * grafia de quem procura (PR 3 parte 2 do untangle, 25/11/2026). É o espelho em JS de SQL_CANONICAL_PHONE_SPELLINGS
+ * aplicado ao canônico, mais o valor como veio (nunca acha MENOS que a igualdade exata de antes).
+ *   celular 55 DD 9 XXXXXXXX -> canônico | sem 55 | sem o 9 | sem 55 e sem o 9 (os "sem o 9" só se o dígito depois
+ *                                do 9 for 6-9, como na expressão canônica)
+ *   fixo    55 DD [2-5]XXXXXXX -> canônico | sem 55
+ * De propósito NÃO gera número sem DDD (8 ou 9 dígitos): casaria com o número de outra pessoa em outro DDD.
+ * Grupo (@g.us) e @lid não são telefone: só o próprio valor.
+ */
+export function phoneSpellingsOf(raw) {
+  if (raw === null || raw === undefined) return [];
+  const original = String(raw).trim();
+  if (!original) return [];
+  const lower = original.toLowerCase();
+  if (lower.includes("@g.us") || lower.includes("@lid")) return [original];
+  const canon = toCanonicalPhone(original);
+  const out = new Set([original]);
+  if (canon) {
+    out.add(canon);
+    if (/^55[1-9]{2}9\d{8}$/.test(canon)) out.add(canon.slice(2));
+    if (/^55[1-9]{2}9[6-9]\d{7}$/.test(canon)) {
+      out.add(`55${canon.slice(2, 4)}${canon.slice(5)}`);
+      out.add(`${canon.slice(2, 4)}${canon.slice(5)}`);
+    }
+    if (/^55[1-9]{2}[2-5]\d{7}$/.test(canon)) out.add(canon.slice(2));
+  }
+  return [...out];
+}

@@ -48,7 +48,7 @@ function makeSupabase({ leadRow, updateError = null }) {
       };
       return chain;
     },
-    eq: () => api,
+    eq: () => api, in: () => api,
   };
   return api;
 }

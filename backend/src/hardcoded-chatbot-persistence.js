@@ -1,3 +1,4 @@
+import { phoneSpellingsOf } from "./services/canonicalPhone.js";
 /**
  * Persistência de Chatbot - Salva progresso incremental no Supabase
  */
@@ -32,7 +33,7 @@ export async function persistChatbotProgress({
       .from(table)
       .select("id")
       .eq("client_id", clientId)
-      .eq("telefone", phone)
+      .in("telefone", phoneSpellingsOf(phone))
       .order("created_at", { ascending: false })
       .limit(1);
 

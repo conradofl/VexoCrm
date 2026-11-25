@@ -177,6 +177,10 @@ describe("Audio Transcription, Evolution Envelope & Anti-Loop Guard", () => {
                 order: () => ({
                   limit: () => Promise.resolve({ data: [{ id: "lead-1", historico: [], dados: {} }] }),
                 }),
+              }), in: () => ({
+                order: () => ({
+                  limit: () => Promise.resolve({ data: [{ id: "lead-1", historico: [], dados: {} }] }),
+                }),
               }),
             }),
           }),
@@ -224,6 +228,19 @@ describe("Audio Transcription, Evolution Envelope & Anti-Loop Guard", () => {
           select: () => ({
             eq: () => ({
               eq: () => ({
+                order: () => ({
+                  limit: () =>
+                    Promise.resolve({
+                      data: [
+                        {
+                          id: "lead-1",
+                          historico: [{ role: "user", content: "[áudio não compreendido]" }],
+                          dados: { audio_unclear_warned_at: "2026-10-10T17:00:00.000Z", audio_fail_count: 1 },
+                        },
+                      ],
+                    }),
+                }),
+              }), in: () => ({
                 order: () => ({
                   limit: () =>
                     Promise.resolve({
