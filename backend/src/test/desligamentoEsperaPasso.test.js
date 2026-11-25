@@ -21,6 +21,11 @@ import { conferirClaimedDoBoot } from "../campaign/claimedConference.js";
 import { RUN_SEND_MARKER, markRunSendStarted, markRunSequenceCut } from "../services/runSendMarker.js";
 import { computeRestartBlockers } from "../services/restartBlockers.js";
 import { registerInsightsRoutes } from "../domains/insights/routes.js";
+const MIGRATION_PAUSE_REASON = readFileSync(
+  resolve("supabase/migrations/20261125030000_add_pause_reason_to_campaign_dispatches.sql"),
+  "utf8"
+); // pause_reason é coluna gerada; o /health (restartBlockers) lê a coluna desde o PR 6b.
+
 
 const FILHO = resolve("src/test/fixtures/desligamentoFilho.mjs");
 const LIMITE_MS = 10_000;
@@ -173,6 +178,7 @@ describe("estado que fica e conferência do boot (os dois PRs encaixam)", () => 
       CREATE TABLE public.campaign_dispatch_runs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), dispatch_id UUID, campaign_id UUID, client_id TEXT, lead_id UUID, phone TEXT, status TEXT, error_message TEXT, sent_at TIMESTAMPTZ, claimed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now());
       CREATE TABLE public.lead_messages (id BIGSERIAL PRIMARY KEY, client_id TEXT, phone TEXT, direction TEXT, campaign_id UUID, meta JSONB, message_timestamp TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now());
     `);
+    await db.exec(MIGRATION_PAUSE_REASON);
     pool = { query: (sql, params) => db.query(sql, params) };
   });
   afterAll(async () => {

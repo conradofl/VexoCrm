@@ -12,6 +12,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { computeRestartBlockers, SCHEDULED_SOON_MINUTES } from "../services/restartBlockers.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+// pause_reason é coluna gerada (migration 20261125030000); o esquema de teste aplica a migration de verdade.
+const MIGRATION_PAUSE_REASON = readFileSync(
+  resolve(__dirname, "../../supabase/migrations/20261125030000_add_pause_reason_to_campaign_dispatches.sql"),
+  "utf8"
+);
+
 
 const AGORA = new Date("2026-11-20T12:00:00Z");
 const daqui = (min) => new Date(AGORA.getTime() + min * 60_000).toISOString();
@@ -36,6 +44,7 @@ beforeAll(async () => {
       error_message TEXT, claimed_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+  await db.exec(MIGRATION_PAUSE_REASON);
   pool = { query: (sql, params) => db.query(sql, params) };
 });
 

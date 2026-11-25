@@ -23,6 +23,11 @@ import { conferirClaimedDoBoot, iniciarConferenciaDeClaimed } from "../campaign/
 import { RUN_BOOT_SKIP_TEXT, RUN_SEND_MARKER, runErrorForDisplay } from "../services/runSendMarker.js";
 import { computeRestartBlockers } from "../services/restartBlockers.js";
 import { finalizeRunSent } from "../services/dispatchRunChip.js";
+const MIGRATION_PAUSE_REASON = readFileSync(
+  resolve("supabase/migrations/20261125030000_add_pause_reason_to_campaign_dispatches.sql"),
+  "utf8"
+); // pause_reason é coluna gerada; o /health (restartBlockers) lê a coluna desde o PR 6b.
+
 
 const T = "tenant-conferencia";
 const CAMP = "11111111-1111-4111-8111-111111111111";
@@ -65,6 +70,7 @@ beforeAll(async () => {
       message_timestamp TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+  await db.exec(MIGRATION_PAUSE_REASON);
   pool = {
     query: async (sql, params) => {
       if (falhar && falhar.test(String(sql))) throw new Error("connection terminated unexpectedly");

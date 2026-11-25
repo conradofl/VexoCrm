@@ -10,11 +10,11 @@
 // 'claimed' sem confirmação aparecem só como informação. Consulta que falha = restartSafe false (na dúvida, segura).
 // Só leitura.
 
-import { QUOTA_PAUSE_MARKER } from "./campaignQuotaGate.js";
+import { AUTO_RESUME_PAUSE_REASONS } from "./pauseReason.js";
 import { RUN_BOOT_SKIP_TEXT } from "./runSendMarker.js";
 
 export const SCHEDULED_SOON_MINUTES = 15;
-export const WINDOW_PAUSE_MARKER = "fora da janela de envio";
+export { WINDOW_PAUSE_MARKER } from "./pauseReason.js";
 
 export const SQL_RESTART_BLOCKERS = `
   SELECT
@@ -25,7 +25,7 @@ export const SQL_RESTART_BLOCKERS = `
     (SELECT count(*)::int FROM public.campaign_dispatches
       WHERE status = 'paused' AND scheduled_at IS NOT NULL
         AND scheduled_at <= $1::timestamptz + make_interval(mins => $2)
-        AND (error_message ILIKE '%' || $3 || '%' OR error_message ILIKE '%' || $4 || '%')) AS lotes_que_voltam_sozinhos,
+        AND pause_reason = ANY($3::text[])) AS lotes_que_voltam_sozinhos,
     (SELECT count(*)::int FROM public.campaigns
       WHERE is_recurring = true AND archived_at IS NULL AND status IN ('active', 'scheduled')
         AND recurrence_end_type IS NOT NULL AND next_run_at IS NOT NULL
@@ -36,7 +36,7 @@ export const SQL_RESTART_BLOCKERS = `
       JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
       WHERE r.status = 'claimed' AND d.status = 'running') AS claimed_sem_confirmacao,
     (SELECT count(*)::int FROM public.campaign_dispatch_runs
-      WHERE status = 'skipped' AND error_message = $5
+      WHERE status = 'skipped' AND error_message = $4
         AND COALESCE(claimed_at, created_at) >= $1::timestamptz - interval '24 hours') AS skipped_sem_confirmacao_24h,
     (SELECT count(*)::int FROM public.campaign_dispatch_runs
       WHERE error_message LIKE '%[vexo:cortado:%'
@@ -62,7 +62,7 @@ export async function computeRestartBlockers(pool, { now = new Date() } = {}) {
   if (!pool) return naoMedido(checkedAt, "sem_banco");
   let row;
   try {
-    const { rows } = await pool.query(SQL_RESTART_BLOCKERS, [checkedAt, SCHEDULED_SOON_MINUTES, WINDOW_PAUSE_MARKER, QUOTA_PAUSE_MARKER, RUN_BOOT_SKIP_TEXT]);
+    const { rows } = await pool.query(SQL_RESTART_BLOCKERS, [checkedAt, SCHEDULED_SOON_MINUTES, [...AUTO_RESUME_PAUSE_REASONS], RUN_BOOT_SKIP_TEXT]);
     row = rows[0] || {};
   } catch (err) {
     return naoMedido(checkedAt, `consulta_falhou: ${String(err?.code || err?.message || err).slice(0, 80)}`);
