@@ -94,6 +94,15 @@ describe("os modelos mortos nao voltam", () => {
     expect(escada.filter((m) => m === "openai/gpt-oss-120b")).toHaveLength(1);
   });
 
+  it("GROQ_CAMPAIGN_AI_MODEL não entra na escada do agente nem de quem não pediu modelo", () => {
+    process.env.GROQ_CAMPAIGN_AI_MODEL = "openai/gpt-oss-120b";
+    expect(resolveLlmLadder(null)[0]).toBe(LLM_MODEL_LADDER_PADRAO[0]);
+    const doAgente = resolveLlmLadder("gemini-flash-latest");
+    expect(doAgente[0]).toBe("gemini-flash-latest");
+    expect(doAgente[1]).toBe(LLM_MODEL_LADDER_PADRAO.filter((m) => m !== "gemini-flash-latest")[0]);
+    delete process.env.GROQ_CAMPAIGN_AI_MODEL;
+  });
+
   it("a escada nunca sai vazia", () => {
     expect(resolveLlmLadder(null).length).toBeGreaterThan(0);
     expect(resolveLlmLadder("llama-3.1-8b-instant").length).toBeGreaterThan(0);

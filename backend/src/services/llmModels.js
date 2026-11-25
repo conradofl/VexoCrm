@@ -125,7 +125,11 @@ export function defaultGroqModel() {
  */
 export function resolveLlmLadder(modeloPedido) {
   const escada = [];
-  const preferidos = [modeloPedido, process.env.GROQ_CAMPAIGN_AI_MODEL].filter(Boolean);
+  // Só o modelo que o chamador pediu (PR 5 parte 2 do untangle, 25/11/2026). Antes GROQ_CAMPAIGN_AI_MODEL entrava
+  // aqui como segundo degrau de TODA chamada, inclusive do agente que responde o lead: em produção era
+  // openai/gpt-oss-120b (Groq, teto de 8.000 TPM) logo depois do Gemini. Quem quer o modelo de campanha
+  // (campaign-ai, extração de contrato/briefing) já o passa como modeloPedido.
+  const preferidos = [modeloPedido].filter(Boolean);
 
   for (const m of preferidos) {
     const nome = String(m).trim();
