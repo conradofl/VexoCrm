@@ -27,6 +27,7 @@ import { canAccessAppView } from "../../accessGuards.js";
 import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
 import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
+import { computeLlmConfigStatus } from "../../services/llmConfigStatus.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
@@ -209,6 +210,7 @@ export function registerInsightsRoutes(app, deps) {
       migrations: getMigrationStatus(),
       services,
       evolutionConfig,
+      llmConfig: computeLlmConfigStatus(),
     });
   });
 
