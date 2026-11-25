@@ -5403,15 +5403,18 @@ export function registerCampaignsRoutes(app, deps) {
 
       let targetCount = 0;
       try {
-        const previewLeads = await buildDispatchLeads({
-          clientId: authorizedClientId,
-          importId: resolveCampaignImportSelection(campaign),
-          limit: limitPerRun,
-          offset: offset,
-          segmentation: validation.analyticsMeta.sequence?.[0]?.segmentation || null,
-          excludeDispatchId: null,
-          excludeCampaignId: campaignId,
-        });
+        // PR 9b do untangle: o alvo do lote é contado com a MESMA regra de público do motor (campaign/audience.js),
+        // sobre o lote como ele vai nascer. Antes filtrava pela segmentação do 1º passo (que o motor não usa): com a
+        // segmentação na campanha, o alvo contava a origem inteira, o motor enviava só aos segmentados e o lote fechava
+        // "Interrompido: N pendentes" com N que nunca sairia. excludeCampaignId fica: só pode diminuir o alvo.
+        const previewLeads = await buildDispatchLeads(
+          dispatchAudienceArgs({
+            clientId: authorizedClientId,
+            campaign,
+            dispatch: { steps: validation.analyticsMeta.sequence, limit_per_run: limitPerRun, offset },
+            excludeCampaignId: campaignId,
+          })
+        );
         targetCount = previewLeads.length;
       } catch (err) {
         console.error("Erro ao calcular target_count:", err);
