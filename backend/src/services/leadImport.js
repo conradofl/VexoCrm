@@ -9,6 +9,7 @@ import { normalizeString } from "../textNormalize.js";
 import { sendError, ensureDb, normalizeBool, normalizeIsoDate } from "./httpInfra.js";
 import { supabase } from "./database.js";
 import { leadsTableName } from "./tenant.js";
+import { phoneSpellingsOf } from "./canonicalPhone.js";
 
 // ---------------------------------------------------------------------------
 // Validação de import do chat outlier
@@ -348,46 +349,19 @@ export function sanitizePhoneE164(phoneInput, defaultDdd = null) {
   return s.startsWith("+") ? s : `+${s}`;
 }
 
+// Gerador único de grafias (PR 3 parte 3 do untangle, 25/11/2026): as grafias do mesmo número (phoneSpellingsOf, espelho
+// de SQL_CANONICAL_PHONE_SPELLINGS), mais os dígitos crus e a versão com "+" de cada grafia com 55. Até aqui gerava
+// também número sem DDD (8 e 9 dígitos) e "com o 9" para fixo (553432345678 -> 5534932345678): os dois casam com o
+// número de OUTRA pessoa. Medição em produção (/health phoneSpellings, 25/11): nenhum telefone com "+" e nenhum sem DDD
+// nas tabelas buscadas, fora 250 itens de planilha da sonhare; para as empresas ativas nenhuma busca muda.
 export function buildPhoneLookupVariants(value) {
   if (!value) return [];
   const rawStr = String(value).trim();
   const digits = rawStr.replace(/\D/g, "");
   if (!digits) return [];
-
-  const variants = new Set();
-  variants.add(digits);
+  const variants = new Set([digits, ...phoneSpellingsOf(rawStr), ...phoneSpellingsOf(digits)]);
+  for (const v of [...variants]) if (/^55\d+$/.test(v)) variants.add(`+${v}`);
   if (rawStr.startsWith("+")) variants.add(`+${digits}`);
-
-  const canonical = sanitizePhone(digits);
-  if (canonical) {
-    variants.add(canonical);
-    variants.add(`+${canonical}`);
-    // Se canonical é 13 dígitos BR (55 + DDD + 9 + 8 dígitos)
-    if (canonical.length === 13 && canonical.startsWith("55")) {
-      const ddd = canonical.slice(2, 4);
-      const nineAndRest = canonical.slice(4); // 9 + 8 dígitos
-      const rest = canonical.slice(5); // 8 dígitos sem o 9
-      const without9 = `55${ddd}${rest}`; // 12 dígitos
-      variants.add(without9);
-      variants.add(`+${without9}`);
-      variants.add(`${ddd}${nineAndRest}`); // 11 dígitos local
-      variants.add(`${ddd}${rest}`); // 10 dígitos local
-      variants.add(nineAndRest); // 9 dígitos
-      variants.add(rest); // 8 dígitos
-    } else if (canonical.length === 12 && canonical.startsWith("55")) {
-      // 55 + DDD + 8 dígitos (celular sem o 9º dígito ou fixo BR)
-      const ddd = canonical.slice(2, 4);
-      const rest = canonical.slice(4);
-      const with9 = `55${ddd}9${rest}`; // 13 dígitos
-      variants.add(with9);
-      variants.add(`+${with9}`);
-      variants.add(`${ddd}${rest}`);
-      variants.add(`${ddd}9${rest}`);
-      variants.add(rest);
-      variants.add(`9${rest}`);
-    }
-  }
-
   return Array.from(variants);
 }
 
