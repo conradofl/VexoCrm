@@ -28,6 +28,7 @@ import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
 import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
 import { computeLlmConfigStatus } from "../../services/llmConfigStatus.js";
+import { getDueDispatchSchedulerStatus } from "../../campaign/dueDispatchScheduler.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
@@ -211,6 +212,8 @@ export function registerInsightsRoutes(app, deps) {
       services,
       evolutionConfig,
       llmConfig: computeLlmConfigStatus(),
+      // Agendador dos lotes (tick de 30 s, ligado pelo server.js): prova de que está vivo.
+      dueDispatchScheduler: getDueDispatchSchedulerStatus(),
     });
   });
 
