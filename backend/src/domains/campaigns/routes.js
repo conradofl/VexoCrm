@@ -24,6 +24,7 @@
 // Corpo do interval em si e byte-a-byte identico ao original.
 
 import { dispatchAudienceArgs } from "../../campaign/audience.js";
+import { describeSendWindowRefusal, evaluateManualSendWindow, evaluateCampaignSendGate } from "../../campaign/sendGate.js";
 import { createCampaignDispatchEngine } from "../../campaign/dispatchEngine.js";
 import { PAUSE_REASON, WINDOW_PAUSE_MARKER, isAutoResumablePause, pauseReasonOf } from "../../services/pauseReason.js";
 import { registerCampaignAgentRoutes } from "../../campaign/agentDraft.js";
@@ -441,42 +442,9 @@ function refuseCampaignWithoutSource(res, sendError, context) {
   return sendError(res, 422, "CAMPAIGN_WITHOUT_SOURCE", CAMPAIGN_WITHOUT_SOURCE_MESSAGE);
 }
 
-// "Disparar Agora" fora da janela de envio do tenant. Até 30/10/2026 a rota do botão passava ignoreSendWindow: true
-// sem perguntar (decisão de projeto), e o lote saía depois do horário que a própria tela prometia. Agora o botão
-// recusa com 422 e devolve a janela e a próxima abertura; só sai fora dela quem repete a chamada com
-// forceOutsideWindow: true, e esse forçamento fica no log. Mesmo texto do agendador (runDueIndependentDispatches).
-export function describeSendWindowRefusal(now, sendWindowConfig) {
-  const localParts = getPartsInTimezone(now, sendWindowConfig.timezone);
-  const nextOpeningDate = getNextSendWindowOpening(now, sendWindowConfig);
-  const nextOpeningParts = getPartsInTimezone(nextOpeningDate, sendWindowConfig.timezone);
-  const nextOpeningStr = `${nextOpeningParts.timeString} (${nextOpeningParts.day}/${nextOpeningParts.month})`;
-  const windowStr = `${sendWindowConfig.start}–${sendWindowConfig.end} [${sendWindowConfig.days.join(",")}] (${sendWindowConfig.timezone})`;
-  return {
-    message: `Fora da janela de envio: horário local ${localParts.timeString}, janela ${windowStr}, próxima abertura prevista para ${nextOpeningStr}`,
-    details: {
-      localTime: localParts.timeString,
-      start: sendWindowConfig.start,
-      end: sendWindowConfig.end,
-      days: sendWindowConfig.days,
-      timezone: sendWindowConfig.timezone,
-      sendWindow: windowStr,
-      nextOpening: nextOpeningDate.toISOString(),
-      nextOpeningLocal: nextOpeningStr,
-    },
-  };
-}
-
-// Regra única da janela para os botões que disparam na hora ("Disparar Agora" e "Disparar não processados"). Até 16/11/2026
-// o run-pending não olhava a janela: respondia "N pendentes em execução", marcava o lote 'running' e o motor pausava no
-// primeiro lead (caso Nous, 20:22, janela até 20:00). allowed=false: a rota devolve 422 OUTSIDE_SEND_WINDOW e não toca no
-// lote. forced=true só com o booleano true confirmado na tela, e vira ignoreSendWindow no motor.
-export function evaluateManualSendWindow({ now = new Date(), settings, forceOutsideWindow }) {
-  const sendWindowConfig = resolveSendWindowConfig(settings || {});
-  if (isWithinSendWindow(now, sendWindowConfig)) return { allowed: true, forced: false, refusal: null };
-  const refusal = describeSendWindowRefusal(now, sendWindowConfig);
-  if (forceOutsideWindow !== true) return { allowed: false, forced: false, refusal };
-  return { allowed: true, forced: true, refusal };
-}
+// describeSendWindowRefusal e evaluateManualSendWindow moraram aqui até o PR 10a do untangle (25/11/2026); agora são
+// do portão de envio (campaign/sendGate.js). Reexportados para quem já importava daqui.
+export { describeSendWindowRefusal, evaluateManualSendWindow } from "../../campaign/sendGate.js";
 
 // Texto gravado em error_message quando o motor lança no meio do lote. Mensagem que já explica a parada (os "Disparo
 // interrompido: ..." do link de agenda) vai como está; o resto ganha o prefixo "Falhou:".
@@ -740,6 +708,29 @@ export function registerCampaignsRoutes(app, deps) {
     );
 
     try {
+      // Portão de envio (PR 10a do untangle): origem explícita e janela do tenant antes de tudo. Até aqui esta porta
+      // saía fora da janela e, com importId vazio, para todas as planilhas da empresa. Ler a janela falhou = 500, nada sai.
+      const gate = evaluateCampaignSendGate({
+        now: new Date(),
+        settings: (await getLeadClientN8nSettings(clientId)) || {},
+        forceOutsideWindow: req.body?.forceOutsideWindow,
+        importSelection: importId,
+      });
+      if (!gate.allowed) {
+        console.warn("[campaign-send-gate] envio manual recusado", { clientId, code: gate.code, uid: req.authAccess?.uid || null });
+        sendError(res, gate.status, gate.code, gate.message, gate.details);
+        return;
+      }
+      if (gate.forced) {
+        console.warn("[campaign-send-gate] envio_manual_forcado_fora_da_janela", {
+          clientId,
+          uid: req.authAccess?.uid || null,
+          email: req.authAccess?.email || null,
+          localTime: gate.refusal.details.localTime,
+          sendWindow: gate.refusal.details.sendWindow,
+        });
+      }
+
       const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
       const { webhookUrl, webhookToken } = dispatchSettings;
       if (!webhookUrl) {
