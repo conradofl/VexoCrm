@@ -23,6 +23,7 @@
 // uma chamada dupla da funcao de registro duplicaria o timer -- a guarda impede isso.
 // Corpo do interval em si e byte-a-byte identico ao original.
 
+import { dispatchAudienceArgs } from "../../campaign/audience.js";
 import { createCampaignDispatchEngine } from "../../campaign/dispatchEngine.js";
 import { PAUSE_REASON, WINDOW_PAUSE_MARKER, isAutoResumablePause, pauseReasonOf } from "../../services/pauseReason.js";
 import { registerCampaignAgentRoutes } from "../../campaign/agentDraft.js";
@@ -4105,14 +4106,11 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (campaignErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
 
-      const previewLeads = await buildDispatchLeads({
-        clientId: authorizedClientId,
-        importId: resolveCampaignImportSelection(campaign),
-        limit: dispatch.limit_per_run,
-        offset: dispatch.offset,
-        segmentation: dispatch.steps?.[0]?.segmentation || null,
-        excludeDispatchId: null,
-      });
+      // Mesmo público que o motor monta (campaign/audience.js, PR 9a do untangle).
+      const previewOccurrence = pgDatabasePool ? await readOccurrenceInfo(pgDatabasePool, dispatch.id) : { isOccurrence: false };
+      const previewLeads = await buildDispatchLeads(
+        dispatchAudienceArgs({ clientId: authorizedClientId, campaign, dispatch, occurrence: previewOccurrence })
+      );
 
       // Retorna no max 100 itens p/ preview, mas informa total no targetCount (caso n estivesse na table)
       res.json({
@@ -4177,14 +4175,11 @@ export function registerCampaignsRoutes(app, deps) {
       if (campErr || !campaign) return sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found");
 
       // 1. Busca todos os leads candidatos do lote
-      const allCandidateLeads = await buildDispatchLeads({
-        clientId: authorizedClientId,
-        importId: resolveCampaignImportSelection(campaign),
-        limit: dispatch.limit_per_run,
-        offset: dispatch.offset,
-        segmentation: dispatch.steps?.[0]?.segmentation || null,
-        excludeDispatchId: null,
-      });
+      // Mesmo público que o motor monta (campaign/audience.js, PR 9a do untangle).
+      const recipientsOccurrence = pgDatabasePool ? await readOccurrenceInfo(pgDatabasePool, dispatch.id) : { isOccurrence: false };
+      const allCandidateLeads = await buildDispatchLeads(
+        dispatchAudienceArgs({ clientId: authorizedClientId, campaign, dispatch, occurrence: recipientsOccurrence })
+      );
 
       // 2. Busca todas as execuções registradas deste disparo em campaign_dispatch_runs
       const { data: runsData, error: runsErr } = await supabase
@@ -4862,14 +4857,18 @@ export function registerCampaignsRoutes(app, deps) {
       const occurrence = pgDatabasePool
         ? await readOccurrenceInfo(pgDatabasePool, dispatchId)
         : { isOccurrence: false };
-      const pendingLeads = await buildDispatchLeads({
-        clientId: authorizedClientId,
-        importId: resolveCampaignImportSelection(campaign),
-        limit: resolveDispatchLeadLimit(dispatch, { isOccurrence: occurrence.isOccurrence }),
-        offset: occurrence.isOccurrence ? 0 : dispatch.offset ?? 0,
-        excludeDispatchId: dispatchId,
-        excludeCampaignId: dispatch.campaign_id,
-      });
+      // Mesmo público que o motor monta, com a segmentação da campanha (antes esta contagem ignorava a segmentação
+      // e prometia mais pendentes do que o motor envia). campaign/audience.js, PR 9a do untangle.
+      const pendingLeads = await buildDispatchLeads(
+        dispatchAudienceArgs({
+          clientId: authorizedClientId,
+          campaign,
+          dispatch,
+          occurrence,
+          excludeDispatchId: dispatchId,
+          excludeCampaignId: dispatch.campaign_id,
+        })
+      );
 
       if (pendingLeads.length === 0) {
         return res.json({
