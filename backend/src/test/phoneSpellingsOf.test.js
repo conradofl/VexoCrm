@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_SPELLINGS, phoneSpellingsOf, toCanonicalPhone } from "../services/canonicalPhone.js";
+import { buildPhoneLookupVariants } from "../services/leadImport.js";
 
 const DDDS = ["11", "34", "99"];
 const LOCAIS = ["999990001", "960000002", "950000005", "900000007", "91234567", "61234567", "21234567", "52345678"];
@@ -64,5 +65,31 @@ describe("phoneSpellingsOf", () => {
       const src = readFileSync(resolve("src", f), "utf8");
       expect(src, f).not.toContain('.eq("telefone", phone)');
     }
+  });
+});
+
+describe("buildPhoneLookupVariants = gerador único (PR 3 parte 3)", () => {
+  it("[OBRIGATÓRIO] toda variante é o mesmo número (tirando o '+'): nunca acha o telefone de outra pessoa", () => {
+    for (const raw of CORPUS) {
+      const canon = toCanonicalPhone(raw);
+      for (const v of buildPhoneLookupVariants(raw)) expect(toCanonicalPhone(v.replace(/^\+/, "")), `${raw} -> ${v}`).toBe(canon);
+    }
+  });
+
+  it("contém todas as grafias do phoneSpellingsOf (nunca acha menos que as buscas do #323)", () => {
+    for (const raw of CORPUS) {
+      const v = new Set(buildPhoneLookupVariants(raw));
+      for (const g of phoneSpellingsOf(raw)) expect(v.has(g), `${raw}: falta ${g}`).toBe(true);
+    }
+  });
+
+  it("não gera mais número sem DDD nem o '9' inventado em fixo", () => {
+    expect(buildPhoneLookupVariants("5534984400049").some((v) => v.length <= 9)).toBe(false);
+    expect(buildPhoneLookupVariants("553432345678")).not.toContain("5534932345678");
+  });
+
+  it("JID e LID: cobre o valor como veio e os dígitos", () => {
+    expect(buildPhoneLookupVariants("553484400049@s.whatsapp.net")).toEqual(expect.arrayContaining(["553484400049@s.whatsapp.net", "553484400049", "5534984400049"]));
+    expect(buildPhoneLookupVariants("123456789012345@lid")).toEqual(expect.arrayContaining(["123456789012345@lid", "123456789012345"]));
   });
 });
