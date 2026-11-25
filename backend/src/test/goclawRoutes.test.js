@@ -459,7 +459,7 @@ describe("Rotas de Gestão do GoClaw (goclaw/routes.js)", () => {
       });
       expect(res.status).toBe(400);
       const json = await res.json();
-      expect(json.error).toBe("Nenhum áudio ou texto fornecido para a Heloísa.");
+      expect(json.error).toBe("Nenhum áudio ou texto fornecido para a Wandinha.");
     });
 
     it("processa mensagem de texto e retorna estrutura padronizada de voz", async () => {

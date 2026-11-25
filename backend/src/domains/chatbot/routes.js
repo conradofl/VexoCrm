@@ -3566,27 +3566,49 @@ export function registerChatbotRoutes(app, deps) {
       entradaAtual = { clientId, msgKey: msgKeyDaEntrada, phone };
     }
 
-    // ── INTERCEPTADOR HELOÍSA (COPILOTO EXECUTIVO WHATSAPP) ──
-    const isHeloisaTarget =
-      (instanceName && (
-        instanceName.toLowerCase().includes("heloisa") ||
-        instanceName.toLowerCase().includes("atende") ||
-        instanceName.toLowerCase() === "geracao-digital-teste-vexo"
-      )) ||
-      req.query?.lane === "heloisa" ||
-      req.query?.agent === "heloisa";
-    const isDirector = (await isHeloisaAuthorizedSenderAsync(phone, pgDatabasePool)) || isHeloisaAuthorizedSender(phone);
-    const hasHeloisaPrefix = /^(helo[ií]sa|[!\/]h)\b/i.test(messageData?.text || "");
-    const isPersonal = isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName);
+    // ── INTERCEPTADOR WANDINHA (EX-HELOÍSA · COPILOTO EXECUTIVO WHATSAPP +553497719779) ──
+    const lowerInst = String(instanceName || "").toLowerCase();
+    const lowerRawInst = String(rawInstanceName || "").toLowerCase();
+    const lowerChipName = String(matchedChip?.name || "").toLowerCase();
+    const matchedChipDigits = String(matchedChip?.phone || "").replace(/\D/g, "");
+    const senderLast8 = String(phone || "").replace(/\D/g, "").slice(-8);
+    const chipLast8 = matchedChipDigits.length >= 8 ? matchedChipDigits.slice(-8) : "";
 
-    // Heloísa só atende e responde pelos chips autorizados da GD / Vexo (EMPRESAS_DA_HELOISA).
-    // Na instância dedicada (vexo-adm-vexo-atende ou lane=heloisa), intercepta 100% das mensagens de diretor sem exigir prefixo.
-    // Em chip comum/comercial (ex: chip WhatsApp da GD ou Caio), SÓ intercepta se houver prefixo explícito ("Heloísa", "!h", "/h")
-    // para não sequestrar conversas humanas entre diretores nem testes de robôs desligados.
+    const isWandinhaChip =
+      lowerInst.includes("wandinha") ||
+      lowerRawInst.includes("wandinha") ||
+      lowerChipName.includes("wandinha") ||
+      matchedChipDigits.endsWith("97719779");
+
+    const isHeloisaTarget =
+      isWandinhaChip ||
+      lowerInst.includes("heloisa") ||
+      lowerInst.includes("atende") ||
+      lowerInst === "geracao-digital-teste-vexo" ||
+      req.query?.lane === "wandinha" ||
+      req.query?.lane === "heloisa" ||
+      req.query?.agent === "wandinha" ||
+      req.query?.agent === "heloisa";
+
+    // Anti-loop: impede que o próprio número da Wandinha (+553497719779) acione a si mesma
+    const isSelfBotEcho =
+      (chipLast8 && senderLast8 === chipLast8) ||
+      (isWandinhaChip && senderLast8 === "97719779");
+
+    const isDirector =
+      !isSelfBotEcho &&
+      ((await isHeloisaAuthorizedSenderAsync(phone, pgDatabasePool)) || isHeloisaAuthorizedSender(phone));
+    const hasHeloisaPrefix = /^(wandinha|helo[ií]sa|[!\/][wh])\b/i.test(messageData?.text || "");
+    const isPersonal = !isWandinhaChip && (isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName));
+
+    // Wandinha atende pelos chips autorizados da Vexo Adm / GD (EMPRESAS_DA_HELOISA).
+    // Na instância dedicada (Wandinha +553497719779, vexo-adm-wandinha, etc.), intercepta 100% das mensagens de diretor sem exigir prefixo.
+    // Em chip comum/comercial, SÓ intercepta se houver prefixo explícito ("Wandinha", "!w", "/w", "Heloísa", "!h", "/h").
     const chipDaHeloisa = EMPRESAS_DA_HELOISA.has(String(clientId || "").toLowerCase());
     const deveInterceptarHeloisa =
       chipDaHeloisa &&
       !fromMe &&
+      !isSelfBotEcho &&
       !isPersonal &&
       (
         (isHeloisaTarget && (isDirector || hasHeloisaPrefix)) ||
@@ -3598,8 +3620,7 @@ export function registerChatbotRoutes(app, deps) {
       return;
     }
     if (deveInterceptarHeloisa) {
-      // Comando com mais de 30 min (fila solta pela Evolution depois de horas presa) não é executado: a Heloísa
-      // marcaria reunião, cadastraria cliente ou cobraria em cima de um pedido velho. A mensagem já está gravada.
+      // Comando com mais de 30 min (fila solta pela Evolution depois de horas presa) não é executado.
       const comandoAtrasado = mensagemAtrasada(messageData.messageTimestamp);
       if (comandoAtrasado) {
         await marcarMensagemBarrada(pgDatabasePool, { clientId, waMessageId: msgKeyDaEntrada, motivo: "mensagem_atrasada" });
@@ -3608,23 +3629,23 @@ export function registerChatbotRoutes(app, deps) {
       }
       const heloisaAtiva = await isHeloisaActive(pgDatabasePool);
       if (!heloisaAtiva) {
-        console.log(`[chatbot-webhook] Heloísa está DESATIVADA no Painel de Controle. Mensagem de ${maskPhoneForLog(phone)} seguirá o fluxo padrão/humano.`);
+        console.log(`[chatbot-webhook] Wandinha está DESATIVADA no Painel de Controle. Mensagem de ${maskPhoneForLog(phone)} seguirá o fluxo padrão/humano.`);
       } else {
         const cleanText = hasHeloisaPrefix
-          ? (messageData.text || "").replace(/^(helo[ií]sa|[!\/]h)[:,]?\s*/i, "").trim()
+          ? (messageData.text || "").replace(/^(wandinha|helo[ií]sa|[!\/][wh])[:,]?\s*/i, "").trim()
           : messageData.text;
 
-        responder({ handled: "heloisa", phone: maskPhoneForLog(phone) });
+        responder({ handled: "heloisa", agent: "wandinha", phone: maskPhoneForLog(phone) });
 
         processarMensagemHeloisa({
           phone,
           texto: cleanText,
           audioBase64: messageData.mediaBase64 || null,
           audioMimetype: messageData.mimetype || "audio/ogg",
-          instanceName: instanceName || "vexo-adm-vexo-atende",
+          instanceName: instanceName || null,
           pool: pgDatabasePool,
         }).catch((err) => {
-          console.error("[chatbot-webhook] Erro no processamento da Heloísa:", err);
+          console.error("[chatbot-webhook] Erro no processamento da Wandinha:", err);
         });
         return;
       }

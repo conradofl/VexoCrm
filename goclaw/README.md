@@ -24,11 +24,11 @@ Arquitetura de agentes autônomos construída sobre o runtime **GoClaw** (Golang
    - **Função**: Auditoria automática de quadros do Trello e envio do Daily Report para o WhatsApp dos sócios e colaboradores.
    - **Prompt**: `prompts/gestor_demandas_auditor.md`
 
-4. **Lane Heloísa (Secretária Executiva & Copiloto dos Sócios)**:
+4. **Lane Wandinha (Secretária Executiva & Copiloto dos Sócios)**:
    - **Modelo**: `gemini/gemini-3-flash-preview`
-   - **Canal**: WhatsApp Exclusivo (Evolution API)
+   - **Canal**: WhatsApp Exclusivo (`+55 34 9771-9779` · Evolution API)
    - **Função**: Assistente pessoal executiva para Conrado e Caio. Entende áudio e texto no trânsito, cadastra clientes no CRM, agenda compromissos, cria follow-ups e cobra colaboradores no WhatsApp com confirmação imediata.
-   - **Prompt**: `prompts/heloisa_executiva.md`
+   - **Prompt**: `prompts/wandinha_executiva.md`
 
 ---
 

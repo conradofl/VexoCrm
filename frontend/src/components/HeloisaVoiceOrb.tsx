@@ -301,7 +301,7 @@ export function HeloisaVoiceOrb() {
     {
       id: "init-1",
       sender: "heloisa",
-      text: `Oi, ${userName}! Sou a Heloísa. Tô conectada e pronta por aqui, pode falar o que precisa.`,
+      text: `Oi, ${userName}! Sou a Wandinha. Tô conectada e pronta por aqui, pode falar o que precisa.`,
       timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
@@ -805,12 +805,12 @@ export function HeloisaVoiceOrb() {
         const rawSpoken = (finalConcat || interim).trim();
         if (!rawSpoken) return;
 
-        const isJustWakeWord = /^helo[íi]sa[?!.]*$/i.test(rawSpoken);
+        const isJustWakeWord = /^(wandinha|helo[íi]sa)[?!.]*$/i.test(rawSpoken);
         let cleanOrder = rawSpoken;
-        if (/^helo[íi]sa\b/i.test(rawSpoken)) {
-          cleanOrder = rawSpoken.replace(/^helo[íi]sa[,.:;!?\s]*/i, "").trim() || rawSpoken;
+        if (/^(wandinha|helo[íi]sa)\b/i.test(rawSpoken)) {
+          cleanOrder = rawSpoken.replace(/^(wandinha|helo[íi]sa)[,.:;!?\s]*/i, "").trim() || rawSpoken;
         }
-        const comandoParaEnviar = isJustWakeWord ? "Olá Heloísa" : cleanOrder;
+        const comandoParaEnviar = isJustWakeWord ? "Olá Wandinha" : cleanOrder;
 
         setLiveTranscript(comandoParaEnviar);
         setStatus("ouvindo");
@@ -968,7 +968,7 @@ export function HeloisaVoiceOrb() {
       {isOpen && (
         <div
           role="region"
-          aria-label="Painel de Transcrição Heloísa"
+          aria-label="Painel de Transcrição Wandinha"
           className="fixed bottom-24 right-4 sm:right-6 z-50 w-[360px] sm:w-[430px] max-w-[calc(100vw-1.5rem)] h-[560px] max-h-[calc(100vh-7.5rem)] rounded-3xl backdrop-blur-2xl bg-slate-950/90 border border-purple-500/30 shadow-[0_25px_70px_rgba(79,70,229,0.35)] flex flex-col overflow-hidden text-slate-100 transition-all duration-300 animate-in fade-in slide-in-from-bottom-5"
         >
           {/* Cabeçalho Glassmorphism */}
@@ -992,7 +992,7 @@ export function HeloisaVoiceOrb() {
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold text-sm tracking-wide text-white drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]">
-                    Heloísa
+                    Wandinha
                   </h3>
                   <Badge
                     variant="outline"
@@ -1001,7 +1001,7 @@ export function HeloisaVoiceOrb() {
                     <Ear className="h-2.5 w-2.5" /> Voz Ativa
                   </Badge>
                 </div>
-                <p className="text-xs text-slate-400">Secretária Executiva & Amiga • Vexo OS</p>
+                <p className="text-xs text-slate-400">Secretária Executiva • Vexo OS</p>
               </div>
             </div>
 
@@ -1095,7 +1095,7 @@ export function HeloisaVoiceOrb() {
                       ? "Gravando voz... Toque para enviar ordem"
                       : liveTranscript
                       ? "Ouvindo... (Pausa envia ou toque para enviar)"
-                      : "Microfone ouvindo... Pode falar 'Heloísa' ou sua ordem"}
+                      : "Microfone ouvindo... Pode falar 'Wandinha' ou sua ordem"}
                   </span>
                 </button>
               )}
@@ -1108,7 +1108,7 @@ export function HeloisaVoiceOrb() {
               {status === "falando" && (
                 <span className="flex items-center gap-1.5 text-purple-300">
                   <Volume2 className="h-3.5 w-3.5 animate-pulse" />
-                  Heloísa falando...
+                  Wandinha falando...
                   <button
                     onClick={pararFala}
                     className="ml-1 text-[11px] underline text-purple-200 hover:text-white"
@@ -1124,7 +1124,7 @@ export function HeloisaVoiceOrb() {
                   className="text-slate-400 hover:text-cyan-300 flex items-center gap-1 transition-colors"
                 >
                   <Sparkles className="h-3 w-3 text-cyan-400" />
-                  Toque para falar ou diga <strong className="text-cyan-300">"Heloísa"</strong>
+                  Toque para falar ou diga <strong className="text-cyan-300">"Wandinha"</strong>
                 </button>
               )}
             </div>
@@ -1168,7 +1168,7 @@ export function HeloisaVoiceOrb() {
               >
                 <div className="flex items-center justify-between gap-3 mb-1 text-[10px] text-slate-300/80">
                   <span className="font-medium text-cyan-300">
-                    {msg.sender === "user" ? "Você" : "Heloísa"}
+                    {msg.sender === "user" ? "Você" : "Wandinha"}
                   </span>
                   <span>{msg.timestamp}</span>
                 </div>
@@ -1204,7 +1204,7 @@ export function HeloisaVoiceOrb() {
             <button
               onClick={() => {
                 destravarAudioMobile();
-                enviarParaHeloisa({ text: "Heloísa, faça uma auditoria geral da operação de todos os tenants do Vexo OS." });
+                enviarParaHeloisa({ text: "Wandinha, faça uma auditoria geral da operação de todos os tenants do Vexo OS." });
               }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
@@ -1213,7 +1213,7 @@ export function HeloisaVoiceOrb() {
             <button
               onClick={() => {
                 destravarAudioMobile();
-                enviarParaHeloisa({ text: "Heloísa, quais clientes estão com prazo vencido?" });
+                enviarParaHeloisa({ text: "Wandinha, quais clientes estão com prazo vencido?" });
               }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
@@ -1222,7 +1222,7 @@ export function HeloisaVoiceOrb() {
             <button
               onClick={() => {
                 destravarAudioMobile();
-                enviarParaHeloisa({ text: "Heloísa, quais são meus compromissos de hoje e amanhã?" });
+                enviarParaHeloisa({ text: "Wandinha, quais são meus compromissos de hoje e amanhã?" });
               }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
@@ -1231,7 +1231,7 @@ export function HeloisaVoiceOrb() {
             <button
               onClick={() => {
                 destravarAudioMobile();
-                enviarParaHeloisa({ text: "Heloísa, consulte como está o status da operação da agência hoje." });
+                enviarParaHeloisa({ text: "Wandinha, consulte como está o status da operação da agência hoje." });
               }}
               className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 whitespace-nowrap border border-white/5"
             >
@@ -1285,7 +1285,7 @@ export function HeloisaVoiceOrb() {
                   status === "ouvindo" && "from-cyan-500 via-purple-600 to-pink-500 ring-cyan-300 shadow-[0_0_40px_rgba(34,211,238,0.8)]",
                   status === "falando" && "from-violet-600 via-purple-500 to-cyan-400 ring-purple-300 shadow-[0_0_40px_rgba(192,132,252,0.8)]"
                 )}
-                aria-label="Falar com a Heloísa (Voz)"
+                aria-label="Falar com a Wandinha (Voz)"
               >
                 {/* Partícula Luminosa em Órbita */}
                 <span
@@ -1343,7 +1343,7 @@ export function HeloisaVoiceOrb() {
               className="bg-slate-900/95 border border-purple-500/40 text-white text-xs px-3 py-1.5 rounded-xl shadow-2xl backdrop-blur-md"
             >
               <div className="flex flex-col">
-                <span className="font-semibold text-cyan-300">Heloísa (Voz • Alt + H)</span>
+                <span className="font-semibold text-cyan-300">Wandinha (Voz • Alt + H)</span>
                 <span className="text-[11px] text-slate-300">Toque ou Alt + H para falar</span>
               </div>
             </TooltipContent>

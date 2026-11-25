@@ -54,7 +54,7 @@ export const INTELIGENCIA_ITEMS: SidebarItem[] = [];
 // ━━ AGENTE IA ━━
 export const AGENTE_IA_ITEMS: SidebarItem[] = [
   { key: "agente-ia", label: "Agente IA", url: "/crm/agente", icon: Bot, page: "agente" },
-  { key: "goclaw-gd", label: "GoClaw & Heloísa", url: "/crm/goclaw-gd", icon: Sparkles, page: "agente" },
+  { key: "goclaw-gd", label: "GoClaw & Wandinha", url: "/crm/goclaw-gd", icon: Sparkles, page: "agente" },
   { key: "colaboradores-gd", label: "Equipe GD & Cobranças", url: "/crm/colaboradores-gd", icon: UserCheck, page: "agente" },
 ];
 

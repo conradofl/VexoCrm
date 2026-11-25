@@ -131,8 +131,8 @@ interface GoclawStatusResponse {
 const LANES_METADATA = [
   {
     key: "heloisa",
-    nome: "Heloísa (Átrio & Interface Executiva)",
-    descricao: "Copiloto direto de Conrado e Caio no WhatsApp. Processa áudios e texto, comanda e orquestra todas as personas da família.",
+    nome: "Wandinha (Secretária Executiva Master)",
+    descricao: "Copiloto direto de Conrado e Caio no WhatsApp (+55 34 9771-9779) e por voz no Vexo OS. Processa áudios e texto, comanda e orquestra todas as personas da família.",
     tag: "Átrio / WhatsApp",
     cor: "purple",
   },
@@ -166,7 +166,7 @@ const LANES_METADATA = [
   },
   {
     key: "wandinha",
-    nome: "Wandinha (Síndica & Trello Auditor)",
+    nome: "Wandinha · Modo Síndica (Trello Auditor)",
     descricao: "Vigilância em tempo real dos quadros na workspace 'Mídias Sociais'. Inspeciona colunas e status de aprovação/conclusão para desarmar cobranças da Mortícia.",
     tag: "Síndica & Auditoria",
     cor: "slate",
@@ -213,7 +213,7 @@ export function GeracaoDigitalGoclawConfig() {
   const [promptEditando, setPromptEditando] = useState<Record<string, string>>({});
   const [logDisparo, setLogDisparo] = useState<any>(null);
 
-  // ─── Query Configuração Geral da Heloísa (Kill Switch) ───────────────────
+  // ─── Query Configuração Geral da Wandinha (Kill Switch) ───────────────────
   const { data: configData, isLoading: carregandoConfig } = useQuery<{
     ok: boolean;
     config: { ativo: boolean; notificar_whatsapp: boolean };
@@ -224,7 +224,7 @@ export function GeracaoDigitalGoclawConfig() {
       const res = await fetchApi("/api/goclaw/heloisa/config", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Falha ao carregar configurações da Heloísa");
+      if (!res.ok) throw new Error("Falha ao carregar configurações da Wandinha");
       return res.json();
     },
     enabled: temAcesso,
@@ -233,7 +233,7 @@ export function GeracaoDigitalGoclawConfig() {
 
   const heloisaAtiva = configData?.config?.ativo !== false;
 
-  // ─── Mutation Liga / Desliga Heloísa (Kill Switch) ────────────────────────
+  // ─── Mutation Liga / Desliga Wandinha (Kill Switch) ────────────────────────
   const toggleHeloisaAtivaMutation = useMutation({
     mutationFn: async (novoAtivo: boolean) => {
       const token = await getIdToken();
@@ -245,7 +245,7 @@ export function GeracaoDigitalGoclawConfig() {
         },
         body: JSON.stringify({ ativo: novoAtivo }),
       });
-      if (!res.ok) throw new Error("Falha ao alternar status da Heloísa");
+      if (!res.ok) throw new Error("Falha ao alternar status da Wandinha");
       return res.json();
     },
     onSuccess: (data, novoAtivo) => {
@@ -254,10 +254,10 @@ export function GeracaoDigitalGoclawConfig() {
         config: { ...prev?.config, ativo: novoAtivo },
       }));
       toast({
-        title: novoAtivo ? "Heloísa Ativada!" : "Heloísa Desligada/Pausada",
+        title: novoAtivo ? "Wandinha Ativada!" : "Wandinha Desligada/Pausada",
         description: novoAtivo
-          ? "A Heloísa está ativa e pronta para responder no WhatsApp e no Widget Web."
-          : "A Heloísa foi desligada. Nenhuma mensagem do WhatsApp será interceptada até você reativar.",
+          ? "A Wandinha está ativa e pronta para responder no WhatsApp e no Widget Web."
+          : "A Wandinha foi desligada. Nenhuma mensagem do WhatsApp será interceptada até você reativar.",
         variant: novoAtivo ? "default" : "destructive",
       });
       queryClient.invalidateQueries({ queryKey: ["heloisaConfig"] });
@@ -271,7 +271,7 @@ export function GeracaoDigitalGoclawConfig() {
     },
   });
 
-  // ─── Query Histórico de Execuções e Tarefas da Heloísa ────────────────────
+  // ─── Query Histórico de Execuções e Tarefas da Wandinha ────────────────────
   const {
     data: execucoesData,
     isLoading: carregandoExecucoes,
@@ -315,7 +315,7 @@ export function GeracaoDigitalGoclawConfig() {
     onSuccess: () => {
       toast({
         title: "Histórico Limpo",
-        description: "O registro de tarefas da Heloísa foi resetado com sucesso.",
+        description: "O registro de tarefas da Wandinha foi resetado com sucesso.",
       });
       queryClient.invalidateQueries({ queryKey: ["heloisaExecucoes"] });
     },
@@ -348,7 +348,7 @@ export function GeracaoDigitalGoclawConfig() {
       const res = await fetchApi("/api/goclaw/heloisa/agendas", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Falha ao carregar agendas da Heloísa");
+      if (!res.ok) throw new Error("Falha ao carregar agendas da Wandinha");
       const json = await res.json();
       return json.data || [];
     },
@@ -584,7 +584,7 @@ export function GeracaoDigitalGoclawConfig() {
     },
   });
 
-  // ─── Query Usuários Autorizados Heloísa ────────────────────────────────────
+  // ─── Query Usuários Autorizados Wandinha ────────────────────────────────────
   const {
     data: heloisaUsuarios = [],
     isLoading: carregandoUsuarios,
@@ -595,7 +595,7 @@ export function GeracaoDigitalGoclawConfig() {
       const res = await fetchApi("/api/goclaw/heloisa/usuarios", {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Falha ao carregar usuários da Heloísa");
+      if (!res.ok) throw new Error("Falha ao carregar usuários da Wandinha");
       const json = await res.json();
       return json.data || [];
     },
@@ -699,7 +699,7 @@ export function GeracaoDigitalGoclawConfig() {
     onSuccess: () => {
       toast({
         title: "Número Removido",
-        description: "O número foi desautorizado da Heloísa com sucesso.",
+        description: "O número foi desautorizado da Wandinha com sucesso.",
       });
       queryClient.invalidateQueries({ queryKey: ["heloisaUsuarios"] });
     },
@@ -722,7 +722,7 @@ export function GeracaoDigitalGoclawConfig() {
   const execucoesLista = execucoesData?.data || [];
 
   return (
-    <PageShell title="Central Executiva · GoClaw & Heloísa">
+    <PageShell title="Central Executiva · GoClaw & Wandinha">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header Principal com Kill Switch & Status */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-6">
@@ -733,17 +733,17 @@ export function GeracaoDigitalGoclawConfig() {
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-xl font-bold text-slate-900 dark:text-white">
-                  Heloísa · Secretária Executiva Master
+                  Wandinha · Secretária Executiva Master
                 </h1>
                 {heloisaAtiva ? (
                   <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 py-1 px-2.5 font-semibold">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                    Heloísa Ativa (Online)
+                    Wandinha Ativa (Online)
                   </Badge>
                 ) : (
                   <Badge variant="destructive" className="flex items-center gap-1.5 py-1 px-2.5 font-semibold">
                     <Power className="h-3 w-3" />
-                    Heloísa Desligada (Pausada)
+                    Wandinha Desligada (Pausada)
                   </Badge>
                 )}
                 {runtime?.online && (
@@ -942,7 +942,7 @@ export function GeracaoDigitalGoclawConfig() {
                       Auditoria de Comandos e Tarefas
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      Histórico completo em tempo real de cada ordem falada ou digitada para a Heloísa
+                      Histórico completo em tempo real de cada ordem falada ou digitada para a Wandinha
                     </CardDescription>
                   </div>
 
@@ -960,7 +960,7 @@ export function GeracaoDigitalGoclawConfig() {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        if (confirm("Deseja realmente limpar todo o histórico de execuções da Heloísa?")) {
+                        if (confirm("Deseja realmente limpar todo o histórico de execuções da Wandinha?")) {
                           limparExecucoesMutation.mutate();
                         }
                       }}
@@ -1021,7 +1021,7 @@ export function GeracaoDigitalGoclawConfig() {
                       Nenhuma tarefa registrada ainda
                     </div>
                     <p className="text-xs text-slate-500 mt-1">
-                      Mande um áudio ou comando de teste para a Heloísa no WhatsApp ou clique no orbe de voz!
+                      Mande um áudio ou comando de teste para a Wandinha no WhatsApp ou clique no orbe de voz!
                     </p>
                   </div>
                 ) : (
@@ -1101,10 +1101,10 @@ export function GeracaoDigitalGoclawConfig() {
                             </div>
                           )}
 
-                          {/* Resposta Heloísa */}
+                          {/* Resposta Wandinha */}
                           {ex.resposta_saida && (
                             <div className="text-[11px] text-slate-600 dark:text-slate-400 pl-2 border-l-2 border-purple-500/40 italic">
-                              Heloísa: "{ex.resposta_saida.slice(0, 180)}{ex.resposta_saida.length > 180 ? "..." : ""}"
+                              Wandinha: "{ex.resposta_saida.slice(0, 180)}{ex.resposta_saida.length > 180 ? "..." : ""}"
                             </div>
                           )}
                         </div>
@@ -1156,7 +1156,7 @@ export function GeracaoDigitalGoclawConfig() {
                         Agendas Oficiais & Integração Google Meet
                       </CardTitle>
                       <CardDescription className="text-xs">
-                        Configure os e-mails das agendas (Conrado, Caio, GD). Ao solicitar um agendamento, a Heloísa gera o Google Meet na hora e avisa a equipe no WhatsApp.
+                        Configure os e-mails das agendas (Conrado, Caio, GD). Ao solicitar um agendamento, a Wandinha gera o Google Meet na hora e avisa a equipe no WhatsApp.
                       </CardDescription>
                     </div>
                   </div>
@@ -1180,7 +1180,7 @@ export function GeracaoDigitalGoclawConfig() {
                     Como funciona a geração automática de reuniões:
                   </div>
                   <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-                    Basta pedir para a Heloísa por voz ou WhatsApp: <code className="bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded font-mono text-[11px]">"Heloísa, agenda uma reunião com o Caio amanhã às 15h sobre a proposta do cliente X"</code>.
+                    Basta pedir para a Wandinha por voz ou WhatsApp: <code className="bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded font-mono text-[11px]">"Wandinha, agenda uma reunião com o Caio amanhã às 15h sobre a proposta do cliente X"</code>.
                     Ela automaticamente cria o link exclusivo do <strong>Google Meet</strong> (ex: <span className="font-mono text-blue-600">https://meet.google.com/abc-defg-hij</span>), salva o compromisso no calendário do Vexo OS e <strong>dispara na hora uma mensagem no WhatsApp</strong> dos participantes selecionados com o link e detalhes da reunião.
                   </p>
                 </div>
@@ -1416,7 +1416,7 @@ export function GeracaoDigitalGoclawConfig() {
                               className="h-7 w-7 text-slate-400 hover:text-red-600 dark:hover:text-red-400"
                               title="Remover autorização"
                               onClick={() => {
-                                if (confirm(`Deseja desautorizar "${u.nome}" da Heloísa?`)) {
+                                if (confirm(`Deseja desautorizar "${u.nome}" da Wandinha?`)) {
                                   excluirUsuarioMutation.mutate(u.id);
                                 }
                               }}
@@ -1587,7 +1587,7 @@ export function GeracaoDigitalGoclawConfig() {
           <DialogHeader>
             <DialogTitle className="text-lg font-bold flex items-center gap-2">
               <Eye className="h-5 w-5 text-purple-600" />
-              Detalhes da Execução da Heloísa
+              Detalhes da Execução da Wandinha
             </DialogTitle>
             <DialogDescription className="text-xs">
               Registro completo de entrada, ferramenta executada e retorno gerado.
@@ -1634,11 +1634,11 @@ export function GeracaoDigitalGoclawConfig() {
                 </div>
               </div>
 
-              {/* Resposta da Heloísa */}
+              {/* Resposta da Wandinha */}
               <div className="space-y-1">
                 <Label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
-                  Resposta Falada / Enviada pela Heloísa:
+                  Resposta Falada / Enviada pela Wandinha:
                 </Label>
                 <div className="p-3 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200/60 dark:border-purple-900/40 text-slate-800 dark:text-slate-200 text-xs leading-relaxed">
                   {execucaoDetalhes.resposta_saida || "[Sem resposta gerada]"}
@@ -1744,7 +1744,7 @@ export function GeracaoDigitalGoclawConfig() {
                 className="h-9 text-xs font-mono"
               />
               <span className="text-[10px] text-slate-400">
-                O titular receberá uma mensagem no WhatsApp com o link do Meet assim que a Heloísa agendar uma reunião.
+                O titular receberá uma mensagem no WhatsApp com o link do Meet assim que a Wandinha agendar uma reunião.
               </span>
             </div>
 
@@ -1815,7 +1815,7 @@ export function GeracaoDigitalGoclawConfig() {
               + Adicionar Diretor Autorizado
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Cadastre o número de WhatsApp do diretor ou gestor para autorizar comandos e áudios com a Heloísa.
+              Cadastre o número de WhatsApp do diretor ou gestor para autorizar comandos e áudios com a Wandinha.
             </DialogDescription>
           </DialogHeader>
 

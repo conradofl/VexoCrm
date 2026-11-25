@@ -137,8 +137,11 @@ export function registerGoclawRoutes(app, {
     const promptsDir = path.join(goclawDir, "prompts");
 
     for (const [laneKey, fileName] of Object.entries(PROMPT_FILE_MAP)) {
+      const wandinhaAltPath = laneKey === "heloisa" ? path.join(promptsDir, "wandinha_executiva.md") : null;
       const filePath = path.join(promptsDir, fileName);
-      if (fs.existsSync(filePath)) {
+      if (wandinhaAltPath && fs.existsSync(wandinhaAltPath)) {
+        prompts[laneKey] = fs.readFileSync(wandinhaAltPath, "utf-8");
+      } else if (fs.existsSync(filePath)) {
         prompts[laneKey] = fs.readFileSync(filePath, "utf-8");
       } else {
         prompts[laneKey] = "";
@@ -169,6 +172,9 @@ export function registerGoclawRoutes(app, {
 
     const filePath = path.join(promptsDir, fileName);
     fs.writeFileSync(filePath, content, "utf-8");
+    if (lane === "heloisa") {
+      fs.writeFileSync(path.join(promptsDir, "wandinha_executiva.md"), content, "utf-8");
+    }
 
     return res.json({ ok: true, message: `Prompt da lane "${lane}" salvo com sucesso.` });
   });
@@ -402,8 +408,16 @@ export function registerGoclawRoutes(app, {
     }
   });
 
-  // ─── Heloísa Voice Chat (Widget de Voz Two-Way do Vexo OS) ────────────────
-  app.post(["/api/goclaw/heloisa/voice-chat", "/api/goclaw/heloisa/voice"], requireAuth, async (req, res) => {
+  // ─── Wandinha Voice Chat (Widget de Voz Two-Way do Vexo OS) ────────────────
+  app.post(
+    [
+      "/api/goclaw/wandinha/voice-chat",
+      "/api/goclaw/wandinha/voice",
+      "/api/goclaw/heloisa/voice-chat",
+      "/api/goclaw/heloisa/voice",
+    ],
+    requireAuth,
+    async (req, res) => {
     try {
       const {
         audioBase64,
@@ -416,7 +430,7 @@ export function registerGoclawRoutes(app, {
 
       if (!text && !audioBase64) {
         return res.status(400).json({
-          error: "Nenhum áudio ou texto fornecido para a Heloísa.",
+          error: "Nenhum áudio ou texto fornecido para a Wandinha.",
         });
       }
 
@@ -450,9 +464,9 @@ export function registerGoclawRoutes(app, {
 
       return res.json(resultado);
     } catch (err) {
-      console.error("[goclaw-routes] Erro no endpoint voice-chat da Heloísa:", err);
+      console.error("[goclaw-routes] Erro no endpoint voice-chat da Wandinha:", err);
       return res.status(500).json({
-        error: err?.message || "Erro interno ao processar voz com a Heloísa.",
+        error: err?.message || "Erro interno ao processar voz com a Wandinha.",
       });
     }
   });

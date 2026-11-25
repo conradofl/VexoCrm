@@ -296,11 +296,11 @@ export async function ensureHeloisaList({
   allowMock = true,
 }) {
   if (!boardId) {
-    throw new Error("boardId é obrigatório para garantir a coluna Heloísa.");
+    throw new Error("boardId é obrigatório para garantir a coluna Wandinha.");
   }
 
   if ((!apiKey || !token) && allowMock) {
-    return { id: `mock_list_heloisa_${boardId}`, name: "Heloísa", created: false };
+    return { id: `mock_list_wandinha_${boardId}`, name: "Wandinha", created: false };
   }
 
   const listsUrl = `https://api.trello.com/1/boards/${boardId}/lists?key=${apiKey}&token=${token}&fields=name,id`;
@@ -319,32 +319,32 @@ export async function ensureHeloisaList({
       const ln = String(l.name || "")
         .toLowerCase()
         .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[\u0300-\u300f\u0300-\u036f]/g, "")
         .trim();
-      return ln === "heloisa";
+      return ln === "wandinha" || ln === "heloisa";
     });
     if (found) {
       return { id: found.id, name: found.name, created: false };
     }
   }
 
-  // Cria a coluna Heloísa no topo do quadro
-  const postUrl = `https://api.trello.com/1/boards/${boardId}/lists?name=Helo%C3%ADsa&pos=top&key=${apiKey}&token=${token}`;
+  // Cria a coluna Wandinha no topo do quadro
+  const postUrl = `https://api.trello.com/1/boards/${boardId}/lists?name=Wandinha&pos=top&key=${apiKey}&token=${token}`;
   try {
     const res = await fetch(postUrl, { method: "POST" });
     if (res && res.ok) {
       const newList = await res.json();
-      return { id: newList.id, name: newList.name || "Heloísa", created: true };
+      return { id: newList.id, name: newList.name || "Wandinha", created: true };
     }
   } catch (errPost) {
-    console.warn(`[trelloService] Falha ao criar coluna Heloísa no quadro ${boardId}:`, errPost.message);
+    console.warn(`[trelloService] Falha ao criar coluna Wandinha no quadro ${boardId}:`, errPost.message);
   }
 
   if (allowMock) {
-    return { id: `mock_list_heloisa_${boardId}`, name: "Heloísa", created: true };
+    return { id: `mock_list_wandinha_${boardId}`, name: "Wandinha", created: true };
   }
 
-  throw new Error(`Não foi possível garantir a coluna Heloísa no quadro ${boardId}.`);
+  throw new Error(`Não foi possível garantir a coluna Wandinha no quadro ${boardId}.`);
 }
 
 /**

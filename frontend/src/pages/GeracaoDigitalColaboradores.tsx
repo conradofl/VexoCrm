@@ -203,7 +203,7 @@ export function GeracaoDigitalColaboradores() {
               Equipe Geração Digital & Cobranças WhatsApp
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-              Colaboradores oficiais da agência monitorados pelo GoClaw, Heloísa e Vigia de Prazos (100% WhatsApp).
+              Colaboradores oficiais da agência monitorados pelo GoClaw, Wandinha e Vigia de Prazos (100% WhatsApp).
             </p>
           </div>
 
@@ -403,7 +403,7 @@ export function GeracaoDigitalColaboradores() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-semibold text-slate-900 dark:text-white">Recebe Cobrança WhatsApp</div>
-                  <div className="text-[11px] text-slate-500">Permite que o GoClaw e a Heloísa enviem avisos automáticos</div>
+                  <div className="text-[11px] text-slate-500">Permite que o GoClaw e a Wandinha enviem avisos automáticos</div>
                 </div>
                 <Switch checked={recebeCobranca} onCheckedChange={setRecebeCobranca} />
               </div>

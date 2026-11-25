@@ -155,7 +155,7 @@ export function gerarLinkGoogleCalendarTemplate({
   const detalhes = [
     descricao,
     meetUrl ? `Link do Meet: ${meetUrl}` : "",
-    "Agendado automaticamente pela Heloísa (Vexo OS)",
+    "Agendado automaticamente pela Wandinha (Vexo OS)",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -480,6 +480,24 @@ export async function executarCadastrarCliente({ nome, telefone, empresa, valor,
   }
 }
 
+export const WANDINHA_OFFICIAL_PHONE = "553497719779";
+export const WANDINHA_OFFICIAL_PHONE_9 = "5534997719779";
+
+function isWandinhaInstanceRow(r) {
+  if (!r) return false;
+  const n = String(r.name || "").toLowerCase();
+  const u = String(r.dispatch_webhook_url || "").toLowerCase();
+  const p = String(r.phone || "").replace(/\D/g, "");
+  return n.includes("wandinha") || u.includes("wandinha") || p.endsWith("97719779");
+}
+
+function isPersonalOrExtractionInstanceRow(r) {
+  if (!r) return false;
+  const n = String(r.name || "").toLowerCase();
+  const u = String(r.dispatch_webhook_url || "").toLowerCase();
+  return n.includes("extracao") || n.includes("extração") || n.includes("pessoal") || u.includes("extracao") || u.includes("pessoal");
+}
+
 export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantId = "vexo-adm") {
   try {
     if (process.env.GD_EVOLUTION_INSTANCE && process.env.GD_EVOLUTION_INSTANCE !== "heloisa") {
@@ -488,18 +506,35 @@ export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantI
 
     if (pool && typeof pool.query === "function") {
       const allowedTenants = Array.from(new Set([tenantId, "vexo-adm", "geracao-digital"].filter(Boolean)));
-      const { rows } = await pool.query(
-        `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url
-         FROM public.lead_client_evolution_instances
-         WHERE client_id = ANY($1::text[])
-         ORDER BY (connection_state = 'open') DESC, is_default DESC, id DESC
-         LIMIT 10`,
-        [allowedTenants]
-      ).catch(() => ({ rows: [] }));
+      let rows = [];
+      try {
+        const res = await pool.query(
+          `SELECT name, phone, client_id, is_default, connection_state, dispatch_webhook_url
+           FROM public.lead_client_evolution_instances
+           WHERE client_id = ANY($1::text[])
+           ORDER BY (connection_state = 'open') DESC, is_default DESC, id DESC
+           LIMIT 15`,
+          [allowedTenants]
+        );
+        rows = res.rows || [];
+      } catch {
+        const resFallback = await pool.query(
+          `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url
+           FROM public.lead_client_evolution_instances
+           WHERE client_id = ANY($1::text[])
+           ORDER BY (connection_state = 'open') DESC, is_default DESC, id DESC
+           LIMIT 15`,
+          [allowedTenants]
+        ).catch(() => ({ rows: [] }));
+        rows = resFallback.rows || [];
+      }
 
-      if (rows && rows.length > 0) {
-        const aberta = rows.find((r) => r.connection_state === "open" || !r.connection_state);
-        const alvo = aberta || rows[0];
+      const elegiveis = rows.filter((r) => !isPersonalOrExtractionInstanceRow(r));
+      if (elegiveis.length > 0) {
+        const wandinhaAberta = elegiveis.find((r) => isWandinhaInstanceRow(r) && (r.connection_state === "open" || !r.connection_state));
+        const wandinhaQualquer = elegiveis.find((r) => isWandinhaInstanceRow(r));
+        const aberta = elegiveis.find((r) => r.connection_state === "open" || !r.connection_state);
+        const alvo = wandinhaAberta || wandinhaQualquer || aberta || elegiveis[0];
         const slug =
           extractEvolutionInstanceSlug(alvo.dispatch_webhook_url) ||
           alvo.instance_name ||
@@ -508,10 +543,9 @@ export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantI
       }
     }
   } catch (err) {
-    console.warn("[Heloísa] Falha ao consultar instâncias ativas do banco:", err.message);
+    console.warn("[Wandinha] Falha ao consultar instâncias ativas do banco:", err.message);
   }
 
-  // Fallback padrão seguro para a instância da Vexo
   return "vexo-adm-vexo-atende";
 }
 
@@ -545,13 +579,18 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
     if (!res.ok) return [];
     const list = await res.json();
     if (!Array.isArray(list)) return [];
-    const authorizedInstances = new Set(["vexo-adm-vexo-atende", "geracao-digital-teste-vexo"]);
+    const authorizedInstances = new Set([
+      "vexo-adm-wandinha",
+      "wandinha",
+      "vexo-adm-vexo-atende",
+      "geracao-digital-teste-vexo",
+    ]);
     return list
       .filter((i) => i && (i.connectionStatus === "open" || i.connection_state === "open"))
       .map((i) => i.name)
-      .filter((name) => authorizedInstances.has(name));
+      .filter((name) => authorizedInstances.has(name) || String(name || "").toLowerCase().includes("wandinha"));
   } catch (err) {
-    console.warn("[Heloísa] Falha ao consultar fetchInstances na Evolution:", err.message);
+    console.warn("[Wandinha] Falha ao consultar fetchInstances na Evolution:", err.message);
     return [];
   }
 }
@@ -574,11 +613,7 @@ function extractEvolutionSlug(urlStr) {
 
 /**
  * Envia mensagem no WhatsApp com contingência automática de instâncias.
- * IMPORTANTE: Heloísa pertence à diretoria da Vexo / Geração Digital.
- * Suas mensagens DEVEM OBRIGATORIAMENTE ser enviadas pelas instâncias oficiais da Vexo:
- * - Instância onde o diretor enviou a mensagem (ex: vexo-adm-vexo-atende)
- * - Contingência oficial: geracao-digital-teste-vexo (que usa o mesmo número da Vexo +55 34 9175-1267)
- * NUNCA utilizar instâncias dinâmicas de outros clientes/tenants da Evolution API.
+ * IMPORTANTE: Wandinha pertence à diretoria da Vexo / Geração Digital (+55 34 9771-9779).
  */
 export async function enviarMensagemWhatsAppComFallback({
   numero,
@@ -587,9 +622,8 @@ export async function enviarMensagemWhatsAppComFallback({
   tenantId = "vexo-adm",
   pool = pgDatabasePool,
 }) {
-  // Blindagem em ambiente de testes: suprime disparos reais de WhatsApp
+  const isEvolutionMocked = typeof sendTextMessageViaEvolution?.mock === "object";
   if ((process.env.NODE_ENV === "test" || process.env.VITEST || process.env.CI) && process.env.ALLOW_LIVE_WHATSAPP !== "true") {
-    const isEvolutionMocked = typeof sendTextMessageViaEvolution?.mock === "object";
     if (!isEvolutionMocked) {
       console.log(`[TEST-MOCK] Disparo real de WhatsApp suprimido em ambiente de teste.`);
       return {
@@ -610,6 +644,7 @@ export async function enviarMensagemWhatsAppComFallback({
     "";
 
   const candidateMap = new Map();
+  let foundWandinhaInDb = false;
 
   const upsertCandidate = (slug, meta = {}) => {
     if (!slug) return;
@@ -622,25 +657,47 @@ export async function enviarMensagemWhatsAppComFallback({
         baseUrl: meta.baseUrl || defaultBaseUrl,
         webhookToken: meta.webhookToken || defaultApiKey,
         connectionState: meta.connectionState || null,
+        phone: meta.phone || null,
+        isWandinha: Boolean(meta.isWandinha),
       });
     } else {
       if (meta.baseUrl) existing.baseUrl = meta.baseUrl;
       if (meta.webhookToken) existing.webhookToken = meta.webhookToken;
       if (meta.connectionState) existing.connectionState = meta.connectionState;
+      if (meta.phone) existing.phone = meta.phone;
+      if (meta.isWandinha) existing.isWandinha = true;
     }
   };
 
-  // 1. Consulta no banco as instâncias autorizadas com suas URLs e credenciais reais
+  // 1. Consulta no banco as instâncias autorizadas com suas URLs e credenciais reais (prioridade máxima para chip Wandinha +553497719779)
   if (pool && typeof pool.query === "function") {
     try {
-      const { rows } = await pool.query(
-        `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url, dispatch_webhook_token
-         FROM public.lead_client_evolution_instances
-         WHERE active = true AND client_id IN ('vexo-adm', 'geracao-digital')
-         ORDER BY (client_id = 'vexo-adm') DESC, (connection_state = 'open') DESC, is_default DESC`
-      ).catch(() => ({ rows: [] }));
+      let rows = [];
+      try {
+        const res = await pool.query(
+          `SELECT name, phone, client_id, is_default, connection_state, dispatch_webhook_url, dispatch_webhook_token
+           FROM public.lead_client_evolution_instances
+           WHERE active = true AND client_id IN ('vexo-adm', 'geracao-digital')
+           ORDER BY (client_id = 'vexo-adm') DESC, (connection_state = 'open') DESC, is_default DESC`
+        );
+        rows = res.rows || [];
+      } catch {
+        const resFallback = await pool.query(
+          `SELECT name, client_id, is_default, connection_state, dispatch_webhook_url, dispatch_webhook_token
+           FROM public.lead_client_evolution_instances
+           WHERE active = true AND client_id IN ('vexo-adm', 'geracao-digital')
+           ORDER BY (client_id = 'vexo-adm') DESC, (connection_state = 'open') DESC, is_default DESC`
+        ).catch(() => ({ rows: [] }));
+        rows = resFallback.rows || [];
+      }
 
-      for (const r of rows) {
+      const sortedRows = [...rows]
+        .filter((r) => !isPersonalOrExtractionInstanceRow(r))
+        .sort((a, b) => Number(isWandinhaInstanceRow(b)) - Number(isWandinhaInstanceRow(a)));
+
+      for (const r of sortedRows) {
+        const isW = isWandinhaInstanceRow(r);
+        if (isW) foundWandinhaInDb = true;
         const slug = extractEvolutionSlug(r.dispatch_webhook_url) || r.name;
         const bUrl = extractBaseUrlFromDispatchUrl(r.dispatch_webhook_url) || defaultBaseUrl;
         const token = r.dispatch_webhook_token || defaultApiKey;
@@ -648,24 +705,32 @@ export async function enviarMensagemWhatsAppComFallback({
           baseUrl: bUrl,
           webhookToken: token,
           connectionState: r.connection_state,
+          phone: r.phone || null,
+          isWandinha: isW,
         });
       }
     } catch (e) {
-      console.warn("[Heloísa] Falha ao consultar instâncias da Vexo no banco:", e.message);
+      console.warn("[Wandinha] Falha ao consultar instâncias da Vexo no banco:", e.message);
     }
   }
 
-  // 2. Se uma instância explícita foi fornecida (ex: vexo-adm-vexo-atende), adiciona/garante presença
+  // 2. Se uma instância explícita foi fornecida, garante presença
   if (instanceName) {
-    upsertCandidate(instanceName);
+    upsertCandidate(instanceName, {
+      isWandinha: String(instanceName).toLowerCase().includes("wandinha"),
+    });
   }
 
-  // 3. Fallbacks de segurança estritamente autorizados da Vexo (número +55 34 9175-1267)
+  // 3. Fallbacks de segurança autorizados da Vexo
   upsertCandidate("vexo-adm-vexo-atende", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
   upsertCandidate("geracao-digital-teste-vexo", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
+  upsertCandidate("vexo-adm-wandinha", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey, isWandinha: true });
 
   const candidates = Array.from(candidateMap.values());
-  if (instanceName) {
+  // Só sobrepõe o topo se instanceName não for o fallback legado quando o chip real da Wandinha existe no banco
+  const shouldPromoteExplicit =
+    Boolean(instanceName) && !(foundWandinhaInDb && instanceName === "vexo-adm-vexo-atende");
+  if (shouldPromoteExplicit) {
     const idx = candidates.findIndex((c) => c.slug === instanceName);
     if (idx > 0) {
       const [item] = candidates.splice(idx, 1);
@@ -673,11 +738,19 @@ export async function enviarMensagemWhatsAppComFallback({
     }
   }
 
+  const destLast8 = String(numero || "").replace(/\D/g, "").slice(-8);
   let lastError = null;
 
   for (const candidate of candidates) {
+    const candLast8 = String(candidate.phone || "").replace(/\D/g, "").slice(-8);
+    // Anti-autoenvio: evita que o chip da Wandinha (+553497719779) envie mensagem para si mesmo em produção
+    if (!isEvolutionMocked && destLast8 && ((candLast8 && candLast8 === destLast8) || (candidate.isWandinha && destLast8 === "97719779"))) {
+      console.warn(`[Wandinha] Autoenvio bloqueado: destinatário (${destLast8}) é o próprio número do chip "${candidate.slug}".`);
+      continue;
+    }
+
     try {
-      console.log(`[Heloísa] Tentando envio de WhatsApp para ${numero} via instância autorizada "${candidate.slug}" (${candidate.baseUrl})...`);
+      console.log(`[Wandinha] Tentando envio de WhatsApp para ${numero} via instância autorizada "${candidate.slug}"...`);
       const envio = await sendTextMessageViaEvolution({
         instanceName: candidate.slug,
         number: numero,
@@ -685,10 +758,10 @@ export async function enviarMensagemWhatsAppComFallback({
         baseUrl: candidate.baseUrl,
         webhookToken: candidate.webhookToken,
       });
-      console.log(`[Heloísa] Mensagem enviada com sucesso para ${numero} via instância autorizada "${candidate.slug}"!`);
+      console.log(`[Wandinha] Mensagem enviada com sucesso para ${numero} via instância autorizada "${candidate.slug}"!`);
       return { envio, instanceName: candidate.slug };
     } catch (err) {
-      console.warn(`[Heloísa] Falha ao enviar via instância autorizada "${candidate.slug}": ${err.message}. Tentando contingência autorizada...`);
+      console.warn(`[Wandinha] Falha ao enviar via instância autorizada "${candidate.slug}": ${err.message}. Tentando contingência autorizada...`);
       lastError = err;
     }
   }
@@ -839,7 +912,7 @@ export async function executarCobrarColaborador({ colaborador, mensagem }, pool 
       telCanonico = `55${telCanonico}`;
     }
 
-    const textoMensagem = `Olá ${colab.nome}! Aqui é a *Heloísa* (Secretária Executiva da Diretoria).\n\n${mensagem}\n\n_Mensagem enviada sob orientação da diretoria da Geração Digital._`;
+    const textoMensagem = `Olá ${colab.nome}! Aqui é a *Wandinha* (Secretária Executiva da Diretoria).\n\n${mensagem}\n\n_Mensagem enviada sob orientação da diretoria da Geração Digital._`;
 
     // Dispara WhatsApp com contingência automática
     const { envio, instanceName: instanciaUsada } = await enviarMensagemWhatsAppComFallback({
@@ -1138,7 +1211,7 @@ export async function executarAgendarCompromisso(
       meetUrl = gerarLinkGoogleMeet(tit, dataIso);
     }
 
-    const desc = `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`;
+    const desc = `Reunião agendada pela Wandinha.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`;
 
     // 4. Salva no banco de dados na tabela events
     let eventoId = calResult?.eventId || null;
@@ -1224,7 +1297,7 @@ export async function executarAgendarCompromisso(
       dataIso,
       duracaoMinutos: duracaoMinutosFinal,
       meetUrl,
-      descricao: `Reunião agendada pela Heloísa.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`,
+      descricao: `Reunião agendada pela Wandinha.\nLink do Meet: ${meetUrl}\nParticipantes: ${listaParticipantesFinal.join(", ")}`,
     });
 
     const participantesFormatados = listaParticipantesFinal.map((email) => {
@@ -1232,7 +1305,7 @@ export async function executarAgendarCompromisso(
       return agenda ? `• ${agenda.nome} (${agenda.email})` : `• ${email}`;
     }).join("\n");
 
-    const msgNotif = `📅 *Novo Compromisso Agendado pela Heloísa!*
+    const msgNotif = `📅 *Novo Compromisso Agendado pela Wandinha!*
 
 📌 *Título:* ${tit}
 ⏰ *Data/Hora:* ${dataFormatada}
@@ -1951,7 +2024,7 @@ export async function executarCriarFollowup(
     const textoMensagem = String(
       mensagem_whatsapp ||
         notas ||
-        `📌 *Lembrete da Heloísa:* ${tit}${cliente_nome ? ` (${cliente_nome})` : ""}`
+        `📌 *Lembrete da Wandinha:* ${tit}${cliente_nome ? ` (${cliente_nome})` : ""}`
     ).trim();
 
     let reminderRow = null;
@@ -2118,7 +2191,7 @@ export async function executarAbrirCardTrello(
     // 1. Cria card no Trello com suporte a multiquadros e coluna Heloísa
     const cardRes = await createTrelloCard({
       name: String(titulo).trim(),
-      desc: descricao ? String(descricao).trim() : `Demanda criada via Heloísa para ${colab.nome}.\nPrazo: ${dataHoraFormatada}`,
+      desc: descricao ? String(descricao).trim() : `Demanda criada via Wandinha para ${colab.nome}.\nPrazo: ${dataHoraFormatada}`,
       listName: lista_destino || "Em Produção / Design",
       dueDate: dueDateUtc,
       memberUsername: colab.trello_username,
@@ -2444,7 +2517,7 @@ export async function executarGerarContratoGomes(
 🔗 *Link Oficial de Assinatura:*
 ${linkAssinatura}
 
-Emitido por Gomes (Cartório & Contratos) via Heloísa.`;
+Emitido por Gomes (Cartório & Contratos) via Wandinha.`;
 
     // 5. Ordem Estrita de Notificação via WhatsApp (ZERO SLACK)
     // 1º Passo (Validação Interna): Notifica Caio no WhatsApp como 1º signatário
@@ -2955,7 +3028,7 @@ export async function executarOnboardingCliente(
         [
           cliente.id,
           "GRUPOS_CRIADOS",
-          "Onboarding operacional executado com sucesso pela Heloísa (Drive e Grupos WhatsApp).",
+          "Onboarding operacional executado com sucesso pela Wandinha (Drive e Grupos WhatsApp).",
           JSON.stringify({
             grupo_interno: { jid: jidInterno, url: urlInterno },
             grupo_cliente: { jid: jidCliente, url: urlCliente },
@@ -3522,11 +3595,11 @@ export async function processarMensagemHeloisa({
   const inicioMs = Date.now();
   const ativa = await isHeloisaActive(pool);
   if (!ativa) {
-    console.log(`[Heloísa] Mensagem ignorada pois a Heloísa está pausada/desativada.`);
+    console.log(`[Wandinha] Mensagem ignorada pois a Wandinha está pausada/desativada.`);
     return {
       autorizado: true,
       pausada: true,
-      resposta: "A Heloísa está pausada temporariamente pelo administrador.",
+      resposta: "A Wandinha está pausada temporariamente pelo administrador.",
     };
   }
 
@@ -3559,7 +3632,7 @@ export async function processarMensagemHeloisa({
   }
 
   if (!promptUsuario) {
-    const msgAviso = `Olá ${diretor.nome}! Sou a Heloísa. Recebi seu áudio, mas não consegui ouvir com clareza. Pode reenviar ou me mandar por texto?`;
+    const msgAviso = `Olá ${diretor.nome}! Sou a Wandinha. Recebi seu áudio, mas não consegui ouvir com clareza. Pode reenviar ou me mandar por texto?`;
     try {
       await enviarMensagemWhatsAppComFallback({
         numero: diretor.telefone,
@@ -3567,9 +3640,9 @@ export async function processarMensagemHeloisa({
         instanceName,
         pool,
       });
-      console.log(`[Heloísa] Aviso de áudio não compreendido enviado para ${diretor.nome} (${diretor.telefone})`);
+      console.log(`[Wandinha] Aviso de áudio não compreendido enviado para ${diretor.nome} (${diretor.telefone})`);
     } catch (errEnvio) {
-      console.error(`[Heloísa] Falha ao enviar aviso de áudio para ${diretor.nome}:`, errEnvio);
+      console.error(`[Wandinha] Falha ao enviar aviso de áudio para ${diretor.nome}:`, errEnvio);
     }
 
     return {
@@ -3578,19 +3651,23 @@ export async function processarMensagemHeloisa({
     };
   }
 
-  // Carrega prompt da Heloísa
+  // Carrega prompt da Wandinha (com fallback de compatibilidade)
   let systemPrompt = "";
   try {
-    const promptPath = path.join(resolveGoclawDir(), "prompts", "heloisa_executiva.md");
-    if (fs.existsSync(promptPath)) {
-      systemPrompt = fs.readFileSync(promptPath, "utf-8");
+    const dirPrompts = path.join(resolveGoclawDir(), "prompts");
+    const wandinhaPath = path.join(dirPrompts, "wandinha_executiva.md");
+    const legacyPath = path.join(dirPrompts, "heloisa_executiva.md");
+    if (fs.existsSync(wandinhaPath)) {
+      systemPrompt = fs.readFileSync(wandinhaPath, "utf-8");
+    } else if (fs.existsSync(legacyPath)) {
+      systemPrompt = fs.readFileSync(legacyPath, "utf-8");
     }
   } catch (e) {
-    console.warn("[Heloísa] Aviso ao ler prompt:", e.message);
+    console.warn("[Wandinha] Aviso ao ler prompt:", e.message);
   }
 
   if (!systemPrompt) {
-    systemPrompt = `Você é Heloísa, secretária executiva e copiloto de Conrado e Caio na Geração Digital e Vexo OS. ZERO SLACK, tudo WhatsApp.`;
+    systemPrompt = `Você é Wandinha, secretária executiva e copiloto de Conrado e Caio na Geração Digital e Vexo OS (+55 34 9771-9779). ZERO SLACK, tudo WhatsApp.`;
   }
 
   systemPrompt += `\n\n=== CONTEXTO DO DIRETOR ATUAL ===\nVocê está conversando diretamente com: ${diretor.nome} (${diretor.papel}). Telefone: ${diretor.telefone}.\nData e Hora Atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`;
@@ -3887,7 +3964,7 @@ export async function processarVozHeloisa({
   if (!ativa) {
     return {
       ok: false,
-      error: "A Heloísa está pausada temporariamente pelo administrador no Painel de Controle.",
+      error: "A Wandinha está pausada temporariamente pelo administrador no Painel de Controle.",
       pausada: true,
       userText: text || "",
       responseText: "Estou pausada temporariamente no momento pelo painel de controle.",
@@ -3895,7 +3972,7 @@ export async function processarVozHeloisa({
     };
   }
 
-  const instanceName = "vexo-adm-vexo-atende";
+  const instanceName = await obterInstanciaWhatsAppAtiva(pool, "vexo-adm");
   let userText = (text || "").trim();
 
   let cleanUserName = String(userName || "").trim().split(" ")[0];
@@ -3942,15 +4019,18 @@ export async function processarVozHeloisa({
     ? snapshot.compromissos.map((ev) => `• ${ev.titulo || ev.name} - ${ev.data_hora || ev.date}`).join("\n")
     : "Nenhum compromisso agendado para hoje ou amanhã.";
 
-  // Etapa 3 (Inteligência & Tools): Carrega prompt da Heloísa
+  // Etapa 3 (Inteligência & Tools): Carrega prompt da Wandinha
   let systemPrompt = "";
   try {
-    const promptPath = path.join(goclawDir, "prompts", "heloisa_executiva.md");
-    if (fs.existsSync(promptPath)) {
-      systemPrompt = fs.readFileSync(promptPath, "utf-8");
+    const wandinhaPath = path.join(goclawDir, "prompts", "wandinha_executiva.md");
+    const legacyPath = path.join(goclawDir, "prompts", "heloisa_executiva.md");
+    if (fs.existsSync(wandinhaPath)) {
+      systemPrompt = fs.readFileSync(wandinhaPath, "utf-8");
+    } else if (fs.existsSync(legacyPath)) {
+      systemPrompt = fs.readFileSync(legacyPath, "utf-8");
     }
   } catch (e) {
-    console.warn("[Heloísa Voz] Aviso ao carregar prompt heloisa_executiva.md:", e.message);
+    console.warn("[Wandinha Voz] Aviso ao carregar prompt wandinha_executiva.md:", e.message);
   }
 
   const previousMessages = Array.isArray(history)
@@ -3964,9 +4044,9 @@ export async function processarVozHeloisa({
     : [];
 
   if (!systemPrompt) {
-    systemPrompt = `Você é a Heloísa, copiloto inteligente e secretária executiva do Vexo OS e da Geração Digital, trabalhando lado a lado com ${cleanUserName} (e Caio). Você possui autoridade e acesso total para consultar qualquer tenant da plataforma.`;
+    systemPrompt = `Você é a Wandinha, copiloto inteligente e secretária executiva do Vexo OS e da Geração Digital, trabalhando lado a lado com ${cleanUserName} (e Caio). Você possui autoridade e acesso total para consultar qualquer tenant da plataforma.`;
   } else {
-    systemPrompt = `Você é a Heloísa, copiloto inteligente e secretária executiva do Vexo OS e da Geração Digital, trabalhando lado a lado com ${cleanUserName} (e Caio). Você possui autoridade e acesso total para consultar qualquer tenant da plataforma.\n\n` + systemPrompt;
+    systemPrompt = `Você é a Wandinha, copiloto inteligente e secretária executiva do Vexo OS e da Geração Digital, trabalhando lado a lado com ${cleanUserName} (e Caio). Você possui autoridade e acesso total para consultar qualquer tenant da plataforma.\n\n` + systemPrompt;
   }
 
   systemPrompt += `\n\n=== CONTEXTO DA SESSÃO DE VOZ (WIDGET FLUTUANTE VEXO OS) ===
@@ -3988,11 +4068,11 @@ ${compromissosTexto}
 === REGRAS MANDATÓRIAS DE NATURALIDADE, CONTINUIDADE & POSTURA ===
 1. NUNCA CHAME O USUÁRIO DE "DIRETOR". Jamais use as expressões "Oi Diretor", "Olá Diretor", "Sim Diretor" ou "Diretor". Se for se dirigir a ele, chame de ${cleanUserName}, mas sem ficar repetindo o nome a todo momento (converse normalmente).
 2. CONTINUIDADE CONVERSACIONAL (NÃO REINICIE A CONVERSA):
-   - Você está no meio de uma conversa contínua. NUNCA comece suas respostas se reapresentando (ex: NUNCA diga "Oi, eu sou a Heloísa, sua secretária...").
+   - Você está no meio de uma conversa contínua. NUNCA comece suas respostas se reapresentando (ex: NUNCA diga "Oi, eu sou a Wandinha, sua secretária...").
    - Se o usuário fez uma pergunta ou pedido, NUNCA repita saudações ("Oi", "Olá", "Tudo bem?"). Dê seguimento IMEDIATO e DIRETO ao que ele acabou de falar.
    - Se o usuário perguntar o que você faz ou suas capacidades, responda DIRETO, por exemplo:
      "Consigo auditar qualquer tenant do Vexo, buscar leads e clientes, cadastrar novos contatos, agendar reuniões e mandar mensagens no WhatsApp pro Caio ou pra equipe. O que você quer que eu veja agora?"
-   - Apenas faça uma saudação se for o primeiríssimo contato absoluto da conversa E o usuário tiver falado apenas um cumprimento isolado (ex: "Oi", "Heloísa").
+   - Apenas faça uma saudação se for o primeiríssimo contato absoluto da conversa E o usuário tiver falado apenas um cumprimento isolado (ex: "Oi", "Wandinha").
 3. ZERO AFETAÇÃO E ZERO FRASES MELOSAS:
    - NUNCA use frases artificiais como "com um toque de amizade", "com todo carinho", "anotei com muito carinho" ou "meu querido".
    - Fale como uma colega sênior competente, prática, inteligente, descontraída e ágil.

@@ -262,6 +262,32 @@ describe("Heloísa só atende e responde pelos chips da Geração Digital", () =
     expect(r).toMatchObject({ handled: "heloisa" });
   });
 
+  it("chip novo 'Wandinha' (vexo-adm-wandinha): Conrado envia mensagem sem prefixo e a Wandinha atende", async () => {
+    const t = setup({ tenant: "vexo-adm" });
+    const r = await t.webhook(mensagem({ clientId: "vexo-adm", text: "marca reunião amanhã às 10h", instance: "vexo-adm-wandinha" }));
+    expect(processarMensagemHeloisa).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ handled: "heloisa", agent: "wandinha" });
+    expect(processarMensagemHeloisa.mock.calls[0][0]).toMatchObject({
+      phone: DIRETOR,
+      instanceName: "vexo-adm-wandinha",
+    });
+  });
+
+  it("chip comum da GD: com prefixo 'Wandinha' de diretor ACIONA a Wandinha normalmente", async () => {
+    const t = setup({ tenant: "geracao-digital" });
+    const r = await t.webhook(mensagem({ clientId: "geracao-digital", text: "Wandinha, auditar campanhas", instance: "geracao-digital-chip-comercial" }));
+    expect(processarMensagemHeloisa).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ handled: "heloisa", agent: "wandinha" });
+    expect(processarMensagemHeloisa.mock.calls[0][0].texto).toBe("auditar campanhas");
+  });
+
+  it("anti-loop: eco do próprio número +553497719779 na instância Wandinha NÃO aciona auto-resposta", async () => {
+    const t = setup({ tenant: "vexo-adm" });
+    const r = await t.webhook(mensagem({ clientId: "vexo-adm", phone: "553497719779", text: "Oi!", instance: "vexo-adm-wandinha" }));
+    expect(processarMensagemHeloisa).not.toHaveBeenCalled();
+    expect(r?.handled).not.toBe("heloisa");
+  });
+
   it("mensagem que a Heloísa atende também fica gravada e aparece em Conversas do chip da GD", async () => {
     const t = setup({ tenant: "geracao-digital" });
     await t.webhook(mensagem({ clientId: "geracao-digital", text: "Heloísa, cadastra o cliente novo", instance: "vexo-adm-vexo-atende" }));

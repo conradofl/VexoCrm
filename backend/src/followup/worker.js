@@ -669,12 +669,12 @@ export async function processHeloisaScheduledWhatsappJob(job) {
   const { numero, texto, instanceName, tenantId } = job?.data || {};
   const pool = getFollowupWorkerDbPool() || pgDatabasePool;
 
-  console.log(`[followup/worker] ⏰ Disparando lembrete programado da Heloísa para ${numero}: "${texto}"`);
+  console.log(`[followup/worker] ⏰ Disparando lembrete programado da Wandinha para ${numero}: "${texto}"`);
   const res = await enviarMensagemWhatsAppComFallback({
     numero,
     texto,
-    instanceName: instanceName || "vexo-adm-vexo-atende",
-    tenantId: tenantId || "geracao-digital",
+    instanceName: instanceName || null,
+    tenantId: tenantId || "vexo-adm",
     pool,
   });
   console.log(`[followup/worker] ✅ Lembrete enviado com sucesso para ${numero} via ${res?.instanceName}!`);
