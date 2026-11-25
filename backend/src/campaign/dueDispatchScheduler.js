@@ -20,6 +20,15 @@ import { syncDailyStalledNotificationsForAllTenants } from "../services/leadReac
 let _dueDispatchTimerStarted = false;
 let _dueDispatchInterval = null;
 let _lastEmptyHeartbeatAt = 0;
+// Prova no /health de que o tick está vivo (o momento em que ele liga mudou nesta extração).
+let _ligadoEm = null;
+let _ultimoTickEm = null;
+let _ticks = 0;
+
+/** Só datas e contagem: { ligado, ligadoEm, ultimoTickEm, ticks }. */
+export function getDueDispatchSchedulerStatus() {
+  return { ligado: Boolean(_dueDispatchInterval), ligadoEm: _ligadoEm, ultimoTickEm: _ultimoTickEm, ticks: _ticks };
+}
 
 export function resetSchedulerHeartbeatForTest() {
   _lastEmptyHeartbeatAt = 0;
@@ -31,6 +40,7 @@ export function stopDueDispatchScheduler() {
     _dueDispatchInterval = null;
     _dueDispatchTimerStarted = false;
     _lastEmptyHeartbeatAt = 0;
+    _ligadoEm = null;
     console.log("[campaign-dispatch-scheduler] scheduler de disparos avulsos parado.");
   }
 }
@@ -465,7 +475,10 @@ export function startDueDispatchScheduler({ runDueIndependentDispatches, pgDatab
   if (!_dueDispatchTimerStarted) {
     _dueDispatchTimerStarted = true;
     console.log(`[campaign-dispatch-scheduler] agendador iniciado (pid=${process.pid}, interval=30000ms)`);
+    _ligadoEm = new Date().toISOString();
     _dueDispatchInterval = setInterval(async () => {
+      _ultimoTickEm = new Date().toISOString();
+      _ticks += 1;
       try {
         await runDueIndependentDispatches({ limit: 50 });
       } catch (err) {

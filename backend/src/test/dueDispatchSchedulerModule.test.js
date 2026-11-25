@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startDueDispatchScheduler, stopDueDispatchScheduler } from "../campaign/dueDispatchScheduler.js";
+import { getDueDispatchSchedulerStatus, startDueDispatchScheduler, stopDueDispatchScheduler } from "../campaign/dueDispatchScheduler.js";
 import * as rotas from "../domains/campaigns/routes.js";
 
 afterEach(() => {
@@ -36,8 +36,14 @@ describe("agendador dos lotes fora do routes.js", () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const run = vi.fn(async () => ({}));
     startDueDispatchScheduler({ runDueIndependentDispatches: run, pgDatabasePool: null });
+    expect(getDueDispatchSchedulerStatus()).toMatchObject({ ligado: true, ultimoTickEm: null, ticks: 0 });
     await tick();
     expect(run).toHaveBeenCalledWith({ limit: 50 });
+    const st = getDueDispatchSchedulerStatus();
+    expect(st.ticks).toBe(1);
+    expect(st.ultimoTickEm).toBeTruthy();
+    stopDueDispatchScheduler();
+    expect(getDueDispatchSchedulerStatus().ligado).toBe(false);
   });
 
   it("[OBRIGATÓRIO] registrar as rotas de campanha NÃO liga mais o tick", () => {
