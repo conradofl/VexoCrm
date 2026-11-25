@@ -105,6 +105,7 @@ import {
   describeChipBusyForButton,
   describeChipBusyForScheduler,
 } from "../../campaign/chipDispatchLock.js";
+import { acquireChipLease, releaseChipLease } from "../../campaign/chipLeaseStore.js";
 import { SQL_CANONICAL_PHONE, SQL_CANONICAL_PHONE_JID, toCanonicalPhone } from "../../services/canonicalPhone.js";
 
 export function normalizeDispatchPhone(phone, lead = null) {
@@ -3170,7 +3171,7 @@ export function registerCampaignsRoutes(app, deps) {
           // TRAVA POR CHIP: com outro lote enviando pelo mesmo chip (deste agendador, de um tick concorrente ou de um
           // botão), este espera e tenta no próximo tick. Só grava o motivo em lote 'scheduled': o 'paused' que chegou
           // aqui é retomável justamente pelo texto do error_message (janela/cota), e sobrescrever tiraria isso dele.
-          const reservaDeChip = reservarChipDoLote(campaign, dispatch);
+          const reservaDeChip = await reservarChipDoLote(campaign, dispatch);
           if (!reservaDeChip.ok) {
             const bloqueador = reservaDeChip.bloqueadoPor;
             const reason = `Chip ocupado por outro lote (lote bloqueador: ${bloqueador.dispatchId})`;
@@ -3232,7 +3233,7 @@ export function registerCampaignsRoutes(app, deps) {
 
             results.push({ id: dispatch.id, campaignId: campaign.id, status: "success" });
           } finally {
-            travaDeChip.liberar(dispatch.id);
+            liberarChipDoLote(dispatch.id);
           }
         } catch (err) {
           console.error(`[campaign-dispatch-scheduler] failed to run dispatch ${dispatch.id}:`, err);
@@ -3402,13 +3403,29 @@ export function registerCampaignsRoutes(app, deps) {
     return unico ? [unico] : null;
   }
 
-  function reservarChipDoLote(campaign, dispatch) {
-    return travaDeChip.reservar({
+  // Duas camadas (PR 10d do untangle): memória primeiro (síncrona, segura ticks intercalados deste processo), depois o
+  // banco (campaign/chipLeaseStore.js: sobrevive a boot e enxerga outro contêiner). Banco recusou: solta a memória.
+  async function reservarChipDoLote(campaign, dispatch) {
+    const pedido = {
       dispatchId: dispatch.id,
       clientId: dispatch.client_id || campaign.client_id,
       chips: chipsDoLote(campaign, dispatch),
       nome: dispatch.name,
-    });
+    };
+    const memoria = travaDeChip.reservar(pedido);
+    if (!memoria.ok) return memoria;
+    const banco = await acquireChipLease(pgDatabasePool, pedido);
+    if (!banco.ok) {
+      travaDeChip.liberar(dispatch.id);
+      return banco;
+    }
+    return memoria;
+  }
+
+  function liberarChipDoLote(dispatchId) {
+    travaDeChip.liberar(dispatchId);
+    // Nunca lança; se falhar, a reserva vence pelo prazo ou é solta quando o lote termina.
+    void releaseChipLease(pgDatabasePool, dispatchId);
   }
 
   // A linha da instância dona do webhook com que este lote envia (ou null se o webhook não é de instância cadastrada).
@@ -4894,7 +4911,7 @@ export function registerCampaignsRoutes(app, deps) {
       }
 
       // Trava por chip: com outro lote enviando pelo mesmo chip, recusa sem mexer no lote (a tela mostra a mensagem).
-      const reservaDeChip = reservarChipDoLote(campaign, dispatch);
+      const reservaDeChip = await reservarChipDoLote(campaign, dispatch);
       if (!reservaDeChip.ok) {
         if (reservaDeChip.mesmoLote) return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
         return sendError(res, 409, "CHIP_BUSY", describeChipBusyForButton(reservaDeChip.bloqueadoPor.nome), {
@@ -4917,7 +4934,7 @@ export function registerCampaignsRoutes(app, deps) {
         .select("id");
 
       if (claimErr || !claimed || claimed.length === 0) {
-        travaDeChip.liberar(dispatchId);
+        liberarChipDoLote(dispatchId);
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
 
@@ -4934,9 +4951,9 @@ export function registerCampaignsRoutes(app, deps) {
       chipReservado = false; // daqui em diante quem solta é o .finally do motor
       runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: janela.forced })
         .catch((err) => markDispatchCrashed(dispatchId, err, "run-pending"))
-        .finally(() => travaDeChip.liberar(dispatchId));
+        .finally(() => liberarChipDoLote(dispatchId));
     } catch (err) {
-      if (chipReservado) travaDeChip.liberar(dispatchId);
+      if (chipReservado) liberarChipDoLote(dispatchId);
       console.error("[run-pending] error:", err);
       sendError(res, 500, "RUN_PENDING_ERROR", err instanceof Error ? err.message : "Failed to run pending leads");
     }
@@ -5819,7 +5836,7 @@ export function registerCampaignsRoutes(app, deps) {
       // dois cliques no botao — ou um clique concorrente com o ciclo do scheduler —
       // iniciem duas execucoes do mesmo disparo. Sem isso o mesmo passo sai duas vezes.
       // Trava por chip: com outro lote enviando pelo mesmo chip, recusa sem mexer no lote (a tela mostra a mensagem).
-      const reservaDeChip = reservarChipDoLote(campaign, dispatch);
+      const reservaDeChip = await reservarChipDoLote(campaign, dispatch);
       if (!reservaDeChip.ok) {
         if (reservaDeChip.mesmoLote) return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
         return sendError(res, 409, "CHIP_BUSY", describeChipBusyForButton(reservaDeChip.bloqueadoPor.nome), {
@@ -5836,11 +5853,11 @@ export function registerCampaignsRoutes(app, deps) {
         .select("id");
 
       if (claimManualErr) {
-        travaDeChip.liberar(dispatchId);
+        liberarChipDoLote(dispatchId);
         return sendError(res, 500, "DISPATCH_CLAIM_FAILED", "Falha ao reivindicar o disparo", claimManualErr.message);
       }
       if (!claimedManual || claimedManual.length === 0) {
-        travaDeChip.liberar(dispatchId);
+        liberarChipDoLote(dispatchId);
         return sendError(res, 409, "DISPATCH_ALREADY_RUNNING", "Este disparo já está em execução");
       }
 
@@ -5893,9 +5910,9 @@ export function registerCampaignsRoutes(app, deps) {
       chipReservado = false; // daqui em diante quem solta é o .finally do motor
       runCampaignDispatch({ dispatch, campaign, supabase, ignoreSendWindow: forcedOutsideWindow })
         .catch((err) => markDispatchCrashed(dispatchId, err, "trigger"))
-        .finally(() => travaDeChip.liberar(dispatchId));
+        .finally(() => liberarChipDoLote(dispatchId));
     } catch (err) {
-      if (chipReservado) travaDeChip.liberar(dispatchId);
+      if (chipReservado) liberarChipDoLote(dispatchId);
       sendError(res, 500, "DISPATCH_TRIGGER_FAILED", err instanceof Error ? err.message : "Failed");
     }
   });

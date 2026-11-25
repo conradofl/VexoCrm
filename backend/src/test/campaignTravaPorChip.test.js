@@ -9,12 +9,17 @@
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { buildDispatchLeads } from "../campaign/dispatch.js";
 import { checkEvolutionInstanceHealth } from "../services/evolution.js";
 
 const SLOW = 120_000;
+// PR 10d: a trava por chip também mora no banco. Todos os casos rodam com a tabela (migration real).
+const MIGRATION_LEASES = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "migrations", "20261125150000_campaign_chip_leases.sql");
 const T = "tenant-trava";
 const SEQ = [{ id: "s1", type: "text", text: "Oi {{nome}}", order: 1, enabled: true, delayAfterSeconds: 0 }];
 const SEQ_AGENDA = [{ id: "s1", type: "text", text: "Agende: {{scheduling_link}}", order: 1, enabled: true, delayAfterSeconds: 0 }];
@@ -134,6 +139,7 @@ const ate = async (cond, ms = 10_000) => {
 async function mundo({ instancias = [CHIP_2, CHIP_3] } = {}) {
   const db = await createPgliteDb(SCHEMA);
   abertos.push(db);
+  await db.exec(await readFile(MIGRATION_LEASES, "utf8"));
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'Empresa da trava')", [T]);
   for (let i = 0; i < 20; i += 1) {
     await db.query("INSERT INTO leads (client_id, telefone, nome, created_at) VALUES ($1, $2, $3, $4)", [
@@ -144,34 +150,39 @@ async function mundo({ instancias = [CHIP_2, CHIP_3] } = {}) {
   _setPgDatabasePoolForTesting(pool);
   const supabase = createPgSupabaseClient(pool);
 
-  const { registerCampaignsRoutes } = await import("../domains/campaigns/routes.js");
-  const handlers = {};
-  const guardar = (metodo) => (path, ...hs) => { handlers[`${metodo} ${path}`] = hs[hs.length - 1]; };
-  const app = { get: guardar("GET"), post: guardar("POST"), put: guardar("PUT"), patch: guardar("PATCH"), delete: guardar("DELETE"), use() {} };
-  const noop = () => {};
-  const routes = registerCampaignsRoutes(app, {
-    CAMPAIGN_SCHEDULER_MAX_BATCH: 10, buildDispatchLeads, canCampaignBeDispatched: () => true,
-    checkEvolutionInstanceHealth, continueCampaignLeadFromReply: async () => {},
-    ensureDb: () => true, executeCampaignDispatch: async () => {}, findCampaignReplyMatches: async () => [],
-    getClientName: async () => "Empresa da trava", getLeadClientEvolutionInstances: async () => instancias,
-    getLeadClientN8nSettings: async () => ({ send_window_enabled: false }), getRequestId: () => "req",
-    getSafeDispatchSettingsLog: () => ({}), internalErrorPayloadDetails: () => ({}), isMissingSchemaError: () => false,
-    isProduction: false, logCampaignReplyFlow: noop, logDirectDispatch: noop, maskPhoneForLog: (p) => p,
-    normalizeIsoDate: (d) => d, leadsTableName: "lead_import_items", normalizeString: (s) => String(s ?? "").trim(),
-    normalizeTenantKey: (s) => String(s || "").trim(), parseOptionalUuid: (s) => ({ value: s }), pgDatabasePool: pool,
-    requireAppViewAccess: () => (req, res, next) => next(), requireCampaignDispatchAccess: (req, res, next) => next(),
-    requireFirebaseAuth: (req, res, next) => next(), requireInternalPageAccess: () => (req, res, next) => next(),
-    resolveAuthorizedClientId: () => T,
-    // O webhook de envio é o do chip do lote (como em produção, source 'campaign_evolution_instance').
-    resolveCampaignDispatchSettings: async (clientId, campaign, opts = {}) => {
-      const id = opts?.dispatchOptions?.evolutionInstanceId || campaign?.analytics_meta?.dispatchOptions?.evolutionInstanceId;
-      const c = instancias.find((i) => i.id === id) || instancias[0];
-      return { webhookUrl: c.dispatch_webhook_url, webhookToken: c.dispatch_webhook_token };
-    },
-    resolveDispatchWebhookSettings: async () => ({}), runDueCampaignDispatches: async () => {}, sanitizePhone: (p) => p,
-    sendError: (res, s, c, m, d) => res.status(s).json({ error: { code: c, message: m, ...(d ? { details: d } : {}) } }),
-    supabase, validateN8nInboundBearer: () => true,
-  });
+  // Cada chamada é um "processo" (registro de rotas com a sua trava em memória); o banco é o mesmo.
+  const registrar = async () => {
+    const { registerCampaignsRoutes } = await import("../domains/campaigns/routes.js");
+    const handlers = {};
+    const guardar = (metodo) => (path, ...hs) => { handlers[`${metodo} ${path}`] = hs[hs.length - 1]; };
+    const app = { get: guardar("GET"), post: guardar("POST"), put: guardar("PUT"), patch: guardar("PATCH"), delete: guardar("DELETE"), use() {} };
+    const noop = () => {};
+    const routes = registerCampaignsRoutes(app, {
+      CAMPAIGN_SCHEDULER_MAX_BATCH: 10, buildDispatchLeads, canCampaignBeDispatched: () => true,
+      checkEvolutionInstanceHealth, continueCampaignLeadFromReply: async () => {},
+      ensureDb: () => true, executeCampaignDispatch: async () => {}, findCampaignReplyMatches: async () => [],
+      getClientName: async () => "Empresa da trava", getLeadClientEvolutionInstances: async () => instancias,
+      getLeadClientN8nSettings: async () => ({ send_window_enabled: false }), getRequestId: () => "req",
+      getSafeDispatchSettingsLog: () => ({}), internalErrorPayloadDetails: () => ({}), isMissingSchemaError: () => false,
+      isProduction: false, logCampaignReplyFlow: noop, logDirectDispatch: noop, maskPhoneForLog: (p) => p,
+      normalizeIsoDate: (d) => d, leadsTableName: "lead_import_items", normalizeString: (s) => String(s ?? "").trim(),
+      normalizeTenantKey: (s) => String(s || "").trim(), parseOptionalUuid: (s) => ({ value: s }), pgDatabasePool: pool,
+      requireAppViewAccess: () => (req, res, next) => next(), requireCampaignDispatchAccess: (req, res, next) => next(),
+      requireFirebaseAuth: (req, res, next) => next(), requireInternalPageAccess: () => (req, res, next) => next(),
+      resolveAuthorizedClientId: () => T,
+      // O webhook de envio é o do chip do lote (como em produção, source 'campaign_evolution_instance').
+      resolveCampaignDispatchSettings: async (clientId, campaign, opts = {}) => {
+        const id = opts?.dispatchOptions?.evolutionInstanceId || campaign?.analytics_meta?.dispatchOptions?.evolutionInstanceId;
+        const c = instancias.find((i) => i.id === id) || instancias[0];
+        return { webhookUrl: c.dispatch_webhook_url, webhookToken: c.dispatch_webhook_token };
+      },
+      resolveDispatchWebhookSettings: async () => ({}), runDueCampaignDispatches: async () => {}, sanitizePhone: (p) => p,
+      sendError: (res, s, c, m, d) => res.status(s).json({ error: { code: c, message: m, ...(d ? { details: d } : {}) } }),
+      supabase, validateN8nInboundBearer: () => true,
+    });
+    return { handlers, routes };
+  };
+  const { handlers, routes } = await registrar();
 
   let offsetLivre = 0;
   const campanha = async (nome) => {
@@ -193,10 +204,10 @@ async function mundo({ instancias = [CHIP_2, CHIP_3] } = {}) {
   };
   const estado = async (id) =>
     (await db.query("SELECT status, error_message, sent_count FROM campaign_dispatches WHERE id = $1", [id])).rows[0];
-  const chamar = async (rota, dispatchId, body = {}) => {
+  const chamar = async (rota, dispatchId, body = {}, h = handlers) => {
     const out = { status: 200, body: null };
     const res = { status(c) { out.status = c; return res; }, json(b) { out.body = b; return res; } };
-    await handlers[rota]({ params: { dispatchId }, body, query: {}, authAccess: { uid: "uid", email: "e@teste" } }, res);
+    await h[rota]({ params: { dispatchId }, body, query: {}, authAccess: { uid: "uid", email: "e@teste" } }, res);
     return out;
   };
   const disparar = (id) => chamar("POST /api/campaigns/dispatches/:dispatchId/trigger", id);
@@ -205,7 +216,11 @@ async function mundo({ instancias = [CHIP_2, CHIP_3] } = {}) {
   const esperarNenhumRodando = () =>
     ate(async () => (await db.query("SELECT count(*)::int AS n FROM campaign_dispatches WHERE status = 'running'")).rows[0].n === 0);
   mundoAtual = { esperarNenhumRodando };
-  return { db, campanha, lote, estado, disparar, naoProcessados, tick, esperarNenhumRodando };
+  const outroProcesso = async () => {
+    const r = await registrar();
+    return { disparar: (id) => chamar("POST /api/campaigns/dispatches/:dispatchId/trigger", id, {}, r.handlers) };
+  };
+  return { db, campanha, lote, estado, disparar, naoProcessados, tick, esperarNenhumRodando, outroProcesso };
 }
 
 const enviosDe = (c) => envios.filter((e) => e.url === c.dispatch_webhook_url);
@@ -343,5 +358,28 @@ describe("[OBRIGATÓRIO] trava por chip: um chip nunca dispara dois lotes ao mes
     await w.esperarNenhumRodando();
     expect((await w.estado(a)).status).toBe("failed");
     expect((await w.estado(b)).status).toBe("done");
+  }, SLOW);
+  it("[PR 10d] outro processo (boot novo ou segundo contêiner) enxerga a trava: o mesmo chip continua com um lote só", async () => {
+    const w = await mundo();
+    const a = await w.lote({ campanhaId: await w.campanha("Campanha A"), nome: "Lote A", chipId: CHIP_2.id });
+    const b = await w.lote({ campanhaId: await w.campanha("Campanha B"), nome: "Lote B", chipId: CHIP_2.id });
+    segurar = true;
+    expect((await w.disparar(a)).status).toBe(200);
+    await ate(() => envios.length === 1);
+
+    const outro = await w.outroProcesso(); // memória vazia, como depois de um boot
+    const r = await outro.disparar(b);
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe("CHIP_BUSY");
+    expect(await w.estado(b)).toMatchObject({ status: "scheduled" });
+
+    abrirPortao();
+    await w.esperarNenhumRodando();
+    // Lote A terminou e soltou a reserva no banco: o outro processo agora dispara.
+    await ate(async () => (await w.db.query("SELECT count(*)::int AS n FROM campaign_chip_leases WHERE released_at IS NULL")).rows[0].n === 0);
+    expect((await outro.disparar(b)).status).toBe(200);
+    await w.esperarNenhumRodando();
+    expect((await w.estado(b)).status).toBe("done");
+    expect(maxEmVoo[CHIP_2.dispatch_webhook_url]).toBe(1);
   }, SLOW);
 });
