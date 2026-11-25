@@ -36,7 +36,14 @@ import {
   deriveExtensionFromMimetype,
 } from "../../services/storage.js";
 import { SQL_CANONICAL_PHONE, variantesDeBuscaPorTelefone } from "../../services/canonicalPhone.js";
-import { mapaDeLidTemTelefone, registrarLidDoWebhook, telefoneRealDoLid } from "../../services/lidMap.js";
+import {
+  juntarMensagensDoLid,
+  lidDoIdentificador,
+  mapaDeLidTemTelefone,
+  registrarLidDoWebhook,
+  telefoneDoLidConhecido,
+  telefoneRealDoLid,
+} from "../../services/lidMap.js";
 import { listarAlertasDeChip } from "../../services/chipAlerts.js";
 import { isDeviceTypedMessage, registerSystemSentFromResponse } from "../../services/systemSentMessages.js";
 import { isPhoneOptedOut } from "../../services/optOut.js";
@@ -3426,9 +3433,25 @@ export function registerChatbotRoutes(app, deps) {
       body.phone || body.telefone || body.remoteJid ||
       body.data?.key?.remoteJid || body.senderJid;
     const lidComTelefone = telefoneRealDoLid(body, identificadorDaConversa);
-    const phone = sanitizePhone(lidComTelefone ? lidComTelefone.phone : identificadorDaConversa);
-    if (lidComTelefone && phone) {
-      await registrarLidDoWebhook(pgDatabasePool, { lid: lidComTelefone.lid, phone });
+    // LID nunca vira telefone (25/11/2026): sem telefone real no payload, usa o já conhecido no mapa; sem nenhum, grava
+    // pelo próprio "NNN@lid" e junta essas mensagens ao telefone real quando ele aparecer (services/lidMap.js).
+    const lidDaConversa = lidDoIdentificador(identificadorDaConversa);
+    let phone = lidDaConversa ? null : sanitizePhone(identificadorDaConversa);
+    let lidSemTelefone = false;
+    if (lidDaConversa) {
+      if (lidComTelefone) phone = sanitizePhone(lidComTelefone.phone);
+      if (phone) {
+        await registrarLidDoWebhook(pgDatabasePool, { lid: lidDaConversa, phone });
+      } else {
+        const conhecido = await telefoneDoLidConhecido(pgDatabasePool, lidDaConversa);
+        phone = conhecido ? sanitizePhone(conhecido) : null;
+      }
+      if (phone) {
+        await juntarMensagensDoLid(pgDatabasePool, { clientId, lid: lidDaConversa, phone });
+      } else {
+        phone = lidDaConversa;
+        lidSemTelefone = true;
+      }
     }
 
     if (!phone) {
@@ -3507,6 +3530,7 @@ export function registerChatbotRoutes(app, deps) {
           transcribed: messageData.transcribed === true,
           described: messageData.described === true,
           fromMe,
+          ...(lidSemTelefone ? { lidSemTelefone: true, lid: phone } : {}),
         },
         instanceName,
         waMessageId: messageData.waMessageId || resolveMessageId(body) || null,
@@ -3515,6 +3539,13 @@ export function registerChatbotRoutes(app, deps) {
       });
     } catch (msgErr) {
       console.warn(`[chatbot-webhook] falha ao gravar mensagem ${fromMe ? "outbound/fromMe" : "inbound"} em lead_messages:`, msgErr?.message || msgErr);
+    }
+
+    // Contato só com LID, sem telefone conhecido: a mensagem já está gravada no Conversas, mas a IA e a campanha não
+    // têm para onde responder (LID não é número). Antes, o LID de 14 dígitos seguia como "telefone" e o envio falhava.
+    if (!fromMe && lidSemTelefone) {
+      descartar("lid_sem_telefone", { clientId, instancia: instanceName || null });
+      return;
     }
 
     // Desfecho por mensagem do lead (services/agentInboundRecovery.js): 'processando' até o fim, com este processo como
