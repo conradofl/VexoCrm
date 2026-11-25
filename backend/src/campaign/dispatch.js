@@ -60,6 +60,7 @@ import { DEFERRAL_REASON, clearQueueDeferral, deferQueue, hasQueueDeferral } fro
 import { isPhoneOptedOut } from "../services/optOut.js";
 import { buildQuotaGateForWebhook } from "../services/campaignQuotaGate.js";
 import { getLeadClientN8nSettings } from "../services/n8nSettings.js";
+import { evaluateReplySendGate } from "./sendGate.js";
 
 const { appendLeadMessage } = createLeadMessaging({
   supabase,
@@ -3077,6 +3078,38 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
     }
   }
 
+  // PORTÃO DA RESPOSTA (PR 10b do untangle): até aqui o próximo passo saía sem janela e sem cota. Janela: a escolha do
+  // tenant para respostas fora do horário (campaign/sendGate.js). Recusado: nada sai e o progresso NÃO anda; a próxima
+  // mensagem do lead tenta de novo.
+  let replySettings = null;
+  let replySettingsUnreadable = false;
+  try {
+    replySettings = await getLeadClientN8nSettings(clientId);
+  } catch (err) {
+    replySettingsUnreadable = true;
+    console.error("[campaign-reply] configuração de envio ilegível; passo segurado:", err?.message || err);
+  }
+  const replyGate = evaluateReplySendGate({ now: new Date(), settings: replySettings, settingsUnreadable: replySettingsUnreadable });
+  if (!replyGate.allowed) {
+    logCampaignReplyFlow("info", "reply_step_held_by_send_gate", {
+      clientId,
+      campaignId: campaign.id,
+      phone: maskPhoneForLog(phone),
+      nextStepIndex,
+      code: replyGate.code,
+    });
+    return { continued: false, finalized: false, held: true, reason: replyGate.code, campaignId: campaign.id, campaignName: campaign.name };
+  }
+
+  // Cota do chip que envia, a MESMA do lote e da fila (campaignQuotaGate): a resposta também gasta e respeita o teto do dia.
+  const replyQuotaGate = await buildQuotaGateForWebhook({
+    clientId,
+    webhookUrl,
+    pool: pgDatabasePool,
+    getInstances: getLeadClientEvolutionInstances,
+    getSettings: getLeadClientN8nSettings,
+  });
+
   logCampaignReplyFlow("info", "reply_received_advancing_sequence", {
     clientId,
     campaignId: campaign.id,
@@ -3115,6 +3148,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
   const { summary } = await dispatchCampaignSequence({
     webhookUrl,
     webhookToken,
+    quotaGate: replyQuotaGate,
     leads: [lead],
     analyticsMeta: {
       ...analyticsMeta,
@@ -3236,6 +3270,37 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
 
   let finalizationWarning = null;
   let nextLeadStart = { started: false, reason: "not_attempted" };
+
+  // Cota do chip esgotada: nada saiu. Não é erro do lead: o progresso volta ao que era (não vira "erro", não puxa o
+  // próximo lead da fila) e a próxima mensagem dele tenta de novo, já no dia seguinte da cota se for o caso.
+  if (summary.allChipsExhausted && summary.successCount <= 0) {
+    logCampaignReplyFlow("warn", "reply_step_held_chip_quota", {
+      clientId,
+      campaignId: campaign.id,
+      phone: maskPhoneForLog(phone),
+      nextStepIndex,
+      chip: summary.exhaustedChipName || null,
+    });
+    if (leadImportItem?.id) {
+      await updateLeadImportItemCampaignProgress({
+        clientId,
+        leadImportItemId: leadImportItem.id,
+        campaignId: campaign.id,
+        progressPatch: { ...progress, updatedAt: repliedAt, lastReplyAt: repliedAt },
+        statusConversa: "em_atendimento",
+        ultimaInteracaoUsuario: repliedAt,
+      });
+    }
+    return {
+      continued: false,
+      finalized: false,
+      held: true,
+      reason: "chip_quota_exhausted",
+      campaignId: campaign.id,
+      campaignName: campaign.name,
+      summary,
+    };
+  }
 
   if (summary.failureCount > 0 || summary.successCount <= 0) {
     const firstFailure = summary.failures?.[0] || null;

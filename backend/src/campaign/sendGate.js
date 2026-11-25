@@ -80,3 +80,20 @@ export function evaluateCampaignSendGate({ now = new Date(), settings, forceOuts
   }
   return { allowed: true, forced: janela.forced, refusal: janela.refusal };
 }
+
+/**
+ * Porta da resposta (PR 10b): o próximo passo da campanha depois que o lead respondeu. É conversa, então a janela segue a
+ * escolha que o tenant já fez para respostas fora do horário ("Agente responde fora da janela", agent_replies_outside_window,
+ * padrão ligado), a mesma regra do agente (domains/chatbot/routes.js). Desligada e fora da janela: segura o passo; o lead
+ * continua esperando a próxima mensagem dele (o progresso não anda). Configuração que não pôde ser lida: segura.
+ * Sem linha de configuração (settings null) não é falha: vale o padrão.
+ */
+export function evaluateReplySendGate({ now = new Date(), settings, settingsUnreadable = false }) {
+  if (settingsUnreadable) {
+    return { allowed: false, code: "SEND_SETTINGS_UNREADABLE", message: "Configuração de envio ilegível: o passo fica para a próxima resposta." };
+  }
+  const config = resolveSendWindowConfig(settings || {});
+  if (config.agentRepliesOutsideWindow || isWithinSendWindow(now, config)) return { allowed: true };
+  const refusal = describeSendWindowRefusal(now, config);
+  return { allowed: false, code: "OUTSIDE_SEND_WINDOW", message: refusal.message, details: refusal.details };
+}
