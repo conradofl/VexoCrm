@@ -352,7 +352,7 @@ export function sanitizePhoneE164(phoneInput, defaultDdd = null) {
 // Gerador único de grafias (PR 3 parte 3 do untangle, 25/11/2026): as grafias do mesmo número (phoneSpellingsOf, espelho
 // de SQL_CANONICAL_PHONE_SPELLINGS), mais os dígitos crus e a versão com "+" de cada grafia com 55. Até aqui gerava
 // também número sem DDD (8 e 9 dígitos) e "com o 9" para fixo (553432345678 -> 5534932345678): os dois casam com o
-// número de OUTRA pessoa. Medição em produção (/health phoneSpellings, 25/11): nenhum telefone com "+" e nenhum sem DDD
+// número de OUTRA pessoa. Medição em produção (/health phoneSpellings, 25/11, #322 e #326; medição já retirada): nenhum telefone com "+" e nenhum sem DDD
 // nas tabelas buscadas, fora 250 itens de planilha da sonhare; para as empresas ativas nenhuma busca muda.
 export function buildPhoneLookupVariants(value) {
   if (!value) return [];

@@ -28,7 +28,6 @@ import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
 import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
 import { computeLlmConfigStatus } from "../../services/llmConfigStatus.js";
-import { getPhoneSpellingStatus } from "../../services/phoneSpellingStatus.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
 const dirnameInsights = dirname(fileURLToPath(import.meta.url));
@@ -212,8 +211,6 @@ export function registerInsightsRoutes(app, deps) {
       services,
       evolutionConfig,
       llmConfig: computeLlmConfigStatus(),
-      // Medição do PR 3 parte 2 do untangle: grafias de telefone gravadas (só contagens; calculada uma vez, em segundo plano).
-      phoneSpellings: getPhoneSpellingStatus(pgDatabasePool),
     });
   });
 
