@@ -276,6 +276,22 @@ describe("a cerca do alvo: o target_count do lote é o público da origem, e é 
     await alvoIgualAoEnvio(w, id, 7);
   }, SLOW);
 
+  it("[OBRIGATÓRIO] segmentação na campanha (PR 9b): alvo = os 10 segmentados, não os 40 da planilha, e o lote fecha 'done'", async () => {
+    const w = await mundo({ nLeads: 7 });
+    await planilhas(w);
+    // 10 dos 40 leads da planilha B são do público da campanha
+    await w.db.query(
+      `UPDATE lead_import_items SET normalized_data = '{"genero":"feminino"}'::jsonb
+        WHERE id IN (SELECT id FROM lead_import_items WHERE import_id = $1 ORDER BY telefone LIMIT 10)`,
+      [IMP_B]
+    );
+    const id = await campanha(w, { importId: IMP_B, meta: { importIds: [IMP_B], segmentation: { gender: "feminino" } } });
+    const lote = await alvoIgualAoEnvio(w, id, 10);
+    const fim = await w.estado(lote.id);
+    expect(fim.status).toBe("done");
+    expect(fim.error_message || "").not.toMatch(/pendente/i);
+  }, SLOW);
+
   it("[OBRIGATÓRIO] 'Executar pendentes' (run-pending, que tem o próprio select da campanha): conta 2 e envia 2", async () => {
     const w = await mundo({ nLeads: 7 });
     await planilhas(w);

@@ -43,5 +43,7 @@ describe("dispatchAudienceArgs", () => {
     expect(motor).toMatch(/const steps = dispatchSteps \?\? campaignMeta\.sequence;/);
     const rotas = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
     expect(rotas).not.toMatch(/segmentation: dispatch\.steps\?\.\[0\]\?\.segmentation/);
+    // PR 9b: a criação do lote também não conta mais pela segmentação do 1º passo
+    expect(rotas).not.toMatch(/sequence\?\.\[0\]\?\.segmentation/);
   });
 });
