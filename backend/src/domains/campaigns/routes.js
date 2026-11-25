@@ -24,7 +24,7 @@
 // Corpo do interval em si e byte-a-byte identico ao original.
 
 import { dispatchAudienceArgs } from "../../campaign/audience.js";
-import { describeSendWindowRefusal, evaluateManualSendWindow, evaluateCampaignSendGate } from "../../campaign/sendGate.js";
+import { describeSendWindowRefusal, evaluateManualSendWindow, evaluateCampaignSendGate, evaluateDirectSendGate } from "../../campaign/sendGate.js";
 import { createCampaignDispatchEngine } from "../../campaign/dispatchEngine.js";
 import { PAUSE_REASON, WINDOW_PAUSE_MARKER, isAutoResumablePause, pauseReasonOf } from "../../services/pauseReason.js";
 import { registerCampaignAgentRoutes } from "../../campaign/agentDraft.js";
@@ -1081,6 +1081,29 @@ export function registerCampaignsRoutes(app, deps) {
 
       const clientId = resolveAuthorizedClientId(req, res, requestedClientId);
       if (!clientId) return;
+
+      // Portão de envio (PR 10c do untangle): janela do tenant antes de tudo. Até aqui o envio direto saía a qualquer hora.
+      // Ler a janela falhou = 500, nada sai.
+      const gate = evaluateDirectSendGate({
+        now: new Date(),
+        settings: (await getLeadClientN8nSettings(clientId)) || {},
+        forceOutsideWindow: req.body?.forceOutsideWindow,
+      });
+      if (!gate.allowed) {
+        logDirectDispatch("warn", "send_gate_refused", { requestId, clientId, code: gate.code });
+        sendError(res, gate.status, gate.code, gate.message, { requestId, ...gate.details });
+        return;
+      }
+      if (gate.forced) {
+        logDirectDispatch("warn", "envio_direto_forcado_fora_da_janela", {
+          requestId,
+          clientId,
+          uid: req.authAccess?.uid || null,
+          email: req.authAccess?.email || null,
+          localTime: gate.refusal.details.localTime,
+          sendWindow: gate.refusal.details.sendWindow,
+        });
+      }
 
       const dispatchSettings = await resolveDispatchWebhookSettings(clientId);
       const { webhookUrl, webhookToken } = dispatchSettings;

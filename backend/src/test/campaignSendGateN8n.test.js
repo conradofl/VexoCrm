@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { evaluateCampaignSendGate, hasExplicitSendSource, SEND_GATE_POLICY } from "../campaign/sendGate.js";
+import { evaluateCampaignSendGate, evaluateDirectSendGate, hasExplicitSendSource, SEND_GATE_POLICY } from "../campaign/sendGate.js";
 import { evaluateManualSendWindow as viaRotas, registerCampaignsRoutes } from "../domains/campaigns/routes.js";
 import { evaluateManualSendWindow } from "../campaign/sendGate.js";
 
@@ -67,12 +67,17 @@ function montar({ settings = JANELA, settingsFalha = false } = {}) {
     resolveCampaignDispatchSettings: async () => ({}), resolveDispatchWebhookSettings, runDueCampaignDispatches: async () => {},
     sanitizePhone: (p) => p, sendError, supabase: null, validateN8nInboundBearer: () => true,
   });
+  const direto = async (body) => {
+    const res = { statusCode: 200, body: null, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(s) { this.statusCode = s; return this; }, json(b) { this.body = b; return this; } };
+    await routes["/api/campaigns/direct-dispatch"]({ body: { clientId: TENANT, phone: "5511999990001", text: "Oi", ...body }, query: {}, headers: {}, authAccess: { uid: "u", email: "e@x" } }, res);
+    return res;
+  };
   const chamar = async (body) => {
     const res = { statusCode: 200, body: null, status(s) { this.statusCode = s; return this; }, json(b) { this.body = b; return this; } };
     await routes["/api/n8n-dispatches"]({ body: { clientId: TENANT, message: "Oi", ...body }, query: {}, headers: {}, authAccess: { uid: "u", email: "e@x" } }, res);
     return res;
   };
-  return { chamar, buildDispatchLeads, resolveDispatchWebhookSettings };
+  return { chamar, direto, buildDispatchLeads, resolveDispatchWebhookSettings };
 }
 
 describe("[OBRIGATÓRIO] POST /api/n8n-dispatches atravessa o portão", () => {
@@ -140,5 +145,59 @@ describe("[OBRIGATÓRIO] POST /api/n8n-dispatches atravessa o portão", () => {
     const trecho = rotas.slice(ini, ini + 4000);
     expect(trecho.indexOf("evaluateCampaignSendGate(")).toBeGreaterThan(0);
     expect(trecho.indexOf("evaluateCampaignSendGate(")).toBeLessThan(trecho.indexOf("resolveDispatchWebhookSettings("));
+  });
+});
+
+describe("[OBRIGATÓRIO] POST /api/campaigns/direct-dispatch atravessa o portão (PR 10c)", () => {
+  it("evaluateDirectSendGate: dentro passa, fora recusa, forçar só com true", () => {
+    expect(evaluateDirectSendGate({ now: new Date(QUARTA_15H_SP), settings: JANELA }).allowed).toBe(true);
+    expect(evaluateDirectSendGate({ now: new Date(QUARTA_21H_SP), settings: JANELA })).toMatchObject({ allowed: false, code: "OUTSIDE_SEND_WINDOW" });
+    expect(evaluateDirectSendGate({ now: new Date(QUARTA_21H_SP), settings: JANELA, forceOutsideWindow: "true" }).allowed).toBe(false);
+    expect(evaluateDirectSendGate({ now: new Date(QUARTA_21H_SP), settings: JANELA, forceOutsideWindow: true })).toMatchObject({ allowed: true, forced: true });
+  });
+
+  it("fora da janela: 422 e nem lê o webhook", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(QUARTA_21H_SP));
+    try {
+      const w = montar();
+      const res = await w.direto({});
+      expect(res.statusCode).toBe(422);
+      expect(res.body.error.code).toBe("OUTSIDE_SEND_WINDOW");
+      expect(w.resolveDispatchWebhookSettings).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("janela ilegível: 500 e nem lê o webhook", async () => {
+    const w = montar({ settingsFalha: true });
+    const res = await w.direto({});
+    expect(res.statusCode).toBe(500);
+    expect(w.resolveDispatchWebhookSettings).not.toHaveBeenCalled();
+  });
+
+  it("dentro da janela: segue para o webhook", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(QUARTA_15H_SP));
+    try {
+      const w = montar();
+      await w.direto({}).catch(() => {});
+      expect(w.resolveDispatchWebhookSettings).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("forçado fora da janela (true): segue para o webhook", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(QUARTA_21H_SP));
+    try {
+      const w = montar();
+      await w.direto({ forceOutsideWindow: true }).catch(() => {});
+      expect(w.resolveDispatchWebhookSettings).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
