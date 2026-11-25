@@ -26,7 +26,7 @@ Arquitetura de agentes autônomos construída sobre o runtime **GoClaw** (Golang
 
 4. **Lane Wandinha (Secretária Executiva & Copiloto dos Sócios)**:
    - **Modelo**: `gemini/gemini-3-flash-preview`
-   - **Canal**: WhatsApp Exclusivo (`+55 34 9771-9779` · Evolution API)
+   - **Canal**: WhatsApp Exclusivo (`+55 34 8837-0439` · Evolution API)
    - **Função**: Assistente pessoal executiva para Conrado e Caio. Entende áudio e texto no trânsito, cadastra clientes no CRM, agenda compromissos, cria follow-ups e cobra colaboradores no WhatsApp com confirmação imediata.
    - **Prompt**: `prompts/wandinha_executiva.md`
 

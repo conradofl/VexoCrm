@@ -262,15 +262,19 @@ describe("Heloísa só atende e responde pelos chips da Geração Digital", () =
     expect(r).toMatchObject({ handled: "heloisa" });
   });
 
-  it("chip novo 'Wandinha' (vexo-adm-wandinha): Conrado envia mensagem sem prefixo e a Wandinha atende", async () => {
+  it("chip novo 'Wandinha GD' (vexo-adm-wandinha-gd): Conrado e Caio (+553497719779) enviam mensagem sem prefixo e a Wandinha atende", async () => {
     const t = setup({ tenant: "vexo-adm" });
-    const r = await t.webhook(mensagem({ clientId: "vexo-adm", text: "marca reunião amanhã às 10h", instance: "vexo-adm-wandinha" }));
+    const rConrado = await t.webhook(mensagem({ clientId: "vexo-adm", text: "marca reunião amanhã às 10h", instance: "vexo-adm-wandinha-gd" }));
     expect(processarMensagemHeloisa).toHaveBeenCalledTimes(1);
-    expect(r).toMatchObject({ handled: "heloisa", agent: "wandinha" });
+    expect(rConrado).toMatchObject({ handled: "heloisa", agent: "wandinha" });
     expect(processarMensagemHeloisa.mock.calls[0][0]).toMatchObject({
       phone: DIRETOR,
-      instanceName: "vexo-adm-wandinha",
+      instanceName: "vexo-adm-wandinha-gd",
     });
+
+    const rCaio = await t.webhook(mensagem({ clientId: "vexo-adm", phone: "553497719779", text: "agenda call hoje às 16h", instance: "vexo-adm-wandinha-gd" }));
+    expect(processarMensagemHeloisa).toHaveBeenCalledTimes(2);
+    expect(rCaio).toMatchObject({ handled: "heloisa", agent: "wandinha" });
   });
 
   it("chip comum da GD: com prefixo 'Wandinha' de diretor ACIONA a Wandinha normalmente", async () => {
@@ -281,9 +285,9 @@ describe("Heloísa só atende e responde pelos chips da Geração Digital", () =
     expect(processarMensagemHeloisa.mock.calls[0][0].texto).toBe("auditar campanhas");
   });
 
-  it("anti-loop: eco do próprio número +553497719779 na instância Wandinha NÃO aciona auto-resposta", async () => {
+  it("anti-loop: eco do próprio número +553488370439 na instância Wandinha GD NÃO aciona auto-resposta", async () => {
     const t = setup({ tenant: "vexo-adm" });
-    const r = await t.webhook(mensagem({ clientId: "vexo-adm", phone: "553497719779", text: "Oi!", instance: "vexo-adm-wandinha" }));
+    const r = await t.webhook(mensagem({ clientId: "vexo-adm", phone: "553488370439", text: "Oi!", instance: "vexo-adm-wandinha-gd" }));
     expect(processarMensagemHeloisa).not.toHaveBeenCalled();
     expect(r?.handled).not.toBe("heloisa");
   });

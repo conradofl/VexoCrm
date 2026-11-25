@@ -17,13 +17,13 @@ import {
   WANDINHA_OFFICIAL_PHONE,
 } from "../domains/goclaw/heloisaEngine.js";
 
-describe("Wandinha (ex-Heloísa) · Novo número +553497719779 e rebrand completo", () => {
+describe("Wandinha (ex-Heloísa) · Novo número +553488370439 (Wandinha GD) e rebrand completo", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("prioriza o chip 'Wandinha' (+553497719779) em Vexo Adm e ignora 'Conrado Extracao'", async () => {
-    expect(WANDINHA_OFFICIAL_PHONE).toBe("553497719779");
+  it("prioriza o chip 'Wandinha GD' (+553488370439) em Vexo Adm, ignora 'Conrado Extracao' e envia normalmente para Conrado e Caio (+553497719779)", async () => {
+    expect(WANDINHA_OFFICIAL_PHONE).toBe("553488370439");
 
     const mockPool = {
       query: vi.fn(async () => ({
@@ -47,12 +47,12 @@ describe("Wandinha (ex-Heloísa) · Novo número +553497719779 e rebrand complet
             dispatch_webhook_token: "tok-campanha",
           },
           {
-            name: "Wandinha",
-            phone: "+553497719779",
+            name: "Wandinha GD",
+            phone: "+553488370439",
             client_id: "vexo-adm",
             is_default: false,
             connection_state: "open",
-            dispatch_webhook_url: "https://evo.exemplo/message/sendText/vexo-adm-wandinha",
+            dispatch_webhook_url: "https://evo.exemplo/message/sendText/vexo-adm-wandinha-gd",
             dispatch_webhook_token: "tok-wandinha",
           },
         ],
@@ -60,31 +60,48 @@ describe("Wandinha (ex-Heloísa) · Novo número +553497719779 e rebrand complet
     };
 
     const slug = await obterInstanciaWhatsAppAtiva(mockPool, "vexo-adm");
-    expect(slug).toBe("vexo-adm-wandinha");
+    expect(slug).toBe("vexo-adm-wandinha-gd");
 
-    const resEnvio = await enviarMensagemWhatsAppComFallback({
+    const resConrado = await enviarMensagemWhatsAppComFallback({
       numero: "5534997817660",
       texto: "Oi Conrado, tudo pronto!",
       instanceName: "vexo-adm-vexo-atende",
       pool: mockPool,
     });
 
-    expect(resEnvio.instanceName).toBe("vexo-adm-wandinha");
+    expect(resConrado.instanceName).toBe("vexo-adm-wandinha-gd");
     expect(sendTextMessageViaEvolution).toHaveBeenCalledWith(
       expect.objectContaining({
-        instanceName: "vexo-adm-wandinha",
+        instanceName: "vexo-adm-wandinha-gd",
         number: "5534997817660",
+        webhookToken: "tok-wandinha",
+      })
+    );
+
+    const resCaio = await enviarMensagemWhatsAppComFallback({
+      numero: "5534997719779",
+      texto: "Oi Caio, aviso de agenda!",
+      instanceName: "vexo-adm-wandinha-gd",
+      pool: mockPool,
+    });
+
+    expect(resCaio.instanceName).toBe("vexo-adm-wandinha-gd");
+    expect(sendTextMessageViaEvolution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceName: "vexo-adm-wandinha-gd",
+        number: "5534997719779",
         webhookToken: "tok-wandinha",
       })
     );
   });
 
-  it("prompts, menu lateral, orbe de voz e painel GoClaw foram atualizados para Wandinha", () => {
+  it("prompts, menu lateral, orbe de voz e painel GoClaw foram atualizados para Wandinha (+55 34 8837-0439)", () => {
     const promptWandinha = readFileSync(resolve("../goclaw/prompts/wandinha_executiva.md"), "utf8");
     const promptLegacy = readFileSync(resolve("../goclaw/prompts/heloisa_executiva.md"), "utf8");
     expect(promptWandinha).toContain("Você é a **Wandinha**");
-    expect(promptWandinha).toContain("+55 34 9771-9779");
+    expect(promptWandinha).toContain("+55 34 8837-0439");
     expect(promptLegacy).toContain("Você é a **Wandinha**");
+    expect(promptLegacy).toContain("+55 34 8837-0439");
 
     const sidebarSrc = readFileSync(resolve("../frontend/src/lib/appSidebar/constants.ts"), "utf8");
     expect(sidebarSrc).toContain('label: "GoClaw & Wandinha"');

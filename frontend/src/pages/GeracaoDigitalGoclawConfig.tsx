@@ -132,7 +132,7 @@ const LANES_METADATA = [
   {
     key: "heloisa",
     nome: "Wandinha (Secretária Executiva Master)",
-    descricao: "Copiloto direto de Conrado e Caio no WhatsApp (+55 34 9771-9779) e por voz no Vexo OS. Processa áudios e texto, comanda e orquestra todas as personas da família.",
+    descricao: "Copiloto direto de Conrado e Caio no WhatsApp (+55 34 8837-0439) e por voz no Vexo OS. Processa áudios e texto, comanda e orquestra todas as personas da família.",
     tag: "Átrio / WhatsApp",
     cor: "purple",
   },

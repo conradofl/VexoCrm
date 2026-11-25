@@ -480,15 +480,15 @@ export async function executarCadastrarCliente({ nome, telefone, empresa, valor,
   }
 }
 
-export const WANDINHA_OFFICIAL_PHONE = "553497719779";
-export const WANDINHA_OFFICIAL_PHONE_9 = "5534997719779";
+export const WANDINHA_OFFICIAL_PHONE = "553488370439";
+export const WANDINHA_OFFICIAL_PHONE_9 = "5534988370439";
 
 function isWandinhaInstanceRow(r) {
   if (!r) return false;
   const n = String(r.name || "").toLowerCase();
   const u = String(r.dispatch_webhook_url || "").toLowerCase();
   const p = String(r.phone || "").replace(/\D/g, "");
-  return n.includes("wandinha") || u.includes("wandinha") || p.endsWith("97719779");
+  return n.includes("wandinha") || u.includes("wandinha") || p.endsWith("88370439");
 }
 
 function isPersonalOrExtractionInstanceRow(r) {
@@ -580,6 +580,8 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
     const list = await res.json();
     if (!Array.isArray(list)) return [];
     const authorizedInstances = new Set([
+      "vexo-adm-wandinha-gd",
+      "wandinha-gd",
       "vexo-adm-wandinha",
       "wandinha",
       "vexo-adm-vexo-atende",
@@ -613,7 +615,7 @@ function extractEvolutionSlug(urlStr) {
 
 /**
  * Envia mensagem no WhatsApp com contingência automática de instâncias.
- * IMPORTANTE: Wandinha pertence à diretoria da Vexo / Geração Digital (+55 34 9771-9779).
+ * IMPORTANTE: Wandinha pertence à diretoria da Vexo / Geração Digital (+55 34 8837-0439).
  */
 export async function enviarMensagemWhatsAppComFallback({
   numero,
@@ -669,7 +671,7 @@ export async function enviarMensagemWhatsAppComFallback({
     }
   };
 
-  // 1. Consulta no banco as instâncias autorizadas com suas URLs e credenciais reais (prioridade máxima para chip Wandinha +553497719779)
+  // 1. Consulta no banco as instâncias autorizadas com suas URLs e credenciais reais (prioridade máxima para chip Wandinha GD +553488370439)
   if (pool && typeof pool.query === "function") {
     try {
       let rows = [];
@@ -724,6 +726,7 @@ export async function enviarMensagemWhatsAppComFallback({
   // 3. Fallbacks de segurança autorizados da Vexo
   upsertCandidate("vexo-adm-vexo-atende", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
   upsertCandidate("geracao-digital-teste-vexo", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
+  upsertCandidate("vexo-adm-wandinha-gd", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey, isWandinha: true });
   upsertCandidate("vexo-adm-wandinha", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey, isWandinha: true });
 
   const candidates = Array.from(candidateMap.values());
@@ -743,8 +746,8 @@ export async function enviarMensagemWhatsAppComFallback({
 
   for (const candidate of candidates) {
     const candLast8 = String(candidate.phone || "").replace(/\D/g, "").slice(-8);
-    // Anti-autoenvio: evita que o chip da Wandinha (+553497719779) envie mensagem para si mesmo em produção
-    if (!isEvolutionMocked && destLast8 && ((candLast8 && candLast8 === destLast8) || (candidate.isWandinha && destLast8 === "97719779"))) {
+    // Anti-autoenvio: evita que o chip da Wandinha (+553488370439) envie mensagem para si mesmo em produção
+    if (!isEvolutionMocked && destLast8 && ((candLast8 && candLast8 === destLast8) || (candidate.isWandinha && destLast8 === "88370439"))) {
       console.warn(`[Wandinha] Autoenvio bloqueado: destinatário (${destLast8}) é o próprio número do chip "${candidate.slug}".`);
       continue;
     }
@@ -3667,7 +3670,7 @@ export async function processarMensagemHeloisa({
   }
 
   if (!systemPrompt) {
-    systemPrompt = `Você é Wandinha, secretária executiva e copiloto de Conrado e Caio na Geração Digital e Vexo OS (+55 34 9771-9779). ZERO SLACK, tudo WhatsApp.`;
+    systemPrompt = `Você é Wandinha, secretária executiva e copiloto de Conrado e Caio na Geração Digital e Vexo OS (+55 34 8837-0439). ZERO SLACK, tudo WhatsApp.`;
   }
 
   systemPrompt += `\n\n=== CONTEXTO DO DIRETOR ATUAL ===\nVocê está conversando diretamente com: ${diretor.nome} (${diretor.papel}). Telefone: ${diretor.telefone}.\nData e Hora Atual: ${new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.`;

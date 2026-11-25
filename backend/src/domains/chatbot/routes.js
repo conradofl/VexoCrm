@@ -3566,7 +3566,7 @@ export function registerChatbotRoutes(app, deps) {
       entradaAtual = { clientId, msgKey: msgKeyDaEntrada, phone };
     }
 
-    // ── INTERCEPTADOR WANDINHA (EX-HELOÍSA · COPILOTO EXECUTIVO WHATSAPP +553497719779) ──
+    // ── INTERCEPTADOR WANDINHA (EX-HELOÍSA · COPILOTO EXECUTIVO WHATSAPP +553488370439) ──
     const lowerInst = String(instanceName || "").toLowerCase();
     const lowerRawInst = String(rawInstanceName || "").toLowerCase();
     const lowerChipName = String(matchedChip?.name || "").toLowerCase();
@@ -3578,7 +3578,7 @@ export function registerChatbotRoutes(app, deps) {
       lowerInst.includes("wandinha") ||
       lowerRawInst.includes("wandinha") ||
       lowerChipName.includes("wandinha") ||
-      matchedChipDigits.endsWith("97719779");
+      matchedChipDigits.endsWith("88370439");
 
     const isHeloisaTarget =
       isWandinhaChip ||
@@ -3590,10 +3590,10 @@ export function registerChatbotRoutes(app, deps) {
       req.query?.agent === "wandinha" ||
       req.query?.agent === "heloisa";
 
-    // Anti-loop: impede que o próprio número da Wandinha (+553497719779) acione a si mesma
+    // Anti-loop: impede que o próprio número da Wandinha (+553488370439) acione a si mesma
     const isSelfBotEcho =
       (chipLast8 && senderLast8 === chipLast8) ||
-      (isWandinhaChip && senderLast8 === "97719779");
+      (isWandinhaChip && senderLast8 === "88370439");
 
     const isDirector =
       !isSelfBotEcho &&
@@ -3602,7 +3602,7 @@ export function registerChatbotRoutes(app, deps) {
     const isPersonal = !isWandinhaChip && (isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName));
 
     // Wandinha atende pelos chips autorizados da Vexo Adm / GD (EMPRESAS_DA_HELOISA).
-    // Na instância dedicada (Wandinha +553497719779, vexo-adm-wandinha, etc.), intercepta 100% das mensagens de diretor sem exigir prefixo.
+    // Na instância dedicada (Wandinha GD +553488370439, vexo-adm-wandinha-gd, etc.), intercepta 100% das mensagens de diretor sem exigir prefixo.
     // Em chip comum/comercial, SÓ intercepta se houver prefixo explícito ("Wandinha", "!w", "/w", "Heloísa", "!h", "/h").
     const chipDaHeloisa = EMPRESAS_DA_HELOISA.has(String(clientId || "").toLowerCase());
     const deveInterceptarHeloisa =

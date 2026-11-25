@@ -83,10 +83,10 @@ lanes:
     systemPromptFile: "prompts/gestor_demandas_auditor.md"
     schedules: []
 
-  # Lane 4: Wandinha (Secretária Executiva & Copiloto dos Sócios · +55 34 9771-9779)
+  # Lane 4: Wandinha (Secretária Executiva & Copiloto dos Sócios · +55 34 8837-0439)
   heloisa:
     name: "Wandinha Secretária Executiva"
-    description: "Copiloto dos sócios Conrado e Caio no WhatsApp (+55 34 9771-9779) com comandos de voz e texto"
+    description: "Copiloto dos sócios Conrado e Caio no WhatsApp (+55 34 8837-0439) com comandos de voz e texto"
     driver: "openai"
     model: "gemini/gemini-3-flash-preview"
     systemPromptFile: "prompts/wandinha_executiva.md"
