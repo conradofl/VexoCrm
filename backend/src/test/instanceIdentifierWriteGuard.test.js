@@ -92,7 +92,8 @@ describe("Teste-Guarda: Resolução Canônica de Identificadores de Chip", () =>
 
   // 3. Guarda estática: disparo de campanha em campaigns/routes.js
   it("campaigns/routes.js resolve identificador canônico no onStepDispatched", () => {
-    const caminho = join(raizSrc, "domains/campaigns/routes.js");
+    // O onStepDispatched do lote mora no motor (campaign/dispatchEngine.js) desde o PR 8 do untangle.
+    const caminho = join(raizSrc, "campaign/dispatchEngine.js");
     const conteudo = readFileSync(caminho, "utf8");
 
     expect(conteudo).toContain("resolveInstanceIdentifier");

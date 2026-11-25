@@ -276,7 +276,7 @@ describe("[TESTE OBRIGATÓRIO 3] chip desconhecido grava NULL, nunca o padrão d
   });
 
   it("a rota liga o rastreador nos dois pontos (onStepDispatched grava, finalizeLeadSent entrega)", () => {
-    const src = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+    const src = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 
     expect(src).toMatch(/createRunChipTracker\(\{ settingsChipId: chipIdFromDispatchSettings\(dispatchSettings\) \}\)/);
     expect(src).toMatch(/onStepDispatched:[^]*?runChipTracker\.record\(lead\?\.id, activeChip\)/);

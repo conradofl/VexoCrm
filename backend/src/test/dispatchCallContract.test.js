@@ -14,7 +14,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 
-const SRC = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+const SRC = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 
 /** Chaves de primeiro nível do objeto passado a cada `dispatchCampaignSequence({ ... })`, na ordem em que aparecem. */
 export function topLevelKeysOfDispatchCalls(source) {

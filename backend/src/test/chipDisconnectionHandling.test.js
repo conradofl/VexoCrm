@@ -4,7 +4,7 @@ import { resolve } from "path";
 
 describe("tratamento de chip desconectado e resiliência de erros", () => {
   const outboundSource = readFileSync(resolve("src/campaign-outbound.js"), "utf8");
-  const routesSource = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+  const routesSource = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 
   it("postEvolutionPayload anexa isConnectionClosed e instanceName no erro", () => {
     expect(outboundSource).toContain("isConnectionClosed =");

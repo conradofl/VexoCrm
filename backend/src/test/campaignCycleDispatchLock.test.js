@@ -6,7 +6,7 @@ import {
   extractCampaignProgress,
 } from "../campaign/dispatch.js";
 
-const routesSource = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+const routesSource = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 const recurrenceSource = readFileSync(resolve("src/services/campaignRecurrenceOccurrences.js"), "utf8");
 
 describe("Trava por ciclo de disparo (isLeadBlockedByActiveCycleProgress)", () => {
