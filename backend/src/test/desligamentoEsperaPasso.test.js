@@ -275,7 +275,7 @@ describe("/health durante o desligamento", () => {
 
 describe("lote no desligamento fica para o boot (não retoma, sem estado novo)", () => {
   it("runCampaignDispatch sai antes de qualquer consulta pós-envio quando o motor parou pelo desligamento", () => {
-    const src = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+    const src = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
     const i = src.indexOf("if (result?.summary?.shutdown) {");
     expect(i).toBeGreaterThan(-1);
     // a primeira consulta pós-envio (contagem dos runs) vem DEPOIS da saída antecipada

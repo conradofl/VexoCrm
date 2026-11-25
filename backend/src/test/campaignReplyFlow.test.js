@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const serverSource = readFileSync(resolve("src/server.js"), "utf8");
 const domainRoutesSource = readFileSync(resolve("src/domains/registerAllDomainRoutes.js"), "utf8");
-const campaignsRoutesSource = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+const campaignsRoutesSource = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 const followupQueueRoutesSource = readFileSync(resolve("src/followup/queueRoutes.js"), "utf8");
 // src/campaign/{settings,dispatch,scheduler}.js: grupo D (campaign engine) extraido de
 // server.js na Onda 3, Run E. As assercoes abaixo cobrem codigo que mudou de arquivo mas nao

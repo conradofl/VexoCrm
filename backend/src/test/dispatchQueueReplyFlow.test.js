@@ -15,7 +15,7 @@ import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 import { getCampaignStepPlan } from "../campaign-outbound.js";
 
-const source = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+const source = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 
 const PASSO_1 = { id: "s1", type: "text", order: 1, text: "Ola {{nome}}", enabled: true, triggerMode: "immediate" };
 const PASSO_2 = { id: "s2", type: "text", order: 2, text: "Vamos agendar?", enabled: true, triggerMode: "after_reply" };

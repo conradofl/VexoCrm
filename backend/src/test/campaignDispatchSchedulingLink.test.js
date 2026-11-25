@@ -16,7 +16,7 @@ describe("protecao contra disparo com {{scheduling_link}} nao substituido", () =
   });
 
   it("domains/campaigns/routes.js nao engole mais falha de agenda com catch silencioso", () => {
-    const source = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
+    const source = (readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8") + "\n" + readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8")) /* motor do lote mora em campaign/dispatchEngine.js desde o PR 8 */;
 
     // Confirma que o trecho do catch lanca erro e bloqueia o disparo em vez de apenas console.warn
     expect(source).toContain("sequenceRequiresSchedulingLink");
