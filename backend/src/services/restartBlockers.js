@@ -14,7 +14,7 @@ import { QUOTA_PAUSE_MARKER } from "./campaignQuotaGate.js";
 import { RUN_BOOT_SKIP_TEXT } from "./runSendMarker.js";
 
 export const SCHEDULED_SOON_MINUTES = 15;
-const WINDOW_PAUSE_MARKER = "fora da janela de envio";
+export const WINDOW_PAUSE_MARKER = "fora da janela de envio";
 
 export const SQL_RESTART_BLOCKERS = `
   SELECT
