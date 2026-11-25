@@ -339,6 +339,96 @@ describe("Webhook com LID: usa o telefone real que a Evolution manda", () => {
   });
 });
 
+// Caso real de 25/11/2026 (vexo-adm, chip "Vexo campanha"): mensagem digitada no aparelho chegou com remoteJid
+// "NNN@lid" de 14 dígitos e sem telefone real; o LID virou "telefone" (+36, Hungria) e a resposta da cliente, que veio
+// com remoteJidAlt, caiu em outra conversa. Payload no formato da Evolution 2.3.7 (Baileys 7, addressingMode "lid").
+const LID14 = "36305392136404@lid";
+function upsertEvolution({ remoteJid = LID14, alt = null, fromMe = false, text = "Oi", instance = "Chip CL" } = {}) {
+  seq += 1;
+  const key = { remoteJid, fromMe, id: `3EB0LID${seq}`, addressingMode: "lid" };
+  if (alt) key.remoteJidAlt = alt;
+  return {
+    event: "messages.upsert",
+    instance,
+    clientId: TENANT,
+    data: {
+      key,
+      pushName: fromMe ? "Vexo" : "Camila",
+      message: { conversation: text },
+      messageType: "conversation",
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      source: fromMe ? "ios" : "android",
+    },
+  };
+}
+const linhas = async () =>
+  (await db.query("SELECT phone, direction, meta FROM public.lead_messages WHERE client_id = $1 ORDER BY id", [TENANT])).rows;
+
+describe("Webhook com LID sem telefone: LID nunca vira telefone", () => {
+  it("mensagem do aparelho com LID de 14 dígitos sem telefone: grava pelo NNN@lid, nunca pelos dígitos", async () => {
+    const t = setup();
+    const r = await t.webhook(upsertEvolution({ fromMe: true, text: "Oi Camila, segue o link" }));
+    expect(r?.error).not.toBe("Missing phone");
+    const rows = await linhas();
+    expect(rows.map((x) => x.phone)).toEqual([LID14]);
+    expect(rows[0].direction).toBe("outbound");
+    expect(rows[0].meta.lidSemTelefone).toBe(true);
+  });
+
+  it("resposta com LID de 15 dígitos sem telefone: grava no Conversas (antes sumia como missing_phone) e a IA não responde", async () => {
+    const t = setup();
+    const r = await t.webhook(upsertEvolution({ remoteJid: LID, text: "Pode me mandar mais detalhes?" }));
+    expect(r?.ignored).toBe("lid_sem_telefone");
+    const rows = await linhas();
+    expect(rows.map((x) => [x.phone, x.direction])).toEqual([[LID, "inbound"]]);
+  });
+
+  it("caso Camila: aparelho manda pelo LID sem telefone, a cliente responde com remoteJidAlt -> uma conversa só, no telefone real", async () => {
+    const t = setup();
+    await t.webhook(upsertEvolution({ fromMe: true, text: "Oi Camila, segue o link" }));
+    await t.webhook(upsertEvolution({ alt: `${NUM}@s.whatsapp.net`, text: "Vou ver e te falo" }));
+    const rows = await linhas();
+    expect(rows.map((x) => [x.phone, x.direction])).toEqual([[NUM, "outbound"], [NUM, "inbound"]]);
+    expect(rows[0].meta.lidSemTelefone).toBeUndefined();
+    expect(rows[0].meta.lid).toBe(LID14);
+    const mapa = await db.query("SELECT lid, phone FROM public.whatsapp_lid_map");
+    expect(mapa.rows).toEqual([{ lid: LID14, phone: NUM }]);
+    const lista = await t.listChats();
+    expect(telefones(lista)).toEqual([NUM]);
+  });
+
+  it("LID já conhecido no mapa: mensagem do aparelho sem telefone grava direto no telefone real", async () => {
+    await db.query("INSERT INTO public.whatsapp_lid_map (lid, phone) VALUES ($1, $2)", [LID14, NUM]);
+    const t = setup();
+    await t.webhook(upsertEvolution({ fromMe: true }));
+    expect((await linhas()).map((x) => x.phone)).toEqual([NUM]);
+  });
+
+  it("mapa preenchido pelo sincronizar só com dígitos do LID também vale", async () => {
+    await db.query("INSERT INTO public.whatsapp_lid_map (lid, phone) VALUES ($1, $2)", ["36305392136404", NUM]);
+    const t = setup();
+    await t.webhook(upsertEvolution({ fromMe: true }));
+    expect((await linhas()).map((x) => x.phone)).toEqual([NUM]);
+  });
+
+  it("conversa antiga gravada pelo LID (sem a marca do conserto) não é mexida quando o telefone aparece", async () => {
+    await conversa({ phone: LID14, text: "mensagem antiga" });
+    const t = setup();
+    await t.webhook(upsertEvolution({ alt: `${NUM}@s.whatsapp.net`, text: "nova" }));
+    const rows = await linhas();
+    expect(rows.map((x) => x.phone)).toEqual([LID14, NUM]);
+  });
+
+  it("junta só na mesma empresa", async () => {
+    const t = setup();
+    await t.webhook(upsertEvolution({ fromMe: true }));
+    await db.query("UPDATE public.lead_messages SET client_id = 'outra-empresa'");
+    await t.webhook(upsertEvolution({ alt: `${NUM}@s.whatsapp.net` }));
+    const { rows } = await db.query("SELECT client_id, phone FROM public.lead_messages ORDER BY id");
+    expect(rows).toEqual([{ client_id: "outra-empresa", phone: LID14 }, { client_id: TENANT, phone: NUM }]);
+  });
+});
+
 describe("Rota de alertas de chip (GET /api/whatsapp/chip-alerts)", () => {
   it("chip da empresa com mensagem que chegou 3 h depois: alerta atrasado", async () => {
     await conversa({ phone: NUM, horaReal: new Date(Date.now() - 3 * 3600 * 1000) });

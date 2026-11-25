@@ -64,3 +64,59 @@ export async function mapaDeLidTemTelefone(pool, agora = Date.now()) {
   cacheTelefoneNoMapa.set(pool, { tem, em: agora });
   return tem;
 }
+
+// Conversa partida pelo LID (25/11/2026, vexo-adm, chip "Vexo campanha"): a mensagem do aparelho chegou com
+// remoteJid "36305392136404@lid" e SEM telefone real no payload. O sanitizePhone tirou o "@lid" e o LID de 14 dígitos
+// virou "telefone" (a tela mostrou +36, Hungria); LID de 15 dígitos virava null e a mensagem era jogada fora como
+// "missing_phone". A resposta da cliente, que veio com o telefone real, caiu em outra conversa.
+// Regra: LID nunca vira telefone. Telefone real do payload > telefone já conhecido no mapa > o próprio JID "NNN@lid"
+// (mesma grafia que o sincronizar usa). Quando o telefone real aparece, as mensagens gravadas pelo LID se juntam a ele.
+
+/** "NNN@lid" (minúsculo, só dígitos antes do @) se o identificador da conversa é um LID; senão null. */
+export function lidDoIdentificador(identificador) {
+  const m = /^(\d{6,20})@lid$/i.exec(String(identificador || "").trim());
+  return m ? `${m[1]}@lid` : null;
+}
+
+/** Telefone real já conhecido para o LID (whatsapp_lid_map), só dígitos; null se não houver. Nunca derruba. */
+export async function telefoneDoLidConhecido(pool, lid) {
+  if (!pool || !lid) return null;
+  const digitos = String(lid).split("@")[0];
+  try {
+    const { rows } = await pool.query(
+      `SELECT phone FROM public.whatsapp_lid_map
+       WHERE lid = ANY($1::text[]) AND phone IS NOT NULL AND phone <> ''
+       ORDER BY updated_at DESC NULLS LAST
+       LIMIT 1`,
+      [[lid, digitos]]
+    );
+    const tel = String(rows?.[0]?.phone || "").split("@")[0].replace(/\D/g, "");
+    return tel || null;
+  } catch (err) {
+    console.warn("[lid-map] falha ao consultar LID:", err?.code || err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Leva para o telefone real as mensagens que o webhook gravou pelo LID por não saber o telefone (meta.lidSemTelefone).
+ * Só essas: conversa antiga partida (gravada antes deste conserto) não é tocada aqui.
+ */
+export async function juntarMensagensDoLid(pool, { clientId, lid, phone }) {
+  if (!pool || !clientId || !lid || !phone) return 0;
+  try {
+    const r = await pool.query(
+      `UPDATE public.lead_messages
+          SET phone = $3,
+              meta = (COALESCE(meta, '{}'::jsonb) - 'lidSemTelefone') || jsonb_build_object('lid', $2::text)
+        WHERE client_id = $1 AND phone = $2 AND meta->>'lidSemTelefone' = 'true'`,
+      [clientId, lid, phone]
+    );
+    const n = Number(r?.rowCount || 0);
+    if (n > 0) console.log("[lid-map] mensagens gravadas pelo LID juntadas ao telefone real", { clientId, mensagens: n });
+    return n;
+  } catch (err) {
+    console.warn("[lid-map] falha ao juntar mensagens do LID:", err?.code || err?.message || err);
+    return 0;
+  }
+}
