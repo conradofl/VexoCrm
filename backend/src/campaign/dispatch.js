@@ -1792,6 +1792,9 @@ export async function findCampaignReplyMatches({ clientId, phone }) {
             id: matchedImportItem.id,
             importId: matchedImportItem.import_id || null,
             nome: normalizeString(matchedImportItem.normalized_data?.nome) || null,
+            // A continuação monta o lead a partir daqui: sem os dados da planilha, {{campo}} do passo seguinte fica sem valor
+            // e a trava de variável segura o envio.
+            normalized_data: matchedImportItem.normalized_data || null,
             statusConversa: matchedImportItem.status_conversa || null,
             ultimaInteracaoBot: matchedImportItem.ultima_interacao_bot || null,
             ultimaInteracaoUsuario: matchedImportItem.ultima_interacao_usuario || null,
@@ -2978,11 +2981,14 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
         if (!leadImportItem.normalized_data) leadImportItem.normalized_data = {};
         leadImportItem.normalized_data.scheduling_link = resolvedSchedulingLink;
       }
+      // Só troca o link que continua com variável sem valor PARA ESTE LEAD. Link montado com campo da planilha
+      // (ex.: https://site/{{pagina}}) é do lead e não pode virar o link genérico.
+      const linkSemValor = (u) => /\{\{|\}\}/.test(applyMessagePlaceholders(u, lead, phone));
       for (const step of remainingSteps) {
-        if (step.linkUrl && step.linkUrl.includes("{{")) {
+        if (step.linkUrl && step.linkUrl.includes("{{") && linkSemValor(step.linkUrl)) {
           step.linkUrl = resolvedSchedulingLink;
         }
-        if (step.url && step.url.includes("{{")) {
+        if (step.url && step.url.includes("{{") && linkSemValor(step.url)) {
           step.url = resolvedSchedulingLink;
         }
       }

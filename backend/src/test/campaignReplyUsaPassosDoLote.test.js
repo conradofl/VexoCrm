@@ -120,6 +120,7 @@ async function mundo({
   continuacaoReal = false,
   leadFinalizado = false,
   semEspera = false,
+  dadosDaPlanilha = { nome: "Cliente" },
 } = {}) {
   const db = await createPgliteDb(SCHEMA);
   abertos.push(db);
@@ -190,8 +191,8 @@ async function mundo({
       [T, leadFinalizado, leadFinalizado ? "finalizado" : null]
     )
     : await db.query(
-      "INSERT INTO lead_import_items (client_id, import_id, telefone, normalized_data) VALUES ($1, $2, '5534988228667', '{\"nome\":\"Cliente\"}'::jsonb) RETURNING id, telefone",
-      [T, IMP]
+      "INSERT INTO lead_import_items (client_id, import_id, telefone, normalized_data) VALUES ($1, $2, '5534988228667', $3::jsonb) RETURNING id, telefone",
+      [T, IMP, JSON.stringify(dadosDaPlanilha)]
     );
   if (continuacaoReal) {
     // O chip de verdade, para a continuação resolver a instância como em produção (só o HTTP da Evolution é dublado).
@@ -398,4 +399,30 @@ describe("4 passos, 2 depois da resposta: o lead responde e o passo 2 sai pela m
       await vi.waitFor(async () => expect(await w.progresso()).toMatchObject({ status: "aguardando_usuario", nextStepIndex: 2 }), { timeout: 10_000 });
     }, SLOW);
   }
+});
+
+// Campo personalizado da planilha (normalized_data.dados.campos) no passo DEPOIS da resposta. Produção, 25/11/2026,
+// "[TESTE] Agenda Cheia": o passo 1 saiu com {{negocio}} trocado, o lead respondeu e o passo 2 foi segurado com
+// "Variável '{{negocio}}' ausente": o item casado na resposta chegava à continuação sem normalized_data.
+describe("campo da planilha no passo depois da resposta", () => {
+  it("[OBRIGATÓRIO] o 'Pode' faz sair o passo 2 com o campo da planilha trocado", async () => {
+    const passos = [
+      { id: "p1", type: "text", text: "Oi, vi o {{negocio}} no Google. Posso te mandar?", order: 1, enabled: true, delayAfterSeconds: 0, triggerMode: "immediate" },
+      { id: "p2", type: "link", text: "Aqui está a página do {{negocio}}", linkUrl: "https://demo.vexoia.com/{{pagina}}", order: 2, enabled: true, delayAfterSeconds: 0, triggerMode: "after_reply" },
+      { id: "p3", type: "text", text: "Quer saber mais?", order: 3, enabled: true, delayAfterSeconds: 0, triggerMode: "after_reply" },
+    ];
+    const w = await mundo({
+      passos,
+      continuacaoReal: true,
+      dadosDaPlanilha: { nome: "Barbearia Salone", dados: { campos: { negocio: "Barbearia Salone", pagina: "barbearia-salone" } } },
+    });
+    expect(enviados.map((e) => e.texto)).toEqual(["Oi, vi o Barbearia Salone no Google. Posso te mandar?"]);
+
+    const out = await w.responder("Pode");
+    expect(out).toMatchObject({ status: "campaign_step_dispatched" });
+    await vi.waitFor(() => expect(enviados.length).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(enviados[1].texto).toContain("Aqui está a página do Barbearia Salone");
+    expect(enviados[1].texto).toContain("https://demo.vexoia.com/barbearia-salone");
+    await vi.waitFor(async () => expect(await w.progresso()).toMatchObject({ status: "aguardando_usuario", nextStepIndex: 2 }), { timeout: 10_000 });
+  }, SLOW);
 });
