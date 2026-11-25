@@ -180,7 +180,7 @@ describe("Heloísa — Follow-up Scheduler com Disparo Programado no WhatsApp", 
     expect(res).toBeDefined();
 
     expect(consoleLogSpy).toHaveBeenCalledWith(
-      '[followup/worker] ⏰ Disparando lembrete programado da Heloísa para 5534997817660: "Mensagem de followup para Conrado"'
+      '[followup/worker] ⏰ Disparando lembrete programado da Wandinha para 5534997817660: "Mensagem de followup para Conrado"'
     );
 
     const successLogFound = consoleLogSpy.mock.calls.some(
