@@ -1388,13 +1388,13 @@ export function getEvolutionAdminConfig() {
   const baseUrl = (
     normalizeString(process.env.EVOLUTION_API_URL) ||
     normalizeString(process.env.EVOLUTION_API_ENDPOINT) ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host"
+    ""
   ).replace(/\/+$/, "");
 
   const apiKey =
     normalizeString(process.env.EVOLUTION_API_KEY) ||
     normalizeString(process.env.EVOLUTION_GLOBAL_KEY) ||
-    "429683C4C977415CAAFCCE10F7D57E11";
+    "";
 
   return {
     baseUrl,
@@ -2222,7 +2222,7 @@ export function buildEvolutionGetBase64Payload(messagePayload) {
  */
 export async function fetchMediaBase64FromEvolution(instanceName, messagePayload, options = {}) {
   if (!instanceName || !messagePayload) return null;
-  const baseUrl = normalizeHttpUrl(options.baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const baseUrl = normalizeHttpUrl(options.baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "";
   const apiKey = options.apiKey || options.webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
   if (!apiKey) {
     console.warn("[evolution] EVOLUTION_API_KEY não configurada para fetchMediaBase64FromEvolution");
@@ -2297,7 +2297,7 @@ export async function sendTextMessageViaEvolution({
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+    "";
   const apiKey =
     webhookToken ||
     process.env.EVOLUTION_API_KEY ||
@@ -2307,6 +2307,10 @@ export async function sendTextMessageViaEvolution({
 
   if (!apiKey) {
     throw new Error("Chave de autenticação da Evolution não configurada");
+  }
+  // Sem valor escrito no código (PR 4b do untangle): host vem do parâmetro ou de EVOLUTION_API_URL/GD_EVOLUTION_URL.
+  if (!effectiveBaseUrl) {
+    throw new Error("Endereço da Evolution não configurado (EVOLUTION_API_URL)");
   }
 
   const headers = {
@@ -2443,7 +2447,7 @@ export async function sendMediaMessageViaEvolution({
     throw new Error("Parâmetros obrigatórios ausentes (instanceName, number, base64)");
   }
 
-  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "";
   const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
 
   if (!apiKey) {
@@ -2525,7 +2529,7 @@ export async function deleteMessageViaEvolution({
     throw new Error("Parâmetros obrigatórios ausentes (instanceName, waMessageId, remoteJid)");
   }
 
-  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "";
   const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
 
   if (!apiKey) {
@@ -2576,7 +2580,7 @@ export async function fetchProfilePictureUrlViaEvolution({
 }) {
   if (!instanceName || !number) return null;
 
-  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "https://vexo-evolution-api.xdvm8y.easypanel.host";
+  const effectiveBaseUrl = normalizeHttpUrl(baseUrl) || normalizeHttpUrl(process.env.EVOLUTION_API_URL) || "";
   const apiKey = webhookToken || process.env.EVOLUTION_API_KEY || process.env.GD_EVOLUTION_API_TOKEN;
   if (!apiKey) return null;
 
@@ -2638,7 +2642,7 @@ export async function createEvolutionGroup({
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+    "";
   const apiKey =
     webhookToken ||
     process.env.EVOLUTION_API_KEY ||
@@ -2759,7 +2763,7 @@ export async function getEvolutionGroupInviteCode({
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+    "";
   const apiKey =
     webhookToken ||
     process.env.EVOLUTION_API_KEY ||
@@ -2833,7 +2837,7 @@ export async function updateEvolutionGroupPicture({
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+    "";
   const apiKey =
     webhookToken ||
     process.env.EVOLUTION_API_KEY ||
@@ -2911,7 +2915,7 @@ export async function linkEvolutionGroupToCommunity({
     normalizeHttpUrl(baseUrl) ||
     normalizeHttpUrl(process.env.EVOLUTION_API_URL) ||
     normalizeHttpUrl(process.env.GD_EVOLUTION_URL) ||
-    "https://vexo-evolution-api.xdvm8y.easypanel.host";
+    "";
   const apiKey =
     webhookToken ||
     process.env.EVOLUTION_API_KEY ||
