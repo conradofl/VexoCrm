@@ -405,7 +405,6 @@ export async function isLeadMessagesIsGroupColumnAvailable(pool, isMissingSchema
   return _leadMessagesIsGroupAvailable;
 }
 
-let _dispatchRunsClaimSchemaEnsured = false;
 let _dueDispatchTimerStarted = false;
 let _dueDispatchInterval = null;
 let _lastEmptyHeartbeatAt = 0;
@@ -3323,30 +3322,18 @@ export function registerCampaignsRoutes(app, deps) {
 
   // ── Campaign Dispatches ──────────────────────────────────────────────────────
 
+  // CHECK de status em supabase/migrations/20261125050000_campaign_dispatches_status_check.sql. Antes era
+  // derrubado e recriado aqui a cada pausa/retomada (ACCESS EXCLUSIVE na tabela no meio do disparo).
   async function ensureCampaignDispatchPausedStatusAllowed() {
-    if (!pgDatabasePool) return;
-
-    await pgDatabasePool.query(`
-      ALTER TABLE public.campaign_dispatches
-      DROP CONSTRAINT IF EXISTS campaign_dispatches_status_check
-    `);
-    await pgDatabasePool.query(`
-      ALTER TABLE public.campaign_dispatches
-      ADD CONSTRAINT campaign_dispatches_status_check
-      CHECK (status IN ('draft', 'scheduled', 'running', 'paused', 'done', 'failed', 'cancelled', 'interrupted'))
-    `);
+    return;
   }
 
+
+  // Colunas em 20261012120000, 20261024150000 e 20261125050000 (Esquema nas migrations (PR 7 do untangle, 25/11/2026)).
   async function ensureCampaignDispatchEvolutionInstanceColumn() {
-    if (!pgDatabasePool) return;
-
-    await pgDatabasePool.query(`
-      ALTER TABLE public.campaign_dispatches
-      ADD COLUMN IF NOT EXISTS evolution_instance_id UUID,
-      ADD COLUMN IF NOT EXISTS target_count INTEGER DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS dispatch_options JSONB DEFAULT '{}'::jsonb
-    `);
+    return;
   }
+
 
   async function validateCampaignDispatchEvolutionInstance(clientId, instanceId, res) {
     if (!instanceId) return true;
@@ -3439,52 +3426,24 @@ export function registerCampaignsRoutes(app, deps) {
   // lead_import_item_id: o id do ITEM da planilha que originou o envio (nulo quando o envio veio de lead do CRM).
   // lead_id é polimórfico (item numa campanha de planilha, lead numa do CRM); esta coluna não é: separa "esta
   // planilha" de "mesmo telefone em outra". Só ADD COLUMN IF NOT EXISTS, barato o bastante para a rota de leitura.
-  let _dispatchRunsItemIdColumnEnsured = false;
+  // lead_import_item_id em 20261003120000 (Esquema nas migrations (PR 7 do untangle, 25/11/2026)).
   async function ensureDispatchRunsItemIdColumn() {
-    if (!pgDatabasePool) return false;
-    if (_dispatchRunsItemIdColumnEnsured) return true;
-    await pgDatabasePool.query(`ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS lead_import_item_id UUID`);
-    _dispatchRunsItemIdColumnEnsured = true;
-    return true;
+    return Boolean(pgDatabasePool);
   }
+
 
   // evolution_instance_id: o chip que de fato enviou (id, nunca nome). Gravado no mesmo UPDATE que marca 'sent';
   // NULL = o envio não soube qual chip usou (ou é anterior a esta coluna). Mesma regra da migration 20261004120000.
-  let _dispatchRunsChipColumnEnsured = false;
   async function ensureDispatchRunsChipColumn() {
-    if (!pgDatabasePool) return false;
-    if (_dispatchRunsChipColumnEnsured) return true;
-    await pgDatabasePool.query(`ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS evolution_instance_id UUID`);
-    _dispatchRunsChipColumnEnsured = true;
-    return true;
+    return Boolean(pgDatabasePool);
   }
 
+
+  // lead_id, claimed_at, CHECK de status e índices em 20260612060000 e 20260831180000 (Esquema nas migrations (PR 7 do untangle, 25/11/2026)).
   async function ensureDispatchRunsClaimSchema() {
-    if (!pgDatabasePool) return false;
-    if (_dispatchRunsClaimSchemaEnsured) return true;
-    await ensureDispatchRunsItemIdColumn();
-    await ensureDispatchRunsChipColumn();
-    await pgDatabasePool.query(
-      `ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS lead_id UUID`
-    );
-    await pgDatabasePool.query(
-      `ALTER TABLE public.campaign_dispatch_runs ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ`
-    );
-    await pgDatabasePool.query(
-      `ALTER TABLE public.campaign_dispatch_runs DROP CONSTRAINT IF EXISTS campaign_dispatch_runs_status_check`
-    );
-    await pgDatabasePool.query(
-      `ALTER TABLE public.campaign_dispatch_runs ADD CONSTRAINT campaign_dispatch_runs_status_check CHECK (status IN ('pending','claimed','sent','failed','skipped','invalid_number'))`
-    );
-    await pgDatabasePool.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_dispatch_runs_dispatch_lead ON public.campaign_dispatch_runs (dispatch_id, lead_id)`
-    );
-    await pgDatabasePool.query(
-      `CREATE INDEX IF NOT EXISTS idx_campaign_dispatch_runs_dispatch_status ON public.campaign_dispatch_runs (dispatch_id, status)`
-    );
-    _dispatchRunsClaimSchemaEnsured = true;
-    return true;
+    return Boolean(pgDatabasePool);
   }
+
   // ────────────────────────────────────────────────────────────────────────────
 
   // Janela dos botões que disparam na hora. null = a rota já respondeu 422 (não mexe no lote); senão { forced }.
