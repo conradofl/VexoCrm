@@ -9,6 +9,29 @@ function normalizeString(value) {
 }
 
 /**
+ * Variáveis do lead para os placeholders: o próprio lead, normalized_data e os campos da planilha.
+ * Lead de planilha chega ao disparo com os campos em normalized_data.dados.campos (um nível abaixo de lead.dados.campos);
+ * sem este degrau, {{campo}} da planilha nunca era trocado. Ordem: o que está mais perto do lead vence.
+ */
+export function leadCustomData(lead) {
+  const leadObj = lead && typeof lead === "object" ? lead : {};
+  const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
+  const nd = obj(leadObj.normalized_data);
+  const ndCamel = obj(leadObj.normalizedData);
+  const ndDados = obj(nd.dados);
+  const leadDados = obj(leadObj.dados);
+  return {
+    ...leadObj,
+    ...nd,
+    ...ndCamel,
+    ...ndDados,
+    ...obj(ndDados.campos),
+    ...leadDados,
+    ...obj(leadDados.campos),
+  };
+}
+
+/**
  * Substitui todas as variáveis de template no texto da mensagem antes do envio ao WhatsApp.
  * Suporta tokens case-insensitive com espaços internos opcionais:
  * - {{primeiro_nome}}, {{primeironome}}, {{first_name}}, {{firstname}}
@@ -156,17 +179,7 @@ export function applyMessagePlaceholders(text, lead = {}, phone = "", extraConte
   }
 
   // 7. Dados dinâmicos adicionais (normalized_data, dados, dados.campos, extraContext)
-  const leadDados = leadObj.dados && typeof leadObj.dados === "object" ? leadObj.dados : {};
-  const customCampos = leadDados.campos && typeof leadDados.campos === "object" ? leadDados.campos : {};
-
-  const customData = {
-    ...leadObj,
-    ...(leadObj.normalized_data || {}),
-    ...(leadObj.normalizedData || {}),
-    ...leadDados,
-    ...customCampos,
-    ...extraObj,
-  };
+  const customData = { ...leadCustomData(leadObj), ...extraObj };
 
   // Trava de segurança: impede que dados brutos ou objetos vazem nos placeholders de acordo
   delete customData.acordo;

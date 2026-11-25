@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { comEnvioRegistrado, dormirInterrompivel, estaDesligando } from "./services/shutdownSignal.js";
 import { isFilterShape, normalizeFilters } from "./segmentation.js";
-import { applyMessagePlaceholders, findUnresolvedPlaceholders } from "./services/messagePlaceholders.js";
+import { applyMessagePlaceholders, findUnresolvedPlaceholders, leadCustomData } from "./services/messagePlaceholders.js";
 import { validateOutboundMessage } from "./services/jsonExtractor.js";
 import { registerSystemSentFromResponse } from "./services/systemSentMessages.js";
 import { pgDatabasePool } from "./services/database.js";
@@ -100,16 +100,7 @@ export function leadVariableIsFilled(name, lead, phone) {
     return Boolean(normalizeString(phone) || normalizeString(lead?.telefone || lead?.phone));
   }
 
-  const leadDados = lead?.dados && typeof lead?.dados === "object" ? lead.dados : {};
-  const customCampos = leadDados.campos && typeof leadDados.campos === "object" ? leadDados.campos : {};
-
-  const customData = {
-    ...(lead || {}),
-    ...(lead?.normalized_data || {}),
-    ...(lead?.normalizedData || {}),
-    ...leadDados,
-    ...customCampos,
-  };
+  const customData = leadCustomData(lead);
   for (const [dataKey, value] of Object.entries(customData)) {
     if (dataKey.toLowerCase().replace(/[\s_-]/g, "") !== key && dataKey.toLowerCase() !== key) continue;
     if (typeof value === "number") return Number.isFinite(value);
