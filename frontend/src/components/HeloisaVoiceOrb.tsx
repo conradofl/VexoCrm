@@ -218,6 +218,7 @@ export function speakNativeTTS({
       (window as any)._activeUtterance = utterance;
     }
 
+    let finalized = false;
     const limparUtterance = () => {
       _activeUtterance = null;
       if (typeof window !== "undefined") {
@@ -229,20 +230,24 @@ export function speakNativeTTS({
       }
     };
 
+    const finishOnce = () => {
+      if (finalized) return;
+      finalized = true;
+      limparUtterance();
+      onEnd?.();
+    };
+
     utterance.onstart = () => {
       // Watchdog de Fala:
       // Adiciona watchdog com setInterval de 1s que executa window.speechSynthesis.resume()
-      // enquanto window.speechSynthesis.speaking for true, evitando que o navegador pause a fala no meio da frase.
+      // enquanto window.speechSynthesis.speaking for true, e finaliza caso o Chromium perca o evento onend.
       if (_speechWatchdog) clearInterval(_speechWatchdog);
       _speechWatchdog = setInterval(() => {
         if (typeof window !== "undefined" && "speechSynthesis" in window) {
           if (window.speechSynthesis.speaking) {
             window.speechSynthesis.resume();
-          } else {
-            if (_speechWatchdog) {
-              clearInterval(_speechWatchdog);
-              _speechWatchdog = null;
-            }
+          } else if (!window.speechSynthesis.pending) {
+            finishOnce();
           }
         }
       }, 1000);
@@ -251,22 +256,19 @@ export function speakNativeTTS({
     };
 
     utterance.onend = () => {
-      limparUtterance();
-      onEnd?.();
+      finishOnce();
     };
 
     utterance.onerror = (e) => {
-      console.warn("[Heloísa TTS] Evento de erro ou cancelamento:", e);
-      limparUtterance();
-      onEnd?.();
+      console.warn("[Wandinha TTS] Evento de erro ou cancelamento:", e);
+      finishOnce();
     };
 
     try {
       window.speechSynthesis.speak(utterance);
     } catch (err) {
-      console.warn("[Heloísa TTS] Falha ao invocar speak():", err);
-      limparUtterance();
-      onEnd?.();
+      console.warn("[Wandinha TTS] Falha ao invocar speak():", err);
+      finishOnce();
     }
   };
 
@@ -282,6 +284,47 @@ export function speakNativeTTS({
   }
 }
 
+function normalizeEchoComparison(str: string): string {
+  return String(str || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeWandinhaWakeTranscript(rawSpoken: string): {
+  isJustWakeWord: boolean;
+  comandoParaEnviar: string;
+} {
+  const normalizedPhonetic = String(rawSpoken || "")
+    .trim()
+    .replace(/\bvandinha\b/gi, "Wandinha");
+
+  const isJustWakeWord = /^(?:(?:oi|ol[áa]|ei|fala|opa)\s+)?(?:wandinha|helo[íi]sa)[?!.,:;]*$/i.test(
+    normalizedPhonetic
+  );
+
+  let cleanOrder = normalizedPhonetic;
+  if (/^(?:wandinha|helo[íi]sa)\b/i.test(normalizedPhonetic)) {
+    cleanOrder =
+      normalizedPhonetic.replace(/^(?:wandinha|helo[íi]sa)[,.:;!?\s]*/i, "").trim() || normalizedPhonetic;
+  } else if (/^(?:oi|ol[áa]|ei|fala)\s+(?:wandinha|helo[íi]sa)\b/i.test(normalizedPhonetic)) {
+    const afterGreeting = normalizedPhonetic
+      .replace(/^(?:oi|ol[áa]|ei|fala)\s+(?:wandinha|helo[íi]sa)[,.:;!?\s]*/i, "")
+      .trim();
+    if (afterGreeting) {
+      cleanOrder = afterGreeting;
+    }
+  }
+
+  return {
+    isJustWakeWord,
+    comandoParaEnviar: isJustWakeWord ? "Olá Wandinha" : cleanOrder,
+  };
+}
+
 export function HeloisaVoiceOrb() {
   const { isInternalUser, isAdminUser, getIdToken, user } = useAuth();
   const userName = user?.displayName ? user.displayName.split(" ")[0] : "Conrado";
@@ -290,6 +333,7 @@ export function HeloisaVoiceOrb() {
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<HeloisaStatus>("idle");
   const [isMuted, setIsMuted] = useState(false);
+  const [autoListenEnabled, setAutoListenEnabled] = useState(true);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [inputText, setInputText] = useState("");
@@ -311,8 +355,15 @@ export function HeloisaVoiceOrb() {
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const isSpeakingRef = useRef<boolean>(false);
+  const isConsultingRef = useRef<boolean>(false);
   const isOpenRef = useRef<boolean>(isOpen);
   const isMutedRef = useRef<boolean>(isMuted);
+  const autoListenRef = useRef<boolean>(autoListenEnabled);
+  const micBlockedRef = useRef<boolean>(false);
+  const messagesRef = useRef<VoiceMessage[]>(messages);
+  const startListeningRef = useRef<(() => void) | null>(null);
+  const lastSpeechEndedAtRef = useRef<number>(0);
+  const lastBotResponseRef = useRef<string>("");
   const resumeListeningTimerRef = useRef<NodeJS.Timeout | null>(null);
   const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -331,6 +382,14 @@ export function HeloisaVoiceOrb() {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    autoListenRef.current = autoListenEnabled;
+  }, [autoListenEnabled]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Somente renderiza para usuários internos e administradores
   if (!isInternalUser && !isAdminUser) {
@@ -352,7 +411,7 @@ export function HeloisaVoiceOrb() {
   // Rolagem suave para o fim das mensagens
   useEffect(() => {
     if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" });
     }
   }, [messages, isOpen, liveTranscript, status]);
 
@@ -447,7 +506,33 @@ export function HeloisaVoiceOrb() {
     }
   }, []);
 
-  // Interromper fala da Heloísa
+  // Agenda retomada contínua da escuta após a Wandinha terminar de falar (com cooldown anti-eco de 650ms)
+  const agendarRetomadaEscuta = useCallback(
+    (delayMs = 650) => {
+      if (resumeListeningTimerRef.current) {
+        clearTimeout(resumeListeningTimerRef.current);
+        resumeListeningTimerRef.current = null;
+      }
+      if (isMobile || !isOpenRef.current || !autoListenRef.current || micBlockedRef.current) {
+        return;
+      }
+      resumeListeningTimerRef.current = setTimeout(() => {
+        resumeListeningTimerRef.current = null;
+        if (
+          isOpenRef.current &&
+          !isSpeakingRef.current &&
+          !isConsultingRef.current &&
+          autoListenRef.current &&
+          !micBlockedRef.current
+        ) {
+          startListeningRef.current?.();
+        }
+      }, delayMs);
+    },
+    [isMobile]
+  );
+
+  // Interromper fala da Wandinha
   const pararFala = useCallback(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -459,20 +544,29 @@ export function HeloisaVoiceOrb() {
       audioPlayerRef.current = null;
     }
     isSpeakingRef.current = false;
+    lastSpeechEndedAtRef.current = Date.now();
     setStatus("idle");
-  }, []);
+    if (isOpenRef.current) {
+      agendarRetomadaEscuta(350);
+    }
+  }, [agendarRetomadaEscuta]);
 
-  // Reprodução de áudio com fallback infalível para síntese nativa gratuita
+  // Reprodução de áudio com fallback infalível para síntese nativa gratuita e retomada contínua do microfone
   const tocarRespostaVoz = useCallback(
     (audioBase64: string | null, responseText: string) => {
+      lastBotResponseRef.current = normalizeEchoComparison(responseText);
+
       if (isMutedRef.current) {
         setStatus("idle");
+        agendarRetomadaEscuta(300);
         return;
       }
 
       const finalizarFala = () => {
         isSpeakingRef.current = false;
+        lastSpeechEndedAtRef.current = Date.now();
         setStatus("idle");
+        agendarRetomadaEscuta(650);
       };
 
       const iniciarFala = () => {
@@ -487,8 +581,11 @@ export function HeloisaVoiceOrb() {
         }
         if (recognitionRef.current) {
           try {
+            recognitionRef.current.onend = null;
+            recognitionRef.current.onerror = null;
             recognitionRef.current.abort();
           } catch {}
+          recognitionRef.current = null;
         }
       };
 
@@ -507,7 +604,7 @@ export function HeloisaVoiceOrb() {
           };
 
           audio.onerror = () => {
-            console.warn("[Heloísa] Falha ao tocar áudio retornado pelo servidor, usando TTS nativo...");
+            console.warn("[Wandinha] Falha ao tocar áudio retornado pelo servidor, usando TTS nativo...");
             audioPlayerRef.current = null;
             speakNativeTTS({
               text: responseText,
@@ -519,7 +616,7 @@ export function HeloisaVoiceOrb() {
           const playPromise = audio.play();
           if (playPromise !== undefined) {
             playPromise.catch((err) => {
-              console.warn("[Heloísa] Autoplay com áudio falhou, usando TTS nativo:", err);
+              console.warn("[Wandinha] Autoplay com áudio falhou, usando TTS nativo:", err);
               audioPlayerRef.current = null;
               speakNativeTTS({
                 text: responseText,
@@ -530,7 +627,7 @@ export function HeloisaVoiceOrb() {
           }
           return;
         } catch (err) {
-          console.warn("[Heloísa] Erro ao instanciar player de áudio:", err);
+          console.warn("[Wandinha] Erro ao instanciar player de áudio:", err);
         }
       }
 
@@ -540,10 +637,10 @@ export function HeloisaVoiceOrb() {
         onEnd: finalizarFala,
       });
     },
-    []
+    [agendarRetomadaEscuta]
   );
 
-  // Envio de texto ou áudio base64 para o backend da Heloísa
+  // Envio de texto ou áudio base64 para o backend da Wandinha
   const enviarParaHeloisa = useCallback(
     async ({
       text,
@@ -556,6 +653,9 @@ export function HeloisaVoiceOrb() {
     }) => {
       const promptLimpo = (text || "").trim();
       if (!promptLimpo && !audioBase64) return;
+      if (isConsultingRef.current) return;
+
+      isConsultingRef.current = true;
 
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         try {
@@ -566,6 +666,8 @@ export function HeloisaVoiceOrb() {
       }
       if (recognitionRef.current) {
         try {
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onerror = null;
           recognitionRef.current.abort();
         } catch {}
         recognitionRef.current = null;
@@ -596,7 +698,7 @@ export function HeloisaVoiceOrb() {
         timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
       };
 
-      const historyPayload = messages.slice(-6).map((m) => ({
+      const historyPayload = messagesRef.current.slice(-6).map((m) => ({
         sender: m.sender,
         text: m.text,
       }));
@@ -652,9 +754,11 @@ export function HeloisaVoiceOrb() {
         };
         setMessages((prev) => [...prev, heloisaMsg]);
 
+        isConsultingRef.current = false;
         tocarRespostaVoz(data.audioBase64 || null, responseText);
       } catch (err: any) {
-        console.error("[Heloísa] Erro ao enviar solicitação:", err);
+        isConsultingRef.current = false;
+        console.error("[Wandinha] Erro ao enviar solicitação:", err);
         const readableError =
           typeof err === "string"
             ? err
@@ -663,9 +767,10 @@ export function HeloisaVoiceOrb() {
             : "Falha de comunicação com o servidor.";
         setErrorMessage(readableError);
         setStatus("idle");
+        agendarRetomadaEscuta(600);
       }
     },
-    [getIdToken, location.pathname, messages, tocarRespostaVoz, userName]
+    [agendarRetomadaEscuta, getIdToken, location.pathname, tocarRespostaVoz, userName]
   );
 
   // Gravação via MediaRecorder para Dispositivos Móveis (iOS Safari / Android Chrome)
@@ -750,20 +855,24 @@ export function HeloisaVoiceOrb() {
     setStatus("consultando");
   }, []);
 
-  // Iniciar escuta via Web Speech API (Desktop) com tolerância a ciclo de vida
+  // Iniciar escuta via Web Speech API (Desktop) com reconexão automática contínua
   const startListening = useCallback(() => {
     destravarAudioMobile();
     if (typeof window === "undefined") return;
-    if (!isOpenRef.current || isSpeakingRef.current) return;
+    if (!isOpenRef.current || isSpeakingRef.current || isConsultingRef.current || micBlockedRef.current) return;
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      console.warn("[Heloísa] SpeechRecognition não suportado neste navegador.");
+      console.warn("[Wandinha] SpeechRecognition não suportado neste navegador.");
       return;
     }
 
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       try {
         mediaRecorderRef.current.onstop = null;
@@ -788,7 +897,7 @@ export function HeloisaVoiceOrb() {
       recognition.maxAlternatives = 1;
 
       recognition.onresult = (event: any) => {
-        if (isSpeakingRef.current) return;
+        if (isSpeakingRef.current || isConsultingRef.current) return;
 
         let interim = "";
         let finalConcat = "";
@@ -805,12 +914,16 @@ export function HeloisaVoiceOrb() {
         const rawSpoken = (finalConcat || interim).trim();
         if (!rawSpoken) return;
 
-        const isJustWakeWord = /^(wandinha|helo[íi]sa)[?!.]*$/i.test(rawSpoken);
-        let cleanOrder = rawSpoken;
-        if (/^(wandinha|helo[íi]sa)\b/i.test(rawSpoken)) {
-          cleanOrder = rawSpoken.replace(/^(wandinha|helo[íi]sa)[,.:;!?\s]*/i, "").trim() || rawSpoken;
+        // Filtro anti-eco: descarta resíduo sonoro das caixas de som logo após o término da fala da Wandinha
+        const msSinceBotSpoke = Date.now() - lastSpeechEndedAtRef.current;
+        if (msSinceBotSpoke < 2500 && lastBotResponseRef.current) {
+          const normSpoken = normalizeEchoComparison(rawSpoken);
+          if (normSpoken.length >= 6 && lastBotResponseRef.current.includes(normSpoken)) {
+            return;
+          }
         }
-        const comandoParaEnviar = isJustWakeWord ? "Olá Wandinha" : cleanOrder;
+
+        const { comandoParaEnviar } = normalizeWandinhaWakeTranscript(rawSpoken);
 
         setLiveTranscript(comandoParaEnviar);
         setStatus("ouvindo");
@@ -821,7 +934,12 @@ export function HeloisaVoiceOrb() {
 
         if (comandoParaEnviar && comandoParaEnviar.length >= 2) {
           silenceTimerRef.current = setTimeout(() => {
-            if (!isSpeakingRef.current && comandoParaEnviar && isOpenRef.current) {
+            if (
+              !isSpeakingRef.current &&
+              !isConsultingRef.current &&
+              comandoParaEnviar &&
+              isOpenRef.current
+            ) {
               enviarParaHeloisa({ text: comandoParaEnviar });
               setLiveTranscript("");
             }
@@ -830,35 +948,71 @@ export function HeloisaVoiceOrb() {
       };
 
       recognition.onerror = (e: any) => {
-        if (e.error === "not-allowed") {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          micBlockedRef.current = true;
           setErrorMessage(
             "Microfone bloqueado pelo navegador. Clique no ícone de configurações ao lado do URL para permitir."
           );
           setStatus("idle");
         } else if (e.error !== "no-speech" && e.error !== "aborted") {
-          console.warn("[Heloísa SpeechRecognition] Info:", e.error);
+          console.warn("[Wandinha SpeechRecognition] Info:", e.error);
         }
       };
 
       recognition.onend = () => {
         recognitionRef.current = null;
+        // No Desktop, o Chrome encerra o SpeechRecognition após alguns segundos de silêncio;
+        // reconectamos automaticamente enquanto o painel estiver aberto e Voz Ativa habilitada.
+        if (
+          !isMobile &&
+          isOpenRef.current &&
+          !isSpeakingRef.current &&
+          !isConsultingRef.current &&
+          autoListenRef.current &&
+          !micBlockedRef.current
+        ) {
+          restartTimerRef.current = setTimeout(() => {
+            restartTimerRef.current = null;
+            if (
+              isOpenRef.current &&
+              !isSpeakingRef.current &&
+              !isConsultingRef.current &&
+              autoListenRef.current &&
+              !micBlockedRef.current
+            ) {
+              startListeningRef.current?.();
+            }
+          }, 300);
+        } else if (!isSpeakingRef.current && !isConsultingRef.current) {
+          setStatus("idle");
+        }
       };
 
       recognition.start();
       recognitionRef.current = recognition;
       setStatus("ouvindo");
     } catch (err) {
-      console.warn("[Heloísa] Falha ao iniciar reconhecimento de voz:", err);
+      console.warn("[Wandinha] Falha ao iniciar reconhecimento de voz:", err);
     }
   }, [enviarParaHeloisa, isMobile]);
+
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   // Solicita explicitamente o microfone e abre a orbe
   const toggleOpen = async () => {
     destravarAudioMobile();
     const nextState = !isOpen;
+    isOpenRef.current = nextState;
     setIsOpen(nextState);
 
     if (nextState) {
+      micBlockedRef.current = false;
+      isSpeakingRef.current = false;
+      isConsultingRef.current = false;
+      autoListenRef.current = true;
+      setAutoListenEnabled(true);
       setErrorMessage(null);
       try {
         if (navigator.mediaDevices?.getUserMedia) {
@@ -867,8 +1021,9 @@ export function HeloisaVoiceOrb() {
           conectarAudioAnalyser(stream);
         }
       } catch (err: any) {
-        console.warn("[Heloísa] Permissão de microfone:", err);
+        console.warn("[Wandinha] Permissão de microfone:", err);
         if (err.name === "NotAllowedError" || err.message?.includes("Permission denied")) {
+          micBlockedRef.current = true;
           setErrorMessage("Permissão de microfone negada. Clique no ícone de cadeado do navegador para permitir.");
         }
       }
@@ -878,6 +1033,7 @@ export function HeloisaVoiceOrb() {
         startListening();
       }
     } else {
+      isConsultingRef.current = false;
       stopListeningAndHardware();
       pararFala();
       setStatus("idle");
@@ -938,7 +1094,45 @@ export function HeloisaVoiceOrb() {
       return;
     }
 
+    micBlockedRef.current = false;
+    isSpeakingRef.current = false;
+    autoListenRef.current = true;
+    setAutoListenEnabled(true);
     startListening();
+  };
+
+  const toggleAutoListen = () => {
+    destravarAudioMobile();
+    const next = !autoListenEnabled;
+    autoListenRef.current = next;
+    setAutoListenEnabled(next);
+    if (!next) {
+      if (resumeListeningTimerRef.current) {
+        clearTimeout(resumeListeningTimerRef.current);
+        resumeListeningTimerRef.current = null;
+      }
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = null;
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.abort();
+        } catch {}
+        recognitionRef.current = null;
+      }
+      if (status === "ouvindo") {
+        setStatus("idle");
+      }
+    } else {
+      micBlockedRef.current = false;
+      isSpeakingRef.current = false;
+      if (!isMobile) {
+        startListening();
+      }
+    }
   };
 
   return (
@@ -994,12 +1188,35 @@ export function HeloisaVoiceOrb() {
                   <h3 className="font-semibold text-sm tracking-wide text-white drop-shadow-[0_0_8px_rgba(168,85,247,0.5)]">
                     Wandinha
                   </h3>
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] px-1.5 py-0 border-cyan-400/40 text-cyan-300 bg-cyan-950/30 flex items-center gap-1"
+                  <button
+                    type="button"
+                    onClick={toggleAutoListen}
+                    title={
+                      autoListenEnabled
+                        ? "Escuta contínua ligada (clique para pausar o microfone)"
+                        : "Microfone pausado (clique para reativar escuta contínua)"
+                    }
                   >
-                    <Ear className="h-2.5 w-2.5" /> Voz Ativa
-                  </Badge>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px] px-1.5 py-0 flex items-center gap-1 cursor-pointer transition-colors",
+                        autoListenEnabled
+                          ? "border-cyan-400/40 text-cyan-300 bg-cyan-950/30 hover:bg-cyan-950/60"
+                          : "border-slate-600/60 text-slate-400 bg-slate-900/60 hover:text-slate-200"
+                      )}
+                    >
+                      {autoListenEnabled ? (
+                        <>
+                          <Ear className="h-2.5 w-2.5" /> Voz Ativa
+                        </>
+                      ) : (
+                        <>
+                          <MicOff className="h-2.5 w-2.5" /> Mic Pausado
+                        </>
+                      )}
+                    </Badge>
+                  </button>
                 </div>
                 <p className="text-xs text-slate-400">Secretária Executiva • Vexo OS</p>
               </div>

@@ -3598,7 +3598,7 @@ export function registerChatbotRoutes(app, deps) {
     const isDirector =
       !isSelfBotEcho &&
       ((await isHeloisaAuthorizedSenderAsync(phone, pgDatabasePool)) || isHeloisaAuthorizedSender(phone));
-    const hasHeloisaPrefix = /^(wandinha|helo[ií]sa|[!\/][wh])\b/i.test(messageData?.text || "");
+    const hasHeloisaPrefix = /^([wv]andinha|helo[ií]sa|[!\/][wh])\b/i.test(messageData?.text || "");
     const isPersonal = !isWandinhaChip && (isPersonalInstance(instanceName) || isPersonalInstance(rawInstanceName));
 
     // Wandinha atende pelos chips autorizados da Vexo Adm / GD (EMPRESAS_DA_HELOISA).
@@ -3632,7 +3632,7 @@ export function registerChatbotRoutes(app, deps) {
         console.log(`[chatbot-webhook] Wandinha está DESATIVADA no Painel de Controle. Mensagem de ${maskPhoneForLog(phone)} seguirá o fluxo padrão/humano.`);
       } else {
         const cleanText = hasHeloisaPrefix
-          ? (messageData.text || "").replace(/^(wandinha|helo[ií]sa|[!\/][wh])[:,]?\s*/i, "").trim()
+          ? (messageData.text || "").replace(/^([wv]andinha|helo[ií]sa|[!\/][wh])[:,]?\s*/i, "").trim()
           : messageData.text;
 
         responder({ handled: "heloisa", agent: "wandinha", phone: maskPhoneForLog(phone) });
