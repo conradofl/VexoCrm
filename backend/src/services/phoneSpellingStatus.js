@@ -8,21 +8,32 @@
 // guardado: o /health devolve { medido: false, emAndamento: true } até terminar. Falha = { medido: false, erro }.
 import { SQL_CANONICAL_PHONE } from "./canonicalPhone.js";
 
-export const PHONE_SPELLING_TABLES = ["leads", "lead_import_items"];
+// Tabela -> coluna do telefone. runs e lead_messages entraram na 2ª medição (25/11): é onde o gerador antigo de
+// grafias (buildPhoneLookupVariants, 24 pontos) procura, e o telefone pode estar com "+", como JID ou sem DDD.
+export const PHONE_SPELLING_TABLES = [
+  { tabela: "leads", coluna: "telefone" },
+  { tabela: "lead_import_items", coluna: "telefone" },
+  { tabela: "campaign_dispatch_runs", coluna: "phone" },
+  { tabela: "lead_messages", coluna: "phone" },
+];
 const STATEMENT_TIMEOUT_MS = 60_000;
 
-export function sqlPhoneSpellingByClient(table) {
+export function sqlPhoneSpellingByClient(table, col = "telefone") {
   return `
     WITH x AS (
-      SELECT client_id, telefone AS raw, ${SQL_CANONICAL_PHONE("telefone")} AS canon
+      SELECT client_id, ${col} AS raw, ${SQL_CANONICAL_PHONE(col)} AS canon
         FROM public.${table}
-       WHERE telefone IS NOT NULL AND telefone <> ''
+       WHERE ${col} IS NOT NULL AND ${col} <> ''
     ),
     por_cliente AS (
       SELECT client_id,
              count(*)::int AS linhas,
              count(*) FILTER (WHERE raw <> canon)::int AS fora_do_canonico,
-             count(*) FILTER (WHERE raw ~ '\\D')::int AS com_nao_digito
+             count(*) FILTER (WHERE raw ~ '\\D')::int AS com_nao_digito,
+             count(*) FILTER (WHERE raw LIKE '+%')::int AS com_mais,
+             count(*) FILTER (WHERE raw ~* '@(s\\.whatsapp\\.net|c\\.us)$')::int AS com_jid,
+             count(*) FILTER (WHERE raw ~* '@(lid|g\\.us)')::int AS lid_ou_grupo,
+             count(*) FILTER (WHERE raw ~ '^[0-9]{8,9}$')::int AS sem_ddd
         FROM x GROUP BY client_id
     ),
     varias AS (
@@ -30,7 +41,7 @@ export function sqlPhoneSpellingByClient(table) {
         FROM (SELECT client_id, canon FROM x GROUP BY client_id, canon HAVING count(DISTINCT raw) > 1) g
        GROUP BY client_id
     )
-    SELECT p.client_id, p.linhas, p.fora_do_canonico, p.com_nao_digito,
+    SELECT p.client_id, p.linhas, p.fora_do_canonico, p.com_nao_digito, p.com_mais, p.com_jid, p.lid_ou_grupo, p.sem_ddd,
            COALESCE(v.numeros_com_varias_grafias, 0)::int AS numeros_com_varias_grafias
       FROM por_cliente p LEFT JOIN varias v ON v.client_id IS NOT DISTINCT FROM p.client_id
      ORDER BY p.client_id
@@ -58,22 +69,30 @@ async function rodarComLimite(pool, sql) {
 
 export async function measurePhoneSpellings(pool) {
   const out = { medido: true, medidoEm: new Date().toISOString(), tabelas: {} };
-  for (const tabela of PHONE_SPELLING_TABLES) {
+  for (const { tabela, coluna } of PHONE_SPELLING_TABLES) {
     try {
-      const rows = await rodarComLimite(pool, sqlPhoneSpellingByClient(tabela));
-      const total = { linhas: 0, foraDoCanonico: 0, comNaoDigito: 0, numerosComVariasGrafias: 0 };
+      const rows = await rodarComLimite(pool, sqlPhoneSpellingByClient(tabela, coluna));
+      const total = { linhas: 0, foraDoCanonico: 0, comNaoDigito: 0, comMais: 0, comJid: 0, lidOuGrupo: 0, semDdd: 0, numerosComVariasGrafias: 0 };
       const porEmpresa = {};
       for (const r of rows) {
         total.linhas += r.linhas;
         total.foraDoCanonico += r.fora_do_canonico;
         total.comNaoDigito += r.com_nao_digito;
         total.numerosComVariasGrafias += r.numeros_com_varias_grafias;
-        if (r.fora_do_canonico > 0 || r.com_nao_digito > 0 || r.numeros_com_varias_grafias > 0) {
+        total.comMais += r.com_mais;
+        total.comJid += r.com_jid;
+        total.lidOuGrupo += r.lid_ou_grupo;
+        total.semDdd += r.sem_ddd;
+        if (r.fora_do_canonico > 0 || r.com_nao_digito > 0 || r.numeros_com_varias_grafias > 0 || r.sem_ddd > 0) {
           porEmpresa[r.client_id ?? "(sem client_id)"] = {
             linhas: r.linhas,
             foraDoCanonico: r.fora_do_canonico,
             comNaoDigito: r.com_nao_digito,
             numerosComVariasGrafias: r.numeros_com_varias_grafias,
+            comMais: r.com_mais,
+            comJid: r.com_jid,
+            lidOuGrupo: r.lid_ou_grupo,
+            semDdd: r.sem_ddd,
           };
         }
       }
