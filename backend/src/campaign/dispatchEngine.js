@@ -15,6 +15,7 @@ import { markRunSendStarted, markRunSequenceCut } from "../services/runSendMarke
 import { isWithinSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
 import { extractCampaignProgress, findLeadsAlreadyReachedInCycle, isLeadBlockedByActiveCycleProgress, markCampaignLeadWaitingReply, resolveCampaignImportSelection, resolveCampaignImportSelectionStrict, resolveDispatchLeadLimit } from "./dispatch.js";
 import { isPhoneOptedOut } from "./queueOptOut.js";
+import { phoneSpellingsOf } from "../services/canonicalPhone.js";
 
 export function createCampaignDispatchEngine(deps) {
   const {
@@ -1218,7 +1219,7 @@ export function createCampaignDispatchEngine(deps) {
             .from("lead_import_items")
             .update(leadPatch)
             .eq("client_id", clientId)
-            .eq("telefone", phone);
+            .in("telefone", phoneSpellingsOf(phone));
         const { error: leadUpdateError } = await leadUpdate;
         if (leadUpdateError) {
           console.warn("[campaign-dispatch] followup queue marker failed:", leadUpdateError.message || leadUpdateError);

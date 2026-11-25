@@ -79,10 +79,10 @@ function makeSupabase() {
     insert: (payload) => { inserts.push(payload); return Promise.resolve({ error: null }); },
     update: (payload) => {
       updates.push(payload);
-      const chain = { eq: () => chain, then: (resolve) => resolve({ error: null }) };
+      const chain = { eq: () => chain, in: () => chain, then: (resolve) => resolve({ error: null }) };
       return chain;
     },
-    eq: () => api,
+    eq: () => api, in: () => api,
     maybeSingle: () => Promise.resolve({ data: null }),
     single: () => Promise.resolve({ data: null }),
   };

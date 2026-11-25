@@ -54,6 +54,8 @@ function buildMockSupabase({ agentInboundPrompt }) {
             eq: () => ({
               eq: () => ({
                 order: () => ({ limit: () => Promise.resolve({ data: [] }) }),
+              }), in: () => ({
+                order: () => ({ limit: () => Promise.resolve({ data: [] }) }),
               }),
             }),
           }),
@@ -64,7 +66,7 @@ function buildMockSupabase({ agentInboundPrompt }) {
       if (table === "lead_messages") {
         return { insert: () => Promise.resolve({ error: null }) };
       }
-      return { select: () => api, eq: () => api, maybeSingle: () => Promise.resolve({ data: null }) };
+      return { select: () => api, eq: () => api, in: () => api, maybeSingle: () => Promise.resolve({ data: null }) };
     },
   };
   return api;

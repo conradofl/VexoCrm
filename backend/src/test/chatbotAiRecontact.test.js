@@ -96,7 +96,7 @@ function makeSupabase({ leadRow, promptRow }) {
       };
       return chain;
     },
-    eq: () => api,
+    eq: () => api, in: () => api,
     maybeSingle: () => Promise.resolve({ data: null }),
     single: () => Promise.resolve({ data: null }),
   };
