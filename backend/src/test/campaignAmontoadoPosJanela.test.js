@@ -102,7 +102,7 @@ let abrirPortao;
 let portao;
 
 beforeAll(async () => {
-  // O agendador arma setInterval(callback, 30000) no registro das rotas. Guarda o callback para chamá-lo como o relógio
+  // O agendador arma setInterval(callback, 30000) quando ligado (startDueDispatchScheduler, como o server.js). Guarda o callback para chamá-lo como o relógio
   // chamaria, sem esperar 30 s de verdade.
   intervalSpy = vi.spyOn(globalThis, "setInterval").mockImplementation((fn, ms) => {
     if (ms === 30000 && !callbackDoIntervalo) callbackDoIntervalo = fn;
@@ -141,7 +141,7 @@ beforeAll(async () => {
 
   const { registerCampaignsRoutes } = await import("../domains/campaigns/routes.js");
   const noop = () => {};
-  registerCampaignsRoutes({ get: noop, post: noop, put: noop, patch: noop, delete: noop, use: noop }, {
+  const rotas = registerCampaignsRoutes({ get: noop, post: noop, put: noop, patch: noop, delete: noop, use: noop }, {
     CAMPAIGN_SCHEDULER_MAX_BATCH: 10, buildDispatchLeads, canCampaignBeDispatched: () => true,
     checkEvolutionInstanceHealth, continueCampaignLeadFromReply: async () => {},
     ensureDb: () => true, executeCampaignDispatch: async () => {}, findCampaignReplyMatches: async () => [],
@@ -159,6 +159,9 @@ beforeAll(async () => {
     sendError: (res, s, c, m) => res.status(s).json({ error: { code: c, message: m } }),
     supabase, validateN8nInboundBearer: () => true,
   });
+  // Desde 25/11/2026 o tick não nasce no registro das rotas: o server.js liga, com o runDueIndependentDispatches das rotas.
+  const { startDueDispatchScheduler } = await import("../campaign/dueDispatchScheduler.js");
+  startDueDispatchScheduler({ runDueIndependentDispatches: rotas.runDueIndependentDispatches, pgDatabasePool: pool });
 
   const { rows: [camp] } = await db.query(
     "INSERT INTO campaigns (client_id, name, analytics_meta, limit_per_run) VALUES ($1, 'Evento Mesa de Negocios 2 - Planilha 1', $2::jsonb, 50) RETURNING id",
@@ -181,6 +184,7 @@ beforeAll(async () => {
 }, SLOW);
 
 afterAll(async () => {
+  (await import("../campaign/dueDispatchScheduler.js")).stopDueDispatchScheduler();
   abrirPortao?.();
   vi.useRealTimers();
   globalThis.fetch = fetchOriginal;

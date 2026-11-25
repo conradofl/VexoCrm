@@ -56,7 +56,8 @@ export function registerAllDomainRoutes(app) {
   registerVexoSalesRoutes(app, routeDeps);
   registerChatbotRoutes(app, routeDeps);
   registerRemindersRoutes(app, routeDeps);
-  registerCampaignsRoutes(app, routeDeps);
+  // O retorno (motor e agendador dos lotes) volta para o server.js ligar o tick de 30 s explicitamente.
+  const campaigns = registerCampaignsRoutes(app, routeDeps);
   registerAcademyRoutes(app, routeDeps);
   registerSmartLinksRoutes(app, routeDeps);
   registerNotificationsRoutes(app, routeDeps);
@@ -95,4 +96,6 @@ export function registerAllDomainRoutes(app) {
 
   // ─── Módulo de Eventos ───
   app.use("/api/eventos", registerEventosRoutes(routeDeps));
+
+  return { campaigns };
 }

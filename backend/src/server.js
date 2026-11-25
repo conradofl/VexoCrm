@@ -93,7 +93,7 @@ import { startAutomationEngine, stopAutomationEngine } from "./followup/automati
 import { closeFollowupQueue } from "./followup/queue.js";
 import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
-import { stopDueDispatchScheduler } from "./domains/campaigns/routes.js";
+import { startDueDispatchScheduler, stopDueDispatchScheduler } from "./campaign/dueDispatchScheduler.js";
 import { stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
 import { stopGdVigiaScheduler } from "./services/gdVigiaScheduler.js";
 import { startGdBriefingReminderScheduler, stopGdBriefingReminderScheduler } from "./services/gdBriefingReminderService.js";
@@ -731,7 +731,7 @@ Object.assign(routeDeps, {
   validateLeadsOutlierRecord,
   validateN8nInboundBearer,
 });
-registerAllDomainRoutes(app);
+const domainRoutes = registerAllDomainRoutes(app);
 registerWebhooksRoutes(app);
 
 app.use((error, req, res, _next) => {
@@ -762,6 +762,11 @@ let httpServer = null;
 
 function startBackgroundServices() {
   startCampaignScheduler();
+  // Agendador dos lotes (tick de 30 s): até 25/11/2026 nascia como efeito colateral do registro das rotas de campanha.
+  startDueDispatchScheduler({
+    runDueIndependentDispatches: domainRoutes.campaigns.runDueIndependentDispatches,
+    pgDatabasePool,
+  });
   // Relatórios diários automáticos (09h00 e 18h00) permanentemente desarmados para eliminar gasto ocioso de tokens:
   // relatórios operacionais só saem sob demanda quando solicitados à Heloísa.
   console.log("[daily-reports] Agendadores diários automáticos (Vigia GD e Trello 09h00/18h00) DESARMADOS — apenas sob demanda.");
