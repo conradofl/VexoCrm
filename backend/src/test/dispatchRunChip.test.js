@@ -283,9 +283,10 @@ describe("[TESTE OBRIGATÓRIO 3] chip desconhecido grava NULL, nunca o padrão d
     expect(src).toMatch(/const finalizeLeadSent = async[^]*?finalizeRunSent\(pgDatabasePool, \{[^}]*chipId: runChipTracker\.take\(lead\.id\)/);
     // nada de cair no chip configurado da campanha
     expect(src.match(/const finalizeLeadSent = async[^]*?finalize_sent_failed/)[0]).not.toMatch(/dispatchEvolutionInstanceId/);
-    // o espelho de bootstrap existe e roda no caminho do disparo
-    expect(src).toMatch(/ADD COLUMN IF NOT EXISTS evolution_instance_id UUID/);
-    expect(src).toMatch(/async function ensureDispatchRunsClaimSchema\(\)[^]*?await ensureDispatchRunsChipColumn\(\)/);
+    // a coluna do chip vem da migration 20261004120000 (PR 7 do untangle: o código não faz mais ALTER por lote)
+    const mig = readFileSync(resolve("supabase/migrations/20261004120000_add_evolution_instance_id_to_dispatch_runs.sql"), "utf8");
+    expect(mig).toMatch(/ADD COLUMN IF NOT EXISTS evolution_instance_id UUID/);
+    expect(src).not.toMatch(/ALTER TABLE public\.campaign_dispatch_runs ADD COLUMN/);
   });
 });
 

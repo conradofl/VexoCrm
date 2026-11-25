@@ -205,7 +205,8 @@ describe("GET /api/campaigns/reports/import-audit — a rota", () => {
     await handler({ query: { clientId: "tenant-1", importId: "import-1" } }, res);
 
     expect(res.statusCode).toBe(200);
-    expect(calls[0].sql).toContain("ADD COLUMN IF NOT EXISTS lead_import_item_id");
+    // lead_import_item_id vem da migration 20261003120000; a rota não faz mais ALTER antes de ler (PR 7 do untangle).
+    expect(calls.some((c) => c.sql.includes("ADD COLUMN IF NOT EXISTS lead_import_item_id"))).toBe(false);
     const auditCall = calls.find((c) => c.sql.includes("WITH items AS"));
     expect(auditCall.params).toEqual(["tenant-1", "import-1"]);
     expect(calls.find((c) => c.sql.includes("campaign_dispatches")).params).toEqual(["tenant-1", "import-1"]);

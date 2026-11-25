@@ -98,7 +98,7 @@ const BASE_SCHEMA = `
     campaign_id UUID NOT NULL REFERENCES public.campaigns(id) ON DELETE CASCADE,
     client_id TEXT NOT NULL,
     phone TEXT NOT NULL,
-    lead_id UUID, -- em produção nasce pelo ensureDispatchRunsClaimSchema
+    lead_id UUID,
     status TEXT NOT NULL DEFAULT 'pending',
     error_message TEXT,
     sent_at TIMESTAMPTZ,
@@ -112,7 +112,14 @@ const openDbs = [];
 async function banco() {
   const db = await createPgliteDb(BASE_SCHEMA);
   openDbs.push(db);
-  for (const file of ["20261008180000_add_recurrence_to_campaigns.sql", "20261012120000_campaign_recurrence_occurrences.sql"]) {
+  // Esquema de campaign_dispatch_runs pelas migrations reais (PR 7 do untangle: o código não faz mais ALTER por lote).
+  for (const file of [
+    "20260612060000_dispatch_runs_lead_claim.sql",
+    "20261003120000_add_lead_import_item_id_to_dispatch_runs.sql",
+    "20261004120000_add_evolution_instance_id_to_dispatch_runs.sql",
+    "20261008180000_add_recurrence_to_campaigns.sql",
+    "20261012120000_campaign_recurrence_occurrences.sql",
+  ]) {
     await db.exec(await readFile(join(MIGRATIONS, file), "utf8"));
   }
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'Condomínio')", [T]);
