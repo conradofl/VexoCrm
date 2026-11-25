@@ -1,5 +1,5 @@
 import { Groq } from "groq-sdk";
-import { callLlmChatCompletion } from "./chatbot-ai-engine.js";
+import { callLlmChatCompletion } from "./services/llm/client.js";
 import { defaultGroqModel } from "./services/llmModels.js";
 import { normalizeSentenceNewlines } from "./services/messagePlaceholders.js";
 
@@ -14,7 +14,6 @@ const GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions";
 // (header x-ratelimit-limit-tokens da propria API, mesma chave).
 // Escada em services/llmModels.js: llama-3.3-70b-versatile foi descontinuado.
 const DEFAULT_GROQ_MODEL = defaultGroqModel();
-const STRICT_JSON_MODELS = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
 const CURIOSITY_NAME_TECHNIQUE = {
   name: "name_curiosity_recovery",
   label: "Name + curiosity recovery",

@@ -1,5 +1,5 @@
 // backend/src/services/magicCampaignCreator.js
-import { callLlmChatCompletion } from "../chatbot-ai-engine.js";
+import { callLlmChatCompletion } from "./llm/client.js";
 import { extractJsonFromLlmText } from "./jsonExtractor.js";
 
 /**

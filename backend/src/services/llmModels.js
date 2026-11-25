@@ -97,6 +97,9 @@ function lerLadderDoAmbiente() {
   return lista.length > 0 ? lista : null;
 }
 
+/** Modelos que aceitam response_format json_schema com strict (era copiado em 3 arquivos). */
+export const STRICT_JSON_MODELS = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
+
 export function llmModelLadder() {
   return lerLadderDoAmbiente() || LLM_MODEL_LADDER_PADRAO;
 }

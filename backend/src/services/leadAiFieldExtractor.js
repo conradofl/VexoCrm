@@ -4,7 +4,7 @@
 // Analisa conversas de WhatsApp, extrai perfil comercial (interesse, faixa_valor, tipo_negocio, cidade_regiao, urgencia)
 // e realiza merge atômico em leads.dados.campos e registro em lead_custom_fields sem sobrescrever edições manuais.
 
-import { callLlmChatCompletion } from "../chatbot-ai-engine.js";
+import { callLlmChatCompletion } from "./llm/client.js";
 import { defaultGroqModel, resolveGroqLadder, classifyLlmHttpError } from "./llmModels.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions";
