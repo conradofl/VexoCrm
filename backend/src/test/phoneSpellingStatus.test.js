@@ -6,6 +6,8 @@ import { measurePhoneSpellings, getPhoneSpellingStatus, _resetPhoneSpellingStatu
 const SCHEMA = `
   CREATE TABLE public.leads (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text, telefone text);
   CREATE TABLE public.lead_import_items (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text, telefone text);
+  CREATE TABLE public.campaign_dispatch_runs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text, phone text);
+  CREATE TABLE public.lead_messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), client_id text, phone text);
 `;
 
 let db;
@@ -32,9 +34,24 @@ describe("measurePhoneSpellings", () => {
     const pool = { query: (sql, p) => db.query(sql, p) };
     const r = await measurePhoneSpellings(pool);
     expect(r.medido).toBe(true);
-    expect(r.tabelas.leads.total).toEqual({ linhas: 5, foraDoCanonico: 2, comNaoDigito: 1, numerosComVariasGrafias: 1 });
-    expect(r.tabelas.leads.porEmpresa).toEqual({ a: { linhas: 4, foraDoCanonico: 2, comNaoDigito: 1, numerosComVariasGrafias: 1 } });
-    expect(r.tabelas.lead_import_items.total).toEqual({ linhas: 3, foraDoCanonico: 1, comNaoDigito: 0, numerosComVariasGrafias: 0 });
+    const z = { comMais: 0, comJid: 0, lidOuGrupo: 0, semDdd: 0 };
+    expect(r.tabelas.leads.total).toEqual({ linhas: 5, foraDoCanonico: 2, comNaoDigito: 1, numerosComVariasGrafias: 1, ...z });
+    expect(r.tabelas.leads.porEmpresa).toEqual({ a: { linhas: 4, foraDoCanonico: 2, comNaoDigito: 1, numerosComVariasGrafias: 1, ...z } });
+    expect(r.tabelas.lead_import_items.total).toEqual({ linhas: 3, foraDoCanonico: 1, comNaoDigito: 0, numerosComVariasGrafias: 0, ...z });
+    expect(JSON.stringify(r)).not.toMatch(/\d{8,}/);
+  });
+
+  it("runs e lead_messages (coluna phone): conta '+', JID, LID/grupo e sem DDD", async () => {
+    db = await createPgliteDb(SCHEMA);
+    await db.exec(`
+      INSERT INTO campaign_dispatch_runs (client_id, phone) VALUES
+        ('a', '5534991093607'), ('a', '+5534991093607'), ('a', '91093607'), ('a', '991093607');
+      INSERT INTO lead_messages (client_id, phone) VALUES
+        ('a', '5534991093607@s.whatsapp.net'), ('a', '123456789012345@lid'), ('a', '1203630@g.us'), ('a', '5534991093607');
+    `);
+    const r = await measurePhoneSpellings({ query: (sql, p) => db.query(sql, p) });
+    expect(r.tabelas.campaign_dispatch_runs.total).toMatchObject({ linhas: 4, comMais: 1, comJid: 0, lidOuGrupo: 0, semDdd: 2 });
+    expect(r.tabelas.lead_messages.total).toMatchObject({ linhas: 4, comMais: 0, comJid: 1, lidOuGrupo: 2, semDdd: 0 });
     expect(JSON.stringify(r)).not.toMatch(/\d{8,}/);
   });
 
