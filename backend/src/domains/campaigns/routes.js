@@ -23,6 +23,7 @@
 // uma chamada dupla da funcao de registro duplicaria o timer -- a guarda impede isso.
 // Corpo do interval em si e byte-a-byte identico ao original.
 
+import { PAUSE_REASON, WINDOW_PAUSE_MARKER, isAutoResumablePause, pauseReasonOf } from "../../services/pauseReason.js";
 import { registerCampaignAgentRoutes } from "../../campaign/agentDraft.js";
 import { createLeadMessaging, isGroupJid } from "../shared/leadMessaging.js";
 import { buildPhoneLookupVariants } from "../../services/leadImport.js";
@@ -2890,6 +2891,8 @@ export function registerCampaignsRoutes(app, deps) {
           .lte("scheduled_at", now)
           .order("scheduled_at", { ascending: true });
 
+        // Pré-filtro no banco pelo texto: equivale a pause_reason (coluna gerada desse texto, migration
+        // 20261125030000). A decisão de retomar é de isAutoResumablePause, logo abaixo.
         if (typeof pausedQuery.or === "function") {
           pausedQuery = pausedQuery.or(`error_message.ilike.%fora da janela de envio%,error_message.ilike.%${QUOTA_PAUSE_MARKER}%`);
         }
@@ -2900,10 +2903,7 @@ export function registerCampaignsRoutes(app, deps) {
 
         if (Array.isArray(pausedDispatches) && pausedDispatches.length > 0) {
           // Filtra em memória para garantir exclusão de lotes pausados manualmente ou não-retomáveis
-          const resumablePaused = pausedDispatches.filter((d) => {
-            const errMsg = String(d.error_message || "");
-            return errMsg.includes("fora da janela de envio") || errMsg.includes(QUOTA_PAUSE_MARKER);
-          });
+          const resumablePaused = pausedDispatches.filter((d) => isAutoResumablePause(d));
           dispatches.push(...resumablePaused.slice(0, remainingLimit));
         }
       }
@@ -2963,9 +2963,9 @@ export function registerCampaignsRoutes(app, deps) {
 
           let resumingFromQuota = false;
           if (dispatch.status === "paused") {
-            const errMsg = String(dispatch.error_message || "");
-            const isSendWindowPause = errMsg.includes("fora da janela de envio");
-            const isQuotaPause = errMsg.includes(QUOTA_PAUSE_MARKER);
+            const motivoPausa = pauseReasonOf(dispatch);
+            const isSendWindowPause = motivoPausa === PAUSE_REASON.FORA_DA_JANELA;
+            const isQuotaPause = motivoPausa === PAUSE_REASON.COTA_CHIP;
 
             if (!isSendWindowPause && !isQuotaPause) {
               const reason = `Lote pausado por motivo não retomável automaticamente: ${dispatch.error_message || "sem mensagem de erro"}`;
@@ -5054,7 +5054,7 @@ export function registerCampaignsRoutes(app, deps) {
               GREATEST(0, COALESCE(d.target_count, 0) - GREATEST(COALESCE(d.sent_count, 0), COALESCE(r.sent_cnt, 0)) - GREATEST(COALESCE(d.failed_count, 0), COALESCE(r.failed_cnt, 0)))
             ) FILTER (
               WHERE d.status IN ('running','scheduled')
-                 OR (d.status = 'paused' AND (d.error_message ILIKE '%fora da janela de envio%' OR d.error_message ILIKE '%' || $5::text || '%'))
+                 OR (d.status = 'paused' AND (d.error_message ILIKE '%' || $6::text || '%' OR d.error_message ILIKE '%' || $5::text || '%'))
             )::int AS leads_will_run,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($2::text[]))::int AS leads_pause_target,
             SUM(COALESCE(d.target_count, 0)) FILTER (WHERE d.status = ANY($3::text[]))::int AS leads_resume_target,
@@ -5076,7 +5076,7 @@ export function registerCampaignsRoutes(app, deps) {
           WHERE d.client_id = $1
           GROUP BY d.campaign_id, c.name, c.archived_at
         `,
-        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES, QUOTA_PAUSE_MARKER]
+        [authorizedClientId, PAUSE_TARGET_STATUSES, RESUME_TARGET_STATUSES, CANCEL_TARGET_STATUSES, QUOTA_PAUSE_MARKER, WINDOW_PAUSE_MARKER]
       );
 
       const active = [];
