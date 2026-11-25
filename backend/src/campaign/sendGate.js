@@ -97,3 +97,16 @@ export function evaluateReplySendGate({ now = new Date(), settings, settingsUnre
   const refusal = describeSendWindowRefusal(now, config);
   return { allowed: false, code: "OUTSIDE_SEND_WINDOW", message: refusal.message, details: refusal.details };
 }
+
+/**
+ * Porta do envio direto (PR 10c): UM número digitado pelo operador (/api/campaigns/direct-dispatch). Não há origem a
+ * conferir; a cota do chip já é aplicada no envio. Até aqui saía a qualquer hora. Agora só dentro da janela do tenant, ou
+ * repetido com forceOutsideWindow === true (logado por quem chama). Opt-out continua fora, de propósito (ação manual).
+ */
+export function evaluateDirectSendGate({ now = new Date(), settings, forceOutsideWindow }) {
+  const janela = evaluateManualSendWindow({ now, settings, forceOutsideWindow });
+  if (!janela.allowed) {
+    return { allowed: false, status: 422, code: "OUTSIDE_SEND_WINDOW", message: janela.refusal.message, details: janela.refusal.details };
+  }
+  return { allowed: true, forced: janela.forced, refusal: janela.refusal };
+}
