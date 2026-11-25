@@ -35,7 +35,7 @@ export function computeLlmConfigStatus(env = process.env) {
     modelos,
     chaves,
     escadaPadrao: llmModelLadder(),
-    // O que o agente tenta quando o tenant não escolheu modelo (hoje inclui GROQ_CAMPAIGN_AI_MODEL).
+    // O que uma chamada sem modelo pedido tenta (desde o PR 5.2b não inclui mais GROQ_CAMPAIGN_AI_MODEL).
     escadaDoAgenteSemModelo: resolveLlmLadder(null),
     modeloDeCampanhaMorto: campanha ? GROQ_MODELOS_MORTOS.has(campanha) : null,
   };
