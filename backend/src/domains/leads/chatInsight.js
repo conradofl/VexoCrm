@@ -7,7 +7,7 @@
 // 🤝 [o que foi combinado ou prometido]
 // ⏭️ [próximo passo concreto]
 
-import { callLlmChatCompletion } from "../../chatbot-ai-engine.js";
+import { callLlmChatCompletion } from "../../services/llm/client.js";
 import { defaultGroqModel, resolveGroqLadder, classifyLlmHttpError } from "../../services/llmModels.js";
 import { parsePrazoData } from "../../services/leadAgreement.js";
 

@@ -4,7 +4,8 @@ import {
   getVariableCounts,
   hasSameVariableCounts,
 } from "../campaign-ai.js";
-import * as chatbotEngine from "../chatbot-ai-engine.js";
+// campaign-ai chama o cliente de LLM, não o motor do agente (PR 5 do untangle).
+import * as chatbotEngine from "../services/llm/client.js";
 
 describe("generateCampaignTemplateVariants - fidelidade, variaveis e nao-silencio", () => {
   it("devolve variantes vazias se nenhum texto base for fornecido", async () => {

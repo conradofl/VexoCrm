@@ -4,7 +4,8 @@ import {
   generateMagicCampaign,
   getFallbackMagicCampaign,
 } from "../services/magicCampaignCreator.js";
-import * as chatbotEngine from "../chatbot-ai-engine.js";
+// O criador de campanha chama o cliente de LLM, não o motor do agente (PR 5 do untangle).
+import * as chatbotEngine from "../services/llm/client.js";
 import { formatStepTextWithButtons } from "../campaign-outbound.js";
 
 describe("magicCampaignCreator", () => {

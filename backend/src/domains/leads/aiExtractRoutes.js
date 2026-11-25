@@ -1,7 +1,7 @@
 // backend/src/domains/leads/aiExtractRoutes.js
 // Endpoint de extração semântica e inteligente de contatos/conversas com Groq (Llama 3.3 70B Versatile).
 
-import { callLlmChatCompletion } from "../../chatbot-ai-engine.js";
+import { callLlmChatCompletion } from "../../services/llm/client.js";
 import { defaultGroqModel } from "../../services/llmModels.js";
 
 export function registerAiExtractRoutes(app, deps) {

@@ -9,11 +9,10 @@
 // OpenAI) — sem dependência nem chave nova.
 import { resolveTenantUuid } from "./tenantResolver.js";
 import { sendError } from "../../services/httpInfra.js";
-import { defaultGroqModel } from "../../services/llmModels.js";
+import { defaultGroqModel, STRICT_JSON_MODELS } from "../../services/llmModels.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_GROQ_MODEL = defaultGroqModel();
-const STRICT_JSON_MODELS = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
 
 function getModel() {
   return process.env.GROQ_CAMPAIGN_AI_MODEL || DEFAULT_GROQ_MODEL;

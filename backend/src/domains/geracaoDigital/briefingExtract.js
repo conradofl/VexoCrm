@@ -10,13 +10,12 @@
 // Reusa a mesma infra de IA do contrato e das campanhas (Groq / API compatível
 // com OpenAI) — sem dependência nem chave nova.
 import { sendError } from "../../services/httpInfra.js";
-import { defaultGroqModel } from "../../services/llmModels.js";
+import { defaultGroqModel, STRICT_JSON_MODELS } from "../../services/llmModels.js";
 import { extractJsonFromLlmText } from "../../services/jsonExtractor.js";
-import { callLlmChatCompletion } from "../../chatbot-ai-engine.js";
+import { callLlmChatCompletion } from "../../services/llm/client.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_GROQ_MODEL = defaultGroqModel();
-const STRICT_JSON_MODELS = new Set(["openai/gpt-oss-20b", "openai/gpt-oss-120b"]);
 
 function getModel() {
   return process.env.GROQ_CAMPAIGN_AI_MODEL || DEFAULT_GROQ_MODEL;

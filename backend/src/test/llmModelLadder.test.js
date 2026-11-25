@@ -222,7 +222,8 @@ describe("a mensagem de cota diz o que o dono precisa decidir", () => {
 });
 
 describe("o motor usa a escada e distingue os erros", () => {
-  const fonte = readFileSync(resolve("src/chatbot-ai-engine.js"), "utf8");
+  // O cliente de LLM saiu do motor para services/llm/client.js (PR 5 do untangle).
+  const fonte = readFileSync(resolve("src/services/llm/client.js"), "utf8");
 
   it("callLlmChatCompletion monta a escada pelo modulo compartilhado", () => {
     expect(fonte).toContain("resolveLlmLadder(chosenModel)");
