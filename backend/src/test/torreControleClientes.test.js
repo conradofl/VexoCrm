@@ -73,11 +73,15 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
       CREATE TABLE public.campaign_dispatch_runs (
         id BIGSERIAL PRIMARY KEY,
         dispatch_id TEXT,
-        status TEXT
+        phone TEXT,
+        status TEXT,
+        sent_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE TABLE public.lead_messages (
         id BIGSERIAL PRIMARY KEY,
         client_id TEXT,
+        phone TEXT,
         direction TEXT,
         message_timestamp TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW()

@@ -433,54 +433,84 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         ),
       pool
         .query(
-          `SELECT
-             d.client_id,
-             COUNT(*) FILTER (WHERE r.status = 'sent' AND COALESCE(r.sent_at, r.created_at) >= NOW() - INTERVAL '24 hours')::int AS sent_today,
-             COUNT(*) FILTER (WHERE r.status = 'sent')::int AS sent_total,
-             MAX(COALESCE(r.sent_at, r.created_at)) FILTER (WHERE r.status = 'sent') AS last_campaign_sent_at,
-             COUNT(DISTINCT r.phone) FILTER (
-               WHERE r.status = 'sent'
-                 AND r.phone IS NOT NULL
-                 AND r.phone <> ''
-                 AND EXISTS (
-                   SELECT 1
-                     FROM public.lead_messages lm
-                    WHERE lm.client_id = d.client_id
-                      AND lm.direction = 'inbound'
-                      AND RIGHT(REGEXP_REPLACE(COALESCE(lm.phone, ''), '\\D', '', 'g'), 8) =
-                          RIGHT(REGEXP_REPLACE(COALESCE(r.phone, ''), '\\D', '', 'g'), 8)
-                      AND COALESCE(lm.message_timestamp, lm.created_at) >= COALESCE(r.sent_at, r.created_at)
-                 )
-             )::int AS campaign_replied_leads
-           FROM public.campaign_dispatch_runs r
-           JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-           GROUP BY d.client_id`
-        )
-        .catch(() => ({ rows: [] })),
-      pool
-        .query(
-          `SELECT d.client_id, COUNT(DISTINCT r.phone)::int AS waiting_cnt
+          `WITH sent_leads AS (
+             SELECT
+               d.client_id,
+               r.phone,
+               MIN(COALESCE(r.sent_at, r.created_at)) AS first_sent_at,
+               MAX(COALESCE(r.sent_at, r.created_at)) AS last_sent_at,
+               COUNT(*)::int AS sent_cnt,
+               COUNT(*) FILTER (WHERE COALESCE(r.sent_at, r.created_at) >= NOW() - INTERVAL '24 hours')::int AS sent_today_cnt
              FROM public.campaign_dispatch_runs r
              JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
-            WHERE r.status = 'sent'
-              AND r.phone IS NOT NULL
-              AND r.phone <> ''
-              AND EXISTS (
-                SELECT 1
-                  FROM (
-                    SELECT DISTINCT ON (lm.client_id, lm.phone)
-                      lm.client_id, lm.phone, lm.direction, COALESCE(lm.message_timestamp, lm.created_at) AS ts
-                    FROM public.lead_messages lm
-                    WHERE lm.client_id = d.client_id
-                      AND COALESCE(lm.message_timestamp, lm.created_at) >= NOW() - INTERVAL '14 days'
-                    ORDER BY lm.client_id, lm.phone, COALESCE(lm.message_timestamp, lm.created_at) DESC
-                  ) last_m
-                 WHERE last_m.direction = 'inbound'
-                   AND last_m.ts < NOW() - INTERVAL '2 hours'
-                   AND RIGHT(REGEXP_REPLACE(COALESCE(last_m.phone, ''), '\\D', '', 'g'), 8) =
-                       RIGHT(REGEXP_REPLACE(COALESCE(r.phone, ''), '\\D', '', 'g'), 8)
-              )
-            GROUP BY d.client_id`
+             WHERE r.status = 'sent'
+             GROUP BY d.client_id, r.phone
+           ),
+           inbound_recent AS (
+             SELECT
+               client_id,
+               phone,
+               MAX(COALESCE(message_timestamp, created_at)) AS last_in_at
+             FROM public.lead_messages
+             WHERE direction = 'inbound'
+               AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '30 days'
+             GROUP BY client_id, phone
+           )
+           SELECT
+             s.client_id,
+             COALESCE(SUM(s.sent_today_cnt), 0)::int AS sent_today,
+             COALESCE(SUM(s.sent_cnt), 0)::int AS sent_total,
+             MAX(s.last_sent_at) AS last_campaign_sent_at,
+             COUNT(DISTINCT s.phone) FILTER (
+               WHERE i.last_in_at IS NOT NULL AND i.last_in_at >= s.first_sent_at
+             )::int AS campaign_replied_leads
+           FROM sent_leads s
+           LEFT JOIN inbound_recent i
+             ON i.client_id = s.client_id
+            AND i.phone = s.phone
+           GROUP BY s.client_id`
+        )
+        .catch(() =>
+          pool
+            .query(
+              `SELECT
+                 d.client_id,
+                 COUNT(*) FILTER (WHERE r.status = 'sent' AND COALESCE(r.sent_at, r.created_at) >= NOW() - INTERVAL '24 hours')::int AS sent_today,
+                 COUNT(*) FILTER (WHERE r.status = 'sent')::int AS sent_total,
+                 MAX(COALESCE(r.sent_at, r.created_at)) FILTER (WHERE r.status = 'sent') AS last_campaign_sent_at,
+                 0::int AS campaign_replied_leads
+               FROM public.campaign_dispatch_runs r
+               JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+               GROUP BY d.client_id`
+            )
+            .catch(() => ({ rows: [] }))
+        ),
+      pool
+        .query(
+          `WITH sent_phones AS (
+             SELECT DISTINCT d.client_id, r.phone
+             FROM public.campaign_dispatch_runs r
+             JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+             WHERE r.status = 'sent' AND r.phone IS NOT NULL AND r.phone <> ''
+           ),
+           last_msgs AS (
+             SELECT DISTINCT ON (lm.client_id, lm.phone)
+               lm.client_id,
+               lm.phone,
+               lm.direction,
+               COALESCE(lm.message_timestamp, lm.created_at) AS ts
+             FROM public.lead_messages lm
+             WHERE COALESCE(lm.message_timestamp, lm.created_at) >= NOW() - INTERVAL '14 days'
+             ORDER BY lm.client_id, lm.phone, COALESCE(lm.message_timestamp, lm.created_at) DESC
+           )
+           SELECT sp.client_id, COUNT(*)::int AS waiting_cnt
+             FROM sent_phones sp
+             JOIN last_msgs lm
+               ON lm.client_id = sp.client_id
+              AND lm.phone = sp.phone
+            WHERE lm.direction = 'inbound'
+              AND lm.ts < NOW() - INTERVAL '2 hours'
+            GROUP BY sp.client_id`
         )
         .catch(() => ({ rows: [] })),
       pool
