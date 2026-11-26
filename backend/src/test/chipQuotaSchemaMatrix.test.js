@@ -111,7 +111,7 @@ describe("[TESTE OBRIGATÓRIO] ESCRITORES reais (reserva, leitura, devolução) 
       expect(await tipo(db)).toBe(TIPO_ORIGINAL[estado]); // a coluna NÃO foi convertida: o código não dependeu disso
     }, SLOW);
 
-    it(`[${estado}] com a conversão LIBERADA: o mesmo caminho funciona e a coluna termina em text`, async () => {
+    it(`[${estado}] com DDL liberado: o código NÃO converte mais (a conversão é da migration 20261004130000) e o caminho funciona`, async () => {
       const { db, pool } = await mundo(estado);
       const dia = await hojeSP(db);
 
@@ -119,7 +119,7 @@ describe("[TESTE OBRIGATÓRIO] ESCRITORES reais (reserva, leitura, devolução) 
       expect(await getChipDailyUsage(CHIP, dia, pool)).toBe(2);
       await releaseChipDailyQuota(CHIP, dia, pool, 1);
       expect(await getChipDailyUsage(CHIP, dia, pool)).toBe(1);
-      expect(await tipo(db)).toBe("text");
+      expect(await tipo(db)).toBe(TIPO_ORIGINAL[estado]);
     }, SLOW);
 
     it(`[${estado}] o portão de cota do disparo funciona com a conversão bloqueada (reserva, esgota e devolve)`, async () => {
@@ -136,18 +136,12 @@ describe("[TESTE OBRIGATÓRIO] ESCRITORES reais (reserva, leitura, devolução) 
     }, SLOW);
   }
 
-  it("a falha da conversão é registrada e NÃO se repete a cada chamada (backoff), mas não impede a cota", async () => {
-    const { pool } = await mundo("fk", { ddlBloqueado: true });
-    const dia = "2026-10-05";
+  it("[untangle] reservar e ler a cota não dispara DDL nenhuma (nem CREATE, nem ALTER)", async () => {
+    const { pool } = await mundo("fk");
     const spy = vi.spyOn(pool, "query");
-
-    await reserveChipDailyQuota(CHIP, dia, pool);
-    await reserveChipDailyQuota(CHIP, dia, pool);
-    await reserveChipDailyQuota(CHIP, dia, pool);
-
-    const tentativasDeDdl = spy.mock.calls.filter((c) => /^\s*CREATE/i.test(String(c[0]))).length;
-    expect(tentativasDeDdl).toBe(1); // uma tentativa; as outras duas reservas não insistiram
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("não foi possível garantir/converter a tabela de uso diário"), expect.anything());
+    await reserveChipDailyQuota(CHIP, "2026-10-05", pool);
+    await getChipDailyUsage(CHIP, "2026-10-05", pool);
+    expect(spy.mock.calls.filter((c) => /^\s*(CREATE|ALTER|DO\s)/i.test(String(c[0])))).toHaveLength(0);
   }, SLOW);
 });
 

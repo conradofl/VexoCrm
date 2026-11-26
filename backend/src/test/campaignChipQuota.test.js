@@ -19,6 +19,7 @@ import { ensureEvolutionInstanceDailyUsageTable, getChipDailyUsage, resetChipQuo
 import { getLeadClientEvolutionInstances } from "../services/evolution.js";
 import { getDateKey } from "../services/analytics.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { applyChipUsageMigration } from "./helpers/chipUsageMigration.js";
 
 const SLOW = 90_000;
 const TENANT = "tenant-e2e";
@@ -42,6 +43,7 @@ const openDbs = [];
 async function bancoDeCota() {
   const db = await createPgliteDb("SET TimeZone = 'UTC';\n" + SCHEMA);
   openDbs.push(db);
+  await applyChipUsageMigration(db); // a tabela nasce da migration (o código não cria mais)
   await db.query("INSERT INTO lead_client_evolution_instances (id, client_id, name, chip_state, daily_limit_override) VALUES ($1,$2,'Chip Principal','warm',NULL)", [CHIP, TENANT]);
   return db;
 }

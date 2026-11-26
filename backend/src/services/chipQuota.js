@@ -8,31 +8,22 @@
 // "enviados hoje" lê só o que passou por reserveChipDailyQuota (follow-up + disparos de campanha).
 //
 // Tipo da coluna: instance_id é TEXT, em todo banco. Houve dois criadores (este e services/evolution.js, que a
-// criava como UUID) e cada leitor assumia um tipo — um dos dois sempre quebrava. Agora este módulo é o ÚNICO
-// criador e converge qualquer tabela existente para TEXT (CONVERGE_USAGE_INSTANCE_ID_SQL, a mesma da migration
-// 20261004130000). TEXT, e não UUID, porque UUID→TEXT nunca perde dado e TEXT→UUID falharia (ou exigiria apagar
-// linhas) se existir um valor que não é UUID.
+// criava como UUID) e cada leitor assumia um tipo — um dos dois sempre quebrava. A tabela e a conversão para TEXT
+// moram SÓ na migration 20261004130000 (aplicada em produção). Desde o untangle (DDL de runtime, 25/11/2026) este
+// módulo não cria nem converte nada: era DDL com lock exclusivo no caminho do envio.
 
 import { pgDatabasePool } from "./database.js";
 import { normalizeString } from "../textNormalize.js";
 
 export const EVOLUTION_CHIP_DAILY_QUOTA_DEFAULTS = { cold: 50, warm: 500 };
 
-let _evolutionDailyUsageSchemaEnsured = false;
-let _ensurePromise = null;
 let _customPool = null;
 
 export function setChipQuotaDbPool(pool) {
   _customPool = pool;
 }
 
-let _ensureRetryAfter = 0;
-const ENSURE_RETRY_BACKOFF_MS = 60_000;
-
 export function resetChipQuotaStateForTest() {
-  _evolutionDailyUsageSchemaEnsured = false;
-  _ensurePromise = null;
-  _ensureRetryAfter = 0;
   _customPool = null;
 }
 
@@ -43,83 +34,15 @@ function getDb(customPool = null) {
   return null;
 }
 
-// Só roda se a coluna AINDA não é TEXT (ALTER TABLE pega ACCESS EXCLUSIVE mesmo em no-op).
-// ANTES do ALTER derruba as FKs da tabela: a tabela criada em junho (routes.js) nasceu com
-// `instance_id UUID REFERENCES lead_client_evolution_instances(id) ON DELETE CASCADE`, e o Postgres recusa trocar o tipo
-// de uma coluna com FK para um tipo incompatível ("foreign key constraint ... cannot be implemented") — foi exatamente
-// por isso que o ALTER antigo (com .catch engolindo) nunca converteu a coluna em produção. Sem a FK a linha de uso de
-// uma instância apagada fica órfã (inofensivo: os leitores fazem JOIN com as instâncias).
-export const CONVERGE_USAGE_INSTANCE_ID_SQL = `DO $$
-DECLARE fk record;
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-     WHERE table_schema = 'public' AND table_name = 'evolution_instance_daily_usage'
-       AND column_name = 'instance_id' AND data_type <> 'text'
-  ) THEN
-    FOR fk IN
-      SELECT conname FROM pg_constraint
-       WHERE conrelid = 'public.evolution_instance_daily_usage'::regclass AND contype = 'f'
-    LOOP
-      EXECUTE format('ALTER TABLE public.evolution_instance_daily_usage DROP CONSTRAINT %I', fk.conname);
-    END LOOP;
-    ALTER TABLE public.evolution_instance_daily_usage ALTER COLUMN instance_id TYPE TEXT USING instance_id::text;
-  END IF;
-END $$;`;
-
-export const CREATE_USAGE_TABLE_SQL = `
-    CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_usage (
-      instance_id TEXT NOT NULL,
-      date DATE NOT NULL,
-      sent_count INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (instance_id, date)
-    )
-  `;
-
+// Esquema na migration 20261004130000 (tabela + instance_id TEXT). Mantidas para quem já chama: só dizem se há banco.
 export async function ensureEvolutionInstanceDailyUsageTable(pool = null) {
-  const db = getDb(pool);
-  if (!db) return false;
-  if (_evolutionDailyUsageSchemaEnsured) return true;
-  if (Date.now() < _ensureRetryAfter) return false;
-
-  if (_ensurePromise) {
-    return _ensurePromise;
-  }
-
-  _ensurePromise = (async () => {
-    try {
-      await db.query(CREATE_USAGE_TABLE_SQL);
-      // sem .catch: se a conversão falhar, o erro aparece — engoli-lo deixou a tabela em UUID por meses em alguns bancos
-      await db.query(CONVERGE_USAGE_INSTANCE_ID_SQL);
-      _evolutionDailyUsageSchemaEnsured = true;
-      return true;
-    } catch (err) {
-      _ensureRetryAfter = Date.now() + ENSURE_RETRY_BACKOFF_MS;
-      throw err;
-    } finally {
-      _ensurePromise = null;
-    }
-  })();
-
-  return _ensurePromise;
+  return Boolean(getDb(pool));
 }
 
 export const ensureEvolutionInstanceDailyUsableTable = ensureEvolutionInstanceDailyUsageTable;
 
-// Quem LÊ ou ESCREVE a cota não pode depender de a conversão de schema ter dado certo: ela é DDL (precisa de permissão
-// e de lock) e pode falhar (foi o que aconteceu: FK). Tenta garantir a tabela, registra a falha e SEGUE — as consultas
-// abaixo funcionam com a coluna em uuid ou em text. Depois de uma falha só tenta de novo após o backoff, para não
-// disparar DDL com lock exclusivo a cada mensagem.
 export async function ensureTolerant(db) {
-  if (_evolutionDailyUsageSchemaEnsured) return true;
-  if (Date.now() < _ensureRetryAfter) return false;
-  try {
-    return await ensureEvolutionInstanceDailyUsageTable(db);
-  } catch (err) {
-    _ensureRetryAfter = Date.now() + ENSURE_RETRY_BACKOFF_MS;
-    console.error("[chip-quota] não foi possível garantir/converter a tabela de uso diário; seguindo com o schema atual:", err?.message || err);
-    return false;
-  }
+  return Boolean(db);
 }
 
 export function resolveChipDailyLimit(instance) {

@@ -80,7 +80,7 @@ describe("[TESTE OBRIGATÓRIO] leitor real com o pool de produção, tabela UUID
     expect(await tipo(db)).toBe("uuid"); // não dependeu da conversão
   }, 60_000);
 
-  it("conversão ACEITA: o leitor se cura sozinho (derruba a FK, converte) e lê o mesmo número", async () => {
+  it("DDL liberado: o leitor NÃO converte mais (a conversão é só da migration 20261004130000) e lê o mesmo número", async () => {
     const { getLeadClientEvolutionInstances } = await import("../services/evolution.js");
     const db = await bancoNoEstadoDeProducao();
     globalThis.__ddlBloqueado = false;
@@ -88,8 +88,7 @@ describe("[TESTE OBRIGATÓRIO] leitor real com o pool de produção, tabela UUID
     const instancias = await getLeadClientEvolutionInstances(T);
 
     expect(Number(instancias[0].sent_count_today)).toBe(6);
-    expect(await tipo(db)).toBe("text");
-    expect((await db.query("SELECT count(*)::int AS n FROM pg_constraint WHERE conrelid = 'public.evolution_instance_daily_usage'::regclass AND contype = 'f'")).rows[0].n).toBe(0);
+    expect(await tipo(db)).toBe("uuid");
   }, 60_000);
 
   it("a reserva de cota (escritor real, pool de produção) funciona nos dois cenários", async () => {

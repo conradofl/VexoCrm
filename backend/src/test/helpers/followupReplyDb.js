@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPgliteDb } from "./pgliteDb.js";
-import { CREATE_USAGE_TABLE_SQL } from "../../services/chipQuota.js";
+import { CHIP_USAGE_MIGRATION_SQL } from "./chipUsageMigration.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(here, "../../../supabase/migrations");
@@ -49,7 +49,7 @@ export async function setupFollowupReplyDb() {
     await db.exec(fs.readFileSync(path.join(MIGRATIONS_DIR, f), "utf8"));
   }
   // A cota do chip cria a tabela uma vez por processo; aqui o banco é novo a cada teste.
-  await db.exec(CREATE_USAGE_TABLE_SQL);
+  await db.exec(CHIP_USAGE_MIGRATION_SQL);
   await db.exec(`
     INSERT INTO followup_companies (id, name, evolution_instance, tenant_id) VALUES
       ('${COMPANY_A}', 'Agente A', 'Chip 1', 't-a'),

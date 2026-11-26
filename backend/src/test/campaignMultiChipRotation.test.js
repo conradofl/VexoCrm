@@ -13,6 +13,7 @@ import { resolve } from "path";
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import { registerCampaignsRoutes } from "../domains/campaigns/routes.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { applyChipUsageMigration } from "./helpers/chipUsageMigration.js";
 import { ensureEvolutionInstanceDailyUsageTable, getChipDailyUsage, resetChipQuotaStateForTest } from "../services/chipQuota.js";
 import { getDateKey } from "../services/analytics.js";
 
@@ -50,7 +51,7 @@ const openDbs = [];
 async function criarBancoReal() {
   const db = await createPgliteDb("SET TimeZone = 'UTC';\n" + SCHEMA);
   openDbs.push(db);
-  await ensureEvolutionInstanceDailyUsageTable(db);
+  await applyChipUsageMigration(db); // a tabela nasce da migration (o código não cria mais)
   return db;
 }
 

@@ -22,7 +22,7 @@ import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { buildDispatchLeads, continueCampaignLeadFromReply, findCampaignReplyMatches } from "../campaign/dispatch.js";
 import { ensureLeadClientEvolutionInstancesTable, getLeadClientEvolutionInstances } from "../services/evolution.js";
-import { CREATE_USAGE_TABLE_SQL } from "../services/chipQuota.js";
+import { CHIP_USAGE_MIGRATION_SQL } from "./helpers/chipUsageMigration.js";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 
 const SLOW = 120_000;
@@ -198,7 +198,7 @@ async function mundo({
     // O chip de verdade, para a continuação resolver a instância como em produção (só o HTTP da Evolution é dublado).
     // Banco novo a cada teste: cria a tabela de chips NESTE banco (o "já criei" do módulo vale para o banco anterior).
     await ensureLeadClientEvolutionInstancesTable({ query: (sql, params) => db.query(sql, params) });
-    await db.exec(CREATE_USAGE_TABLE_SQL);
+    await db.exec(CHIP_USAGE_MIGRATION_SQL);
     await db.query(
       `INSERT INTO public.lead_client_evolution_instances (id, client_id, name, dispatch_webhook_url, dispatch_webhook_token, active, is_default, connection_state)
        VALUES ($1, $2, 'Chip de Disparo - Atendimento', 'https://evo.teste/message/sendText/container-led-chip-de-disparo-atendimento', 'tok', true, true, 'open')`,

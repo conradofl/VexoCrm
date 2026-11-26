@@ -652,15 +652,7 @@ export function registerCampaignsRoutes(app, deps) {
     }
   }
 
-  if (pgDatabasePool && process.env.NODE_ENV !== "test") {
-    (async () => {
-      try {
-        await pgDatabasePool.query(`ALTER TABLE public.campaigns ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();`);
-      } catch (err) {
-        console.warn("[campaigns-schema] Aviso ao garantir updated_at em campaigns:", err?.message || err);
-      }
-    })();
-  }
+  // campaigns.updated_at: migration 20261016180000 (o ALTER que rodava aqui a cada boot saiu no untangle, 25/11/2026).
 
   const { appendLeadMessage } = createLeadMessaging({
     supabase,
