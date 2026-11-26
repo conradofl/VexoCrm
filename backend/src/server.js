@@ -94,7 +94,6 @@ import { closeFollowupQueue } from "./followup/queue.js";
 import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
 import { startDueDispatchScheduler, stopDueDispatchScheduler } from "./campaign/dueDispatchScheduler.js";
-import { startBarredRetakeScheduler, stopBarredRetakeScheduler } from "./campaign/retomadaBarradas.js";
 import { stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
 import { stopGdVigiaScheduler } from "./services/gdVigiaScheduler.js";
 import { startGdBriefingReminderScheduler, stopGdBriefingReminderScheduler } from "./services/gdBriefingReminderService.js";
@@ -768,8 +767,6 @@ function startBackgroundServices() {
     runDueIndependentDispatches: domainRoutes.campaigns.runDueIndependentDispatches,
     pgDatabasePool,
   });
-  // Retomada das respostas barradas em 18-19/11 (etapa pendente, aos poucos, uma vez por lead; campaign/retomadaBarradas.js).
-  startBarredRetakeScheduler({ pool: pgDatabasePool });
   // Relatórios diários automáticos (09h00 e 18h00) permanentemente desarmados para eliminar gasto ocioso de tokens:
   // relatórios operacionais só saem sob demanda quando solicitados à Heloísa.
   console.log("[daily-reports] Agendadores diários automáticos (Vigia GD e Trello 09h00/18h00) DESARMADOS — apenas sob demanda.");
@@ -879,7 +876,6 @@ async function gracefulShutdown(signal) {
       pararAgendadores: async () => {
         stopCampaignScheduler();
         stopDueDispatchScheduler();
-        stopBarredRetakeScheduler();
         stopAutomationEngine();
         stopAgentRecoverySweeper();
         await Promise.allSettled([pauseFollowupWorker(), pauseRagWorker(), pauseSlackWorker()]);
