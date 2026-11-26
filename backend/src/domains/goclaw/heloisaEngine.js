@@ -220,63 +220,13 @@ export async function registrarExecucaoHeloisa({
   }
 }
 
+// Seeds e correções idempotentes da secretária (as TABELAS vêm das migrations 20261114190000 e 20261116183000).
 export async function ensureHeloisaTables(pool = pgDatabasePool) {
   if (!pool || typeof pool.query !== "function") return;
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS public.heloisa_usuarios_autorizados (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        client_id VARCHAR(100) DEFAULT 'geracao-digital',
-        nome VARCHAR(150) NOT NULL,
-        telefone VARCHAR(50) NOT NULL UNIQUE,
-        email VARCHAR(255),
-        papel VARCHAR(100) DEFAULT 'Diretor',
-        ativo BOOLEAN DEFAULT true,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS public.heloisa_config (
-        chave VARCHAR(100) PRIMARY KEY,
-        valor JSONB NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_by VARCHAR(150)
-      );
-
-      CREATE TABLE IF NOT EXISTS public.heloisa_agendas (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        nome VARCHAR(150) NOT NULL,
-        email VARCHAR(255) NOT NULL UNIQUE,
-        telefone VARCHAR(50),
-        papel VARCHAR(100) DEFAULT 'Participante',
-        ativo BOOLEAN DEFAULT true,
-        notificar_whatsapp BOOLEAN DEFAULT true,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS public.heloisa_execucoes (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        canal VARCHAR(50) NOT NULL DEFAULT 'whatsapp',
-        solicitante_nome VARCHAR(150),
-        solicitante_telefone VARCHAR(50),
-        solicitante_papel VARCHAR(100),
-        client_id VARCHAR(100) DEFAULT 'vexo-adm',
-        texto_entrada TEXT,
-        tipo_entrada VARCHAR(50) DEFAULT 'text',
-        ferramenta_executada VARCHAR(100),
-        parametros JSONB DEFAULT '{}',
-        resultado JSONB DEFAULT '{}',
-        resposta_saida TEXT,
-        status VARCHAR(50) NOT NULL DEFAULT 'sucesso',
-        erro_detalhes TEXT,
-        tempo_execucao_ms INTEGER DEFAULT 0,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_created_at ON public.heloisa_execucoes (created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_status ON public.heloisa_execucoes (status);
-      CREATE INDEX IF NOT EXISTS idx_heloisa_execucoes_canal ON public.heloisa_execucoes (canal);
+      -- Tabelas e índices: migrations 20261114190000 e 20261116183000 (o CREATE rodava aqui; saiu no untangle, 26/11/2026).
+      -- Ficam só as correções e os seeds idempotentes abaixo.
 
       -- Unificação do Conrado Finzi com seu e-mail oficial (conradofl@gmail.com)
       DELETE FROM public.heloisa_agendas WHERE email = 'conradofinzi@gmail.com';
