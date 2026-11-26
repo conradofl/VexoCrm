@@ -6,13 +6,13 @@
 // (validateCampaignAnalyticsMeta sobre o meta normalizado + passos do lote) e resolveDispatchLeadLimit. Quem
 // RECEBE continua sendo decidido só pelo motor; isto muda o número que a tela mostra, para bater com o envio.
 import { normalizeCampaignAnalyticsMeta, validateCampaignAnalyticsMeta } from "../campaign-outbound.js";
-import { resolveCampaignImportSelection, resolveDispatchLeadLimit } from "./dispatch.js";
+import { resolveCampaignImportSelection, resolveDispatchLeadLimit, resolveEffectiveCampaignSequence } from "./dispatch.js";
 
 /** Segmentação que o motor aplica ao lote (mesma expressão de dispatchEngine.js). */
 export function dispatchAudienceSegmentation(campaign, dispatch) {
   const campaignMeta = normalizeCampaignAnalyticsMeta(campaign?.analytics_meta || {});
   const dispatchSteps = Array.isArray(dispatch?.steps) && dispatch.steps.length > 0 ? dispatch.steps : null;
-  const steps = dispatchSteps ?? campaignMeta.sequence;
+  const steps = dispatchSteps ? resolveEffectiveCampaignSequence(dispatchSteps, campaignMeta.sequence, null) : campaignMeta.sequence;
   const validation = validateCampaignAnalyticsMeta({ ...campaignMeta, sequence: steps });
   return validation?.analyticsMeta?.segmentation || null;
 }

@@ -40,7 +40,9 @@ describe("dispatchAudienceArgs", () => {
   it("a regra é a mesma expressão que o motor usa", () => {
     const motor = readFileSync(resolve("src/campaign/dispatchEngine.js"), "utf8");
     expect(motor).toMatch(/segmentation: validation\.analyticsMeta\.segmentation \|\| null/);
-    expect(motor).toMatch(/const steps = dispatchSteps \?\? campaignMeta\.sequence;/);
+    expect(motor).toMatch(/const steps = dispatchSteps \? resolveEffectiveCampaignSequence\(dispatchSteps, campaignMeta\.sequence, null\) : campaignMeta\.sequence;/);
+    const publico = readFileSync(resolve("src/campaign/audience.js"), "utf8");
+    expect(publico).toMatch(/const steps = dispatchSteps \? resolveEffectiveCampaignSequence\(dispatchSteps, campaignMeta\.sequence, null\) : campaignMeta\.sequence;/);
     const rotas = readFileSync(resolve("src/domains/campaigns/routes.js"), "utf8");
     expect(rotas).not.toMatch(/segmentation: dispatch\.steps\?\.\[0\]\?\.segmentation/);
     // PR 9b: a criação do lote também não conta mais pela segmentação do 1º passo

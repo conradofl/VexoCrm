@@ -13,7 +13,7 @@ import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } fro
 import { isEvolutionOpenState, resolveInstanceIdentifier, validateWhatsappNumbersWithCache } from "../services/evolution.js";
 import { markRunSendStarted, markRunSequenceCut } from "../services/runSendMarker.js";
 import { isWithinSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
-import { extractCampaignProgress, findLeadsAlreadyReachedInCycle, isLeadBlockedByActiveCycleProgress, markCampaignLeadWaitingReply, resolveCampaignImportSelection, resolveCampaignImportSelectionStrict, resolveDispatchLeadLimit } from "./dispatch.js";
+import { extractCampaignProgress, findLeadsAlreadyReachedInCycle, isLeadBlockedByActiveCycleProgress, markCampaignLeadWaitingReply, resolveCampaignImportSelection, resolveCampaignImportSelectionStrict, resolveDispatchLeadLimit, resolveEffectiveCampaignSequence } from "./dispatch.js";
 import { isPhoneOptedOut } from "./queueOptOut.js";
 import { phoneSpellingsOf } from "../services/canonicalPhone.js";
 
@@ -48,7 +48,9 @@ export function createCampaignDispatchEngine(deps) {
     const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
     const dispatchEvolutionInstanceId = normalizeString(dispatch.evolution_instance_id);
     const dispatchCampaignMeta = buildDispatchCampaignMeta(campaign, dispatch);
-    const steps = dispatchSteps ?? campaignMeta.sequence;
+    // Lote com cópia própria dos passos: vale a estrutura dela, com o conteúdo editado na campanha (mesma regra da
+    // continuação por resposta, resolveEffectiveCampaignSequence).
+    const steps = dispatchSteps ? resolveEffectiveCampaignSequence(dispatchSteps, campaignMeta.sequence, null) : campaignMeta.sequence;
 
     // Este e o caminho de envio REALMENTE em uso (fila de campaign_dispatches, acionada
     // pelo scheduler) — e ele NAO passa por getCampaignStepPlan, entao nunca produziu
