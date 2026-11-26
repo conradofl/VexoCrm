@@ -94,7 +94,7 @@ export const AJUDA_ITEMS: SidebarItem[] = [
 
 // ━━ ADMIN ━━
 export const ADMIN_ITEMS: SidebarItem[] = [
-  { key: "superadmin", label: "Master Control", url: "/crm/superadmin", icon: Crown, page: "empresas" },
+  { key: "superadmin", label: "Torre de Clientes", url: "/crm/superadmin", icon: Crown, page: "empresas" },
   { key: "admin", label: "Administração", url: "/crm/admin", icon: ShieldCheck, page: "empresas" },
   { key: "comercial-vexo", label: "Comercial Vexo", url: "/crm/comercial-vexo", icon: Sparkles, page: "apresentacao" },
 ];

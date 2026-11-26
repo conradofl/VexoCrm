@@ -2,18 +2,30 @@
 import pg from "pg";
 import { requireFirebaseAuth } from "../../access/middlewares.js";
 import { normalizeChipLimits } from "../../access/chipLimit.js";
+import {
+  buildTorreClientesOverview,
+  cobrarColaboradorTorreViaWandinha,
+  isGdTorreAccessEnabled,
+  registrarContatoTorreCliente,
+  removerContatoTorreCliente,
+  setGdTorreAccess,
+} from "./torreClientesService.js";
 
 const { Pool } = pg;
 
-function requireSuperAdminGuard(req, res, next) {
+function isSuperAdminUser(req) {
   const access = req.authAccess || {};
-  const isSuperAdmin =
+  return (
     access.role === "superadmin" ||
     access.isAdmin === true ||
     access.email === "conradofinzi@gmail.com" ||
-    access.email?.endsWith("@vexoia.com");
+    access.email === "conradofl@gmail.com" ||
+    access.email?.endsWith("@vexoia.com")
+  );
+}
 
-  if (!isSuperAdmin) {
+function requireSuperAdminGuard(req, res, next) {
+  if (!isSuperAdminUser(req)) {
     res.status(403).json({ error: "FORBIDDEN", message: "Apenas o SuperAdmin Master tem acesso a estas informações." });
     return;
   }
@@ -21,7 +33,103 @@ function requireSuperAdminGuard(req, res, next) {
 }
 
 export function registerSuperAdminRoutes(app, deps) {
-  const { supabase, sendError } = deps;
+  const { supabase, pgDatabasePool, sendError } = deps;
+
+  const requireTorreClientesAccess = async (req, res, next) => {
+    if (isSuperAdminUser(req)) return next();
+    const access = req.authAccess || {};
+    const isInternal = access.role === "internal" || access.userType === "internal";
+    const gdLiberado = await isGdTorreAccessEnabled(pgDatabasePool);
+    if (isInternal && gdLiberado) return next();
+    res.status(403).json({
+      error: "FORBIDDEN",
+      message: "O acesso da equipe GD à Torre de Controle está temporariamente bloqueado pelo administrador da Vexo.",
+    });
+  };
+
+  // GET /api/superadmin/torre-clientes -> Torre de Controle consolidada de todos os clientes Vexo
+  app.get("/api/superadmin/torre-clientes", requireFirebaseAuth, requireTorreClientesAccess, async (req, res) => {
+    try {
+      const data = await buildTorreClientesOverview(pgDatabasePool);
+      res.json({
+        ok: true,
+        isSuperAdmin: isSuperAdminUser(req),
+        ...data,
+      });
+    } catch (err) {
+      console.error("[torre-clientes] Erro ao carregar visão geral:", err);
+      res.status(500).json({ error: "TORRE_OVERVIEW_FAILED", message: err?.message || "Erro ao carregar Torre de Controle." });
+    }
+  });
+
+  // POST /api/superadmin/torre-clientes/gd-access -> Liberar / bloquear acesso da GD ao painel
+  app.post("/api/superadmin/torre-clientes/gd-access", requireFirebaseAuth, requireSuperAdminGuard, async (req, res) => {
+    try {
+      const enabled = Boolean(req.body?.enabled);
+      const updatedBy = req.authAccess?.email || "Conrado";
+      const cfg = await setGdTorreAccess(pgDatabasePool, { enabled, updatedBy });
+      res.json({ ok: true, ...cfg });
+    } catch (err) {
+      res.status(500).json({ error: "TORRE_GD_ACCESS_FAILED", message: err?.message || "Erro ao atualizar permissão da GD." });
+    }
+  });
+
+  // POST /api/superadmin/torre-clientes/:clientId/contatos -> Registrar Horário do Contato e Futuro Contato
+  app.post("/api/superadmin/torre-clientes/:clientId/contatos", requireFirebaseAuth, requireTorreClientesAccess, async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { responsavel, horarioContato, futuroContato, resumo, proximoAssunto, demandaAtual } = req.body || {};
+      const criadoPor = req.authAccess?.name || req.authAccess?.email || "Conrado";
+      const result = await registrarContatoTorreCliente(pgDatabasePool, {
+        clientId,
+        responsavel,
+        horarioContato,
+        futuroContato,
+        resumo,
+        proximoAssunto,
+        demandaAtual,
+        criadoPor,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error("[torre-clientes] Erro ao registrar contato:", err);
+      res.status(500).json({ error: "TORRE_CONTACT_SAVE_FAILED", message: err?.message || "Erro ao salvar contato do cliente." });
+    }
+  });
+
+  // DELETE /api/superadmin/torre-clientes/:clientId/contatos/:contatoId -> Remover item do histórico de contatos
+  app.delete(
+    "/api/superadmin/torre-clientes/:clientId/contatos/:contatoId",
+    requireFirebaseAuth,
+    requireTorreClientesAccess,
+    async (req, res) => {
+      try {
+        const { clientId, contatoId } = req.params;
+        const updatedBy = req.authAccess?.email || "Conrado";
+        const atualizado = await removerContatoTorreCliente(pgDatabasePool, { clientId, contatoId, updatedBy });
+        res.json({ ok: true, clienteControle: atualizado });
+      } catch (err) {
+        res.status(500).json({ error: "TORRE_CONTACT_DELETE_FAILED", message: err?.message || "Erro ao remover contato." });
+      }
+    }
+  );
+
+  // POST /api/superadmin/torre-clientes/:clientId/cobrar -> Cobrar colaborador responsável via Wandinha no WhatsApp
+  app.post("/api/superadmin/torre-clientes/:clientId/cobrar", requireFirebaseAuth, requireTorreClientesAccess, async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { clientName, responsavel, mensagemCustomizada } = req.body || {};
+      const result = await cobrarColaboradorTorreViaWandinha(pgDatabasePool, {
+        clientId,
+        clientName,
+        responsavel,
+        mensagemCustomizada,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: "TORRE_COBRANCA_FAILED", message: err?.message || "Erro ao enviar cobrança via Wandinha." });
+    }
+  });
 
   // GET /api/superadmin/overview -> Métricas Globais do SaaS
   app.get("/api/superadmin/overview", requireFirebaseAuth, requireSuperAdminGuard, async (req, res) => {

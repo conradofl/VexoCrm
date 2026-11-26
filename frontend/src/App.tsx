@@ -286,6 +286,14 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="torre-clientes"
+                element={
+                  <ProtectedRoute allowedRoles={["internal"]}>
+                    <SuperAdmin />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="empresas" element={<Navigate to="/crm/admin?tab=empresas" replace />} />
               <Route path="usuarios" element={<Navigate to="/crm/admin?tab=usuarios" replace />} />
               <Route path="integracoes" element={<Navigate to="/crm/admin?tab=integracoes" replace />} />
