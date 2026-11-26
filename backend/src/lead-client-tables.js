@@ -17,15 +17,6 @@ export function leadsTableName(clientId) {
   return "leads";
 }
 
-function buildLeadClientIndexName(tableName, suffix) {
-  let hash = 0;
-  for (const char of tableName) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  }
-
-  return `idx_${tableName.slice(0, 34)}_${hash.toString(36)}_${suffix}`;
-}
-
 export async function checkLeadClientTableStatus(pgClientOrPool, tenantId) {
   const tableName = leadsTableName(tenantId);
 
@@ -60,181 +51,38 @@ export async function ensureLeadClientTable(pgClientOrPool, tenantId, schemaType
     throw new Error("POSTGRES_POOL_UNAVAILABLE");
   }
 
-  const tableName = leadsTableName(tenantId);
-  const schemaExtraColumns = {
-    outlier: `
-        interesse TEXT,
-        objetivo TEXT,
-        prazo TEXT,
-        melhor_horario TEXT,
-        credito TEXT,
-        parcela TEXT,
-        lance_entrada_fgts TEXT,`,
-    infinie: `
-        interesse TEXT,
-        objetivo TEXT,
-        prazo TEXT,
-        melhor_horario TEXT,
-        tipo_instalacao TEXT,
-        conta_luz_faixa TEXT,`,
-    generico: `
-        interesse TEXT,
-        objetivo TEXT,
-        prazo TEXT,
-        melhor_horario TEXT,`,
-  };
-  const extraColumns = schemaExtraColumns[schemaType] ?? schemaExtraColumns.generico;
-
-  await pgClientOrPool.query(`
-    CREATE TABLE IF NOT EXISTS public."${tableName}" (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
-      telefone TEXT NOT NULL,
-      nome TEXT,
-      tipo_cliente TEXT,
-      faixa_consumo TEXT,
-      cidade TEXT,
-      estado TEXT,
-      conta_energia TEXT,
-      status TEXT,
-      bot_ativo BOOLEAN DEFAULT false,
-      historico TEXT,
-      data_hora TIMESTAMPTZ,
-      qualificacao TEXT,
-      lead_temperature TEXT CHECK (lead_temperature IS NULL OR lead_temperature IN ('QUENTE', 'MORNO', 'FRIO')),
-      status_conversa TEXT CHECK (status_conversa IS NULL OR status_conversa IN ('aguardando_usuario', 'em_atendimento', 'finalizado')),
-      source_campaign_id UUID REFERENCES public.campaigns(id) ON DELETE SET NULL,
-      source_campaign_name TEXT,
-      lead_source TEXT CHECK (lead_source IS NULL OR lead_source IN ('campanha', 'organico', 'trafego_pago', 'whatsapp_ads', 'indicacao', 'outro', 'extracao_whatsapp')),
-      lead_score NUMERIC(8, 2),
-      potential_contract_value NUMERIC(14, 2),
-      first_contact_at TIMESTAMPTZ,
-      qualified_at TIMESTAMPTZ,
-      closed_at TIMESTAMPTZ,
-      lead_origin TEXT,
-      behavior_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
-      ultima_interacao_bot TIMESTAMPTZ,
-      ultima_interacao_usuario TIMESTAMPTZ,
-      mensagem TEXT,
-      finalizado BOOLEAN DEFAULT false,
-      spin_fase TEXT CHECK (spin_fase IS NULL OR spin_fase IN ('situacao', 'problema', 'implicacao', 'necessidade')),
-      dados JSONB NOT NULL DEFAULT '{}'::jsonb,
-      data_nascimento DATE,
-      aniversario_casamento DATE,
-      epoca_ferias DATE,
-      data_retorno TIMESTAMPTZ,
-      ultima_visita DATE,
-      perfil_musical TEXT,${extraColumns}
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ DEFAULT now(),
-      UNIQUE (client_id, telefone)
-    )
-  `);
-
-  await pgClientOrPool.query(`CREATE INDEX IF NOT EXISTS "${buildLeadClientIndexName(tableName, "cid")}" ON public."${tableName}" (client_id)`);
-  await pgClientOrPool.query(`CREATE INDEX IF NOT EXISTS "${buildLeadClientIndexName(tableName, "phone")}" ON public."${tableName}" (telefone)`);
-  await pgClientOrPool.query(`CREATE INDEX IF NOT EXISTS "${buildLeadClientIndexName(tableName, "created")}" ON public."${tableName}" (created_at DESC)`);
-
+  // A tabela é sempre public.leads (leadsTableName), criada pelas migrations (20260304000001 e seguintes). Até 26/11/2026
+  // este ponto rodava CREATE TABLE/INDEX a cada chamada; saiu no untangle (DDL de runtime). Aqui só confere que existe.
   const status = await checkLeadClientTableStatus(pgClientOrPool, tenantId);
   if (!status.exists) {
     throw new Error("LEAD_CLIENT_TABLE_NOT_CREATED");
   }
 
-  await ensureLeadIntelligenceColumns(pgClientOrPool);
-  await ensureLeadAnchorColumns(pgClientOrPool);
-
   return status;
 }
 
+// Colunas na migration 20261126020000. Mantida para quem já chama; não roda DDL.
 export async function ensureLeadAnchorColumns(pgClientOrPool) {
-  if (!pgClientOrPool) return;
-  try {
-    await pgClientOrPool.query(`
-      ALTER TABLE public.leads 
-        ADD COLUMN IF NOT EXISTS aniversario_casamento DATE,
-        ADD COLUMN IF NOT EXISTS epoca_ferias DATE,
-        ADD COLUMN IF NOT EXISTS data_retorno TIMESTAMPTZ;
-    `);
-  } catch (err) {
-    console.warn("[lead-tables] Falha ao adicionar colunas de âncoras em public.leads:", err?.message || err);
-  }
+  return Boolean(pgClientOrPool);
 }
 
+// Colunas e índices nas migrations (20260730000000, 20260909171000, 20261008160000, 20260905130000...). Rodava ALTER TABLE leads
+// (lock exclusivo) a cada listagem do Banco de Dados; saiu no untangle. Mantida para quem já chama.
 export async function ensureLeadIntelligenceColumns(pgClientOrPool) {
-  if (!pgClientOrPool) return;
-  try {
-    await pgClientOrPool.query(`
-      ALTER TABLE public.leads 
-        ADD COLUMN IF NOT EXISTS tenant_id UUID,
-        ADD COLUMN IF NOT EXISTS phone TEXT,
-        ADD COLUMN IF NOT EXISTS stage TEXT DEFAULT 'cold',
-        ADD COLUMN IF NOT EXISTS stage_source TEXT NULL,
-        ADD COLUMN IF NOT EXISTS lost_reason TEXT NULL,
-        ADD COLUMN IF NOT EXISTS temperature TEXT DEFAULT 'warm',
-        ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT ARRAY[]::text[],
-        ADD COLUMN IF NOT EXISTS last_interaction_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMPTZ,
-        ADD COLUMN IF NOT EXISTS extracted_from_wa BOOLEAN DEFAULT false,
-        ADD COLUMN IF NOT EXISTS raw_chat_summary TEXT,
-        ADD COLUMN IF NOT EXISTS assigned_to TEXT;
-
-      CREATE INDEX IF NOT EXISTS idx_leads_assigned_to
-        ON public.leads (client_id, assigned_to);
-      CREATE INDEX IF NOT EXISTS idx_leads_last_message_at
-        ON public.leads (client_id, last_message_at);
-    `);
-  } catch (err) {
-    console.warn("[lead-tables] Could not add lead intelligence columns:", err?.message || err);
-  }
+  return Boolean(pgClientOrPool);
 }
 
+// Coluna na migration 20260908180000. Mantida para quem já chama; não roda DDL.
 export async function ensureLeadsClientsTicketMedioColumn(pgClientOrPool) {
-  if (!pgClientOrPool) return;
-  try {
-    await pgClientOrPool.query(`
-      ALTER TABLE public.leads_clients
-        ADD COLUMN IF NOT EXISTS ticket_medio NUMERIC(12,2) NULL;
-    `);
-  } catch (err) {
-    console.warn("[lead-client-tables] Could not add ticket_medio column to leads_clients:", err?.message || err);
-  }
+  return Boolean(pgClientOrPool);
 }
 
+// Tabela e column_mapping na migration 20261001120000. Mantida para quem já chama; não roda DDL.
 export async function ensureLeadCustomFieldsTable(pgClientOrPool) {
-  if (!pgClientOrPool) return;
-  try {
-    await pgClientOrPool.query(`
-      CREATE TABLE IF NOT EXISTS public.lead_custom_fields (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
-        key TEXT NOT NULL,
-        label TEXT NOT NULL,
-        type TEXT NOT NULL DEFAULT 'text',
-        import_id UUID REFERENCES public.lead_imports(id) ON DELETE SET NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CONSTRAINT uq_lead_custom_fields_client_key UNIQUE (client_id, key)
-      );
-      CREATE INDEX IF NOT EXISTS idx_lead_custom_fields_client_id ON public.lead_custom_fields (client_id);
-      ALTER TABLE public.lead_imports ADD COLUMN IF NOT EXISTS column_mapping JSONB;
-    `);
-  } catch (err) {
-    console.warn("[lead-client-tables] ensureLeadCustomFieldsTable failed:", err?.message || err);
-  }
+  return Boolean(pgClientOrPool);
 }
 
+// Colunas nas migrations 20261008170000 e 20261011183000. Mantida para quem já chama; não roda DDL.
 export async function ensureLeadReactivationSettingsColumns(pgClientOrPool) {
-  if (!pgClientOrPool) return;
-  try {
-    await pgClientOrPool.query(`
-      ALTER TABLE public.lead_client_n8n_settings
-        ADD COLUMN IF NOT EXISTS reactivation_enabled BOOLEAN DEFAULT false,
-        ADD COLUMN IF NOT EXISTS reactivation_stalled_days INT DEFAULT 7,
-        ADD COLUMN IF NOT EXISTS reactivation_cadence_id UUID NULL,
-        ADD COLUMN IF NOT EXISTS reactivation_cooldown_days INT DEFAULT 30,
-        ADD COLUMN IF NOT EXISTS stalled_notifications_synced_at TIMESTAMPTZ NULL;
-    `);
-  } catch (err) {
-    console.warn("[lead-client-tables] Could not add reactivation columns to lead_client_n8n_settings:", err?.message || err);
-  }
+  return Boolean(pgClientOrPool);
 }
