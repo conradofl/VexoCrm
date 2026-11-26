@@ -129,6 +129,7 @@ import { resolveCampaignAgent, AGENTE_CAMPANHA, AGENTE_NENHUM } from "../../serv
 import { validateOutboundMessage } from "../../services/jsonExtractor.js";
 import { getCampaignStepPlan, normalizeCampaignAnalyticsMeta } from "../../campaign-outbound.js";
 import { normalizeCampaignPendingStepIndex } from "../../campaign/dispatch.js";
+import { pickCampaignAwaitingReply } from "../../campaign/replyRouting.js";
 import { parseSimulationState } from "./simulationState.js";
 
 function isTerminalCampaignProgressState(progress) {
@@ -3838,31 +3839,8 @@ export function registerChatbotRoutes(app, deps) {
     try {
       campaignReplyContext = await findCampaignReplyMatches({ clientId, phone });
 
-      const allCandidates = [
-        ...(campaignReplyContext.processingWaitForReplyMatches || []),
-        ...(campaignReplyContext.waitForReplyMatches || []),
-        ...(campaignReplyContext.matches || []),
-        ...(campaignReplyContext.activePeriodCampaign ? [campaignReplyContext.activePeriodCampaign] : []),
-      ];
-
-      // Prioriza a campanha que efetivamente possui progresso pendente e passos a enviar (não pausada nem superada por campanha já concluída)
-      let activeWaitCampaign = allCandidates.find((c) => {
-        if (!c || c.status === "pausada" || c.supersededByCompletedCampaign) return false;
-        const progress = c.leadImportItem?.progress || {};
-        const hasProgress = progress && Object.keys(progress).length > 0;
-        if (!hasProgress) return false;
-        if (progress.status === "finalizado" || progress.status === "erro" || Boolean(progress.completedAt)) return false;
-        const nextStepIndex = normalizeCampaignPendingStepIndex(progress.nextStepIndex);
-        if (nextStepIndex === null) return false;
-        const stepPlan = getCampaignStepPlan(c.analyticsMeta || {});
-        const steps = stepPlan.enabledSteps || [];
-        return nextStepIndex < steps.length;
-      }) || (
-        campaignReplyContext.processingWaitForReplyMatches?.[0]?.status !== "pausada" &&
-        !campaignReplyContext.processingWaitForReplyMatches?.[0]?.supersededByCompletedCampaign
-          ? campaignReplyContext.processingWaitForReplyMatches?.[0]
-          : null
-      ) || null;
+      // Regra em campaign/replyRouting.js (mesma de antes; a retomada das respostas barradas usa a mesma).
+      let activeWaitCampaign = pickCampaignAwaitingReply(campaignReplyContext);
 
       activeCampaignForLead = campaignReplyContext.activePeriodCampaign;
       temCampanhaParaEsteTelefone = (campaignReplyContext.matches?.length ?? 0) > 0;
