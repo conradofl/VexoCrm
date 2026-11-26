@@ -175,18 +175,15 @@ describe("Item 07 — Passos Condicionais e Ações Internas", () => {
   });
 
   describe("3. Migração Idempotente de Colunas (ensureFollowupConditionalAndInternalColumns)", () => {
-    it("executa DDL idempotente com step_type, action_type, action_payload e conditions", async () => {
+    it("[untangle] colunas e CHECKs vêm da migration 20260929100000; o código não roda DDL", async () => {
       const mockClient = { query: vi.fn().mockResolvedValue({ rows: [] }) };
-      await ensureFollowupConditionalAndInternalColumns(mockClient);
-
-      expect(mockClient.query).toHaveBeenCalledTimes(1);
-      const sql = mockClient.query.mock.calls[0][0];
-      expect(sql).toContain("ADD COLUMN IF NOT EXISTS step_type");
-      expect(sql).toContain("ADD COLUMN IF NOT EXISTS action_type");
-      expect(sql).toContain("ADD COLUMN IF NOT EXISTS action_payload");
-      expect(sql).toContain("ADD COLUMN IF NOT EXISTS conditions");
-      expect(sql).toContain("followup_templates_step_type_check");
-      expect(sql).toContain("followup_templates_action_type_check");
+      expect(await ensureFollowupConditionalAndInternalColumns(mockClient)).toBe(true);
+      expect(mockClient.query).not.toHaveBeenCalled();
+      const { readFileSync } = await import("node:fs");
+      const { resolve } = await import("node:path");
+      const sql = readFileSync(resolve("supabase/migrations/20260929100000_add_followup_conditional_and_internal_steps.sql"), "utf8");
+      for (const t of ["step_type", "action_type", "action_payload", "conditions", "followup_templates_step_type_check", "followup_templates_action_type_check"]) expect(sql).toContain(t);
+      expect(sql).toContain("'create_reminder', 'change_stage', 'assign_operator', 'add_tag'");
     });
   });
 

@@ -463,28 +463,8 @@ export function createPgMassDeleteRepo() {
       return rows;
     },
 
+    // Tabela de auditoria na migration 20261002140000 (o CREATE em runtime saiu no untangle, 26/11/2026).
     async ensureAuditTable(pool) {
-      if (auditEnsured) return;
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.lead_mass_delete_audit (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          client_id TEXT NOT NULL,
-          user_uid TEXT,
-          user_email TEXT,
-          criterion JSONB NOT NULL,
-          options JSONB NOT NULL,
-          matched INTEGER NOT NULL,
-          expected_count INTEGER NOT NULL,
-          deleted INTEGER NOT NULL,
-          kept INTEGER NOT NULL,
-          kept_multi_import INTEGER NOT NULL DEFAULT 0,
-          kept_with_messages INTEGER NOT NULL DEFAULT 0,
-          kept_both INTEGER NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        CREATE INDEX IF NOT EXISTS idx_lead_mass_delete_audit_client
-          ON public.lead_mass_delete_audit (client_id, created_at DESC);
-      `);
       auditEnsured = true;
     },
 

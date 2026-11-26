@@ -441,9 +441,7 @@ export function registerChatbotRoutes(app, deps) {
   if (pgDatabasePool && process.env.NODE_ENV !== "test") {
     (async () => {
       try {
-        await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS media_url TEXT;");
-        await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS content_type TEXT;");
-        await pgDatabasePool.query("ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS assigned_chip TEXT;");
+        // media_url/content_type (20261016180000) e leads.assigned_chip (20261017100000) vêm das migrations (untangle, DDL de runtime).
         // Retro-fill idempotente das mensagens de campanha sem media_url
         await pgDatabasePool.query(`
           UPDATE public.lead_messages lm
@@ -898,34 +896,9 @@ export function registerChatbotRoutes(app, deps) {
 
   app.get("/api/whatsapp/chats", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (_req, res) => {
     if (!ensureDb(res)) return;
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS instance_name VARCHAR(150);").catch(() => {}); } catch(e) {}
-    // contact_name/is_group: nome exibido e flag de grupo vivem na mensagem para o
-    // inbox nao depender da tabela de leads (mostrar nome nao pode criar lead).
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS contact_name TEXT;").catch(() => {}); } catch(e) {}
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT false;").catch(() => {}); } catch(e) {}
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS message_timestamp TIMESTAMPTZ;").catch(() => {}); } catch(e) {}
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS media_url TEXT;").catch(() => {}); } catch(e) {}
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS content_type TEXT;").catch(() => {}); } catch(e) {}
-
-    try {
-      await pgDatabasePool.query(`
-        CREATE TABLE IF NOT EXISTS public.whatsapp_chat_states (
-          client_id TEXT NOT NULL,
-          phone TEXT NOT NULL,
-          state TEXT NOT NULL DEFAULT 'ativa',
-          reason TEXT,
-          source TEXT NOT NULL DEFAULT 'auto',
-          changed_by TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          PRIMARY KEY (client_id, phone)
-        );
-        CREATE INDEX IF NOT EXISTS idx_whatsapp_chat_states_client_state
-          ON public.whatsapp_chat_states (client_id, state);
-        ALTER TABLE public.whatsapp_chat_states ADD COLUMN IF NOT EXISTS agent_muted_at TIMESTAMPTZ NULL;
-        ALTER TABLE public.whatsapp_chat_states ADD COLUMN IF NOT EXISTS agent_muted_reason TEXT NULL;
-      `).catch(() => {});
-    } catch(e) {}
+    // Colunas de lead_messages (instance_name, contact_name, is_group...) e whatsapp_chat_states vêm das migrations
+    // (20260801120001, 20260802100000, 20260827000000, 20261016180000, 20260901190000, 20260911120000). Até 26/11/2026 esta
+    // rota rodava ALTER/CREATE (lock exclusivo em lead_messages) a cada chamada; saiu no untangle (DDL de runtime).
 
     try {
       const search = normalizeString(_req.query.search)?.toLowerCase() || "";
@@ -1987,11 +1960,9 @@ export function registerChatbotRoutes(app, deps) {
 
   app.delete("/api/whatsapp/chats/clear", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
     if (!ensureDb(res)) return;
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS instance_name VARCHAR(150);").catch(() => {}); } catch(e) {}
-    // contact_name/is_group: nome exibido e flag de grupo vivem na mensagem para o
-    // inbox nao depender da tabela de leads (mostrar nome nao pode criar lead).
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS contact_name TEXT;").catch(() => {}); } catch(e) {}
-    try { await pgDatabasePool.query("ALTER TABLE public.lead_messages ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT false;").catch(() => {}); } catch(e) {}
+    // Colunas de lead_messages (instance_name, contact_name, is_group...) e whatsapp_chat_states vêm das migrations
+    // (20260801120001, 20260802100000, 20260827000000, 20261016180000, 20260901190000, 20260911120000). Até 26/11/2026 esta
+    // rota rodava ALTER/CREATE (lock exclusivo em lead_messages) a cada chamada; saiu no untangle (DDL de runtime).
 
     try {
       const requestedClientId = normalizeString(req.query.clientId || req.body.clientId);

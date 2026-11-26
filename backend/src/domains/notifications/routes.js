@@ -11,32 +11,7 @@ export function registerNotificationsRoutes(app, deps) {
     sendError,
   } = deps;
 
-  // Bootstrap idempotente da tabela notifications
-  (async () => {
-    try {
-      if (pgDatabasePool?.query) {
-        await pgDatabasePool.query(`
-          CREATE TABLE IF NOT EXISTS public.notifications (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            client_id TEXT NOT NULL,
-            user_id TEXT,
-            type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            link TEXT,
-            read BOOLEAN NOT NULL DEFAULT false,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          )
-        `);
-        await pgDatabasePool.query(`
-          CREATE INDEX IF NOT EXISTS idx_notifications_client_read_created
-            ON public.notifications (client_id, read, created_at DESC)
-        `);
-      }
-    } catch (err) {
-      console.warn("[notifications-domain] Bootstrap warning:", err?.message || err);
-    }
-  })();
+  // notifications: tabela em 20260221031218 e índice em 20261126030000 (o bootstrap no boot saiu no untangle, 26/11/2026).
 
   // GET /api/notifications: feed de notificações do usuário/tenant
   app.get("/api/notifications", requireFirebaseAuth, async (req, res) => {

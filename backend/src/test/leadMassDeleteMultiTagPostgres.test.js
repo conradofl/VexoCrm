@@ -6,6 +6,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { readFileSync as readFileSyncMig } from "node:fs";
+import { dirname as dirnameMig, join as joinMig } from "node:path";
+import { fileURLToPath as fileURLToPathMig } from "node:url";
+const resolveMig = (f) => joinMig(dirnameMig(fileURLToPathMig(import.meta.url)), "..", "..", "supabase", "migrations", f);
+
+// lead_mass_delete_audit: só a migration cria (o código não roda mais DDL, untangle 26/11/2026).
+const AUDIT_MIGRATION = readFileSyncMig(resolveMig("20261002140000_create_lead_mass_delete_audit.sql"), "utf8");
 import {
   MASS_DELETE_ERRORS,
   createPgMassDeleteRepo,
@@ -77,6 +84,7 @@ describe("Exclusão em massa por várias tags (Postgres Real)", () => {
 
   beforeEach(async () => {
     db = await createPgliteDb(SCHEMA);
+    await db.exec(AUDIT_MIGRATION);
     pool = createMockPool(db);
     repo = createPgMassDeleteRepo();
 

@@ -1,7 +1,13 @@
 // O registro da importação (lead_imports + lead_import_items + lead_custom_fields) em Postgres REAL (pglite), para os testes de
 // POST /api/leads/import-csv que usam um pool de mentira para os LEADS. Desde que o import-csv registra a importação no mesmo lugar da
 // tela de Planilhas, esse SQL passa a existir; aqui ele vai para um banco de verdade e o resto continua no mock do teste.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPgliteDb } from "./pgliteDb.js";
+
+// Colunas de lote de lead_imports (status, expected_rows, ...): só a migration cria (o código não roda mais DDL, untangle 26/11/2026).
+const BATCH_MIGRATION = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "supabase", "migrations", "20261005120000_add_batch_columns_to_lead_imports.sql"), "utf8");
 
 const REGISTRY_SCHEMA = `
   SET TimeZone = 'UTC';
@@ -24,6 +30,7 @@ const REGISTRY_SQL = /lead_imports|lead_import_items|lead_custom_fields|^\s*(BEG
 /** Redireciona o SQL do registro de importação do `mockPool.query` (vi.fn) para o pglite; o resto segue no mock. */
 export async function attachImportRegistry(mockPool) {
   const db = await createPgliteDb(REGISTRY_SCHEMA);
+  await db.exec(BATCH_MIGRATION);
   const original = mockPool.query.getMockImplementation();
   mockPool.query.mockImplementation(async (sql, params) => (REGISTRY_SQL.test(String(sql)) ? db.query(sql, params) : original(sql, params)));
   mockPool.registry = db;

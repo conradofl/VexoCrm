@@ -258,26 +258,8 @@ export function createPgOriginFixRepo() {
       return res.rowCount ?? 0;
     },
 
+    // Tabela de auditoria na migration 20261003090000 (o CREATE em runtime saiu no untangle, 26/11/2026).
     async ensureAuditTable(pool) {
-      if (auditEnsured) return;
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.lead_origin_fix_audit (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          client_id TEXT NOT NULL,
-          user_uid TEXT,
-          user_email TEXT,
-          expected_count INTEGER NOT NULL,
-          corrected INTEGER NOT NULL,
-          corrected_with_import_id INTEGER NOT NULL DEFAULT 0,
-          corrected_only_import_tag INTEGER NOT NULL DEFAULT 0,
-          left_undeterminable INTEGER NOT NULL DEFAULT 0,
-          left_instagram_importer INTEGER NOT NULL DEFAULT 0,
-          lead_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        CREATE INDEX IF NOT EXISTS idx_lead_origin_fix_audit_client
-          ON public.lead_origin_fix_audit (client_id, created_at DESC);
-      `);
       auditEnsured = true;
     },
 

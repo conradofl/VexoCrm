@@ -16,6 +16,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { readFileSync as readFileSyncMig } from "node:fs";
+import { dirname as dirnameMig, join as joinMig } from "node:path";
+import { fileURLToPath as fileURLToPathMig } from "node:url";
+const resolveMig = (f) => joinMig(dirnameMig(fileURLToPathMig(import.meta.url)), "..", "..", "supabase", "migrations", f);
+
+// lead_mass_delete_audit: só a migration cria (o código não roda mais DDL, untangle 26/11/2026).
+const AUDIT_MIGRATION = readFileSyncMig(resolveMig("20261002140000_create_lead_mass_delete_audit.sql"), "utf8");
 import { resolveAuthorizedClientId } from "../services/tenant.js";
 import { resetLeadImportBatchStateForTest } from "../services/leadImportBatches.js";
 import {
@@ -109,6 +116,7 @@ const DONO_T = { role: "client", scopeMode: "assigned_clients", clientId: T, cli
 
 beforeAll(async () => {
   db = await createPgliteDb(SCHEMA);
+  await db.exec(AUDIT_MIGRATION);
   for (const file of MIGRATIONS) {
     let sql = readFileSync(resolve(file), "utf8");
     if (file.includes("whatsapp_number_validation")) {

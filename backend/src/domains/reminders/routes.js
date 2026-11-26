@@ -20,49 +20,7 @@ export function registerRemindersRoutes(app, deps) {
 
   const dbQuery = (sql, params) => pgDatabasePool.query(sql, params);
 
-  // Bootstrap idempotente da tabela lead_reminders no boot
-  (async () => {
-    try {
-      await pgDatabasePool.query(`
-        CREATE TABLE IF NOT EXISTS public.lead_reminders (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          client_id TEXT NOT NULL,
-          lead_id UUID,
-          phone TEXT NOT NULL,
-          lead_name TEXT,
-          title TEXT NOT NULL,
-          notes TEXT,
-          remind_at TIMESTAMPTZ NOT NULL,
-          assigned_to_uid TEXT,
-          assigned_to_name TEXT,
-          created_by_uid TEXT,
-          created_by_name TEXT,
-          status TEXT NOT NULL DEFAULT 'pending',
-          completed_at TIMESTAMPTZ,
-          completed_by_uid TEXT,
-          activity_type TEXT DEFAULT 'reminder',
-          meeting_url TEXT,
-          call_status TEXT,
-          meeting_outcome TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        ALTER TABLE public.lead_reminders
-          ADD COLUMN IF NOT EXISTS activity_type TEXT DEFAULT 'reminder',
-          ADD COLUMN IF NOT EXISTS meeting_url TEXT,
-          ADD COLUMN IF NOT EXISTS call_status TEXT,
-          ADD COLUMN IF NOT EXISTS meeting_outcome TEXT;
-        CREATE INDEX IF NOT EXISTS idx_lead_reminders_client_phone
-          ON public.lead_reminders (client_id, phone);
-        CREATE INDEX IF NOT EXISTS idx_lead_reminders_client_status_remind
-          ON public.lead_reminders (client_id, status, remind_at);
-        CREATE INDEX IF NOT EXISTS idx_lead_reminders_activity_type
-          ON public.lead_reminders (client_id, activity_type);
-      `).catch(() => {});
-    } catch {
-      // Ignora erro de boot caso pool não esteja pronto
-    }
-  })();
+  // lead_reminders: migrations 20260913160000 e 20261016140000 (o bootstrap com CREATE/ALTER no boot saiu no untangle, 26/11/2026).
 
   // ─── GET /api/reminders/inbox-summary — Sumário de agendamentos e lembretes para o Inbox ───
   app.get("/api/reminders/inbox-summary", requireFirebaseAuth, requireAppViewAccess("whatsapp"), async (req, res) => {
