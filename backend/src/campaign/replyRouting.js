@@ -1,6 +1,6 @@
 // Qual campanha está esperando a resposta deste lead (e tem próximo passo a enviar). Extraída do webhook de entrada
-// (domains/chatbot/routes.js, ETAPA 4) em 26/11/2026, SEM mudar a regra, para a retomada das respostas barradas
-// (campaign/retomadaBarradas.js) escolher exatamente a mesma campanha que o webhook escolheria.
+// (domains/chatbot/routes.js, ETAPA 4) em 26/11/2026, SEM mudar a regra: uma função pura e testável, para quem precisar
+// escolher a mesma campanha que o webhook escolheria.
 import { getCampaignStepPlan } from "../campaign-outbound.js";
 import { normalizeCampaignPendingStepIndex } from "./dispatch.js";
 

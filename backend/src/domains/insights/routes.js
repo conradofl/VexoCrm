@@ -28,8 +28,6 @@ import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
 import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
 import { computeLlmConfigStatus } from "../../services/llmConfigStatus.js";
-import { getInboundDelayStatus } from "../../services/inboundDelayStatus.js";
-import { getBarredRetakeStatus } from "../../campaign/retomadaBarradas.js";
 import { getDueDispatchSchedulerStatus } from "../../campaign/dueDispatchScheduler.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
@@ -216,10 +214,6 @@ export function registerInsightsRoutes(app, deps) {
       llmConfig: computeLlmConfigStatus(),
       // Agendador dos lotes (tick de 30 s, ligado pelo server.js): prova de que está vivo.
       dueDispatchScheduler: getDueDispatchSchedulerStatus(),
-      // Medição: atraso da Evolution na entrada e mensagens barradas pelo portão de idade (só contagens, uma vez por processo).
-      inboundDelay: getInboundDelayStatus(pgDatabasePool),
-      // Retomada das respostas barradas em 18-19/11: quantas ainda esperam a próxima etapa (só contagem, NÃO envia).
-      retomadaBarradas: getBarredRetakeStatus(pgDatabasePool),
     });
   });
 
