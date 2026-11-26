@@ -58,6 +58,7 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
         campaign_id TEXT,
         client_id TEXT,
         status TEXT,
+        target_count INTEGER,
         total_leads INTEGER,
         sent_count INTEGER,
         failed_count INTEGER,
@@ -66,6 +67,11 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
         started_at TIMESTAMPTZ,
         completed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE TABLE public.campaign_dispatch_runs (
+        id BIGSERIAL PRIMARY KEY,
+        dispatch_id TEXT,
+        status TEXT
       );
       CREATE TABLE public.lead_messages (
         id BIGSERIAL PRIMARY KEY,

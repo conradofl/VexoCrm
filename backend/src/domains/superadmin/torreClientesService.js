@@ -205,7 +205,7 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         .catch(() => ({ rows: [] })),
       pool
         .query(
-          `SELECT id, client_id, name, phone, active, is_default, connection_state, chip_state, daily_limit_override
+          `SELECT *
              FROM public.lead_client_evolution_instances
             WHERE active = true
             ORDER BY is_default DESC, id ASC`
@@ -221,7 +221,7 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         .catch(() => ({ rows: [] })),
       pool
         .query(
-          `SELECT id::text AS id, client_id, name, status, starts_at, ends_at, scheduled_for, last_triggered_at, created_at, archived_at, analytics_meta
+          `SELECT *
              FROM public.campaigns
             WHERE archived_at IS NULL
             ORDER BY COALESCE(last_triggered_at, created_at) DESC`
@@ -229,11 +229,28 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         .catch(() => ({ rows: [] })),
       pool
         .query(
-          `SELECT id::text AS id, campaign_id::text AS campaign_id, client_id, status, total_leads, sent_count, failed_count, skipped_count, error_message, started_at, completed_at, created_at
-             FROM public.campaign_dispatches
-            ORDER BY created_at DESC`
+          `SELECT
+             d.*,
+             COALESCE(r.sent_cnt, d.sent_count, 0)::int AS real_sent_count,
+             COALESCE(r.failed_cnt, d.failed_count, 0)::int AS real_failed_count,
+             COALESCE(r.skipped_cnt, 0)::int AS real_skipped_count
+           FROM public.campaign_dispatches d
+           LEFT JOIN (
+             SELECT
+               dispatch_id,
+               COUNT(*) FILTER (WHERE status = 'sent') AS sent_cnt,
+               COUNT(*) FILTER (WHERE status IN ('failed', 'invalid_number')) AS failed_cnt,
+               COUNT(*) FILTER (WHERE status = 'skipped') AS skipped_cnt
+             FROM public.campaign_dispatch_runs
+             GROUP BY dispatch_id
+           ) r ON r.dispatch_id = d.id
+           ORDER BY d.created_at DESC`
         )
-        .catch(() => ({ rows: [] })),
+        .catch(() =>
+          pool
+            .query(`SELECT * FROM public.campaign_dispatches ORDER BY created_at DESC`)
+            .catch(() => ({ rows: [] }))
+        ),
       pool
         .query(
           `SELECT
@@ -268,13 +285,14 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     if (!chipsByClient.has(cid)) chipsByClient.set(cid, []);
     const limit = resolveChipDailyLimit(ch);
     const used = usageByChipId.get(String(ch.id)) || 0;
-    const isConnected = ch.connection_state === "open";
+    const isConnected = ch.connection_state === "open" || !ch.connection_state || ch.connection_state === "unknown";
+    const slug = ch.dispatch_webhook_url ? String(ch.dispatch_webhook_url).split("/").filter(Boolean).pop() : null;
     chipsByClient.get(cid).push({
       id: String(ch.id),
       name: ch.name || "Chip",
-      phone: ch.phone || null,
+      phone: ch.phone || slug || null,
       connected: isConnected,
-      connectionState: ch.connection_state || "unknown",
+      connectionState: ch.connection_state || "open",
       chipState: ch.chip_state || "active",
       usedToday: used,
       dailyLimit: limit,
@@ -320,22 +338,45 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
       const lotes = dispatchesByCampaign.get(String(camp.id)) || [];
       const latestLote = lotes[0] || null;
       const meta = camp.analytics_meta && typeof camp.analytics_meta === "object" ? camp.analytics_meta : {};
+      const phonesArr = Array.isArray(camp.phones) ? camp.phones : [];
+
+      const lotesTargetSum = lotes.reduce(
+        (acc, l) => acc + (Number(l.target_count) || Number(l.total_leads) || 0),
+        0
+      );
+      const lotesSentSum = lotes.reduce(
+        (acc, l) => acc + (Number(l.real_sent_count ?? l.sent_count) || 0),
+        0
+      );
+      const lotesFailedSum = lotes.reduce(
+        (acc, l) => acc + (Number(l.real_failed_count ?? l.failed_count) || 0),
+        0
+      );
+      const lotesSkippedSum = lotes.reduce(
+        (acc, l) => acc + (Number(l.real_skipped_count ?? l.skipped_count) || 0),
+        0
+      );
 
       const totalLeads =
-        Number(latestLote?.total_leads) ||
+        lotesTargetSum ||
+        Number(camp.target_count) ||
         Number(meta?.lastDispatchSummary?.totalLeads) ||
         Number(meta?.totalLeads) ||
+        phonesArr.length ||
+        lotesSentSum ||
         0;
       const sentCount =
-        Number(latestLote?.sent_count) ||
+        lotesSentSum ||
+        Number(camp.sent_count) ||
         Number(meta?.lastDispatchSummary?.sentCount) ||
         Number(meta?.sentCount) ||
         0;
       const failedCount =
-        Number(latestLote?.failed_count) ||
+        lotesFailedSum ||
+        Number(camp.failed_count) ||
         Number(meta?.lastDispatchSummary?.failedCount) ||
         0;
-      const skippedCount = Number(latestLote?.skipped_count) || 0;
+      const skippedCount = lotesSkippedSum || 0;
       const rawStatus = String(latestLote?.status || camp.status || "rascunho").toLowerCase();
 
       const isFinished = ["done", "completed", "concluida", "enviada", "cancelled", "cancelada"].includes(rawStatus);
@@ -348,13 +389,19 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
 
       const dataInicio =
         latestLote?.started_at ||
+        latestLote?.scheduled_at ||
         camp.starts_at ||
         camp.scheduled_for ||
         camp.last_triggered_at ||
         camp.created_at ||
         null;
 
-      const dataConclusaoReal = latestLote?.completed_at || camp.ends_at || null;
+      const dataConclusaoReal =
+        latestLote?.finished_at ||
+        latestLote?.completed_at ||
+        camp.ends_at ||
+        (isFinished ? latestLote?.updated_at || camp.updated_at : null) ||
+        null;
       const previsaoConclusao =
         !dataConclusaoReal && remainingInQueue > 0
           ? computeEstimatedCampaignEnd({ remainingInQueue, dailyLimitTotal: totalDailyLimit, now })
@@ -371,7 +418,7 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         sentCount,
         remainingInQueue,
         failedCount,
-        pauseReason: latestLote?.error_message || null,
+        pauseReason: latestLote?.pause_reason || latestLote?.error_message || null,
         lastTriggeredAt: camp.last_triggered_at || latestLote?.created_at || null,
       };
     });

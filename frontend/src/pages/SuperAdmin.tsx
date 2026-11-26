@@ -155,21 +155,39 @@ function formatDateBr(iso: string | null | undefined): string {
 function formatCampaignStatusBadge(status: string) {
   const s = String(status || "").toLowerCase();
   if (["running", "ativa", "executando", "queued"].includes(s)) {
-    return { label: "Ativa", cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" };
+    return {
+      label: "Ativa",
+      cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold",
+    };
   }
   if (["scheduled", "agendada"].includes(s)) {
-    return { label: "Agendada", cls: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" };
+    return {
+      label: "Agendada",
+      cls: "bg-cyan-500/15 text-cyan-800 dark:text-cyan-300 border-cyan-500/30 font-semibold",
+    };
   }
   if (["paused", "pausada", "interrupted", "interrompido"].includes(s)) {
-    return { label: "Pausada", cls: "bg-amber-500/15 text-amber-300 border-amber-500/30" };
+    return {
+      label: "Pausada",
+      cls: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30 font-semibold",
+    };
   }
   if (["done", "completed", "concluida", "enviada"].includes(s)) {
-    return { label: "Concluída", cls: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" };
+    return {
+      label: "Concluída",
+      cls: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 font-semibold",
+    };
   }
   if (["failed", "falhou"].includes(s)) {
-    return { label: "Falhou", cls: "bg-rose-500/15 text-rose-300 border-rose-500/30" };
+    return {
+      label: "Falhou",
+      cls: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30 font-semibold",
+    };
   }
-  return { label: "Rascunho", cls: "bg-slate-500/15 text-slate-300 border-slate-500/30" };
+  return {
+    label: "Rascunho",
+    cls: "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30 font-semibold",
+  };
 }
 
 export default function SuperAdmin() {
@@ -423,7 +441,7 @@ export default function SuperAdmin() {
   }, [clientes, searchTerm, statusFilter, responsavelFilter]);
 
   return (
-    <div className="min-h-screen space-y-6 bg-background p-4 md:p-6 text-foreground">
+    <div className="h-full overflow-y-auto space-y-6 bg-background p-4 md:p-6 pb-28 text-foreground">
       {/* Cabeçalho da Torre de Controle */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between border-b border-border pb-5">
         <div className="flex items-center gap-3">
@@ -654,19 +672,40 @@ export default function SuperAdmin() {
 
             const semaforoBadge =
               cliente.semaforo === "critico"
-                ? { label: "🔴 Crítico", cls: "bg-rose-500/15 text-rose-400 border-rose-500/40" }
+                ? {
+                    label: "🔴 Crítico",
+                    cls: "bg-rose-500/15 text-rose-700 dark:text-rose-400 border-rose-500/40 font-semibold",
+                  }
                 : cliente.semaforo === "atencao"
-                ? { label: "🟡 Atenção", cls: "bg-amber-500/15 text-amber-300 border-amber-500/40" }
-                : { label: "🟢 Saudável", cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/40" };
+                ? {
+                    label: "🟡 Atenção",
+                    cls: "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/40 font-semibold",
+                  }
+                : {
+                    label: "🟢 Saudável",
+                    cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/40 font-semibold",
+                  };
 
             const futuroBadge =
               rel.futuroContatoStatus === "atrasado"
-                ? { label: "ATRASADO", cls: "bg-rose-500/20 text-rose-300 border-rose-500/40" }
+                ? {
+                    label: "ATRASADO",
+                    cls: "bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40 font-semibold",
+                  }
                 : rel.futuroContatoStatus === "hoje"
-                ? { label: "PARA HOJE", cls: "bg-amber-500/20 text-amber-300 border-amber-500/40" }
+                ? {
+                    label: "PARA HOJE",
+                    cls: "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40 font-semibold",
+                  }
                 : rel.futuroContatoStatus === "agendado"
-                ? { label: "AGENDADO", cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" }
-                : { label: "SEM DATA FUTURA", cls: "bg-slate-500/20 text-slate-300 border-slate-500/40" };
+                ? {
+                    label: "AGENDADO",
+                    cls: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 font-semibold",
+                  }
+                : {
+                    label: "SEM DATA FUTURA",
+                    cls: "bg-slate-500/15 text-slate-700 dark:text-slate-300 border-slate-500/30 font-semibold",
+                  };
 
             return (
               <Card
@@ -685,7 +724,7 @@ export default function SuperAdmin() {
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <h2 className="text-lg font-bold text-foreground">{cliente.name}</h2>
-                        <span className="font-mono text-xs text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
+                        <span className="font-mono text-xs text-purple-700 dark:text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
                           {cliente.id}
                         </span>
                         <Badge variant="outline" className={semaforoBadge.cls}>
@@ -694,12 +733,12 @@ export default function SuperAdmin() {
                         {rel.responsavel ? (
                           <Badge
                             variant="outline"
-                            className="border-indigo-500/30 bg-indigo-500/10 text-indigo-300 flex items-center gap-1"
+                            className="border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 flex items-center gap-1 font-semibold"
                           >
                             <UserCheck className="h-3 w-3" /> Resp: {rel.responsavel}
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 text-slate-400">
+                          <Badge variant="outline" className="border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-400">
                             Sem responsável atribuído
                           </Badge>
                         )}
@@ -710,9 +749,9 @@ export default function SuperAdmin() {
                           {cliente.alertas.map((al, idx) => (
                             <span
                               key={idx}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-md"
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 dark:text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-md"
                             >
-                              <AlertTriangle className="h-3 w-3 text-amber-400" /> {al}
+                              <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" /> {al}
                             </span>
                           ))}
                         </div>
@@ -725,7 +764,7 @@ export default function SuperAdmin() {
                         size="sm"
                         variant="outline"
                         onClick={() => handleOpenContactForm(cliente)}
-                        className="h-8 text-xs border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20"
+                        className="h-8 text-xs font-semibold border-cyan-500/40 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 hover:bg-cyan-500/20"
                       >
                         <Plus className="mr-1.5 h-3.5 w-3.5" />
                         {isFormOpen ? "Fechar Registro" : "Registrar Contato / Futuro Contato"}
@@ -736,7 +775,7 @@ export default function SuperAdmin() {
                         variant="outline"
                         disabled={cobrandoClientId === cliente.id}
                         onClick={() => handleCobrarWandinha(cliente)}
-                        className="h-8 text-xs border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20"
+                        className="h-8 text-xs font-semibold border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300 hover:bg-purple-500/20"
                         title="Envia cobrança no WhatsApp do colaborador responsável via Wandinha"
                       >
                         <Send className="mr-1.5 h-3.5 w-3.5" />
@@ -870,10 +909,10 @@ export default function SuperAdmin() {
                           </div>
 
                           <div className="rounded-lg bg-background/70 border border-cyan-500/30 p-2">
-                            <p className="text-[10px] uppercase text-cyan-300 font-semibold">
+                            <p className="text-[10px] uppercase text-cyan-700 dark:text-cyan-300 font-semibold">
                               Futuro Contato
                             </p>
-                            <p className="text-xs font-bold text-cyan-200 mt-0.5">
+                            <p className="text-xs font-bold text-cyan-900 dark:text-cyan-200 mt-0.5">
                               {formatDateTimeBr(rel.futuroContato)}
                             </p>
                           </div>
