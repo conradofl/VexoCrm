@@ -17,14 +17,9 @@ export const EVOLUTION_KEY_ENVS = [
 ];
 export const EVOLUTION_INSTANCE_ENVS = ["GD_EVOLUTION_INSTANCE", "GD_ONBOARDING_EVOLUTION_INSTANCE"];
 
-// Nomes que o código usa hoje como instância padrão quando a empresa não diz qual.
-export const INSTANCIAS_PADRAO_DO_CODIGO = [
-  "vexo-adm-vexo-atende",
-  "geracao-digital-comercial-hostery",
-  "geracao-digital-teste-vexo",
-  "gd-oficial",
-  "Teste",
-];
+// Nomes que o código usa como instância padrão quando a empresa não diz qual: services/defaultInstances.js (um lugar só).
+export { INSTANCIAS_PADRAO_DO_CODIGO } from "./defaultInstances.js";
+import { INSTANCIAS_PADRAO_DO_CODIGO } from "./defaultInstances.js";
 
 function definida(nome, env) {
   return typeof env[nome] === "string" && env[nome].trim() !== "";

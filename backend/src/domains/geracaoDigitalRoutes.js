@@ -28,6 +28,7 @@ import {
 import { buildCronograma } from "./geracaoDigitalContracts/contractMerge.js";
 import { sendTextMessageViaEvolution, sendTextViaEvolutionUrl } from "../services/evolution.js";
 import { toWhatsappNumberBr } from "../services/canonicalPhone.js";
+import { INSTANCIA_JURIDICO_SEM_ENV, instanciaGdDoEnv } from "../services/defaultInstances.js";
 
 let _evolutionSender = sendTextMessageViaEvolution;
 export function _setEvolutionSenderForTesting(fn) {
@@ -521,7 +522,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
         sendTextViaEvolutionUrl({
           url: evolutionUrl,
           apiKey: evolutionToken,
-          instance: dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste",
+          instance: dynamicInstanceName || instanciaGdDoEnv(INSTANCIA_JURIDICO_SEM_ENV),
           number,
           text,
         });
@@ -536,7 +537,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
           baseUrl = baseUrl.split("/message/sendText")[0];
         }
 
-        const instanceName = dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste";
+        const instanceName = dynamicInstanceName || instanciaGdDoEnv(INSTANCIA_JURIDICO_SEM_ENV);
         const endpoint = `${baseUrl}/group/create/${instanceName}`;
 
         const members = membersString.split(",").map(m => m.trim()).filter(Boolean);
@@ -589,7 +590,7 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       let whatsappGroupId = null;
       let whatsappGroupError = null;
       // Instância que será usada, para o front dizer qual quando o grupo falha.
-      const instanciaUsada = dynamicInstanceName || process.env.GD_EVOLUTION_INSTANCE || "Teste";
+      const instanciaUsada = dynamicInstanceName || instanciaGdDoEnv(INSTANCIA_JURIDICO_SEM_ENV);
 
       // Create WhatsApp Group
       if (createWhatsappGroup) {

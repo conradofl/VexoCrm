@@ -21,10 +21,11 @@ import {
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { pgDatabasePool } from "./database.js";
 import { resolveCandidateEvolutionInstances } from "../domains/geracaoDigitalContracts/contractEvolutionResolver.js";
+import { INSTANCIA_PADRAO_GD_COMERCIAL, INSTANCIA_PADRAO_VEXO_ADM } from "./defaultInstances.js";
 
 export const GD_CAIO_WHATSAPP_PADRAO = "5534997719779";
 export const DEFAULT_TICK_INTERVAL_MS = 30_000; // 30 segundos
-export const LEGACY_INVALID_INSTANCES = new Set(["vexo-adm-vexo-atende"]);
+export const LEGACY_INVALID_INSTANCES = new Set([INSTANCIA_PADRAO_VEXO_ADM]);
 
 let _schedulerInterval = null;
 let _isProcessing = false;
@@ -55,10 +56,10 @@ export async function processarLembretesBriefing({
     (instanceName && !LEGACY_INVALID_INSTANCES.has(instanceName) ? instanceName : null) ||
     (process.env.GD_ONBOARDING_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_ONBOARDING_EVOLUTION_INSTANCE) ? process.env.GD_ONBOARDING_EVOLUTION_INSTANCE : null) ||
     (process.env.GD_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_EVOLUTION_INSTANCE) ? process.env.GD_EVOLUTION_INSTANCE : null) ||
-    "geracao-digital-comercial-hostery";
+    INSTANCIA_PADRAO_GD_COMERCIAL;
 
   if (LEGACY_INVALID_INSTANCES.has(effectiveInstance)) {
-    effectiveInstance = "geracao-digital-comercial-hostery";
+    effectiveInstance = INSTANCIA_PADRAO_GD_COMERCIAL;
   }
 
   const webhookToken = candidate.webhookToken || null;
@@ -318,10 +319,10 @@ export async function processarRespostaBriefingNoWhatsApp({
     (instanceName && !LEGACY_INVALID_INSTANCES.has(instanceName) ? instanceName : null) ||
     (process.env.GD_ONBOARDING_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_ONBOARDING_EVOLUTION_INSTANCE) ? process.env.GD_ONBOARDING_EVOLUTION_INSTANCE : null) ||
     (process.env.GD_EVOLUTION_INSTANCE && !LEGACY_INVALID_INSTANCES.has(process.env.GD_EVOLUTION_INSTANCE) ? process.env.GD_EVOLUTION_INSTANCE : null) ||
-    "geracao-digital-comercial-hostery";
+    INSTANCIA_PADRAO_GD_COMERCIAL;
 
   if (LEGACY_INVALID_INSTANCES.has(effectiveInstance)) {
-    effectiveInstance = "geracao-digital-comercial-hostery";
+    effectiveInstance = INSTANCIA_PADRAO_GD_COMERCIAL;
   }
 
   const webhookToken = candidate.webhookToken || null;

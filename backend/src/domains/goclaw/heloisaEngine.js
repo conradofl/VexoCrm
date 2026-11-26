@@ -39,6 +39,7 @@ import {
   calculateTrelloMarcoDelays,
   formatarPrazoAmigavel,
 } from "../../services/trelloService.js";
+import { INSTANCIA_PADRAO_VEXO_ADM, INSTANCIA_TESTE_GD } from "../../services/defaultInstances.js";
 
 export const DIRETORES_AUTORIZADOS = {
   conrado: {
@@ -496,7 +497,7 @@ export async function obterInstanciaWhatsAppAtiva(pool = pgDatabasePool, tenantI
     console.warn("[Wandinha] Falha ao consultar instâncias ativas do banco:", err.message);
   }
 
-  return "vexo-adm-vexo-atende";
+  return INSTANCIA_PADRAO_VEXO_ADM;
 }
 
 /**
@@ -534,8 +535,8 @@ export async function obterInstanciasEvolutionAbertas(baseUrl, apiKey = null) {
       "wandinha-gd",
       "vexo-adm-wandinha",
       "wandinha",
-      "vexo-adm-vexo-atende",
-      "geracao-digital-teste-vexo",
+      INSTANCIA_PADRAO_VEXO_ADM,
+      INSTANCIA_TESTE_GD,
     ]);
     return list
       .filter((i) => i && (i.connectionStatus === "open" || i.connection_state === "open"))
@@ -584,7 +585,7 @@ export async function enviarMensagemWhatsAppComFallback({
         waMessageId: "mock-wa-test-id",
         mensagem: "Sucesso simulado em teste.",
         envio: { success: true, key: { id: "mock-wa-test-id" }, waMessageId: "mock-wa-test-id" },
-        instanceName: instanceName || "vexo-adm-vexo-atende",
+        instanceName: instanceName || INSTANCIA_PADRAO_VEXO_ADM,
       };
     }
   }
@@ -674,15 +675,15 @@ export async function enviarMensagemWhatsAppComFallback({
   }
 
   // 3. Fallbacks de segurança autorizados da Vexo
-  upsertCandidate("vexo-adm-vexo-atende", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
-  upsertCandidate("geracao-digital-teste-vexo", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
+  upsertCandidate(INSTANCIA_PADRAO_VEXO_ADM, { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
+  upsertCandidate(INSTANCIA_TESTE_GD, { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey });
   upsertCandidate("vexo-adm-wandinha-gd", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey, isWandinha: true });
   upsertCandidate("vexo-adm-wandinha", { baseUrl: defaultBaseUrl, webhookToken: defaultApiKey, isWandinha: true });
 
   const candidates = Array.from(candidateMap.values());
   // Só sobrepõe o topo se instanceName não for o fallback legado quando o chip real da Wandinha existe no banco
   const shouldPromoteExplicit =
-    Boolean(instanceName) && !(foundWandinhaInDb && instanceName === "vexo-adm-vexo-atende");
+    Boolean(instanceName) && !(foundWandinhaInDb && instanceName === INSTANCIA_PADRAO_VEXO_ADM);
   if (shouldPromoteExplicit) {
     const idx = candidates.findIndex((c) => c.slug === instanceName);
     if (idx > 0) {
@@ -905,7 +906,7 @@ export async function executarAgendarCompromisso(
     agenda_alvo,
   },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende",
+  instanceName = INSTANCIA_PADRAO_VEXO_ADM,
   diretorSolicitante = null
 ) {
   try {
@@ -1327,7 +1328,7 @@ _Reunião registrada no Vexo OS e link gerado automaticamente._`;
 export async function executarCancelarCompromisso(
   { termo_ou_titulo, data_hora, cancelar_todos_posteriores = false },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende",
+  instanceName = INSTANCIA_PADRAO_VEXO_ADM,
   diretorSolicitante = null
 ) {
   try {
@@ -1444,7 +1445,7 @@ export async function executarAtualizarCompromisso(
     evento_id,
   },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende",
+  instanceName = INSTANCIA_PADRAO_VEXO_ADM,
   diretorSolicitante = null
 ) {
   try {
@@ -1956,7 +1957,7 @@ export async function executarCriarFollowup(
     notas,
   },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende",
+  instanceName = INSTANCIA_PADRAO_VEXO_ADM,
   diretorSolicitante = null
 ) {
   try {
@@ -2118,7 +2119,7 @@ export async function executarAbrirCardTrello(
     tipo_demanda = null,
   },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende",
+  instanceName = INSTANCIA_PADRAO_VEXO_ADM,
   diretor = null
 ) {
   try {
@@ -2300,7 +2301,7 @@ export async function executarAbrirCardTrello(
 export async function executarGerarContratoGomes(
   { cliente_nome, valor = null, escopo = null, aprovador_nome = null, telefone = null },
   pool = pgDatabasePool,
-  instanceName = "vexo-adm-vexo-atende",
+  instanceName = INSTANCIA_PADRAO_VEXO_ADM,
   diretor = null
 ) {
   try {

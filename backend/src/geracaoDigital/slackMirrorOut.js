@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import { INSTANCIA_GD_SEM_ENV, instanciaGdDoEnv } from "../services/defaultInstances.js";
 
 // Processar a mensagem de saída do Slack e enviar para a Evolution API (WhatsApp)
 export async function processSlackMessageToEvolution(pool, event) {
@@ -33,7 +34,7 @@ export async function processSlackMessageToEvolution(pool, event) {
     // 4. Integração Evolution API
     const evolutionUrl = process.env.GD_EVOLUTION_URL;
     const evolutionToken = process.env.GD_EVOLUTION_TOKEN;
-    const instanceName = process.env.GD_EVOLUTION_INSTANCE || "gd-oficial";
+    const instanceName = instanciaGdDoEnv(INSTANCIA_GD_SEM_ENV);
 
     if (!evolutionUrl || !evolutionToken) {
       throw new Error("Evolution URL ou Token não configurados no ambiente.");

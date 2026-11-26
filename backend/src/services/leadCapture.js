@@ -11,6 +11,7 @@ import {
 } from "./evolution.js";
 import { maskPhoneForLog, normalizeTenantKey } from "./tenant.js";
 import { leadSourceForAdOrigin, parseAdAttribution, recordLeadAdOrigin } from "../traffic/adOrigin.js";
+import { INSTANCIA_PADRAO_VEXO_ADM } from "./defaultInstances.js";
 
 /** Memória em processo para rate limit de IP (captura e telemetria). */
 const ipSubmissionWindow = new Map();
@@ -654,7 +655,7 @@ export async function dispatchCaptureAutoReply(
       `[leadCapture] Nome técnico da instância Evolution não encontrado para tenant "${clientId}". URL ausente ou malformada em lead_client_evolution_instances.`
     );
     if (clientId === "vexo-adm") {
-      targetInstanceName = "vexo-adm-vexo-atende";
+      targetInstanceName = INSTANCIA_PADRAO_VEXO_ADM;
     } else {
       console.warn(
         `[leadCapture] Tenant "${clientId}" sem chip configurado em lead_client_evolution_instances. Mensagem automática não enviada.`
@@ -824,7 +825,7 @@ export async function notifyOwnerOnCapture(pool, { clientId, alertText, chipInst
         `[leadCapture] Nome técnico da instância Evolution não encontrado para alerta ao dono (tenant "${clientId}"). URL ausente ou malformada em lead_client_evolution_instances.`
       );
       if (clientId === "vexo-adm") {
-        targetInstance = "vexo-adm-vexo-atende";
+        targetInstance = INSTANCIA_PADRAO_VEXO_ADM;
       } else {
         console.warn(
           `[leadCapture] Tenant "${clientId}" sem chip configurado para alertar dono. Alerta não enviado.`

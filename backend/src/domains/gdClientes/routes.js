@@ -66,6 +66,7 @@ import { gerarPortalToken, hashPortalToken } from "./portalTokens.js";
 import { temSufixoSecreto } from "./portalSlug.js";
 import { resolveCandidateEvolutionInstances } from "../geracaoDigitalContracts/contractEvolutionResolver.js";
 import { obterTelefonesEquipeGd } from "./gdColaboradoresMemoria.js";
+import { INSTANCIA_PADRAO_GD_COMERCIAL, INSTANCIA_PADRAO_VEXO_ADM } from "../../services/defaultInstances.js";
 
 export { GD_DONO, gerarPortalToken, hashPortalToken };
 const PERMISSAO_GD = "geracao_digital.proposals";
@@ -951,7 +952,7 @@ export function registerGdClientesRoutes(app, {
 
         const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
         const candidate = candidateInstances[0] || {};
-        const instanceName = candidate.slug || "geracao-digital-comercial-hostery";
+        const instanceName = candidate.slug || INSTANCIA_PADRAO_GD_COMERCIAL;
         const webhookToken = candidate.webhookToken || null;
         const baseUrl = candidate.baseUrl || null;
 
@@ -1285,7 +1286,7 @@ export function registerGdClientesRoutes(app, {
           (typeof req.body.instance_name === "string" && req.body.instance_name.trim()) ||
           process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
           process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+          INSTANCIA_PADRAO_VEXO_ADM;
 
         const communityRes = await evolutionCommunityLinker({
           instanceName,
@@ -1327,7 +1328,7 @@ export function registerGdClientesRoutes(app, {
           (typeof req.body.instance_name === "string" && req.body.instance_name.trim()) ||
           process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
           process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+          INSTANCIA_PADRAO_VEXO_ADM;
 
         const avatarRes = await brandingAvatarGenerator({
           clientName: cliente.nome,
@@ -1375,7 +1376,7 @@ export function registerGdClientesRoutes(app, {
 
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
         const candidate = candidateInstances[0] || {};
-        const instanceName = candidate.slug || "geracao-digital-comercial-hostery";
+        const instanceName = candidate.slug || INSTANCIA_PADRAO_GD_COMERCIAL;
         const webhookToken = candidate.webhookToken || null;
         const baseUrl = candidate.baseUrl || null;
 
@@ -1492,7 +1493,7 @@ export function registerGdClientesRoutes(app, {
 
         const candidateInstances = await resolveCandidateEvolutionInstances(db, body.instance_name);
         const candidate = candidateInstances[0] || {};
-        const instanceName = candidate.slug || "geracao-digital-comercial-hostery";
+        const instanceName = candidate.slug || INSTANCIA_PADRAO_GD_COMERCIAL;
         const webhookToken = candidate.webhookToken || null;
         const baseUrl = candidate.baseUrl || null;
 
@@ -1647,7 +1648,7 @@ export function registerGdClientesRoutes(app, {
       try {
         const db = pool();
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
-        const instanceName = candidateInstances[0]?.slug || "geracao-digital-comercial-hostery";
+        const instanceName = candidateInstances[0]?.slug || INSTANCIA_PADRAO_GD_COMERCIAL;
         const now = req.body?.now ? new Date(req.body.now) : new Date();
 
         const resultado = await reminderProcessor({
@@ -1713,7 +1714,7 @@ export function registerGdClientesRoutes(app, {
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
         const candidate = candidateInstances[0];
-        const instanceName = candidate?.slug || "geracao-digital-comercial-hostery";
+        const instanceName = candidate?.slug || INSTANCIA_PADRAO_GD_COMERCIAL;
         const webhookToken = candidate?.webhookToken || null;
         const baseUrl = candidate?.baseUrl || null;
 
@@ -1749,7 +1750,7 @@ export function registerGdClientesRoutes(app, {
         const ator = req.authActor || { tipo: "humano", id: req.authAccess?.uid || "humano" };
         const candidateInstances = await resolveCandidateEvolutionInstances(db, req.body?.instance_name);
         const candidate = candidateInstances[0];
-        const instanceName = candidate?.slug || "geracao-digital-comercial-hostery";
+        const instanceName = candidate?.slug || INSTANCIA_PADRAO_GD_COMERCIAL;
         const webhookToken = candidate?.webhookToken || null;
         const baseUrl = candidate?.baseUrl || null;
 
@@ -1792,7 +1793,7 @@ export function registerGdClientesRoutes(app, {
           body.instance ||
           process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
           process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+          INSTANCIA_PADRAO_VEXO_ADM;
 
         const resultado = await approvalMessageProcessor({
           pool: db,
@@ -1912,7 +1913,7 @@ export function registerGdClientesRoutes(app, {
           (typeof body.instance_name === "string" && body.instance_name.trim()) ||
           process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
           process.env.GD_EVOLUTION_INSTANCE ||
-          "vexo-adm-vexo-atende";
+          INSTANCIA_PADRAO_VEXO_ADM;
 
         // Modo 1: Ingestão em lote / Watcher da pasta "Logos Novas" no Google Drive
         if (

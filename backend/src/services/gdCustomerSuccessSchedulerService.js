@@ -16,6 +16,7 @@ import { sendTextMessageViaEvolution } from "./evolution.js";
 import { pgDatabasePool } from "./database.js";
 import { GD_DONO } from "../domains/gdClientes/campos.js";
 import { garantirPortalSlugSecreto, temSufixoSecreto } from "../domains/gdClientes/portalSlug.js";
+import { INSTANCIA_PADRAO_VEXO_ADM } from "./defaultInstances.js";
 
 export const DEFAULT_CS_INTERVAL_DAYS = 14;
 export const GOOGLE_REVIEW_DAYS_THRESHOLD = 15;
@@ -178,7 +179,7 @@ export async function processarReguaCustomerSuccess({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    INSTANCIA_PADRAO_VEXO_ADM;
 
   // Busca clientes pertencentes à GD que tenham grupo de WhatsApp do cliente configurado
   const { rows: clientes } = await db.query(
