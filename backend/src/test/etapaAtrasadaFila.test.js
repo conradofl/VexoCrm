@@ -128,31 +128,39 @@ describe("[OBRIGATÓRIO] fila da etapa de campanha atrasada", () => {
   });
 });
 
-describe("[OBRIGATÓRIO] alerta de atraso da Evolution", () => {
+describe("[OBRIGATÓRIO] alerta de atraso da Evolution (WhatsApp do Conrado)", () => {
   const MIN = 60_000;
-  it(`${ATRASO_LIMITE} respostas atrasadas em 30 min: avisa no Slack uma vez, com empresas e mediana; resposta na hora não conta`, async () => {
+  it(`${ATRASO_LIMITE} respostas atrasadas em 30 min: avisa no WhatsApp uma vez, com empresas e mediana; resposta na hora não conta`, async () => {
     const slack = vi.fn(async () => {});
     const t0 = Date.UTC(2026, 10, 26, 12);
-    await registrarIdadeDaEntrada({ clientId: "adv", idadeMs: 5 * MIN, agora: t0, sendSlack: slack }); // na hora
-    for (let i = 0; i < ATRASO_LIMITE - 1; i += 1) await registrarIdadeDaEntrada({ clientId: "adv", idadeMs: 300 * MIN, agora: t0 + i * MIN, sendSlack: slack });
+    await registrarIdadeDaEntrada({ clientId: "adv", idadeMs: 5 * MIN, agora: t0, enviarAviso: slack }); // na hora
+    for (let i = 0; i < ATRASO_LIMITE - 1; i += 1) await registrarIdadeDaEntrada({ clientId: "adv", idadeMs: 300 * MIN, agora: t0 + i * MIN, enviarAviso: slack });
     expect(slack).not.toHaveBeenCalled();
-    expect(await registrarIdadeDaEntrada({ clientId: "tinge", idadeMs: 400 * MIN, agora: t0 + 10 * MIN, sendSlack: slack })).toBe(true);
+    expect(await registrarIdadeDaEntrada({ clientId: "tinge", idadeMs: 400 * MIN, agora: t0 + 10 * MIN, enviarAviso: slack })).toBe(true);
     expect(slack).toHaveBeenCalledTimes(1);
-    expect(slack.mock.calls[0][0].text).toMatch(/adv, tinge/);
-    expect(slack.mock.calls[0][0].text).toMatch(/atraso mediano 300 min/);
-    for (let i = 0; i < 10; i += 1) await registrarIdadeDaEntrada({ clientId: "adv", idadeMs: 300 * MIN, agora: t0 + (11 + i) * MIN, sendSlack: slack });
+    expect(slack.mock.calls[0][0].texto).toMatch(/adv, tinge/);
+    expect(slack.mock.calls[0][0].texto).toMatch(/atraso mediano 300 min/);
+    for (let i = 0; i < 10; i += 1) await registrarIdadeDaEntrada({ clientId: "adv", idadeMs: 300 * MIN, agora: t0 + (11 + i) * MIN, enviarAviso: slack });
     expect(slack).toHaveBeenCalledTimes(1); // no máximo um a cada 2 h
     expect(getInboundDelayAlertStatus(t0 + 20 * MIN)).toMatchObject({ alertasEnviados: 1, limite: ATRASO_LIMITE });
   });
 
-  it("atrasos espalhados (fora da janela de 30 min) não disparam; falha do Slack fica registrada e não lança", async () => {
+  it("atrasos espalhados (fora da janela de 30 min) não disparam; falha do envio fica registrada e não lança", async () => {
     const t0 = Date.UTC(2026, 10, 26, 12);
-    const slack = vi.fn(async () => { throw new Error("SLACK_BOT_TOKEN não configurado."); });
-    for (let i = 0; i < ATRASO_LIMITE; i += 1) await registrarIdadeDaEntrada({ clientId: "a", idadeMs: 100 * MIN, agora: t0 + i * 40 * MIN, sendSlack: slack });
+    const slack = vi.fn(async () => { throw new Error("Nenhuma instância autorizada da Vexo disponível para envio."); });
+    for (let i = 0; i < ATRASO_LIMITE; i += 1) await registrarIdadeDaEntrada({ clientId: "a", idadeMs: 100 * MIN, agora: t0 + i * 40 * MIN, enviarAviso: slack });
     expect(slack).not.toHaveBeenCalled();
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
-    for (let i = 0; i < ATRASO_LIMITE; i += 1) await registrarIdadeDaEntrada({ clientId: "a", idadeMs: 100 * MIN, agora: t0 + 300 * MIN + i, sendSlack: slack });
-    expect(getInboundDelayAlertStatus(t0 + 300 * MIN + 10).ultimoErroAlerta).toMatch(/SLACK_BOT_TOKEN/);
+    for (let i = 0; i < ATRASO_LIMITE; i += 1) await registrarIdadeDaEntrada({ clientId: "a", idadeMs: 100 * MIN, agora: t0 + 300 * MIN + i, enviarAviso: slack });
+    expect(getInboundDelayAlertStatus(t0 + 300 * MIN + 10).ultimoErroAlerta).toMatch(/Nenhuma instância autorizada/);
     err.mockRestore();
+  });
+  it("o envio padrão é o WhatsApp da Wandinha (sem Slack), com destino ADMIN_ALERT_PHONE ou o Conrado cadastrado", () => {
+    const src = readFileSync(resolve("src/services/inboundDelayAlert.js"), "utf8");
+    expect(src).toContain("enviarMensagemWhatsAppComFallback({ numero, texto, tenantId: \"vexo-adm\" })");
+    expect(src).toContain("process.env.ADMIN_ALERT_PHONE");
+    expect(src).toContain("DIRETORES_AUTORIZADOS?.conrado?.telefone");
+    expect(src).not.toMatch(/sendSlackMessage|trelloSlackReporter/);
+    expect(src).not.toMatch(/\d{10,}/); // nenhum telefone escrito aqui (repositório público)
   });
 });
