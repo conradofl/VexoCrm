@@ -4,7 +4,8 @@
 // existe. Havia dois criadores (evolution.js como UUID, chipQuota.js como TEXT) e leitores que assumiam cada um
 // dos tipos: um dos dois sempre quebrava (`uuid = text` / `text = uuid`).
 //
-// Provado em Postgres REAL (pglite) com a SQL do produto (importada, não copiada), partindo dos TRÊS estados
+// Provado em Postgres REAL (pglite) com a migration 20261004130000 (desde o untangle, 25/11/2026, o código não cria nem
+// converte mais a tabela: só a migration), partindo dos TRÊS estados
 // possíveis: tabela criada como UUID (o DDL antigo do evolution.js), como TEXT (o do chipQuota.js) e inexistente.
 // Limites do pglite (helpers/pgliteDb.js): não prova que roda em produção; todas as consultas rodam sem adaptação.
 
@@ -12,9 +13,6 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import {
-  CONVERGE_USAGE_INSTANCE_ID_SQL,
-  CREATE_USAGE_TABLE_SQL,
-  ensureEvolutionInstanceDailyUsageTable,
   getChipDailyUsage,
   releaseChipDailyQuota,
   reserveChipDailyQuota,
@@ -24,6 +22,7 @@ import { buildEvolutionInstancesSql, getLeadClientEvolutionInstances } from "../
 import { EVOLUTION_USAGE_REPORT_SQL } from "../domains/insights/routes.js";
 import { buildChipQuotaSql } from "../services/dashboardCalculations.js";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { CHIP_USAGE_MIGRATION_SQL } from "./helpers/chipUsageMigration.js";
 
 const SLOW = 60_000;
 const T = "tenant-a";
@@ -79,7 +78,7 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
         await db.query("INSERT INTO evolution_instance_daily_usage (instance_id, date, sent_count) VALUES ($1,'2026-01-01',3)", [CHIP_B]);
       }
 
-      await ensureEvolutionInstanceDailyUsageTable(db);
+      await db.exec(CHIP_USAGE_MIGRATION_SQL);
 
       expect(await tipo(db)).toBe("text");
       if (inicio !== "nenhum") {
@@ -101,7 +100,7 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
     it(`começando de '${inicio}': todos os LEITORES funcionam (tela de chips, relatório, dashboard)`, async () => {
       const db = await mundo(inicio);
       const dia = await hojeSP(db);
-      await ensureEvolutionInstanceDailyUsageTable(db);
+      await db.exec(CHIP_USAGE_MIGRATION_SQL);
       await reserveChipDailyQuota(CHIP, dia, db, 4);
 
       // "enviados hoje" na tela de chips — a função REAL do produto, com o pool do pglite
@@ -136,17 +135,10 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
     }
   }, SLOW);
 
-  it("o bloco da migration é o MESMO do código (não diverge), e a sentinela do migrate.js reconhece 'já é TEXT'", () => {
-    const sql = readFileSync(resolve("supabase/migrations/20261004130000_converge_evolution_instance_daily_usage_instance_id.sql"), "utf8");
+  it("a sentinela do migrate.js reconhece 'já é TEXT', e a migration já cria a tabela como TEXT", () => {
     const migrate = readFileSync(resolve("src/migrate.js"), "utf8");
-
-    expect(sql).toContain(CONVERGE_USAGE_INSTANCE_ID_SQL);
     expect(migrate).toMatch(/"20261004130000_converge_evolution_instance_daily_usage_instance_id\.sql":[^]*?data_type='text'/);
-  });
-
-  it("o DDL do criador único já nasce TEXT (não depende da convergência para ficar certo)", () => {
-    expect(CREATE_USAGE_TABLE_SQL).toMatch(/instance_id TEXT NOT NULL/);
-    expect(CREATE_USAGE_TABLE_SQL).not.toMatch(/UUID/i);
+    expect(CHIP_USAGE_MIGRATION_SQL).toMatch(/instance_id TEXT NOT NULL/);
   });
 
   it("[TESTE OBRIGATÓRIO] por que o ALTER antigo nunca converteu: com a FK de junho o Postgres RECUSA a troca de tipo (o .catch escondia)", async () => {
@@ -158,19 +150,17 @@ describe("a coluna converge para TEXT a partir de qualquer estado", () => {
     expect(await tipo(db)).toBe("uuid");
 
     // e o bloco novo (que derruba a FK antes) converte
-    await db.exec(CONVERGE_USAGE_INSTANCE_ID_SQL);
+    await db.exec(CHIP_USAGE_MIGRATION_SQL);
     expect(await tipo(db)).toBe("text");
   }, SLOW);
 
-  it("há UM criador só: evolution.js não cria mais a tabela, delega ao chipQuota.js", () => {
+  it("[untangle] nenhum código cria ou converte a tabela: só a migration", () => {
     const evolution = readFileSync(resolve("src/services/evolution.js"), "utf8");
     const quota = readFileSync(resolve("src/services/chipQuota.js"), "utf8");
-
-    expect(evolution).not.toMatch(/CREATE TABLE IF NOT EXISTS public\.evolution_instance_daily_usage/);
-    expect(evolution).toMatch(/ensureEvolutionInstanceDailyUsageTable\(db\)/);
-    expect(quota).toMatch(/CREATE TABLE IF NOT EXISTS public\.evolution_instance_daily_usage/);
-    // a conversão não engole erro (antes: .catch(() => {}) deixou a tabela em UUID em alguns bancos)
-    expect(quota).not.toMatch(/ALTER COLUMN instance_id TYPE TEXT\s*`\)\.catch/);
+    for (const src of [evolution, quota]) {
+      expect(src).not.toMatch(/CREATE TABLE IF NOT EXISTS public\.evolution_instance_daily_usage/);
+      expect(src).not.toMatch(/ALTER TABLE public\.evolution_instance_daily_usage/);
+    }
   });
 });
 
@@ -194,7 +184,7 @@ describe("'enviados hoje' é o dia do TENANT, o mesmo em que a cota é gravada",
 
   // semeia linhas distintas nos dias vizinhos (para que ler o dia errado dê outro número) e devolve o que há no dia pedido
   async function semear(db) {
-    await ensureEvolutionInstanceDailyUsageTable(db);
+    await db.exec(CHIP_USAGE_MIGRATION_SQL);
     const base = await dia(db, "America/Sao_Paulo");
     const hoje = (await db.query("SELECT to_char($1::date + g, 'YYYY-MM-DD') AS d, g FROM generate_series(-2, 2) g ORDER BY g", [base])).rows;
     for (const { d, g } of hoje) await reserveChipDailyQuota(CHIP, d, db, 10 + (g + 3) * 7); // 17, 24, 31, 38, 45: todos distintos
@@ -257,7 +247,7 @@ describe("'enviados hoje' é o dia do TENANT, o mesmo em que a cota é gravada",
 
   it("vários tenants no mapa: cada um com o dia do SEU fuso", async () => {
     const db = await mundo("nenhum");
-    await ensureEvolutionInstanceDailyUsageTable(db);
+    await db.exec(CHIP_USAGE_MIGRATION_SQL);
     await db.query("INSERT INTO lead_client_evolution_instances (id, client_id, name) VALUES ('cccccccc-0000-4000-8000-00000000000c', 'tenant-b', 'Chip C')");
     const utc = await dia(db, "UTC");
     const { fuso, dia: diaDoFuso } = await fusoQueNaoE(db, utc);

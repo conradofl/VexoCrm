@@ -17,6 +17,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
+import { applyChipUsageMigration } from "./helpers/chipUsageMigration.js";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { ensureEvolutionInstanceDailyUsageTable, reserveChipDailyQuota, resetChipQuotaStateForTest } from "../services/chipQuota.js";
 
@@ -157,7 +158,7 @@ async function mundo({ leads = 3 } = {}) {
   await db.exec(await readFile(join(MIGRATIONS, "20261029200000_create_campaign_queue_deferrals.sql"), "utf8"));
   await db.exec("TRUNCATE public.campaign_queue_deferrals");
   _setPgDatabasePoolForTesting({ query: (sql, params) => db.query(sql, params) });
-  await ensureEvolutionInstanceDailyUsageTable({ query: (sql, params) => db.query(sql, params) });
+  await applyChipUsageMigration(db); // a tabela nasce da migration (o código não cria mais)
   await db.exec("TRUNCATE public.evolution_instance_daily_usage");
   resetChipQuotaStateForTest?.();
   estado.settings = JANELA_ABERTA;
