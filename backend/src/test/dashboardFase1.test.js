@@ -564,7 +564,7 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
       expect(heavyComputationsCount).toBe(1);
     });
 
-    it("a checagem da tabela acontece uma vez em várias requisições", async () => {
+    it("[untangle] a tabela de cache vem da migration 20261002090000: nenhuma chamada roda CREATE TABLE", async () => {
       let createTableQueryCount = 0;
 
       const pool = makeMockPool({
@@ -594,8 +594,8 @@ describe("Dashboard Fase 1 — Regras e Especificações", () => {
         await ensureDashboardMetricsCacheTable(pool);
       }
 
-      // CREATE TABLE deve ter rodado rigorosamente 1 única vez
-      expect(createTableQueryCount).toBe(1);
+      // não roda DDL nenhuma (antes: 1 vez por processo)
+      expect(createTableQueryCount).toBe(0);
     });
   });
 });

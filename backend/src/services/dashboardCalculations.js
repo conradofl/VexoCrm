@@ -238,29 +238,11 @@ export function _resetDashboardCacheTableEnsuredForTest() {
 /**
  * Garante a existência da tabela de cache no banco. Executa apenas uma vez por processo.
  */
+// dashboard_metrics_cache: migration 20261002090000 (o CREATE em runtime saiu no untangle, 26/11/2026).
 export async function ensureDashboardMetricsCacheTable(pool) {
-  if (_dashboardMetricsCacheTableEnsured) return true;
   if (!pool) return false;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS public.dashboard_metrics_cache (
-        client_id TEXT NOT NULL,
-        period TEXT NOT NULL,
-        data JSONB NOT NULL,
-        status TEXT NOT NULL DEFAULT 'fresh',
-        calculated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        last_error TEXT,
-        PRIMARY KEY (client_id, period)
-      );
-      CREATE INDEX IF NOT EXISTS idx_dashboard_metrics_cache_lookup
-        ON public.dashboard_metrics_cache (client_id, period);
-    `);
-    _dashboardMetricsCacheTableEnsured = true;
-    return true;
-  } catch (err) {
-    console.warn("[dashboard] warn ensuring cache table:", err?.message || err);
-    return false;
-  }
+  _dashboardMetricsCacheTableEnsured = true;
+  return true;
 }
 
 /**

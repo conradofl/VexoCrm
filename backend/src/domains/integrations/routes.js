@@ -561,13 +561,7 @@ export function registerIntegrationsRoutes(app, deps) {
     // 2. Check/upsert tenant in Postgres
     try {
       if (pgDatabasePool) {
-        await pgDatabasePool.query(`
-          CREATE TABLE IF NOT EXISTS public.leads_clients (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          )
-        `).catch(() => {});
+        // leads_clients vem das migrations (20260304000001); o CREATE aqui saiu no untangle (26/11/2026).
 
         await pgDatabasePool.query(
           `INSERT INTO public.leads_clients (id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING`,

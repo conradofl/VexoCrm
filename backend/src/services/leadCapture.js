@@ -472,20 +472,7 @@ export async function saveCaptureLead(pool, { clientId, phone, fullName, email, 
 export const DAILY_CAPTURE_DISPATCH_LIMIT_PER_TENANT = 50;
 export const MAX_CAPTURE_DISPATCH_PER_PHONE_24H = 5;
 
-export const CREATE_LEAD_CAPTURE_DISPATCHES_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS public.lead_capture_dispatches (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    client_id TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'sent',
-    instance_name TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-  CREATE INDEX IF NOT EXISTS idx_lead_capture_dispatches_client_time 
-    ON public.lead_capture_dispatches (client_id, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_lead_capture_dispatches_phone_time 
-    ON public.lead_capture_dispatches (client_id, phone, created_at DESC);
-`;
+// lead_capture_dispatches: migration 20261126030000 (o CREATE rodava em runtime; saiu no untangle, 26/11/2026).
 
 let _leadCaptureDispatchesTableEnsured = false;
 
@@ -496,15 +483,8 @@ let _leadCaptureDispatchesTableEnsured = false;
  */
 export async function ensureLeadCaptureDispatchesTable(pool) {
   if (!pool) return false;
-  if (_leadCaptureDispatchesTableEnsured) return true;
-  try {
-    await pool.query(CREATE_LEAD_CAPTURE_DISPATCHES_TABLE_SQL);
-    _leadCaptureDispatchesTableEnsured = true;
-    return true;
-  } catch (err) {
-    console.warn("[leadCapture] Erro ao garantir tabela lead_capture_dispatches:", err?.message || err);
-    return false;
-  }
+  _leadCaptureDispatchesTableEnsured = true;
+  return true;
 }
 
 /** Reseta a flag de criação da tabela (útil para testes unitários). */

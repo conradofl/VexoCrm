@@ -401,9 +401,7 @@ export async function saveFunnelSettings(pool, clientId, vocabulary = {}) {
 
   // 1. Grava em leads_clients (garante coluna com fallback)
   try {
-    await pool.query(
-      `ALTER TABLE public.leads_clients ADD COLUMN IF NOT EXISTS funnel_config JSONB DEFAULT '{}'::jsonb`
-    );
+    // leads_clients.funnel_config: migration 20261126030000 (o ALTER rodava a cada gravação; saiu no untangle).
     await pool.query(
       `UPDATE public.leads_clients SET funnel_config = $1, updated_at = NOW() WHERE id = $2`,
       [JSON.stringify(funnelConfig), clientId]

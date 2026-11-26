@@ -12,16 +12,9 @@ export function resetSdrRotationStateForTest() {
   _sdrRotationStateSchemaEnsured = false;
 }
 
+// sdr_rotation_state: migration 20260918110000 (o CREATE em runtime saiu no untangle, 26/11/2026).
 export async function ensureSdrRotationStateTable(pool) {
   if (!pool) return false;
-  if (_sdrRotationStateSchemaEnsured) return true;
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.sdr_rotation_state (
-      client_id  TEXT        PRIMARY KEY,
-      cursor     INTEGER     NOT NULL DEFAULT 0,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
   _sdrRotationStateSchemaEnsured = true;
   return true;
 }

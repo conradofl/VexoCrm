@@ -225,18 +225,8 @@ export function resetLeadImportBatchStateForTest() {
   _batchColumnsEnsured = false;
 }
 
-/** Espelho em runtime da migration 20261005120000 (idempotente, memoizado por processo). */
+/** Colunas na migration 20261005120000. Não roda mais DDL (untangle, 26/11/2026); mantida para quem já chama. */
 export async function ensureLeadImportBatchColumns(pool) {
-  if (_batchColumnsEnsured) return true;
-  await pool.query(`
-    ALTER TABLE public.lead_imports
-      ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed',
-      ADD COLUMN IF NOT EXISTS expected_rows INTEGER,
-      ADD COLUMN IF NOT EXISTS received_offset INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS import_params JSONB,
-      ADD COLUMN IF NOT EXISTS import_stats JSONB,
-      ADD COLUMN IF NOT EXISTS fingerprint TEXT
-  `);
   _batchColumnsEnsured = true;
   return true;
 }

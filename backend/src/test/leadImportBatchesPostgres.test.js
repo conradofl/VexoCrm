@@ -560,19 +560,19 @@ describe("[TESTE OBRIGATÓRIO] matriz código × schema: o schema ANTIGO (sem as
     expect(lista[0]).toMatchObject({ source_name: "antiga.xlsx", status: "completed", expected_rows: null, received_offset: 0 });
   }, SLOW);
 
-  it("lista em schema antigo com DDL liberado: o espelho em runtime cria as colunas e a lista traz o status", async () => {
+  it("[untangle] lista em schema antigo com DDL liberado: o código NÃO cria mais as colunas (só a migration 20261005120000) e a lista segue funcionando", async () => {
     const { db, pool } = await mundo({ migrada: false });
     await db.exec(`INSERT INTO lead_imports (client_id, source_name) VALUES ('${T}', 'antiga.xlsx')`);
 
     const lista = await listLeadImports(pool, T);
 
-    expect(lista[0].status).toBe("completed"); // o DEFAULT da coluna: planilhas anteriores seguem completas
+    expect(lista[0].status).toBe("completed");
     const colunas = (await db.query("SELECT column_name FROM information_schema.columns WHERE table_name='lead_imports' AND column_name IN ('status','expected_rows','received_offset','import_params','import_stats','fingerprint')")).rows;
-    expect(colunas).toHaveLength(6);
+    expect(colunas).toHaveLength(0);
   }, SLOW);
 
-  it("importar em schema antigo com DDL liberado funciona de ponta a ponta (a migration não precisa ter rodado)", async () => {
-    const { pool } = await mundo({ migrada: false });
+  it("com a migration (como em produção) importar funciona de ponta a ponta", async () => {
+    const { pool } = await mundo({ migrada: true });
     const r = await importarTudo(pool, planilha(1_200));
     expect(r.fechamento.item.status).toBe("completed");
   }, SLOW);
@@ -581,16 +581,16 @@ describe("[TESTE OBRIGATÓRIO] matriz código × schema: o schema ANTIGO (sem as
     const { db, pool } = await mundo({ migrada: true });
 
     await db.exec(MIGRATION); // de novo
-    await ensureLeadImportBatchColumns(pool); // espelho depois da migration
+    expect(await ensureLeadImportBatchColumns(pool)).toBe(true); // não roda DDL (untangle)
 
     const colunas = (await db.query("SELECT column_name FROM information_schema.columns WHERE table_name='lead_imports'")).rows.map((c) => c.column_name);
     for (const c of ["status", "expected_rows", "received_offset", "import_params", "import_stats", "fingerprint"]) expect(colunas).toContain(c);
   }, SLOW);
 
-  it("importar em schema antigo com DDL BLOQUEADO falha com erro claro, sem criar nada pela metade", async () => {
+  it("importar em schema antigo (sem a migration) falha com erro claro, sem criar nada pela metade", async () => {
     const { db, pool } = await mundo({ migrada: false, ddlBloqueado: true });
 
-    await expect(openLeadImport(pool, { clientId: T, sourceName: "p", defaultDdd: "34", columnMapping: { mapping: MAPEAMENTO }, totalRows: 10 })).rejects.toThrow(/permission denied/);
+    await expect(openLeadImport(pool, { clientId: T, sourceName: "p", defaultDdd: "34", columnMapping: { mapping: MAPEAMENTO }, totalRows: 10 })).rejects.toThrow(/column "\w+" of relation "lead_imports" does not exist|permission denied/);
 
     expect((await db.query("SELECT count(*)::int AS n FROM lead_imports")).rows[0].n).toBe(0);
   }, SLOW);

@@ -282,14 +282,11 @@ describe("C — arquivo grande entra em lotes (não por um corpo único de 15 Mi
     expect((await m.post(`/api/leads/import-batches/${outro}/batches`, { startIndex: 0, rows: rows.slice(0, 5) })).status).toBe(403);
   }, SLOW);
 
-  it("funciona com o schema ANTIGO (sem as colunas de lote): as colunas são garantidas em tempo de execução", async () => {
+  it("[untangle] schema ANTIGO (sem a migration 20261005120000): o código não cria mais as colunas; abrir a importação falha com erro, sem gravar leads", async () => {
     const m = await novoMundo({ migrada: false });
     const rows = planilha(100);
-    const aberta = await abrirBanco(m, rows);
-    expect(aberta.item.status).toBe("incomplete");
-    expect(await enviarLotes(m, aberta.item.id, rows)).toBeNull();
-    const fechada = await (await m.post(`/api/leads/import-batches/${aberta.item.id}/close`, {})).json();
-    expect(fechada.item.status).toBe("completed");
-    expect(await contar(m, "SELECT count(*)::int AS n FROM leads")).toBe(90);
+    const r = await m.post("/api/leads/import-batches/open", { clientId: T, sourceName: "clientes-2026.xlsx", defaultDdd: "34", columnMapping: MAPEAMENTO, totalRows: rows.length, sampleRows: rows.slice(0, 15) });
+    expect(r.ok).toBe(false);
+    expect(await contar(m, "SELECT count(*)::int AS n FROM leads")).toBe(0);
   }, SLOW);
 });

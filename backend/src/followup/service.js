@@ -79,27 +79,10 @@ export const VALID_CONDITION_OPERATORS = [
   "is_not_empty",
 ];
 
+// Colunas e CHECKs de followup_templates na migration 20260929100000 (idênticos). Até 26/11/2026 este ponto refazia os
+// CHECKs (DROP + ADD, lock exclusivo) a cada chamada; saiu no untangle. Mantida para quem já chama.
 export async function ensureFollowupConditionalAndInternalColumns(pgClientOrPool) {
-  if (!pgClientOrPool) return;
-  try {
-    await pgClientOrPool.query(`
-      ALTER TABLE public.followup_templates 
-        ADD COLUMN IF NOT EXISTS step_type TEXT NOT NULL DEFAULT 'message',
-        ADD COLUMN IF NOT EXISTS action_type TEXT NULL,
-        ADD COLUMN IF NOT EXISTS action_payload JSONB DEFAULT '{}'::jsonb,
-        ADD COLUMN IF NOT EXISTS conditions JSONB DEFAULT '[]'::jsonb;
-      ALTER TABLE public.followup_templates DROP CONSTRAINT IF EXISTS followup_templates_step_type_check;
-      ALTER TABLE public.followup_templates
-        ADD CONSTRAINT followup_templates_step_type_check
-        CHECK (step_type IN ('message', 'internal_action'));
-      ALTER TABLE public.followup_templates DROP CONSTRAINT IF EXISTS followup_templates_action_type_check;
-      ALTER TABLE public.followup_templates
-        ADD CONSTRAINT followup_templates_action_type_check
-        CHECK (action_type IS NULL OR action_type IN ('create_reminder', 'change_stage', 'assign_operator', 'add_tag'));
-    `);
-  } catch (err) {
-    console.warn("[followup-service] Falha ao adicionar colunas de passos condicionais/ações internas em followup_templates:", err?.message || err);
-  }
+  return Boolean(pgClientOrPool);
 }
 
 export function validateTemplatePayload(payload = {}) {
