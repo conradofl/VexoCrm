@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
-import { classifyBarredReplies, getBarredRetakeStatus, _resetBarredRetakeStatusForTesting } from "../campaign/retomadaBarradas.js";
+import { classifyBarredReplies, getBarredRetakeStatus, runBarredRetakeTick, _resetBarredRetakeStatusForTesting } from "../campaign/retomadaBarradas.js";
 import { pickCampaignAwaitingReply } from "../campaign/replyRouting.js";
 
 const SEQ = { sequence: [
@@ -62,14 +62,11 @@ describe("classifyBarredReplies (não envia)", () => {
     expect(getBarredRetakeStatus(pool)).toEqual({ medido: false, emAndamento: true });
     await new Promise((r) => setTimeout(r, 400));
     const st = getBarredRetakeStatus(pool);
-    expect(st.modo).toBe("so_contagem");
+    expect(st.modo).toBe("contagem_no_boot");
+    expect(st.envio).toMatchObject({ enviadas: 0 });
     expect(JSON.stringify(st)).not.toMatch(/\d{10,}/);
   });
 
-  it("o módulo não envia: não importa continueCampaignLeadFromReply nem o motor de envio", () => {
-    const src = readFileSync(resolve("src/campaign/retomadaBarradas.js"), "utf8");
-    expect(src).not.toMatch(/continueCampaignLeadFromReply|dispatchCampaignSequence|sendText/);
-  });
 });
 
 describe("pickCampaignAwaitingReply (regra extraída do webhook, igual)", () => {
@@ -84,5 +81,88 @@ describe("pickCampaignAwaitingReply (regra extraída do webhook, igual)", () => 
   it("o webhook usa a função extraída", () => {
     const src = readFileSync(resolve("src/domains/chatbot/routes.js"), "utf8");
     expect(src).toContain("let activeWaitCampaign = pickCampaignAwaitingReply(campaignReplyContext);");
+  });
+});
+
+describe("[OBRIGATÓRIO] envio da retomada: aos poucos, uma vez por lead, só na janela", () => {
+  const JANELA_ABERTA = async () => ({ send_window_enabled: false });
+  const JANELA_FECHADA = async () => ({ send_window_enabled: true, send_window_start: "08:00", send_window_end: "09:00", send_window_days: ["seg"] });
+  const resultado = async (id) => (await db.query("SELECT meta->>'retomada_resultado' AS r FROM lead_messages WHERE id = $1", [id])).rows[0]?.r ?? null;
+  const idDe = async (phone) => (await db.query("SELECT id FROM lead_messages WHERE phone = $1 AND direction = 'inbound' ORDER BY created_at DESC LIMIT 1", [phone])).rows[0].id;
+  const deps = (over = {}) => ({
+    optedOut: async (_p, { phone }) => phone === "5534999669078",
+    findCampaignReplyMatches: async ({ phone }) => ctx(phone === "5534990001111" ? [] : [esperando()]),
+    getSettings: JANELA_ABERTA,
+    env: {},
+    ...over,
+  });
+
+  it("um envio por ciclo; atendida, opt-out e sem etapa são marcadas sem envio; ninguém recebe duas vezes", async () => {
+    const pool = await banco();
+    const enviados = [];
+    const continueReply = async (a) => { enviados.push(a.phone); return { continued: true }; };
+    // cada ciclo faz no máximo UM envio; roda até a fila esvaziar
+    const acoes = [];
+    for (let i = 0; i < 10; i += 1) {
+      const r = await runBarredRetakeTick({ pool, continueReply, ...deps() });
+      acoes.push(r.acao);
+      if (r.acao === "nada_pendente") break;
+    }
+    expect(acoes.filter((a) => a === "enviada")).toHaveLength(2);
+    expect(acoes.at(-1)).toBe("nada_pendente");
+    expect(enviados.sort()).toEqual(["5511999990001", "5534991342631"]);
+    expect(await resultado(await idDe("5534991442757"))).toBe("atendida_depois");
+    expect(await resultado(await idDe("5534999669078"))).toBe("opt_out");
+    expect(await resultado(await idDe("5534990001111"))).toBe("sem_etapa_pendente");
+    // o lead da Tinge tinha DUAS respostas barradas: as duas ficam marcadas (ele recebeu uma vez só)
+    const tinge = (await db.query("SELECT meta->>'retomada_resultado' AS r FROM lead_messages WHERE client_id = 'tinge' ORDER BY created_at")).rows;
+    expect(tinge).toEqual([{ r: "enviada" }, { r: "enviada" }]);
+    expect(await resultado(await idDe("5534991342631"))).toBe("enviada");
+  });
+
+  it("vai pelo caminho da resposta, com a hora real da resposta barrada e a campanha que espera", async () => {
+    const pool = await banco();
+    const chamadas = [];
+    await runBarredRetakeTick({ pool, continueReply: async (a) => { chamadas.push(a); return { continued: true }; }, ...deps() });
+    expect(chamadas[0]).toMatchObject({ clientId: "adv", phone: "5534991342631", campaignMatch: { id: "camp-1" } });
+    expect(chamadas[0].repliedAt).toBe("2026-11-18T21:23:00.000Z");
+  });
+
+  it("fora da janela da empresa: não envia e não marca", async () => {
+    const pool = await banco();
+    let chamou = false;
+    const r = await runBarredRetakeTick({ pool, now: new Date("2026-11-26T23:00:00Z"), continueReply: async () => { chamou = true; return { continued: true }; }, ...deps({ getSettings: JANELA_FECHADA }) });
+    expect(chamou).toBe(false);
+    expect(r.acao).toBe("nada_nesta_janela");
+    expect(await resultado(await idDe("5534991342631"))).toBeNull();
+  });
+
+  it("adiada (cota do chip / segurada): não marca, tenta de novo no próximo ciclo", async () => {
+    const pool = await banco();
+    const r = await runBarredRetakeTick({ pool, continueReply: async () => ({ continued: false, held: true, reason: "chip_quota_exhausted" }), ...deps() });
+    expect(r.acao).toBe("adiada");
+    expect(await resultado(await idDe("5534991342631"))).toBeNull();
+  });
+
+  it("o motor recusou (ex.: lead já não espera): marca com o motivo e não insiste; erro também marca (na dúvida, não repete)", async () => {
+    const pool = await banco();
+    await runBarredRetakeTick({ pool, continueReply: async () => ({ continued: false, reason: "lead_not_waiting_reply" }), ...deps() });
+    expect(await resultado(await idDe("5534991342631"))).toBe("lead_not_waiting_reply");
+    await runBarredRetakeTick({ pool, continueReply: async () => { throw new Error("evolution fora"); }, ...deps() });
+    expect(await resultado(await idDe("5511999990001"))).toMatch(/^erro: evolution fora/);
+  });
+
+  it("RETOMADA_BARRADAS_DESLIGADA=1 desliga sem deploy", async () => {
+    const pool = await banco();
+    let chamou = false;
+    const r = await runBarredRetakeTick({ pool, continueReply: async () => { chamou = true; return { continued: true }; }, ...deps({ env: { RETOMADA_BARRADAS_DESLIGADA: "1" } }) });
+    expect(r.acao).toBe("desligada");
+    expect(chamou).toBe(false);
+  });
+
+  it("server.js liga o ciclo e desliga no desligamento", () => {
+    const server = readFileSync(resolve("src/server.js"), "utf8");
+    expect(server).toContain("startBarredRetakeScheduler({ pool: pgDatabasePool });");
+    expect(server).toContain("stopBarredRetakeScheduler();");
   });
 });
