@@ -26,6 +26,16 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Scale,
+  Trophy,
+  BellRing,
+  Medal,
+  Flame,
+  MessageSquareReply,
+  ShieldAlert,
+  TrendingUp,
+  Pencil,
+  Phone,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,8 +73,49 @@ interface TorreCampaignItem {
   sentCount: number;
   remainingInQueue: number;
   failedCount: number;
+  stepsCount?: number;
+  isStuck?: boolean;
   pauseReason: string | null;
   lastTriggeredAt: string | null;
+}
+
+interface TorreAlertaItem {
+  id: string;
+  clientId: string;
+  clientName: string;
+  categoria:
+    | "campanha_travada"
+    | "chip_bloqueio"
+    | "inatividade"
+    | "cota_fila"
+    | "falha_entrega"
+    | "leads_sem_resposta"
+    | "futuro_contato"
+    | "sla_contato";
+  severidade: "critico" | "atencao";
+  titulo: string;
+  detalhe: string;
+  responsavel: string;
+}
+
+interface TorrePodiumEntry {
+  posicao: number;
+  clientId: string;
+  clientName: string;
+  responsavel: string;
+  disparosTotal: number;
+  disparosHoje: number;
+  respostasTotal: number;
+  leadsResponderam: number;
+  taxaRetornoPct: number;
+  scorePerformance: number;
+}
+
+interface TorreRankingPodium {
+  maisDispararam: TorrePodiumEntry[];
+  maisResponderam: TorrePodiumEntry[];
+  maiorTaxaRetorno: TorrePodiumEntry[];
+  melhorPerformance: TorrePodiumEntry[];
 }
 
 interface TorreContatoLog {
@@ -88,29 +139,44 @@ interface TorreClienteItem {
     total: number;
     connected: number;
     disconnected: number;
+    restricted?: number;
     usedQuotaToday: number;
     totalSentAllChips: number;
     totalDailyLimit: number;
+    quotaExhausted?: boolean;
     items: TorreChipItem[];
   };
   campanhas: {
     total: number;
     ativas: number;
     pausadas: number;
+    travadas?: number;
+    etapasRetidas?: number;
     totalLeads: number;
     enviadosTotal: number;
     filaRestante: number;
     falhasTotal: number;
+    diasSemCriarCampanha?: number | null;
     items: TorreCampaignItem[];
   };
   disparos: {
     enviadosHoje: number;
     respostasHoje: number;
+    enviados30d?: number;
+    respostas30d?: number;
+    leadsQueResponderam?: number;
+    taxaRetornoPct?: number;
+    taxaFalhaPct?: number;
+    scorePerformance?: number;
+    leadsAguardandoResposta?: number;
+    diasSemDisparo?: number | null;
     ultimoDisparoAt: string | null;
     ultimaRespostaAt: string | null;
   };
   relacionamento: {
     responsavel: string;
+    telefoneEmpresa?: string;
+    instrucaoWandinha?: string;
     horarioContato: string | null;
     futuroContato: string | null;
     futuroContatoStatus: "atrasado" | "hoje" | "agendado" | "sem_agendamento";
@@ -216,6 +282,20 @@ export default function SuperAdmin() {
   ]);
 
   const [clientes, setClientes] = useState<TorreClienteItem[]>([]);
+  const [quadroAlertas, setQuadroAlertas] = useState<TorreAlertaItem[]>([]);
+  const [rankingPodium, setRankingPodium] = useState<TorreRankingPodium>({
+    maisDispararam: [],
+    maisResponderam: [],
+    maiorTaxaRetorno: [],
+    melhorPerformance: [],
+  });
+  const [alertaCategoryFilter, setAlertaCategoryFilter] = useState<string>("all");
+  const [podiumTab, setPodiumTab] = useState<
+    "melhorPerformance" | "maisDispararam" | "maisResponderam" | "maiorTaxaRetorno"
+  >("melhorPerformance");
+  const [showAlertBoard, setShowAlertBoard] = useState(true);
+  const [showPodiumBoard, setShowPodiumBoard] = useState(true);
+
   const [resumoGlobal, setResumoGlobal] = useState({
     totalClientes: 0,
     clientesCriticos: 0,
@@ -227,6 +307,9 @@ export default function SuperAdmin() {
     totalDisparosHoje: 0,
     chipsConectados: 0,
     chipsDesconectados: 0,
+    totalAlertasAtivos: 0,
+    campanhasTravadasTotal: 0,
+    empresasInativasTotal: 0,
   });
 
   // Filtros da Torre (Filtro por Empresa como solicitado pelo Conrado)
@@ -240,13 +323,18 @@ export default function SuperAdmin() {
   // Estado independente de expandir/minimizar cada empresa (true = minimizado, false/undefined = expandido)
   const [minimizedClients, setMinimizedClients] = useState<Record<string, boolean>>({});
 
-  // Controle de formulário de Novo Contato / Futuro Contato por cliente
+  // Controle de formulário de Novo Contato / Edição de Contato e Instrução Wandinha por cliente
   const [openContactFormClientId, setOpenContactFormClientId] = useState<string | null>(null);
+  const [editingContatoId, setEditingContatoId] = useState<string | null>(null);
+  const [openWandinhaClientId, setOpenWandinhaClientId] = useState<string | null>(null);
   const [openHistoryClientIds, setOpenHistoryClientIds] = useState<Record<string, boolean>>({});
   const [savingContactClientId, setSavingContactClientId] = useState<string | null>(null);
+  const [savingWandinhaClientId, setSavingWandinhaClientId] = useState<string | null>(null);
   const [cobrandoClientId, setCobrandoClientId] = useState<string | null>(null);
 
   const [formResponsavel, setFormResponsavel] = useState("");
+  const [formTelefoneEmpresa, setFormTelefoneEmpresa] = useState("");
+  const [formInstrucaoWandinha, setFormInstrucaoWandinha] = useState("");
   const [formHorarioContato, setFormHorarioContato] = useState(() => toLocalDatetimeInputValue(new Date()));
   const [formFuturoContato, setFormFuturoContato] = useState(() =>
     toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000))
@@ -281,7 +369,13 @@ export default function SuperAdmin() {
         setColaboradores(data.colaboradoresDisponiveis);
       }
       if (data.resumoGlobal) {
-        setResumoGlobal(data.resumoGlobal);
+        setResumoGlobal((prev) => ({ ...prev, ...data.resumoGlobal }));
+      }
+      if (Array.isArray(data.quadroAlertas)) {
+        setQuadroAlertas(data.quadroAlertas);
+      }
+      if (data.rankingPodium) {
+        setRankingPodium(data.rankingPodium);
       }
       if (Array.isArray(data.clientes)) {
         setClientes(data.clientes);
@@ -342,12 +436,16 @@ export default function SuperAdmin() {
 
   const handleOpenContactForm = (cliente: TorreClienteItem) => {
     setMinimizedClients((prev) => ({ ...prev, [cliente.id]: false }));
-    if (openContactFormClientId === cliente.id) {
+    setOpenWandinhaClientId(null);
+    if (openContactFormClientId === cliente.id && !editingContatoId) {
       setOpenContactFormClientId(null);
       return;
     }
+    setEditingContatoId(null);
     setOpenContactFormClientId(cliente.id);
     setFormResponsavel(cliente.relacionamento.responsavel || "Gabriel Oliveira");
+    setFormTelefoneEmpresa(cliente.relacionamento.telefoneEmpresa || "");
+    setFormInstrucaoWandinha(cliente.relacionamento.instrucaoWandinha || cliente.relacionamento.demandaAtual || "");
     setFormHorarioContato(toLocalDatetimeInputValue(new Date()));
     setFormFuturoContato(
       cliente.relacionamento.futuroContato
@@ -358,15 +456,90 @@ export default function SuperAdmin() {
     setFormProximoAssunto(cliente.relacionamento.proximoAssunto || "");
   };
 
-  const handleSaveContato = async (clientId: string) => {
+  const handleOpenWandinhaPanel = (cliente: TorreClienteItem) => {
+    setMinimizedClients((prev) => ({ ...prev, [cliente.id]: false }));
+    setOpenContactFormClientId(null);
+    if (openWandinhaClientId === cliente.id) {
+      setOpenWandinhaClientId(null);
+      return;
+    }
+    setOpenWandinhaClientId(cliente.id);
+    setFormResponsavel(cliente.relacionamento.responsavel || "Gabriel Oliveira");
+    setFormTelefoneEmpresa(cliente.relacionamento.telefoneEmpresa || "");
+    setFormInstrucaoWandinha(
+      cliente.relacionamento.instrucaoWandinha ||
+        cliente.relacionamento.demandaAtual ||
+        "Verificar campanhas, fila de disparos e retorno dos leads desta empresa."
+    );
+  };
+
+  const handleSaveWandinhaConfig = async (clientId: string) => {
     try {
-      setSavingContactClientId(clientId);
+      setSavingWandinhaClientId(clientId);
       const headers = await getAuthHeaders();
-      const res = await fetchApi(`/api/superadmin/torre-clientes/${clientId}/contatos`, {
+      const res = await fetchApi(`/api/superadmin/torre-clientes/${clientId}/wandinha-config`, {
         method: "POST",
         headers,
         body: JSON.stringify({
           responsavel: formResponsavel,
+          telefoneEmpresa: formTelefoneEmpresa,
+          instrucaoWandinha: formInstrucaoWandinha,
+        }),
+      });
+      if (!res.ok) throw new Error("Falha ao salvar telefone da empresa e instrução da Wandinha.");
+      toast.success("WhatsApp da empresa e instrução de cobrança da Wandinha salvos!");
+      await fetchTorreData();
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao salvar configuração da Wandinha.");
+    } finally {
+      setSavingWandinhaClientId(null);
+    }
+  };
+
+  const handleEditContato = (cliente: TorreClienteItem, contato?: TorreContatoLog) => {
+    setMinimizedClients((prev) => ({ ...prev, [cliente.id]: false }));
+    setOpenWandinhaClientId(null);
+    const targetId = contato?.id || cliente.relacionamento.historicoContatos[0]?.id || "atual";
+    setEditingContatoId(targetId);
+    setOpenContactFormClientId(cliente.id);
+    setFormResponsavel(contato?.responsavel || cliente.relacionamento.responsavel || "Gabriel Oliveira");
+    setFormTelefoneEmpresa(cliente.relacionamento.telefoneEmpresa || "");
+    setFormInstrucaoWandinha(cliente.relacionamento.instrucaoWandinha || "");
+    setFormHorarioContato(
+      contato?.horarioContato
+        ? toLocalDatetimeInputValue(new Date(contato.horarioContato))
+        : cliente.relacionamento.horarioContato
+        ? toLocalDatetimeInputValue(new Date(cliente.relacionamento.horarioContato))
+        : toLocalDatetimeInputValue(new Date())
+    );
+    setFormFuturoContato(
+      contato?.futuroContato
+        ? toLocalDatetimeInputValue(new Date(contato.futuroContato))
+        : cliente.relacionamento.futuroContato
+        ? toLocalDatetimeInputValue(new Date(cliente.relacionamento.futuroContato))
+        : toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000))
+    );
+    setFormResumo(contato?.resumo || cliente.relacionamento.demandaAtual || "");
+    setFormProximoAssunto(contato?.proximoAssunto ?? cliente.relacionamento.proximoAssunto ?? "");
+  };
+
+  const handleSaveContato = async (clientId: string) => {
+    try {
+      setSavingContactClientId(clientId);
+      const headers = await getAuthHeaders();
+      const isEditing = Boolean(editingContatoId);
+      const endpoint = isEditing
+        ? `/api/superadmin/torre-clientes/${clientId}/contatos/${editingContatoId}`
+        : `/api/superadmin/torre-clientes/${clientId}/contatos`;
+      const method = isEditing ? "PUT" : "POST";
+
+      const res = await fetchApi(endpoint, {
+        method,
+        headers,
+        body: JSON.stringify({
+          responsavel: formResponsavel,
+          telefoneEmpresa: formTelefoneEmpresa,
+          instrucaoWandinha: formInstrucaoWandinha,
           horarioContato: formHorarioContato ? new Date(formHorarioContato).toISOString() : new Date().toISOString(),
           futuroContato: formFuturoContato ? new Date(formFuturoContato).toISOString() : null,
           resumo: formResumo,
@@ -375,8 +548,13 @@ export default function SuperAdmin() {
         }),
       });
       if (!res.ok) throw new Error("Falha ao salvar registro de contato.");
-      toast.success("Horário do contato e futuro contato registrados com sucesso!");
+      toast.success(
+        isEditing
+          ? "Contato e Futuro Contato atualizados com sucesso!"
+          : "Horário do contato e futuro contato registrados com sucesso!"
+      );
       setOpenContactFormClientId(null);
+      setEditingContatoId(null);
       setOpenHistoryClientIds((prev) => ({ ...prev, [clientId]: true }));
       await fetchTorreData();
     } catch (err: any) {
@@ -401,25 +579,41 @@ export default function SuperAdmin() {
     }
   };
 
-  const handleCobrarWandinha = async (cliente: TorreClienteItem) => {
+  const handleCobrarWandinha = async (
+    cliente: TorreClienteItem,
+    destino: "colaborador" | "empresa" = "colaborador"
+  ) => {
     try {
-      setCobrandoClientId(cliente.id);
+      setCobrandoClientId(`${cliente.id}:${destino}`);
       const headers = await getAuthHeaders();
       const res = await fetchApi(`/api/superadmin/torre-clientes/${cliente.id}/cobrar`, {
         method: "POST",
         headers,
         body: JSON.stringify({
           clientName: cliente.name,
-          responsavel: cliente.relacionamento.responsavel || "Gabriel Oliveira",
+          responsavel:
+            openWandinhaClientId === cliente.id
+              ? formResponsavel
+              : cliente.relacionamento.responsavel || "Gabriel Oliveira",
+          destino,
+          telefoneEmpresa:
+            openWandinhaClientId === cliente.id
+              ? formTelefoneEmpresa
+              : cliente.relacionamento.telefoneEmpresa || "",
+          instrucaoWandinha:
+            openWandinhaClientId === cliente.id
+              ? formInstrucaoWandinha
+              : cliente.relacionamento.instrucaoWandinha || cliente.relacionamento.demandaAtual || "",
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.sucesso === false) {
-        throw new Error(data?.message || "Falha ao disparar cobrança via Wandinha.");
+        throw new Error(data?.message || "Falha ao disparar mensagem via Wandinha.");
       }
-      toast.success(`Wandinha enviou a cobrança no WhatsApp de ${data.destinatario}!`);
+      toast.success(`Wandinha enviou a mensagem no WhatsApp de ${data.destinatario}!`);
+      await fetchTorreData();
     } catch (err: any) {
-      toast.error(err?.message || "Erro ao cobrar colaborador via Wandinha.");
+      toast.error(err?.message || "Erro ao enviar via Wandinha.");
     } finally {
       setCobrandoClientId(null);
     }
@@ -647,6 +841,280 @@ export default function SuperAdmin() {
         </Card>
       </div>
 
+      {/* QUADRO DE AVISOS / CENTRAL DE ALERTAS OPERACIONAIS */}
+      <Card className="border-rose-300 dark:border-rose-500/40 bg-card shadow-sm overflow-hidden">
+        <CardHeader className="py-3 px-4 border-b border-border/60 bg-rose-50/70 dark:bg-rose-950/25">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <BellRing className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+              <CardTitle className="text-base font-bold text-foreground">
+                Quadro de Avisos & Central de Alertas Operacionais
+              </CardTitle>
+              <Badge
+                variant="outline"
+                className="bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-200 dark:border-rose-500/40 font-semibold"
+              >
+                {quadroAlertas.length} alerta(s) ativo(s)
+              </Badge>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { key: "all", label: `Todos (${quadroAlertas.length})` },
+                {
+                  key: "futuro_contato",
+                  label: `📅 Futuro Contato (${
+                    quadroAlertas.filter((a) => a.categoria === "futuro_contato" || a.categoria === "sla_contato").length
+                  })`,
+                },
+                {
+                  key: "campanha_travada",
+                  label: `🛑 Campanha Parada/Etapa (${
+                    quadroAlertas.filter((a) => a.categoria === "campanha_travada" || a.categoria === "cota_fila").length
+                  })`,
+                },
+                {
+                  key: "chip_bloqueio",
+                  label: `📵 Chip / Bloqueio (${
+                    quadroAlertas.filter((a) => a.categoria === "chip_bloqueio").length
+                  })`,
+                },
+                {
+                  key: "inatividade",
+                  label: `⏳ Dias sem Disparo/Campanha (${
+                    quadroAlertas.filter((a) => a.categoria === "inatividade").length
+                  })`,
+                },
+                {
+                  key: "extras",
+                  label: `⚡ Leads & Falhas (${
+                    quadroAlertas.filter((a) =>
+                      ["leads_sem_resposta", "falha_entrega"].includes(a.categoria)
+                    ).length
+                  })`,
+                },
+              ].map((cat) => (
+                <button
+                  key={cat.key}
+                  type="button"
+                  onClick={() => setAlertaCategoryFilter(cat.key)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
+                    alertaCategoryFilter === cat.key
+                      ? "bg-rose-600 text-white border-rose-600"
+                      : "bg-background text-foreground/85 border-border hover:bg-muted"
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowAlertBoard((v) => !v)}
+                className="h-7 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                {showAlertBoard ? (
+                  <>
+                    <ChevronUp className="mr-1 h-3.5 w-3.5" /> Minimizar Quadro
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="mr-1 h-3.5 w-3.5" /> Expandir Quadro
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+
+        {showAlertBoard && (
+          <CardContent className="p-4">
+            {quadroAlertas.length === 0 ? (
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold">
+                ✅ Nenhum alerta crítico ou campanha travada no momento. Todas as empresas operando normalmente.
+              </p>
+            ) : (
+              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 max-h-72 overflow-y-auto pr-1">
+                {quadroAlertas
+                  .filter((a) => {
+                    if (alertaCategoryFilter === "all") return true;
+                    if (alertaCategoryFilter === "futuro_contato") {
+                      return a.categoria === "futuro_contato" || a.categoria === "sla_contato";
+                    }
+                    if (alertaCategoryFilter === "campanha_travada") {
+                      return a.categoria === "campanha_travada" || a.categoria === "cota_fila";
+                    }
+                    if (alertaCategoryFilter === "extras") {
+                      return ["leads_sem_resposta", "falha_entrega"].includes(a.categoria);
+                    }
+                    return a.categoria === alertaCategoryFilter;
+                  })
+                  .map((alerta) => (
+                    <div
+                      key={alerta.id}
+                      onClick={() => {
+                        setEmpresaFilter(alerta.clientId);
+                        setMinimizedClients((prev) => ({ ...prev, [alerta.clientId]: false }));
+                      }}
+                      className={`cursor-pointer rounded-xl border p-3 transition-all hover:shadow-md ${
+                        alerta.severidade === "critico"
+                          ? "border-rose-300 bg-rose-50/80 dark:border-rose-500/40 dark:bg-rose-950/30"
+                          : "border-amber-300 bg-amber-50/80 dark:border-amber-500/40 dark:bg-amber-950/25"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-xs text-foreground truncate">{alerta.clientName}</span>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] shrink-0 font-semibold ${
+                            alerta.severidade === "critico"
+                              ? "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/25 dark:text-rose-200 dark:border-rose-500/40"
+                              : "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-500/25 dark:text-amber-200 dark:border-amber-500/40"
+                          }`}
+                        >
+                          {alerta.severidade === "critico" ? "🔴 Crítico" : "🟡 Atenção"}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs font-bold text-rose-900 dark:text-rose-200 flex items-center gap-1">
+                        <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> {alerta.titulo}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-700 dark:text-slate-300 leading-snug">
+                        {alerta.detalhe}
+                      </p>
+                      <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground border-t border-border/60 pt-1.5">
+                        <span>Resp: <strong>{alerta.responsavel}</strong></span>
+                        <span className="text-purple-700 dark:text-purple-300 font-semibold">Filtrar empresa →</span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* PÓDIO TOP 5 MELHORES EMPRESAS (DISPAROS, RESPOSTAS, RETORNO % E PERFORMANCE GERAL) */}
+      <Card className="border-amber-300 dark:border-amber-500/40 bg-card shadow-sm overflow-hidden">
+        <CardHeader className="py-3 px-4 border-b border-border/60 bg-amber-50/70 dark:bg-amber-950/20">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Trophy className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              <CardTitle className="text-base font-bold text-foreground">
+                Pódio Top 5 Empresas · Ranking de Disparos, Retorno e Performance
+              </CardTitle>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { key: "melhorPerformance", label: "🏆 Melhor Performance Geral", icon: Trophy },
+                { key: "maisDispararam", label: "🚀 Mais Dispararam", icon: Flame },
+                { key: "maisResponderam", label: "💬 Mais Responderam", icon: MessageSquareReply },
+                { key: "maiorTaxaRetorno", label: "📈 Maior % de Retorno", icon: TrendingUp },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setPodiumTab(tab.key as any)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all border ${
+                    podiumTab === tab.key
+                      ? "bg-amber-600 text-white border-amber-600 shadow-2xs"
+                      : "bg-background text-foreground/85 border-border hover:bg-muted"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowPodiumBoard((v) => !v)}
+                className="h-7 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                {showPodiumBoard ? (
+                  <>
+                    <ChevronUp className="mr-1 h-3.5 w-3.5" /> Minimizar Pódio
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="mr-1 h-3.5 w-3.5" /> Expandir Pódio
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+
+        {showPodiumBoard && (
+          <CardContent className="p-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {(rankingPodium[podiumTab] || []).map((item) => {
+                const medalStyle =
+                  item.posicao === 1
+                    ? "border-amber-400 bg-amber-50/90 dark:border-amber-500/50 dark:bg-amber-950/30"
+                    : item.posicao === 2
+                    ? "border-slate-300 bg-slate-100/80 dark:border-slate-600 dark:bg-slate-900/60"
+                    : item.posicao === 3
+                    ? "border-orange-300 bg-orange-50/80 dark:border-orange-500/40 dark:bg-orange-950/25"
+                    : "border-border bg-card";
+                const medalEmoji =
+                  item.posicao === 1
+                    ? "🥇 1º Lugar"
+                    : item.posicao === 2
+                    ? "🥈 2º Lugar"
+                    : item.posicao === 3
+                    ? "🥉 3º Lugar"
+                    : `🏅 ${item.posicao}º Lugar`;
+
+                return (
+                  <div
+                    key={`${podiumTab}-${item.clientId}`}
+                    onClick={() => {
+                      setEmpresaFilter(item.clientId);
+                      setMinimizedClients((prev) => ({ ...prev, [item.clientId]: false }));
+                    }}
+                    className={`cursor-pointer rounded-xl border p-3 space-y-2 transition-all hover:shadow-md ${medalStyle}`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-extrabold text-amber-900 dark:text-amber-300 flex items-center gap-1">
+                        <Medal className="h-3.5 w-3.5 shrink-0" /> {medalEmoji}
+                      </span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-background border border-border text-foreground">
+                        Score {item.scorePerformance}
+                      </span>
+                    </div>
+
+                    <p className="text-sm font-bold text-foreground truncate" title={item.clientName}>
+                      {item.clientName}
+                    </p>
+
+                    <div className="grid grid-cols-3 gap-1 text-center pt-1">
+                      <div className="rounded bg-background/90 border border-border p-1">
+                        <p className="text-[9px] text-muted-foreground font-semibold">Disparos</p>
+                        <p className="text-xs font-bold text-foreground">{item.disparosTotal}</p>
+                      </div>
+                      <div className="rounded bg-background/90 border border-border p-1">
+                        <p className="text-[9px] text-muted-foreground font-semibold">Respostas</p>
+                        <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                          {item.respostasTotal}
+                        </p>
+                      </div>
+                      <div className="rounded bg-background/90 border border-border p-1">
+                        <p className="text-[9px] text-muted-foreground font-semibold">Retorno</p>
+                        <p className="text-xs font-bold text-purple-700 dark:text-purple-300">
+                          {item.taxaRetornoPct}%
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
       {/* Barra de Filtros e Filtro por Empresa */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-card border border-border p-3.5 rounded-2xl shadow-sm">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -858,13 +1326,14 @@ export default function SuperAdmin() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={cobrandoClientId === cliente.id}
-                        onClick={() => handleCobrarWandinha(cliente)}
+                        onClick={() => handleOpenWandinhaPanel(cliente)}
                         className="h-8 text-xs font-semibold border-purple-300 bg-purple-50 text-purple-900 hover:bg-purple-100 dark:border-purple-500/40 dark:bg-purple-500/15 dark:text-purple-200 dark:hover:bg-purple-500/25"
-                        title="Envia cobrança no WhatsApp do colaborador responsável via Wandinha"
+                        title="Configurar o que a Wandinha irá cobrar e o número de WhatsApp da empresa"
                       >
-                        <Send className="mr-1.5 h-3.5 w-3.5" />
-                        {cobrandoClientId === cliente.id ? "Enviando..." : "Cobrar via Wandinha"}
+                        <Bot className="mr-1.5 h-3.5 w-3.5" />
+                        {openWandinhaClientId === cliente.id
+                          ? "Fechar Instrução Wandinha"
+                          : "Instrução Wandinha & WhatsApp Empresa"}
                       </Button>
 
                       <Button
@@ -900,16 +1369,113 @@ export default function SuperAdmin() {
                 {/* Corpo Expansível da Empresa */}
                 {!isMinimized && (
                   <CardContent className="pt-4 space-y-4">
-                    {/* Formulário Inline de Novo Contato e Futuro Contato */}
+                    {/* Painel de Instrução da Wandinha & Conexão do Número WhatsApp da Empresa */}
+                    {openWandinhaClientId === cliente.id && (
+                      <div className="rounded-2xl border border-purple-300 bg-purple-50/90 dark:border-purple-500/40 dark:bg-purple-950/30 p-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-purple-900 dark:text-purple-200 flex items-center gap-1.5">
+                            <Bot className="h-4 w-4 text-purple-700 dark:text-purple-300" /> Instrução do que a Wandinha irá cobrar & Número WhatsApp da Empresa
+                          </h3>
+                          <span className="text-[11px] text-purple-800 dark:text-purple-300 font-medium">
+                            Conecte o WhatsApp da empresa e defina a instrução para a Wandinha cobrar o colaborador ou contatar a empresa
+                          </span>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                              <Phone className="h-3 w-3 text-emerald-600 dark:text-emerald-400" /> WhatsApp da Empresa (para a Wandinha contatar)
+                            </label>
+                            <Input
+                              placeholder="Ex: 5534999998888"
+                              value={formTelefoneEmpresa}
+                              onChange={(e) => setFormTelefoneEmpresa(e.target.value)}
+                              className="h-8 text-xs bg-background border-border text-foreground"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                              Colaborador Responsável a ser cobrado
+                            </label>
+                            <Select value={formResponsavel} onValueChange={setFormResponsavel}>
+                              <SelectTrigger className="h-8 text-xs bg-background border-border text-foreground">
+                                <SelectValue placeholder="Selecione o colaborador" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {colaboradores.map((col) => (
+                                  <SelectItem key={col.nome} value={col.nome}>
+                                    {col.nome}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-purple-900 dark:text-purple-200">
+                              Instrução do que a Wandinha irá cobrar / falar
+                            </label>
+                            <Input
+                              placeholder="Ex: Cobrar subida da planilha nova e retorno dos 57 leads..."
+                              value={formInstrucaoWandinha}
+                              onChange={(e) => setFormInstrucaoWandinha(e.target.value)}
+                              className="h-8 text-xs bg-background border-purple-400 dark:border-purple-500/50 text-foreground"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={savingWandinhaClientId === cliente.id}
+                            onClick={() => handleSaveWandinhaConfig(cliente.id)}
+                            className="h-8 text-xs font-semibold border-border bg-card text-foreground hover:bg-accent"
+                          >
+                            {savingWandinhaClientId === cliente.id ? "Salvando..." : "Salvar Telefone & Instrução"}
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            disabled={cobrandoClientId === `${cliente.id}:colaborador`}
+                            onClick={() => handleCobrarWandinha(cliente, "colaborador")}
+                            className="h-8 bg-purple-700 hover:bg-purple-800 dark:bg-purple-600 dark:hover:bg-purple-500 text-white text-xs font-semibold"
+                          >
+                            <Send className="mr-1.5 h-3.5 w-3.5" />
+                            {cobrandoClientId === `${cliente.id}:colaborador`
+                              ? "Enviando..."
+                              : `Cobrar Colaborador (${formResponsavel || "Equipe"})`}
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            disabled={cobrandoClientId === `${cliente.id}:empresa`}
+                            onClick={() => handleCobrarWandinha(cliente, "empresa")}
+                            className="h-8 bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 text-white text-xs font-semibold"
+                          >
+                            <Phone className="mr-1.5 h-3.5 w-3.5" />
+                            {cobrandoClientId === `${cliente.id}:empresa`
+                              ? "Contatando..."
+                              : "Wandinha Contatar WhatsApp da Empresa"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Formulário Inline de Novo Contato / Edição de Contato e Futuro Contato */}
                     {isFormOpen && (
                       <div className="rounded-2xl border border-cyan-300 bg-cyan-50/90 dark:border-cyan-500/40 dark:bg-cyan-950/30 p-4 space-y-3">
                         <div className="flex items-center justify-between">
                           <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-900 dark:text-cyan-200 flex items-center gap-1.5">
-                            <CalendarClock className="h-4 w-4 text-cyan-700 dark:text-cyan-300" /> Novo Registro de Contato & Agendamento de Futuro Contato
+                            <CalendarClock className="h-4 w-4 text-cyan-700 dark:text-cyan-300" />{" "}
+                            {editingContatoId
+                              ? "Editar Registro de Contato & Futuro Contato"
+                              : "Novo Registro de Contato & Agendamento de Futuro Contato"}
                           </h3>
                         </div>
 
-                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                           <div className="space-y-1">
                             <label className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
                               Colaborador Responsável
@@ -926,6 +1492,18 @@ export default function SuperAdmin() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
+                              WhatsApp da Empresa
+                            </label>
+                            <Input
+                              placeholder="Ex: 5534999998888"
+                              value={formTelefoneEmpresa}
+                              onChange={(e) => setFormTelefoneEmpresa(e.target.value)}
+                              className="h-8 text-xs bg-background border-border text-foreground"
+                            />
                           </div>
 
                           <div className="space-y-1">
@@ -983,7 +1561,11 @@ export default function SuperAdmin() {
                             onClick={() => handleSaveContato(cliente.id)}
                             className="h-8 bg-cyan-700 hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 text-white text-xs font-semibold"
                           >
-                            {savingContactClientId === cliente.id ? "Salvando..." : "Salvar Contato & Futuro Contato"}
+                            {savingContactClientId === cliente.id
+                              ? "Salvando..."
+                              : editingContatoId
+                              ? "Salvar Alterações"
+                              : "Salvar Contato & Futuro Contato"}
                           </Button>
                         </div>
                       </div>
@@ -991,16 +1573,39 @@ export default function SuperAdmin() {
 
                     {/* Grid de 3 Colunas por Cliente: 1) Contato & Futuro Contato, 2) Campanhas & Fila, 3) Chips & Limites */}
                     <div className="grid gap-4 lg:grid-cols-3">
-                      {/* BLOCO 1: HORÁRIO DO CONTATO & FUTURO CONTATO */}
+                      {/* BLOCO 1: HORÁRIO DO CONTATO & FUTURO CONTATO (COM BOTÕES DE EDITAR E EXCLUIR) */}
                       <div className="rounded-xl border border-border bg-slate-50/70 dark:bg-slate-900/40 p-3.5 space-y-3 flex flex-col justify-between">
                         <div className="space-y-2.5">
-                          <div className="flex items-center justify-between">
+                          <div className="flex flex-wrap items-center justify-between gap-1.5">
                             <span className="text-xs font-bold uppercase tracking-wider text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
                               <Clock className="h-3.5 w-3.5" /> Controle de Contato & Demandas
                             </span>
-                            <Badge variant="outline" className={`text-[10px] ${futuroBadge.cls}`}>
-                              {futuroBadge.label}
-                            </Badge>
+                            <div className="flex items-center gap-1">
+                              <Badge variant="outline" className={`text-[10px] ${futuroBadge.cls}`}>
+                                {futuroBadge.label}
+                              </Badge>
+                              <button
+                                type="button"
+                                onClick={() => handleEditContato(cliente)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-card border border-border text-foreground hover:bg-accent"
+                                title="Editar Horário do Contato, Futuro Contato e Demanda"
+                              >
+                                <Pencil className="h-3 w-3 text-cyan-700 dark:text-cyan-300" /> Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleDeleteContato(
+                                    cliente.id,
+                                    rel.historicoContatos[0]?.id || "atual"
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-card border border-rose-300 dark:border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                                title="Excluir / limpar o contato atual"
+                              >
+                                <Trash2 className="h-3 w-3" /> Excluir
+                              </button>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-2 gap-2 pt-1">
@@ -1023,12 +1628,28 @@ export default function SuperAdmin() {
                             </div>
                           </div>
 
-                          <div className="rounded-lg bg-card border border-border p-2.5 space-y-1 text-xs">
-                            <p className="text-[10px] uppercase font-semibold text-muted-foreground">
-                              Demanda Atual / Observação para Cobrança:
+                          {/* WhatsApp da Empresa & Instrução da Wandinha visíveis direto no bloco */}
+                          <div className="rounded-lg bg-card border border-border p-2.5 space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
+                                <Phone className="h-3 w-3 text-emerald-600 dark:text-emerald-400" /> WhatsApp da Empresa:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenWandinhaPanel(cliente)}
+                                className="text-[10px] font-semibold text-purple-700 dark:text-purple-300 hover:underline"
+                              >
+                                {rel.telefoneEmpresa ? `+${rel.telefoneEmpresa}` : "+ Inserir telefone"}
+                              </button>
+                            </div>
+
+                            <p className="text-[10px] uppercase font-semibold text-muted-foreground pt-1">
+                              Demanda Atual / Instrução para Cobrança:
                             </p>
                             <p className="text-foreground font-medium">
-                              {rel.demandaAtual || "Nenhuma demanda registrada ainda. Clique em Registrar Contato."}
+                              {rel.instrucaoWandinha ||
+                                rel.demandaAtual ||
+                                "Nenhuma demanda registrada ainda. Clique em Registrar Contato ou Instrução Wandinha."}
                             </p>
                             {rel.proximoAssunto && (
                               <p className="text-[11px] text-cyan-800 dark:text-cyan-300 pt-1 font-medium">
@@ -1076,6 +1697,14 @@ export default function SuperAdmin() {
                                         </span>
                                         <button
                                           type="button"
+                                          onClick={() => handleEditContato(cliente, h)}
+                                          className="text-muted-foreground hover:text-cyan-700 dark:hover:text-cyan-300"
+                                          title="Editar este registro"
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </button>
+                                        <button
+                                          type="button"
                                           onClick={() => handleDeleteContato(cliente.id, h.id)}
                                           className="text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400"
                                           title="Excluir registro"
@@ -1108,11 +1737,16 @@ export default function SuperAdmin() {
                           <span className="text-[11px] text-muted-foreground">
                             Último disparo:{" "}
                             <strong className="text-foreground">{formatDateTimeBr(cliente.disparos.ultimoDisparoAt)}</strong>
+                            {typeof cliente.disparos.diasSemDisparo === "number" && cliente.disparos.diasSemDisparo > 0 && (
+                              <span className="ml-1 text-amber-800 dark:text-amber-300 font-semibold">
+                                ({cliente.disparos.diasSemDisparo}d atrás)
+                              </span>
+                            )}
                           </span>
                         </div>
 
-                        {/* Mini-KPIs da Fila */}
-                        <div className="grid grid-cols-4 gap-1.5 text-center">
+                        {/* Mini-KPIs da Fila & Retorno */}
+                        <div className="grid grid-cols-5 gap-1.5 text-center">
                           <div className="rounded-lg bg-card border border-border p-1.5">
                             <p className="text-[10px] text-muted-foreground font-medium">Total Leads</p>
                             <p className="text-xs font-bold text-foreground">{cliente.campanhas.totalLeads}</p>
@@ -1133,6 +1767,12 @@ export default function SuperAdmin() {
                             <p className="text-[10px] text-muted-foreground font-medium">Hoje (24h)</p>
                             <p className="text-xs font-bold text-cyan-700 dark:text-cyan-300">
                               {cliente.disparos.enviadosHoje}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-purple-50/70 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-500/40 p-1.5">
+                            <p className="text-[10px] text-purple-800 dark:text-purple-300 font-semibold">Retorno</p>
+                            <p className="text-xs font-bold text-purple-900 dark:text-purple-200">
+                              {cliente.disparos.taxaRetornoPct || 0}%
                             </p>
                           </div>
                         </div>

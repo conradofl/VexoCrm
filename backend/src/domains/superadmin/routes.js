@@ -5,9 +5,12 @@ import { normalizeChipLimits } from "../../access/chipLimit.js";
 import {
   buildTorreClientesOverview,
   cobrarColaboradorTorreViaWandinha,
+  editarContatoTorreCliente,
   isGdTorreAccessEnabled,
+  limparControleContatoTorreCliente,
   registrarContatoTorreCliente,
   removerContatoTorreCliente,
+  salvarConfigWandinhaTorreCliente,
   setGdTorreAccess,
 } from "./torreClientesService.js";
 
@@ -78,11 +81,13 @@ export function registerSuperAdminRoutes(app, deps) {
   app.post("/api/superadmin/torre-clientes/:clientId/contatos", requireFirebaseAuth, requireTorreClientesAccess, async (req, res) => {
     try {
       const { clientId } = req.params;
-      const { responsavel, horarioContato, futuroContato, resumo, proximoAssunto, demandaAtual } = req.body || {};
+      const { responsavel, telefoneEmpresa, instrucaoWandinha, horarioContato, futuroContato, resumo, proximoAssunto, demandaAtual } = req.body || {};
       const criadoPor = req.authAccess?.name || req.authAccess?.email || "Conrado";
       const result = await registrarContatoTorreCliente(pgDatabasePool, {
         clientId,
         responsavel,
+        telefoneEmpresa,
+        instrucaoWandinha,
         horarioContato,
         futuroContato,
         resumo,
@@ -97,7 +102,37 @@ export function registerSuperAdminRoutes(app, deps) {
     }
   });
 
-  // DELETE /api/superadmin/torre-clientes/:clientId/contatos/:contatoId -> Remover item do histórico de contatos
+  // PUT /api/superadmin/torre-clientes/:clientId/contatos/:contatoId -> Editar Contato / Futuro Contato
+  app.put(
+    "/api/superadmin/torre-clientes/:clientId/contatos/:contatoId",
+    requireFirebaseAuth,
+    requireTorreClientesAccess,
+    async (req, res) => {
+      try {
+        const { clientId, contatoId } = req.params;
+        const { responsavel, telefoneEmpresa, instrucaoWandinha, horarioContato, futuroContato, resumo, proximoAssunto, demandaAtual } = req.body || {};
+        const updatedBy = req.authAccess?.name || req.authAccess?.email || "Conrado";
+        const atualizado = await editarContatoTorreCliente(pgDatabasePool, {
+          clientId,
+          contatoId: contatoId === "atual" ? null : contatoId,
+          responsavel,
+          telefoneEmpresa,
+          instrucaoWandinha,
+          horarioContato,
+          futuroContato,
+          resumo,
+          proximoAssunto,
+          demandaAtual,
+          updatedBy,
+        });
+        res.json({ ok: true, clienteControle: atualizado });
+      } catch (err) {
+        res.status(500).json({ error: "TORRE_CONTACT_EDIT_FAILED", message: err?.message || "Erro ao editar contato." });
+      }
+    }
+  );
+
+  // DELETE /api/superadmin/torre-clientes/:clientId/contatos/:contatoId -> Remover item do histórico ou limpar controle atual
   app.delete(
     "/api/superadmin/torre-clientes/:clientId/contatos/:contatoId",
     requireFirebaseAuth,
@@ -106,7 +141,10 @@ export function registerSuperAdminRoutes(app, deps) {
       try {
         const { clientId, contatoId } = req.params;
         const updatedBy = req.authAccess?.email || "Conrado";
-        const atualizado = await removerContatoTorreCliente(pgDatabasePool, { clientId, contatoId, updatedBy });
+        const atualizado =
+          contatoId === "atual"
+            ? await limparControleContatoTorreCliente(pgDatabasePool, { clientId, updatedBy })
+            : await removerContatoTorreCliente(pgDatabasePool, { clientId, contatoId, updatedBy });
         res.json({ ok: true, clienteControle: atualizado });
       } catch (err) {
         res.status(500).json({ error: "TORRE_CONTACT_DELETE_FAILED", message: err?.message || "Erro ao remover contato." });
@@ -114,16 +152,48 @@ export function registerSuperAdminRoutes(app, deps) {
     }
   );
 
-  // POST /api/superadmin/torre-clientes/:clientId/cobrar -> Cobrar colaborador responsável via Wandinha no WhatsApp
+  // POST /api/superadmin/torre-clientes/:clientId/wandinha-config -> Salvar WhatsApp da empresa e instrução do que a Wandinha irá cobrar
+  app.post(
+    "/api/superadmin/torre-clientes/:clientId/wandinha-config",
+    requireFirebaseAuth,
+    requireTorreClientesAccess,
+    async (req, res) => {
+      try {
+        const { clientId } = req.params;
+        const { telefoneEmpresa, instrucaoWandinha, responsavel } = req.body || {};
+        const updatedBy = req.authAccess?.name || req.authAccess?.email || "Conrado";
+        const atualizado = await salvarConfigWandinhaTorreCliente(pgDatabasePool, {
+          clientId,
+          telefoneEmpresa,
+          instrucaoWandinha,
+          responsavel,
+          updatedBy,
+        });
+        res.json({ ok: true, clienteControle: atualizado });
+      } catch (err) {
+        res.status(500).json({
+          error: "TORRE_WANDINHA_CONFIG_FAILED",
+          message: err?.message || "Erro ao salvar telefone da empresa e instrução da Wandinha.",
+        });
+      }
+    }
+  );
+
+  // POST /api/superadmin/torre-clientes/:clientId/cobrar -> Cobrar colaborador responsável ou entrar em contato com WhatsApp da empresa via Wandinha
   app.post("/api/superadmin/torre-clientes/:clientId/cobrar", requireFirebaseAuth, requireTorreClientesAccess, async (req, res) => {
     try {
       const { clientId } = req.params;
-      const { clientName, responsavel, mensagemCustomizada } = req.body || {};
+      const { clientName, responsavel, destino, telefoneEmpresa, instrucaoWandinha, mensagemCustomizada } = req.body || {};
+      const updatedBy = req.authAccess?.name || req.authAccess?.email || "Conrado";
       const result = await cobrarColaboradorTorreViaWandinha(pgDatabasePool, {
         clientId,
         clientName,
         responsavel,
+        destino,
+        telefoneEmpresa,
+        instrucaoWandinha,
         mensagemCustomizada,
+        updatedBy,
       });
       res.json({ ok: true, ...result });
     } catch (err) {

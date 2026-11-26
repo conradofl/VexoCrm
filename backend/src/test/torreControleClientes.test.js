@@ -3,8 +3,10 @@ import { PGlite } from "@electric-sql/pglite";
 import {
   buildTorreClientesOverview,
   classifyFuturoContatoStatus,
+  editarContatoTorreCliente,
   registrarContatoTorreCliente,
   removerContatoTorreCliente,
+  salvarConfigWandinhaTorreCliente,
   setGdTorreAccess,
   isGdTorreAccessEnabled,
 } from "../domains/superadmin/torreClientesService.js";
@@ -145,8 +147,34 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
     expect(tb.relacionamento.futuroContato).toBe("2026-11-28T16:00:00.000Z");
     expect(tb.relacionamento.futuroContatoStatus).toBe("agendado");
     expect(tb.relacionamento.historicoContatos).toHaveLength(2);
+    expect(Array.isArray(overview.quadroAlertas)).toBe(true);
+    expect(overview.rankingPodium.maisDispararam[0].clientId).toBe("tinge-brasil");
+    expect(overview.rankingPodium.melhorPerformance[0].clientId).toBe("tinge-brasil");
 
-    // 4. Remover um contato do histórico
+    // 4. Editar um contato e configurar WhatsApp da Empresa + Instrução da Wandinha
+    const aposEdicao = await editarContatoTorreCliente(db, {
+      clientId: "tinge-brasil",
+      contatoId: c2.registro.id,
+      responsavel: "Gabriel Oliveira",
+      telefoneEmpresa: "5534998887777",
+      instrucaoWandinha: "Cobrar validação do lote 2 e retorno dos leads",
+      horarioContato: "2026-11-26T15:30:00Z",
+      futuroContato: "2026-11-29T10:00:00Z",
+      resumo: "Contato editado com instrução para Wandinha",
+      proximoAssunto: "Validar fechamento",
+    });
+    expect(aposEdicao.telefoneEmpresa).toBe("5534998887777");
+    expect(aposEdicao.instrucaoWandinha).toBe("Cobrar validação do lote 2 e retorno dos leads");
+    expect(aposEdicao.futuroContato).toBe("2026-11-29T10:00:00.000Z");
+
+    const cfgWandinha = await salvarConfigWandinhaTorreCliente(db, {
+      clientId: "tinge-brasil",
+      telefoneEmpresa: "5534998887777",
+      instrucaoWandinha: "Cobrar lote 3",
+    });
+    expect(cfgWandinha.instrucaoWandinha).toBe("Cobrar lote 3");
+
+    // 5. Remover um contato do histórico
     const aposRemocao = await removerContatoTorreCliente(db, {
       clientId: "tinge-brasil",
       contatoId: c2.registro.id,
