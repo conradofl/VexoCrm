@@ -194,12 +194,14 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
   let clientsRows = [];
   let chipsRows = [];
   let usageRows = [];
+  let runsByChipRows = [];
+  let msgsByChipRows = [];
   let campaignsRows = [];
   let dispatchesRows = [];
   let msgStatsRows = [];
 
   if (pool && typeof pool.query === "function") {
-    const [cRes, chRes, uRes, campRes, dispRes, mRes] = await Promise.all([
+    const [cRes, chRes, uRes, rChipRes, mChipRes, campRes, dispRes, mRes] = await Promise.all([
       pool
         .query(`SELECT id, name, created_at FROM public.leads_clients ORDER BY name ASC`)
         .catch(() => ({ rows: [] })),
@@ -213,10 +215,48 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         .catch(() => ({ rows: [] })),
       pool
         .query(
-          `SELECT instance_id::text AS instance_id, sent_count
-             FROM public.evolution_instance_daily_usage
-            WHERE usage_date = $1`,
+          `SELECT
+             instance_id::text AS instance_id,
+             COALESCE(SUM(sent_count) FILTER (WHERE date = $1::date), 0)::int AS sent_today,
+             COALESCE(SUM(sent_count), 0)::int AS sent_total
+           FROM public.evolution_instance_daily_usage
+           GROUP BY instance_id::text`,
           [todayKey]
+        )
+        .catch(() =>
+          pool
+            .query(
+              `SELECT
+                 instance_id::text AS instance_id,
+                 COALESCE(SUM(sent_count) FILTER (WHERE usage_date = $1), 0)::int AS sent_today,
+                 COALESCE(SUM(sent_count), 0)::int AS sent_total
+               FROM public.evolution_instance_daily_usage
+               GROUP BY instance_id::text`,
+              [todayKey]
+            )
+            .catch(() => ({ rows: [] }))
+        ),
+      pool
+        .query(
+          `SELECT
+             evolution_instance_id::text AS instance_id,
+             COUNT(*) FILTER (WHERE status = 'sent' AND COALESCE(sent_at, updated_at) >= NOW() - INTERVAL '24 hours')::int AS runs_today,
+             COUNT(*) FILTER (WHERE status = 'sent')::int AS runs_total
+           FROM public.campaign_dispatch_runs
+           WHERE evolution_instance_id IS NOT NULL
+           GROUP BY evolution_instance_id::text`
+        )
+        .catch(() => ({ rows: [] })),
+      pool
+        .query(
+          `SELECT
+             client_id,
+             LOWER(TRIM(instance_name)) AS instance_key,
+             COUNT(*) FILTER (WHERE direction = 'outbound' AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '24 hours')::int AS msgs_today,
+             COUNT(*) FILTER (WHERE direction = 'outbound')::int AS msgs_total
+           FROM public.lead_messages
+           WHERE instance_name IS NOT NULL AND TRIM(instance_name) <> ''
+           GROUP BY client_id, LOWER(TRIM(instance_name))`
         )
         .catch(() => ({ rows: [] })),
       pool
@@ -269,6 +309,8 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     clientsRows = cRes.rows || [];
     chipsRows = chRes.rows || [];
     usageRows = uRes.rows || [];
+    runsByChipRows = rChipRes.rows || [];
+    msgsByChipRows = mChipRes.rows || [];
     campaignsRows = campRes.rows || [];
     dispatchesRows = dispRes.rows || [];
     msgStatsRows = mRes.rows || [];
@@ -276,7 +318,27 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
 
   const usageByChipId = new Map();
   for (const u of usageRows) {
-    usageByChipId.set(String(u.instance_id), Number(u.sent_count) || 0);
+    usageByChipId.set(String(u.instance_id), {
+      sentToday: Number(u.sent_today) || 0,
+      sentTotal: Number(u.sent_total) || 0,
+    });
+  }
+
+  const runsByChipId = new Map();
+  for (const r of runsByChipRows) {
+    runsByChipId.set(String(r.instance_id), {
+      runsToday: Number(r.runs_today) || 0,
+      runsTotal: Number(r.runs_total) || 0,
+    });
+  }
+
+  const msgsByClientAndKey = new Map();
+  for (const m of msgsByChipRows) {
+    const key = `${String(m.client_id || "")}|${String(m.instance_key || "")}`;
+    msgsByClientAndKey.set(key, {
+      msgsToday: Number(m.msgs_today) || 0,
+      msgsTotal: Number(m.msgs_total) || 0,
+    });
   }
 
   const chipsByClient = new Map();
@@ -284,20 +346,51 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     const cid = String(ch.client_id || "");
     if (!chipsByClient.has(cid)) chipsByClient.set(cid, []);
     const limit = resolveChipDailyLimit(ch);
-    const used = usageByChipId.get(String(ch.id)) || 0;
-    const isConnected = ch.connection_state === "open" || !ch.connection_state || ch.connection_state === "unknown";
+    const chipIdStr = String(ch.id);
     const slug = ch.dispatch_webhook_url ? String(ch.dispatch_webhook_url).split("/").filter(Boolean).pop() : null;
+    const nameKey = String(ch.name || "").trim().toLowerCase();
+    const slugKey = String(slug || "").trim().toLowerCase();
+
+    const uStat = usageByChipId.get(chipIdStr) || { sentToday: 0, sentTotal: 0 };
+    const rStat = runsByChipId.get(chipIdStr) || { runsToday: 0, runsTotal: 0 };
+    const mStatName = nameKey ? msgsByClientAndKey.get(`${cid}|${nameKey}`) : null;
+    const mStatSlug = slugKey && slugKey !== nameKey ? msgsByClientAndKey.get(`${cid}|${slugKey}`) : null;
+    const mStatId = msgsByClientAndKey.get(`${cid}|${chipIdStr.toLowerCase()}`) || null;
+
+    const msgsToday = (mStatName?.msgsToday || 0) + (mStatSlug?.msgsToday || 0) + (mStatId?.msgsToday || 0);
+    const msgsTotal = (mStatName?.msgsTotal || 0) + (mStatSlug?.msgsTotal || 0) + (mStatId?.msgsTotal || 0);
+
+    // Prioriza a cota oficial do dia (evolution_instance_daily_usage, igual à tela Chips WhatsApp), com fallback para runs/mensagens
+    const usedToday = uStat.sentToday > 0 ? uStat.sentToday : Math.max(rStat.runsToday, msgsToday);
+    const totalSent = Math.max(uStat.sentTotal, rStat.runsTotal, msgsTotal, usedToday);
+
+    const isConnected = ch.connection_state === "open" || !ch.connection_state || ch.connection_state === "unknown";
     chipsByClient.get(cid).push({
-      id: String(ch.id),
+      id: chipIdStr,
       name: ch.name || "Chip",
       phone: ch.phone || slug || null,
       connected: isConnected,
       connectionState: ch.connection_state || "open",
-      chipState: ch.chip_state || "active",
-      usedToday: used,
+      chipState: ch.chip_state || "cold",
+      usedToday,
+      totalSent,
       dailyLimit: limit,
       isDefault: Boolean(ch.is_default),
+      balancePercentToday: 0,
+      balancePercentTotal: 0,
     });
+  }
+
+  // Calcula o balanceamento (% de participação de cada chip nos disparos do dia e no total da empresa)
+  for (const list of chipsByClient.values()) {
+    const sumToday = list.reduce((acc, c) => acc + c.usedToday, 0);
+    const sumTotal = list.reduce((acc, c) => acc + c.totalSent, 0);
+    for (const chip of list) {
+      chip.balancePercentToday =
+        sumToday > 0 ? Math.round((chip.usedToday / sumToday) * 100) : list.length > 0 ? Math.round(100 / list.length) : 0;
+      chip.balancePercentTotal =
+        sumTotal > 0 ? Math.round((chip.totalSent / sumTotal) * 100) : list.length > 0 ? Math.round(100 / list.length) : 0;
+    }
   }
 
   // Agrupa lotes por campaign_id
@@ -326,6 +419,7 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     const connectedChips = clientChips.filter((c) => c.connected).length;
     const disconnectedChips = clientChips.length - connectedChips;
     const usedQuotaToday = clientChips.reduce((acc, c) => acc + c.usedToday, 0);
+    const totalSentAllChips = clientChips.reduce((acc, c) => acc + (c.totalSent || 0), 0);
     const totalDailyLimit = clientChips.reduce((acc, c) => acc + c.dailyLimit, 0);
 
     const rawCampaigns = campaignsByClient.get(cid) || [];
@@ -482,6 +576,7 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         connected: connectedChips,
         disconnected: disconnectedChips,
         usedQuotaToday,
+        totalSentAllChips,
         totalDailyLimit,
         items: clientChips,
       },

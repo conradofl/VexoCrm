@@ -37,7 +37,7 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
       );
       CREATE TABLE public.evolution_instance_daily_usage (
         instance_id TEXT NOT NULL,
-        usage_date TEXT NOT NULL,
+        date DATE NOT NULL DEFAULT CURRENT_DATE,
         sent_count INTEGER DEFAULT 0
       );
       CREATE TABLE public.campaigns (
@@ -88,6 +88,10 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
        VALUES ('chip-tb-1', 'tinge-brasil', 'Chip Disparo Tinge', '+5534991112222', true, true, 'open', 50)`
     );
     await db.query(
+      `INSERT INTO public.evolution_instance_daily_usage (instance_id, date, sent_count)
+       VALUES ('chip-tb-1', '2026-11-26'::date, 19), ('chip-tb-1', '2026-11-25'::date, 31)`
+    );
+    await db.query(
       `INSERT INTO public.campaigns (id, client_id, name, status, starts_at)
        VALUES ('camp-tb-1', 'tinge-brasil', 'Campanha Fim de Ano', 'running', '2026-11-20T12:00:00Z')`
     );
@@ -127,6 +131,11 @@ describe("Torre de Controle de Clientes Vexo OS · Horário do Contato, Futuro C
     expect(tb.id).toBe("tinge-brasil");
     expect(tb.chips.connected).toBe(1);
     expect(tb.chips.totalDailyLimit).toBe(50);
+    expect(tb.chips.usedQuotaToday).toBe(19);
+    expect(tb.chips.totalSentAllChips).toBe(50);
+    expect(tb.chips.items[0].usedToday).toBe(19);
+    expect(tb.chips.items[0].totalSent).toBe(50);
+    expect(tb.chips.items[0].balancePercentToday).toBe(100);
     expect(tb.campanhas.totalLeads).toBe(150);
     expect(tb.campanhas.enviadosTotal).toBe(50);
     expect(tb.campanhas.filaRestante).toBe(100);
