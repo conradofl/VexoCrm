@@ -1132,7 +1132,7 @@ export function createCampaignDispatchEngine(deps) {
         });
       },
       onLeadCheckOptout: checkOptout,
-      onStepDispatched: async ({ lead, phone, step, sentAt, instanceName, activeChip }) => {
+      onStepDispatched: async ({ lead, phone, step, sentText, sentAt, instanceName, activeChip }) => {
         runChipTracker.record(lead?.id, activeChip);
         try {
           const rawChip = activeChip?.instanceId || activeChip?.instanceName || instanceName || dispatch?.evolution_instance_id || campaign?.evolution_instance_id || null;
@@ -1142,7 +1142,7 @@ export function createCampaignDispatchEngine(deps) {
           const isImageStep = step.type === "image" || Boolean(mediaUrl);
           const contentType = isImageStep ? "image" : (step.contentType || step.content_type || "text");
           const stepCaption = step.caption || step.image?.caption || "";
-          const messageText = step.message || step.text || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
+          const messageText = sentText || step.message || step.text || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
 
           await appendLeadMessage({
             clientId,

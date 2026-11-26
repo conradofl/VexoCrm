@@ -1116,7 +1116,7 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
     },
     waitForReplyMode: "block_next_lead",
     // Este caminho nao cria run (nao ha lote): sem isto o envio ficava sem nenhum registro.
-    onStepDispatched: async ({ phone, step, stepIndex, sentAt, instanceName }) => {
+    onStepDispatched: async ({ phone, step, sentText, stepIndex, sentAt, instanceName }) => {
       try {
         await appendLeadMessage({
           clientId,
@@ -1125,7 +1125,7 @@ export async function startNextCampaignLeadInQueue({ campaign, clientId, replied
           phone,
           senderType: "bot",
           direction: "outbound",
-          messageText: step.text || step.message || step.caption || "",
+          messageText: sentText || step.text || step.message || step.caption || "",
           deliveredAt: sentAt || new Date().toISOString(),
           messageTimestamp: sentAt || new Date().toISOString(),
           instanceName: instanceName || null,
@@ -3196,7 +3196,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
       },
       client: { id: clientId, name: await getClientName(clientId) },
     },
-    onStepDispatched: async ({ step, stepIndex, sentAt, instanceName, activeChip }) => {
+    onStepDispatched: async ({ step, sentText, stepIndex, sentAt, instanceName, activeChip }) => {
       const originalStepIndex = nextStepIndex + stepIndex;
       lastDispatchedStep = step;
       lastDispatchedOriginalIndex = originalStepIndex;
@@ -3223,7 +3223,7 @@ export async function continueCampaignLeadFromReply({ clientId, phone, repliedAt
             linkText = linkText ? `${linkText}\n\n${lUrl}` : lUrl;
           }
         }
-        const messageText = linkText || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
+        const messageText = sentText || linkText || stepCaption || (isImageStep ? (step.image?.name ? `[Imagem: ${step.image.name}]` : "[Imagem da Campanha]") : "");
 
         await appendLeadMessage({
           clientId,
