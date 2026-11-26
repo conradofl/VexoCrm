@@ -19,6 +19,7 @@
 
 import crypto from "node:crypto";
 import { ImportError } from "../services/leadImportBatches.js";
+import { lerIdsDeCampanha, resumoDeCampanhas } from "../services/campaignAgentSummary.js";
 import { previaSeparacao, separarLotes } from "../services/leadBatchSeparation.js";
 import { idsDaOrigem, lerOrigem, rotuloDaOrigem } from "../services/leadBatchOrigin.js";
 
@@ -304,6 +305,20 @@ export function registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool }) {
       res.json({ previa: await previaSeparacao(pgDatabasePool, { clientId: req.campaignAgentTenant, leadIds }) });
     } catch (error) {
       responder(res, error);
+    }
+  });
+
+  // Resumo de desempenho (enviados, falharam, responderam) das campanhas da empresa do token, para o analista do
+  // agente comparar formatos. Só leitura: ?ids=uuid,uuid (até 50).
+  app.get("/api/campaign-agent/campaigns/summary", requireCampaignAgentToken, async (req, res) => {
+    if (semBanco(res)) return;
+    const ids = lerIdsDeCampanha(req.query?.ids);
+    if (!ids.length) return deny(res, 400, "CAMPAIGN_IDS_REQUIRED", "Informe ids de campanha em ?ids=.");
+    try {
+      res.json({ campanhas: await resumoDeCampanhas(pgDatabasePool, { clientId: req.campaignAgentTenant, campaignIds: ids }) });
+    } catch (error) {
+      console.error("[campaign-agent] erro no resumo de campanhas:", error?.message || error);
+      deny(res, 500, "CAMPAIGN_SUMMARY_FAILED", "Falha ao ler o resumo das campanhas.");
     }
   });
 
