@@ -13,68 +13,48 @@ import type { StepActionButton } from "@/lib/leadImports/spreadsheet";
 
 type SequenceStep = CampaignSequenceStep & { buttons?: StepActionButton[] };
 
-function getStepChromaticStyle(order: number, type: "text" | "image" | "link") {
-  if (type === "link") {
-    return {
-      container:
-        "border-l-4 border-l-cyan-600 dark:border-l-cyan-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
-      badge:
-        "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/80 dark:text-cyan-300 font-semibold text-xs border border-cyan-200 dark:border-cyan-800/70",
-      badgeText: `🔗 PASSO ${order} · LINK / PÁGINA`,
-      marker: "bg-cyan-600 text-white dark:bg-cyan-500",
-    };
-  }
-  if (order === 1) {
-    return {
-      container:
-        "border-l-4 border-l-blue-600 dark:border-l-blue-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
-      badge:
-        "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800/70 border font-bold text-[10px] tracking-wide",
-      badgeText: "⚡ PASSO 1 · DISPARO INICIAL",
-      marker: "bg-blue-600 text-white dark:bg-blue-500",
-    };
-  }
-  if (order === 2) {
-    return {
-      container:
-        "border-l-4 border-l-emerald-600 dark:border-l-emerald-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
-      badge:
-        "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800/70 border font-bold text-[10px] tracking-wide",
-      badgeText: "💬 PASSO 2 · PÓS-RESPOSTA",
-      marker: "bg-emerald-600 text-white dark:bg-emerald-500",
-    };
-  }
-  if (order === 3 || type === "image") {
-    const isImage = type === "image";
-    return {
-      container:
-        "border-l-4 border-l-amber-500 dark:border-l-amber-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
-      badge:
-        "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-800/70 border font-bold text-[10px] tracking-wide",
-      badgeText: isImage ? `🖼️ PASSO ${order} · MÍDIA / IMAGEM` : "🖼️ PASSO 3 · MÍDIA / IMAGEM",
-      marker: "bg-amber-500 text-white dark:bg-amber-400 dark:text-slate-950",
-    };
-  }
-  // Passos subsequentes (4, 5...): alternar entre purple e rose
-  const isPurple = order % 2 === 0;
-  if (isPurple) {
-    return {
-      container:
-        "border-l-4 border-l-purple-600 dark:border-l-purple-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
-      badge:
-        "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/80 dark:text-purple-300 dark:border-purple-800/70 border font-bold text-[10px] tracking-wide",
-      badgeText: `🔄 PASSO ${order} · SEQUÊNCIA`,
-      marker: "bg-purple-600 text-white dark:bg-purple-500",
-    };
-  }
-  return {
-    container:
-      "border-l-4 border-l-rose-600 dark:border-l-rose-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
-    badge:
-      "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800/70 border font-bold text-[10px] tracking-wide",
-    badgeText: `🎯 PASSO ${order} · CONTINUAÇÃO`,
+// Cor e rótulo do cartão do passo. O RÓTULO segue o TIPO escolhido (texto, imagem, link) — até 26/11/2026 seguia a
+// POSIÇÃO: o passo 3 aparecia sempre como "MÍDIA / IMAGEM" (mesmo sendo texto), o 1 como "DISPARO INICIAL" e o 2 como
+// "PÓS-RESPOSTA", e parecia que o tipo estava "chumbado". O tipo enviado sempre foi o escolhido; só o rótulo mentia.
+// A cor do passo de texto continua variando pela posição, para distinguir um do outro.
+const ESTILO_POR_COR = {
+  blue: {
+    container: "border-l-4 border-l-blue-600 dark:border-l-blue-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800/70 border font-bold text-[10px] tracking-wide",
+    marker: "bg-blue-600 text-white dark:bg-blue-500",
+  },
+  emerald: {
+    container: "border-l-4 border-l-emerald-600 dark:border-l-emerald-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800/70 border font-bold text-[10px] tracking-wide",
+    marker: "bg-emerald-600 text-white dark:bg-emerald-500",
+  },
+  purple: {
+    container: "border-l-4 border-l-purple-600 dark:border-l-purple-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/80 dark:text-purple-300 dark:border-purple-800/70 border font-bold text-[10px] tracking-wide",
+    marker: "bg-purple-600 text-white dark:bg-purple-500",
+  },
+  rose: {
+    container: "border-l-4 border-l-rose-600 dark:border-l-rose-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800/70 border font-bold text-[10px] tracking-wide",
     marker: "bg-rose-600 text-white dark:bg-rose-500",
-  };
+  },
+  amber: {
+    container: "border-l-4 border-l-amber-500 dark:border-l-amber-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge: "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-800/70 border font-bold text-[10px] tracking-wide",
+    marker: "bg-amber-500 text-white dark:bg-amber-400 dark:text-slate-950",
+  },
+  cyan: {
+    container: "border-l-4 border-l-cyan-600 dark:border-l-cyan-400 bg-white dark:bg-slate-900/90 border border-slate-200/80 dark:border-slate-800 rounded-xl shadow-xs",
+    badge: "bg-cyan-50 text-cyan-700 dark:bg-cyan-950/80 dark:text-cyan-300 font-semibold text-xs border border-cyan-200 dark:border-cyan-800/70",
+    marker: "bg-cyan-600 text-white dark:bg-cyan-500",
+  },
+} as const;
+
+export function getStepChromaticStyle(order: number, type: "text" | "image" | "link") {
+  if (type === "link") return { ...ESTILO_POR_COR.cyan, badgeText: `🔗 PASSO ${order} · LINK / PÁGINA` };
+  if (type === "image") return { ...ESTILO_POR_COR.amber, badgeText: `🖼️ PASSO ${order} · MÍDIA / IMAGEM` };
+  const cor = order === 1 ? "blue" : order === 2 ? "emerald" : order % 2 === 0 ? "purple" : "rose";
+  return { ...ESTILO_POR_COR[cor], badgeText: `💬 PASSO ${order} · TEXTO` };
 }
 
 const VARIAVEIS_DO_LINK = ["{{nome}}", "{{primeiro_nome}}", "{{telefone}}"];
