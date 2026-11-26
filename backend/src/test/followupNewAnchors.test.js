@@ -266,19 +266,17 @@ describe("Item 05 — As Três Novas Âncoras no Follow-up", () => {
     });
   });
 
-  describe("5. Migração Idempotente de Banco (ensureLeadAnchorColumns)", () => {
-    it("ensureLeadAnchorColumns executa ALTER TABLE ADD COLUMN IF NOT EXISTS para as 3 colunas", async () => {
-      const mockPool = {
-        query: vi.fn().mockResolvedValue({ rows: [] }),
-      };
-
+  describe("5. Colunas de âncora vêm da migration (20261126020000), não do código", () => {
+    it("a migration cria as 3 colunas; ensureLeadAnchorColumns não roda DDL", async () => {
+      const { readFileSync } = await import("node:fs");
+      const { resolve } = await import("node:path");
+      const sql = readFileSync(resolve("supabase/migrations/20261126020000_leads_colunas_ancora.sql"), "utf8");
+      expect(sql).toContain("ADD COLUMN IF NOT EXISTS aniversario_casamento DATE");
+      expect(sql).toContain("ADD COLUMN IF NOT EXISTS epoca_ferias DATE");
+      expect(sql).toContain("ADD COLUMN IF NOT EXISTS data_retorno TIMESTAMPTZ");
+      const mockPool = { query: vi.fn().mockResolvedValue({ rows: [] }) };
       await ensureLeadAnchorColumns(mockPool);
-
-      expect(mockPool.query).toHaveBeenCalledTimes(1);
-      const alterSql = mockPool.query.mock.calls[0][0];
-      expect(alterSql).toContain("ADD COLUMN IF NOT EXISTS aniversario_casamento DATE");
-      expect(alterSql).toContain("ADD COLUMN IF NOT EXISTS epoca_ferias DATE");
-      expect(alterSql).toContain("ADD COLUMN IF NOT EXISTS data_retorno TIMESTAMPTZ");
+      expect(mockPool.query).not.toHaveBeenCalled();
     });
   });
 });
