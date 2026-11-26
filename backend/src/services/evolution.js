@@ -2,8 +2,7 @@
 // server.js — grupo E do mapa, Onda 3 Run D). Movimento puro: corpos idênticos aos
 // de server.js na revisão anterior a esta extração.
 //
-// _evolutionInstancesSchemaEnsured (antes `let` isolado em server.js) vira estado
-// privado deste módulo — só ensureLeadClientEvolutionInstancesTable o toca.
+// O esquema das tabelas daqui mora na migration 20261126010000 (DDL de runtime virou migration, untangle 26/11/2026).
 //
 // logCampaignDispatch: movida para cá (não estava no grupo E do mapa) porque
 // checkEvolutionInstanceHealth depende dela e o grafo de imports não permite que
@@ -26,7 +25,6 @@ import { normalizeTenantKey, normalizeHttpUrl } from "./tenant.js";
 import { toWhatsappNumberBr } from "./canonicalPhone.js";
 import { isMaskedSecretPlaceholder } from "./httpInfra.js";
 import { upsertLeadByPhone } from "./leadUpsert.js";
-import { ensureEvolutionInstanceDailyUsageTable } from "./chipQuota.js";
 import { getDateKey } from "./analytics.js";
 import { resolveSendWindowConfig } from "./sendWindow.js";
 import { reclassifyLeadFromMessages } from "./funnelService.js";
@@ -89,105 +87,11 @@ export function mergeEvolutionInstanceIntoSettings(settings, instance) {
   };
 }
 
-let _evolutionInstancesSchemaEnsured = false;
-
+// Esquema (chips, índices, auditoria de limite) na migration 20261126010000 (DDL de runtime virou migration, untangle).
+// Mantida para quem já chama: só diz se há banco.
 export async function ensureLeadClientEvolutionInstancesTable(pool = null) {
   const db = pool || pgDatabasePool;
-  if (!db) return false;
-  if (_evolutionInstancesSchemaEnsured && db === pgDatabasePool) return true;
-
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS public.leads_clients (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `).catch(() => {});
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS public.lead_client_evolution_instances (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        client_id TEXT NOT NULL,
-        name TEXT NOT NULL DEFAULT 'Evolution',
-        dispatch_webhook_url TEXT NOT NULL,
-        dispatch_webhook_token TEXT,
-        inbound_bearer_token TEXT,
-        owner_uid TEXT NULL,
-        active BOOLEAN NOT NULL DEFAULT true,
-        is_default BOOLEAN NOT NULL DEFAULT false,
-        webhook_enabled BOOLEAN NOT NULL DEFAULT false,
-        chip_state TEXT NOT NULL DEFAULT 'cold',
-        connection_state TEXT NOT NULL DEFAULT 'unknown',
-        daily_limit_override INTEGER,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_by_uid TEXT,
-        updated_by_email TEXT
-      )
-    `);
-
-    await db.query(`
-      ALTER TABLE public.lead_client_evolution_instances
-        ADD COLUMN IF NOT EXISTS connection_state TEXT NOT NULL DEFAULT 'unknown'
-    `).catch(() => {});
-
-    await db.query(`
-      ALTER TABLE public.lead_client_evolution_instances
-        ADD COLUMN IF NOT EXISTS owner_uid TEXT NULL
-    `).catch(() => {});
-
-    await db.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_client_evolution_default
-        ON public.lead_client_evolution_instances (client_id)
-        WHERE is_default = true
-    `).catch(() => {});
-
-    await db.query(`
-      CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_client
-        ON public.lead_client_evolution_instances (client_id, active)
-    `).catch(() => {});
-
-    await db.query(`
-      CREATE INDEX IF NOT EXISTS idx_lead_client_evolution_owner_uid
-        ON public.lead_client_evolution_instances (client_id, owner_uid)
-    `).catch(() => {});
-
-    // A tabela de uso diário tem UM criador só (services/chipQuota.js), com instance_id TEXT. Antes era criada
-    // aqui como UUID e lá como TEXT — cada leitor assumia um tipo e um dos dois quebrava.
-    await ensureEvolutionInstanceDailyUsageTable(db).catch((err) => {
-      console.warn("[evolution-instances] tabela de uso diário não pôde ser garantida:", err?.message || err);
-    });
-
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS public.evolution_instance_daily_limit_audit (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        instance_id TEXT NOT NULL,
-        client_id TEXT NOT NULL,
-        previous_limit INTEGER,
-        new_limit INTEGER,
-        changed_by_uid TEXT,
-        changed_by_email TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )
-    `).catch(() => {});
-
-    await db.query(`
-      CREATE INDEX IF NOT EXISTS idx_evolution_instance_daily_limit_audit_instance
-        ON public.evolution_instance_daily_limit_audit (instance_id, created_at DESC)
-    `).catch(() => {});
-
-    if (db === pgDatabasePool) {
-      _evolutionInstancesSchemaEnsured = true;
-    }
-    return true;
-  } catch (err) {
-    console.warn("[evolution-instances] Table initialization warning:", err.message);
-    if (db === pgDatabasePool) {
-      _evolutionInstancesSchemaEnsured = true;
-    }
-    return true;
-  }
+  return Boolean(db);
 }
 
 export async function recordDailyLimitOverrideAudit(clientOrPool, {
@@ -331,36 +235,9 @@ export async function getDefaultLeadClientEvolutionInstance(clientId, pool = nul
   return selectDefaultEvolutionInstance(instances);
 }
 
-let syncProgressTableEnsured = false;
+// whatsapp_instance_sync_progress: migration 20261126010000. Mantida para quem já chama; não roda DDL.
 export async function ensureSyncProgressTable(pool = null) {
-  const db = pool || pgDatabasePool;
-  if (!db || syncProgressTableEnsured) return;
-  try {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS public.whatsapp_instance_sync_progress (
-        client_id TEXT NOT NULL,
-        instance_id TEXT NOT NULL,
-        instance_name TEXT,
-        status TEXT NOT NULL DEFAULT 'idle',
-        total_chats INTEGER NOT NULL DEFAULT 0,
-        processed_chats INTEGER NOT NULL DEFAULT 0,
-        synced_chats INTEGER NOT NULL DEFAULT 0,
-        inserted_messages INTEGER NOT NULL DEFAULT 0,
-        last_remote_jid TEXT,
-        current_batch INTEGER NOT NULL DEFAULT 0,
-        total_batches INTEGER NOT NULL DEFAULT 0,
-        error_message TEXT,
-        blocked_by_campaign TEXT,
-        started_at TIMESTAMPTZ,
-        finished_at TIMESTAMPTZ,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (client_id, instance_id)
-      )
-    `);
-    syncProgressTableEnsured = true;
-  } catch (err) {
-    console.warn("[sync-evolution] Erro ao assegurar tabela whatsapp_instance_sync_progress:", err?.message || err);
-  }
+  return;
 }
 
 // ATENÇÃO DE ESCALABILIDADE (Multi-Processo / Multi-Container):
@@ -657,19 +534,7 @@ export async function syncEvolutionInstanceChatsAndMessages(
     const lidMap = new Map();
     if (db) {
       try {
-        await db.query(`
-          CREATE TABLE IF NOT EXISTS public.whatsapp_lid_map (
-            lid TEXT PRIMARY KEY,
-            phone TEXT,
-            contact_name TEXT,
-            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          )`).catch(() => {});
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ALTER COLUMN phone DROP NOT NULL`).catch(() => {});
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_pic TEXT`).catch(() => {});
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS description TEXT`).catch(() => {});
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS website TEXT`).catch(() => {});
-        await db.query(`ALTER TABLE public.whatsapp_lid_map ADD COLUMN IF NOT EXISTS profile_checked BOOLEAN DEFAULT false`).catch(() => {});
+        // whatsapp_lid_map: tabela em 20260802140000 e colunas de perfil em 20261126010000 (não roda mais DDL aqui).
         const { rows: lidRows } = await db.query(
           "SELECT lid, phone, contact_name, profile_pic, profile_checked FROM public.whatsapp_lid_map"
         );
