@@ -94,6 +94,7 @@ import { closeFollowupQueue } from "./followup/queue.js";
 import { closeRagQueue } from "./rag/queue.js";
 import { closeSlackQueue } from "./geracaoDigital/slackQueue.js";
 import { startDueDispatchScheduler, stopDueDispatchScheduler } from "./campaign/dueDispatchScheduler.js";
+import { startEtapaAtrasadaScheduler, stopEtapaAtrasadaScheduler } from "./campaign/etapaAtrasadaFila.js";
 import { stopTrelloSlackScheduler } from "./services/trelloSlackScheduler.js";
 import { stopGdVigiaScheduler } from "./services/gdVigiaScheduler.js";
 import { startGdBriefingReminderScheduler, stopGdBriefingReminderScheduler } from "./services/gdBriefingReminderService.js";
@@ -767,6 +768,8 @@ function startBackgroundServices() {
     runDueIndependentDispatches: domainRoutes.campaigns.runDueIndependentDispatches,
     pgDatabasePool,
   });
+  // Fila da etapa de campanha que chegou atrasada (campaign/etapaAtrasadaFila.js): sai aos poucos, na janela.
+  startEtapaAtrasadaScheduler({ pool: pgDatabasePool });
   // Relatórios diários automáticos (09h00 e 18h00) permanentemente desarmados para eliminar gasto ocioso de tokens:
   // relatórios operacionais só saem sob demanda quando solicitados à Heloísa.
   console.log("[daily-reports] Agendadores diários automáticos (Vigia GD e Trello 09h00/18h00) DESARMADOS — apenas sob demanda.");
@@ -876,6 +879,7 @@ async function gracefulShutdown(signal) {
       pararAgendadores: async () => {
         stopCampaignScheduler();
         stopDueDispatchScheduler();
+        stopEtapaAtrasadaScheduler();
         stopAutomationEngine();
         stopAgentRecoverySweeper();
         await Promise.allSettled([pauseFollowupWorker(), pauseRagWorker(), pauseSlackWorker()]);
