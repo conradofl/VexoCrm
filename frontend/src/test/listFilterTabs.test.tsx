@@ -14,6 +14,8 @@ import trackerSrc from "../pages/LeadImports/DispatchCampaignTracker.tsx?raw";
 import sheetsSrc from "../pages/LeadImports/SavedSheetsCards.tsx?raw";
 
 // ── a barra é o componente real, embrulhado num espião: dá para ver QUEM a renderizou ─────────────
+// O cartão da campanha confere leads repetidos antes de disparar (useRepeatContactsGuard lê o token).
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ getIdToken: async () => "tok" }) }));
 vi.mock("@/components/ListFilterBar", async (importOriginal) => {
   const actual: any = await importOriginal();
   return { ...actual, ListFilterBar: vi.fn(actual.ListFilterBar) };

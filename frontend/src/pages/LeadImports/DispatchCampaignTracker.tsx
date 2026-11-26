@@ -53,6 +53,8 @@ import { formatDateTime } from "@/lib/leadImports/spreadsheet";
 import { getStableColor } from "@/lib/stableColor";
 import { OutsideSendWindowError, type OutsideSendWindowDetails } from "@/lib/dispatchTrigger";
 import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
+import { RepeatDecisionBanner, useRepeatContactsGuard } from "@/components/campaigns/RepeatContactsDialog";
+import { isRepeatDecisionPause } from "@/lib/repeatContacts";
 import { DispatchStopNotice, QueueBlockNotice, describeDispatchStop } from "@/components/campaigns/DispatchStopReason";
 import {
   useDispatchSummary,
@@ -359,6 +361,9 @@ function CampaignCard({
   const [isRenaming, setIsRenaming] = useState(false);
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
   const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
+  // Lead que já recebeu outra campanha: pergunta antes de disparar (26/11/2026, "pergunta sempre").
+  const { guard, decide, repeatContactsDialog } = useRepeatContactsGuard(campaign.campaignId);
+  const loteEsperandoDecisao = campaign.batches.find((b) => isRepeatDecisionPause(b.errorMessage));
 
   // "Aguardando disparo" é justamente quem mais precisa do botão: nada roda sem clique.
   const isScheduled = campaign.status === "agendada" || campaign.status === "aguardando_disparo";
@@ -397,7 +402,7 @@ function CampaignCard({
         });
       },
     };
-    triggerDispatch.mutate(batch1.id, callbacks);
+    void guard(() => triggerDispatch.mutate(batch1.id, callbacks));
   };
 
   const handleHeaderClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -572,7 +577,14 @@ function CampaignCard({
       )}
 
       {/* Por que parou: o motivo gravado pelo motor do lote que o botão dispara, e a fila de resposta parada por chip. */}
-      {!isExpanded && (
+      {loteEsperandoDecisao && (
+        <RepeatDecisionBanner
+          errorMessage={loteEsperandoDecisao.errorMessage || ""}
+          onDecide={decide}
+          testId={`repeat-decision-banner-${campaign.campaignId}`}
+        />
+      )}
+      {!isExpanded && !loteEsperandoDecisao && (
         <>
           {batch1 && describeDispatchStop(batch1.status, batch1.errorMessage) && (
             <DispatchStopNotice
@@ -612,6 +624,7 @@ function CampaignCard({
         />
       )}
       {outsideWindowDialog}
+      {repeatContactsDialog}
     </div>
   );
 }
@@ -632,6 +645,9 @@ export function CampaignDetails({
   const bulkAction = useCampaignDispatchBulkAction();
   const triggerDispatch = useTriggerDispatch(campaign.campaignId);
   const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
+  // Lead que já recebeu outra campanha: pergunta antes de disparar (26/11/2026, "pergunta sempre").
+  const { guard, decide, repeatContactsDialog } = useRepeatContactsGuard(campaign.campaignId);
+  const loteEsperandoDecisao = campaign.batches.find((b) => isRepeatDecisionPause(b.errorMessage));
 
   // Inicializa com o primeiro lote pendente/agendado ou o lote 1
   const defaultBatch =
@@ -675,7 +691,7 @@ export function CampaignDetails({
         });
       },
     };
-    triggerDispatch.mutate(batchId, callbacks);
+    void guard(() => triggerDispatch.mutate(batchId, callbacks));
   };
 
   const total = campaign.leadsTotal || 1;
@@ -762,7 +778,7 @@ export function CampaignDetails({
                 leadsCount={campaign.leadsActionable.resume}
                 campaignName={campaign.campaignName}
                 pending={bulkAction.isPending}
-                onConfirm={(scheduledAt) => handleBulkAction("resume", scheduledAt)}
+                onConfirm={(scheduledAt) => void guard(() => handleBulkAction("resume", scheduledAt))}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white border-transparent"
               />
             )}
@@ -904,6 +920,7 @@ export function CampaignDetails({
       <QueueBlockNotice block={campaign.queueBlock} className="mt-2" />
 
       {outsideWindowDialog}
+      {repeatContactsDialog}
     </>
   );
 }

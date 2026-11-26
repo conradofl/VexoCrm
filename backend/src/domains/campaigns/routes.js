@@ -23,7 +23,8 @@
 // uma chamada dupla da funcao de registro duplicaria o timer -- a guarda impede isso.
 // Corpo do interval em si e byte-a-byte identico ao original.
 
-import { dispatchAudienceArgs } from "../../campaign/audience.js";
+import { dispatchAudienceArgs, dispatchAudienceSegmentation } from "../../campaign/audience.js";
+import { REPEAT_DECISION, REPEAT_PAUSE_MARKER, findLeadsReachedByOtherCampaigns, repeatDecisionOf, summarizeReached } from "../../campaign/repeatContact.js";
 import { createDueDispatchRunner } from "../../campaign/dueDispatchScheduler.js";
 import { describeSendWindowRefusal, evaluateManualSendWindow, evaluateCampaignSendGate, evaluateDirectSendGate } from "../../campaign/sendGate.js";
 import { createCampaignDispatchEngine } from "../../campaign/dispatchEngine.js";
@@ -3923,6 +3924,90 @@ export function registerCampaignsRoutes(app, deps) {
   });
 
   // GET /api/campaigns/:campaignId/recipients — Lista completa de destinatários a nível de campanha com status, resposta causal de 14 dias e exportação
+  // Lead que já recebeu OUTRA campanha (campaign/repeatContact.js). A tela pergunta antes de Disparar/Retomar.
+  async function carregarCampanhaParaRepetidos(req, res) {
+    const campaignId = normalizeString(req.params.campaignId);
+    if (!campaignId) { sendError(res, 400, "MISSING_ID", "Missing campaign id"); return null; }
+    const { rows = [] } = await pgDatabasePool.query(
+      `SELECT id, name, client_id, import_id, analytics_meta FROM public.campaigns WHERE id::text = $1`,
+      [campaignId]
+    );
+    const campaign = rows[0] || null;
+    if (!campaign) { sendError(res, 404, "CAMPAIGN_NOT_FOUND", "Campaign not found"); return null; }
+    const clientId = resolveAuthorizedClientId(req, res, campaign.client_id);
+    if (!clientId) return null;
+    return { campaign, clientId };
+  }
+
+  // Quantos leads que AINDA vão receber esta campanha já receberam outra.
+  app.get("/api/campaigns/:campaignId/repeat-contacts", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Banco indisponível");
+    try {
+      const alvo = await carregarCampanhaParaRepetidos(req, res);
+      if (!alvo) return;
+      const { campaign, clientId } = alvo;
+      const pendentes = await buildDispatchLeads({
+        clientId,
+        importId: resolveCampaignImportSelection(campaign),
+        segmentation: dispatchAudienceSegmentation(campaign, {}),
+        excludeCampaignId: campaign.id,
+      });
+      const achados = await findLeadsReachedByOtherCampaigns(pgDatabasePool, {
+        clientId,
+        campaignId: campaign.id,
+        phones: (pendentes || []).map((l) => l.telefone),
+      });
+      return res.json({
+        ok: true,
+        pendentes: (pendentes || []).length,
+        jaReceberam: achados.size,
+        campanhas: summarizeReached(achados).slice(0, 5),
+        decisao: repeatDecisionOf(campaign),
+      });
+    } catch (error) {
+      console.error("[repeat-contacts] falha ao contar repetidos:", error?.message || error);
+      return sendError(res, 500, "REPEAT_CONTACTS_FAILED", "Não foi possível conferir os leads repetidos.");
+    }
+  });
+
+  // Grava "pular" | "enviar" na campanha e libera os lotes que pararam esperando essa resposta.
+  app.put("/api/campaigns/:campaignId/repeat-contacts-decision", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
+    if (!ensureDb(res)) return;
+    if (!pgDatabasePool) return sendError(res, 503, "DB_UNAVAILABLE", "Banco indisponível");
+    const decisao = String(req.body?.decisao || "").trim().toLowerCase();
+    if (decisao !== REPEAT_DECISION.PULAR && decisao !== REPEAT_DECISION.ENVIAR) {
+      return sendError(res, 400, "INVALID_DECISION", "Decisão deve ser 'pular' ou 'enviar'.");
+    }
+    try {
+      const alvo = await carregarCampanhaParaRepetidos(req, res);
+      if (!alvo) return;
+      const { campaign, clientId } = alvo;
+      await pgDatabasePool.query(
+        `UPDATE public.campaigns
+            SET analytics_meta = jsonb_set(
+                  COALESCE(analytics_meta, '{}'::jsonb),
+                  '{dispatchOptions}',
+                  COALESCE(analytics_meta->'dispatchOptions', '{}'::jsonb) || jsonb_build_object('repeatContacted', $3::text),
+                  true
+                ),
+                updated_at = now()
+          WHERE id::text = $1 AND client_id = $2`,
+        [String(campaign.id), clientId, decisao]
+      );
+      const { rowCount } = await pgDatabasePool.query(
+        `UPDATE public.campaign_dispatches
+            SET status = 'scheduled', scheduled_at = now(), error_message = NULL, updated_at = now()
+          WHERE campaign_id::text = $1 AND client_id = $2 AND status = 'paused' AND error_message LIKE $3`,
+        [String(campaign.id), clientId, `${REPEAT_PAUSE_MARKER}%`]
+      );
+      return res.json({ ok: true, decisao, lotesLiberados: rowCount || 0 });
+    } catch (error) {
+      console.error("[repeat-contacts] falha ao gravar decisão:", error?.message || error);
+      return sendError(res, 500, "REPEAT_DECISION_FAILED", "Não foi possível gravar a decisão.");
+    }
+  });
+
   app.get("/api/campaigns/:campaignId/recipients", requireFirebaseAuth, requireCampaignDispatchAccess, async (req, res) => {
     if (!ensureDb(res)) return;
     const campaignId = normalizeString(req.params.campaignId);

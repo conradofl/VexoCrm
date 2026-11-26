@@ -6,10 +6,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { DISPATCH_SQUARE_STYLES } from "@/hooks/useCampanhas";
 
+// O cartão da campanha confere leads repetidos antes de disparar (useRepeatContactsGuard lê o token).
+vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ getIdToken: async () => "tok" }) }));
 vi.mock("@/components/ui/use-toast", () => ({
   toast: vi.fn(),
 }));
@@ -21,6 +23,11 @@ const deleteCampaignMutateAsync = vi.fn().mockResolvedValue(undefined);
 const restoreCampaignMutateAsync = vi.fn().mockResolvedValue(undefined);
 const triggerDispatchMutate = vi.fn();
 
+// Conferência de leads repetidos (antes de disparar): aqui nenhum lead repetido, o botão dispara depois de conferir.
+vi.mock("@/lib/repeatContacts", async (importOriginal) => {
+  const actual: any = await importOriginal();
+  return { ...actual, getRepeatContacts: async () => ({ pendentes: 0, jaReceberam: 0, campanhas: [], decisao: null }) };
+});
 vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
   const actual: any = await importOriginal();
   return {
@@ -434,7 +441,7 @@ describe("DispatchCampaignTracker", () => {
 
     fireEvent.click(triggerBtn);
 
-    expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-first", expect.any(Object));
+    await waitFor(() => expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-first", expect.any(Object)));
   });
 
   it("[TESTE OBRIGATÓRIO] caso 31/10 'teste 2': lote manual não disparado mostra 'Aguardando disparo', sem término, e com o botão de disparar", async () => {
@@ -465,7 +472,7 @@ describe("DispatchCampaignTracker", () => {
 
     const triggerBtn = screen.getByTestId("btn-trigger-batch-1-c-aguardando");
     fireEvent.click(triggerBtn);
-    expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-manual", expect.any(Object));
+    await waitFor(() => expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-manual", expect.any(Object)));
   });
 
   it("separa o próximo lote do término estimado no cabeçalho e no rodapé do cartão expandido", async () => {
@@ -539,7 +546,7 @@ describe("DispatchCampaignTracker", () => {
 
     // Clica no botão e aciona a mutação para batch-3
     fireEvent.click(triggerBtn3);
-    expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-3", expect.any(Object));
+    await waitFor(() => expect(triggerDispatchMutate).toHaveBeenCalledWith("batch-3", expect.any(Object)));
   });
 });
 

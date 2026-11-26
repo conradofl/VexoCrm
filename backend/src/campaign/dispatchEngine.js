@@ -15,6 +15,7 @@ import { markRunSendStarted, markRunSequenceCut } from "../services/runSendMarke
 import { isWithinSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
 import { extractCampaignProgress, findLeadsAlreadyReachedInCycle, isLeadBlockedByActiveCycleProgress, markCampaignLeadWaitingReply, resolveCampaignImportSelection, resolveCampaignImportSelectionStrict, resolveDispatchLeadLimit, resolveEffectiveCampaignSequence } from "./dispatch.js";
 import { isPhoneOptedOut } from "./queueOptOut.js";
+import { REPEAT_DECISION, describeRepeatPause, findLeadsReachedByOtherCampaigns, reachedEntryFor, repeatDecisionOf } from "./repeatContact.js";
 import { phoneSpellingsOf } from "../services/canonicalPhone.js";
 
 export function createCampaignDispatchEngine(deps) {
@@ -184,6 +185,52 @@ export function createCampaignDispatchEngine(deps) {
         continue;
       }
       cycleLeads.push(l);
+    }
+
+    // Lead que já recebeu OUTRA campanha (campaign/repeatContact.js): segue a decisão gravada na campanha. Sem decisão e
+    // com lead repetido neste lote, o lote para e espera (nunca manda repetido sem alguém ter dito que pode).
+    const decisaoRepetidos = repeatDecisionOf(campaign);
+    if (decisaoRepetidos !== REPEAT_DECISION.ENVIAR && pgDatabasePool && cycleLeads.length > 0) {
+      const jaReceberam = await findLeadsReachedByOtherCampaigns(pgDatabasePool, {
+        clientId,
+        campaignId: campaign.id,
+        phones: cycleLeads.map((l) => l.telefone),
+      });
+      if (jaReceberam.size > 0 && !decisaoRepetidos) {
+        const pauseMsg = describeRepeatPause(jaReceberam);
+        console.warn("[campaign-dispatch] lote parado: leads que já receberam outra campanha, sem decisão", {
+          dispatchId,
+          campaignId: campaign.id,
+          repetidos: jaReceberam.size,
+        });
+        await db.from("campaign_dispatches").update({
+          status: "paused",
+          error_message: pauseMsg,
+          updated_at: new Date().toISOString(),
+        }).eq("id", dispatchId);
+        return;
+      }
+      if (jaReceberam.size > 0) {
+        const mantidos = [];
+        for (const l of cycleLeads) {
+          const anterior = reachedEntryFor(jaReceberam, l.telefone);
+          if (!anterior) {
+            mantidos.push(l);
+            continue;
+          }
+          const digits = normalizeString(l.telefone).replace(/\D/g, "");
+          await pgDatabasePool.query(
+            `INSERT INTO public.campaign_dispatch_runs
+               (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
+             VALUES ($1, $2, $3, $4, $5, 'skipped', $6, now(), $7)
+             ON CONFLICT (dispatch_id, lead_id) DO NOTHING`,
+            [dispatchId, campaign.id, clientId, l.id || null, digits, `Já recebeu a campanha "${anterior.campaignName}" (pulado por decisão)`, importItemIdOf(l)]
+          ).catch((err) => {
+            console.warn("[campaign-dispatch] falha ao registrar lead pulado por outra campanha:", err?.message || err);
+          });
+        }
+        cycleLeads.splice(0, cycleLeads.length, ...mantidos);
+      }
     }
 
     if (cycleLeads.length === 0) {
