@@ -26,12 +26,13 @@ export async function getRepeatContacts(token: string | null | undefined, campai
 export async function putRepeatDecision(
   token: string | null | undefined,
   campaignId: string,
-  decisao: RepeatDecision
+  decisao: RepeatDecision,
+  { liberarLotes = true }: { liberarLotes?: boolean } = {}
 ): Promise<{ ok: boolean; decisao: RepeatDecision; lotesLiberados: number }> {
   const res = await fetch(`${API_BASE_URL}/api/campaigns/${campaignId}/repeat-contacts-decision`, {
     method: "PUT",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ decisao }),
+    body: JSON.stringify({ decisao, liberarLotes }),
   });
   if (!res.ok) throw new Error(await readApiErrorMessage(res, "Erro ao gravar a decisão"));
   return res.json();

@@ -14,6 +14,7 @@ import { OptOutSkipNotice } from "@/components/leads/OptOutSkipNotice";
 import { DispatchStopNotice, describePendingRecipient } from "@/components/campaigns/DispatchStopReason";
 import { OutsideSendWindowError } from "@/lib/dispatchTrigger";
 import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
+import { useRepeatContactsGuard } from "@/components/campaigns/RepeatContactsDialog";
 
 interface DispatchRecipientsDialogProps {
   dispatchId: string | null;
@@ -34,6 +35,8 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
   const retryFailedMutation = useRetryFailedDispatchLeads();
   const runPendingMutation = useRunPendingDispatchLeads();
   const { askToForce, outsideWindowDialog } = useOutsideSendWindowConfirm();
+  // Quem já recebeu outra campanha: pergunta antes de "Disparar não processados" (26/11/2026).
+  const { ensureDecision, repeatContactsDialog } = useRepeatContactsGuard(data?.campaignId || undefined);
 
   const handleDownloadCsv = async () => {
     if (!dispatchId) return;
@@ -91,6 +94,7 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
 
   const handleRunPending = async () => {
     if (!dispatchId) return;
+    if (data?.campaignId && (await ensureDecision(data.campaignId)) === "cancelado") return;
     try {
       let res;
       try {
@@ -459,6 +463,7 @@ export function DispatchRecipientsDialog({ dispatchId, onClose, onDeleted }: Dis
         </DialogFooter>
       </DialogContent>
       {outsideWindowDialog}
+      {repeatContactsDialog}
     </Dialog>
   );
 }

@@ -56,12 +56,14 @@ function jsonResponse(status: number, body: any) {
 
 let triggerBodies: any[] = [];
 let decisoes: any[] = [];
+let liberar: any[] = [];
 let repetidos: any = { pendentes: 4, jaReceberam: 0, campanhas: [], decisao: null };
 let batchError: string | null = null;
 beforeEach(() => {
   vi.clearAllMocks();
   triggerBodies = [];
   decisoes = [];
+  liberar = [];
   repetidos = { pendentes: 4, jaReceberam: 0, campanhas: [], decisao: null };
   batchError = null;
   globalThis.fetch = vi.fn().mockImplementation(async (url: string, options?: any) => {
@@ -74,6 +76,7 @@ beforeEach(() => {
     if (u.endsWith("/repeat-contacts-decision")) {
       const body = JSON.parse(options.body);
       decisoes.push(body.decisao);
+      liberar.push(body.liberarLotes);
       return jsonResponse(200, { ok: true, decisao: body.decisao, lotesLiberados: 1 });
     }
     return jsonResponse(200, {});
@@ -146,6 +149,7 @@ describe("pergunta antes de mandar para quem já recebeu outra campanha", () => 
     fireEvent.click(screen.getByTestId("repeat-contacts-skip"));
     await waitFor(() => expect(triggerBodies).toHaveLength(1));
     expect(decisoes).toEqual(["pular"]);
+    expect(liberar).toEqual([false]); // quem dispara é o botão; liberar aqui fazia o "Retomar" dar erro
   });
 
   it("'Enviar de novo' grava 'enviar' e dispara", async () => {
@@ -172,5 +176,6 @@ describe("pergunta antes de mandar para quem já recebeu outra campanha", () => 
     expect(faixa.textContent).toContain('2 lead(s) deste lote já receberam "A" (2).');
     fireEvent.click(screen.getByTestId("repeat-decision-skip"));
     await waitFor(() => expect(decisoes).toEqual(["pular"]));
+    expect(liberar).toEqual([true]); // a faixa libera o lote parado
   });
 });

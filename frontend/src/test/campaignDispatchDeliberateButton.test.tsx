@@ -288,6 +288,48 @@ describe("Frente A — Botão 'Disparar agora' separado de 'Salvar Alterações'
     expect(createdDispatchesCalls[0]).not.toHaveProperty("limitPerRun");
   });
 
+  // 26/11/2026: lead que já recebeu OUTRA campanha. Depois de criar o lote e antes do trigger, pergunta.
+  async function disparoComRepetidos(escolha: "repeat-contacts-skip" | "repeat-contacts-cancel") {
+    const decisoes: any[] = [];
+    const base = globalThis.fetch as any;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, options?: any) => {
+      if (String(url).endsWith("/repeat-contacts")) {
+        return { ok: true, json: async () => ({ pendentes: 2, jaReceberam: 1, campanhas: [{ campaignId: "outra", campaignName: "Campanha Antiga", count: 1 }], decisao: null }) };
+      }
+      if (String(url).endsWith("/repeat-contacts-decision")) {
+        decisoes.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ ok: true, decisao: "pular", lotesLiberados: 0 }) };
+      }
+      return base(url, options);
+    }) as any;
+    mockCampaignsList = [testCampaign];
+    renderLeadImports("enviadas");
+    fireEvent.click(await screen.findByRole("button", { name: /Ver detalhes de Campanha em Edição/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Editar$/i }));
+    await waitFor(() => expect(screen.getByDisplayValue("Campanha em Edição")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar e Disparar Agora/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirmar e Disparar Agora/i }));
+    const texto = await screen.findByTestId("repeat-contacts-text");
+    expect(texto.textContent).toContain('"Campanha Antiga" (1)');
+    expect(triggeredDispatchesCalls).toHaveLength(0); // ainda não disparou: está perguntando
+    fireEvent.click(screen.getByTestId(escolha));
+    return decisoes;
+  }
+
+  it("lead que já recebeu outra campanha: pergunta antes do trigger; 'Pular quem já recebeu' grava (sem liberar lote) e dispara", async () => {
+    const decisoes = await disparoComRepetidos("repeat-contacts-skip");
+    await waitFor(() => expect(triggeredDispatchesCalls).toHaveLength(1));
+    expect(decisoes).toEqual([{ decisao: "pular", liberarLotes: false }]);
+  });
+
+  it("lead que já recebeu outra campanha: 'Não disparar' salva a campanha e NÃO dispara", async () => {
+    const decisoes = await disparoComRepetidos("repeat-contacts-cancel");
+    await waitFor(() => expect(createdDispatchesCalls).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(triggeredDispatchesCalls).toHaveLength(0);
+    expect(decisoes).toEqual([]);
+  });
+
   it("SPEC 17: com 'só os primeiros N' digitado, o lote criado leva limitPerRun = N", async () => {
     mockCampaignsList = [testCampaign];
     renderLeadImports("enviadas");
