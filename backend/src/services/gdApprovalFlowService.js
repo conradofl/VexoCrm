@@ -19,6 +19,7 @@
 
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { GD_DONO } from "../domains/gdClientes/campos.js";
+import { INSTANCIA_PADRAO_VEXO_ADM } from "./defaultInstances.js";
 
 export const GD_CAIO_TAG = "@caioalmeida";
 export const GD_CAIO_WHATSAPP_NUMERO = process.env.GD_CAIO_WHATSAPP || "5534997798725";
@@ -122,7 +123,7 @@ export async function enviarDocumentosParaAprovacaoInterna({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    INSTANCIA_PADRAO_VEXO_ADM;
 
   const mensagemCaio =
     `📋 *SÍNTESE DE BRIEFING GERADA · APROVAÇÃO INTERNA*\n\n` +
@@ -252,7 +253,7 @@ export async function enviarDocumentosParaAprovacaoCliente({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    INSTANCIA_PADRAO_VEXO_ADM;
 
   const tagCliente = cliente.aprovador_telefone
     ? `@${cliente.aprovador_telefone}`
@@ -349,7 +350,7 @@ export async function processarMensagemAprovacaoWhatsApp({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    INSTANCIA_PADRAO_VEXO_ADM;
 
   // 1. Verifica se a mensagem veio de um grupo interno (PASTA: {CLIENTE})
   const { rows: clientesInternos } = await pool.query(

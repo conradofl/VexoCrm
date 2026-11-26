@@ -398,6 +398,7 @@ import {
 } from "../../services/agentMuteGuard.js";
 
 import { describeUnrecognizedMessage, rawMessageKind } from "../../services/messageKind.js";
+import { INSTANCIA_TESTE_GD } from "../../services/defaultInstances.js";
 import { findConversationChip, replyChipUnavailableMessage, resolveReplyChip } from "../../services/inboxReplyChip.js";
 import { conversationExists, parseNewConversationPhone, resolveNewConversationChip } from "../../services/inboxNewConversation.js";
 
@@ -3560,7 +3561,7 @@ export function registerChatbotRoutes(app, deps) {
       isWandinhaChip ||
       lowerInst.includes("heloisa") ||
       lowerInst.includes("atende") ||
-      lowerInst === "geracao-digital-teste-vexo" ||
+      lowerInst === INSTANCIA_TESTE_GD ||
       req.query?.lane === "wandinha" ||
       req.query?.lane === "heloisa" ||
       req.query?.agent === "wandinha" ||

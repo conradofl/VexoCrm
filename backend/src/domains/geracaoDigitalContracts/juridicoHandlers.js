@@ -14,6 +14,7 @@ import { extractEvolutionInstanceSlug, sendTextMessageViaEvolution, sendTextViaE
 // NÃO converter para const/arrow function, sob risco de quebra em tempo de execução por TDZ.
 import { buildContractPdfBuffer } from "./contractHandlers.js";
 import { resolveCandidateEvolutionInstances } from "./contractEvolutionResolver.js";
+import { INSTANCIA_JURIDICO_SEM_ENV, instanciaGdDoEnv } from "../../services/defaultInstances.js";
 
 const SLACK_API = "https://slack.com/api";
 
@@ -231,7 +232,7 @@ async function sendWhatsapp({ number, text, instance }) {
   const status = await sendTextViaEvolutionUrl({
     url: process.env.GD_EVOLUTION_URL,
     apiKey: process.env.GD_EVOLUTION_TOKEN,
-    instance: instance || process.env.GD_EVOLUTION_INSTANCE || "Teste",
+    instance: instance || instanciaGdDoEnv(INSTANCIA_JURIDICO_SEM_ENV),
     number,
     text,
   });

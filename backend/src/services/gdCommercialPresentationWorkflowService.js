@@ -27,6 +27,7 @@ import {
 } from "./googleDriveClientSetup.js";
 import { sendTextMessageViaEvolution } from "./evolution.js";
 import { GD_CAIO_WHATSAPP_PADRAO } from "./gdBriefingReminderService.js";
+import { INSTANCIA_PADRAO_VEXO_ADM } from "./defaultInstances.js";
 
 export const GD_PASTA_INGESTAO_LOGOS_NOVAS = "Logos Novas";
 export const GD_PASTA_RAIZ_MAQUINAS_DE_VENDAS = "Máquinas de Vendas";
@@ -103,7 +104,7 @@ export async function executarFluxoApresentacaoComercial({
     instanceName ||
     process.env.GD_ONBOARDING_EVOLUTION_INSTANCE ||
     process.env.GD_EVOLUTION_INSTANCE ||
-    "vexo-adm-vexo-atende";
+    INSTANCIA_PADRAO_VEXO_ADM;
 
   // 1. Processamento e Refinamento de Logo com Gemini Vision
   const logoResult = await logoEnhancer({

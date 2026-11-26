@@ -48,6 +48,7 @@ import {
   isCardInApprovalOrDone,
   formatarPrazoAmigavel,
 } from "../services/trelloService.js";
+import { INSTANCIA_PADRAO_VEXO_ADM } from "../services/defaultInstances.js";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -791,7 +792,7 @@ export async function processTrelloCardFollowupCheckJob(job, customPool = null) 
       await enviarMensagemWhatsAppComFallback({
         numero: colabTelefone,
         texto: mensagemTexto,
-        instanceName: "vexo-adm-vexo-atende",
+        instanceName: INSTANCIA_PADRAO_VEXO_ADM,
         tenantId: "geracao-digital",
         pool,
       });
