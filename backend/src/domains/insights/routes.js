@@ -29,6 +29,7 @@ import { computeRestartBlockers } from "../../services/restartBlockers.js";
 import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
 import { computeLlmConfigStatus } from "../../services/llmConfigStatus.js";
 import { getInboundDelayAlertStatus } from "../../services/inboundDelayAlert.js";
+import { getRecentOutboundFailures } from "../../campaign-outbound.js";
 import { getEtapaAtrasadaFilaStatus } from "../../campaign/etapaAtrasadaFila.js";
 import { getDueDispatchSchedulerStatus } from "../../campaign/dueDispatchScheduler.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
@@ -219,6 +220,8 @@ export function registerInsightsRoutes(app, deps) {
       // Atraso de entrega da Evolution (alerta no Slack) e fila da etapa de campanha que chegou atrasada.
       inboundDelayAlert: getInboundDelayAlertStatus(),
       filaEtapaAtrasada: getEtapaAtrasadaFilaStatus(),
+      // Últimas falhas de envio de passo para a Evolution (tipo do passo, HTTP, começo da resposta; sem telefone).
+      falhasDeEnvio: getRecentOutboundFailures(),
     });
   });
 
