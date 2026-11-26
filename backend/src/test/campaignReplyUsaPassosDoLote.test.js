@@ -21,7 +21,8 @@ import { createPgliteDb } from "./helpers/pgliteDb.js";
 import { _setPgDatabasePoolForTesting } from "../services/database.js";
 import { createPgSupabaseClient } from "../pgSupabaseCompat.js";
 import { buildDispatchLeads, continueCampaignLeadFromReply, findCampaignReplyMatches } from "../campaign/dispatch.js";
-import { ensureLeadClientEvolutionInstancesTable, getLeadClientEvolutionInstances } from "../services/evolution.js";
+import { getLeadClientEvolutionInstances } from "../services/evolution.js";
+import { applyEvolutionSchemaMigrations } from "./helpers/evolutionSchemaMigration.js";
 import { CHIP_USAGE_MIGRATION_SQL } from "./helpers/chipUsageMigration.js";
 import { registerChatbotRoutes } from "../domains/chatbot/routes.js";
 
@@ -197,7 +198,7 @@ async function mundo({
   if (continuacaoReal) {
     // O chip de verdade, para a continuação resolver a instância como em produção (só o HTTP da Evolution é dublado).
     // Banco novo a cada teste: cria a tabela de chips NESTE banco (o "já criei" do módulo vale para o banco anterior).
-    await ensureLeadClientEvolutionInstancesTable({ query: (sql, params) => db.query(sql, params) });
+    await applyEvolutionSchemaMigrations(db); // a tabela de chips nasce das migrations (o código não cria mais)
     await db.exec(CHIP_USAGE_MIGRATION_SQL);
     await db.query(
       `INSERT INTO public.lead_client_evolution_instances (id, client_id, name, dispatch_webhook_url, dispatch_webhook_token, active, is_default, connection_state)
