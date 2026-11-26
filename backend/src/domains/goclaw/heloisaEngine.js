@@ -3642,7 +3642,8 @@ export async function processarMensagemHeloisa({
   const toolCalls = assistantMessage?.tool_calls || [];
 
   // Fallback determinístico de linguagem natural para Gomes / Contrato
-  const textoParaAnalise = (typeof userText !== "undefined" ? userText : (typeof promptUsuario !== "undefined" ? promptUsuario : "")) || "";
+  // Era `typeof userText !== "undefined" ? userText : (typeof promptUsuario ...)` (copiado da voz): aqui só existe promptUsuario.
+  const textoParaAnalise = promptUsuario || "";
   if (toolCalls.length === 0 && textoParaAnalise) {
     const ehContrato =
       /(?:gomes|gerar|gera|emita|emitir|criar|cria)\s+(?:o\s+)?(?:contrato|minuta)|minuta\s+de\s+contrato/i.test(textoParaAnalise);
@@ -4056,7 +4057,8 @@ ${compromissosTexto}
   const toolCalls = assistantMessage?.tool_calls || [];
 
   // Fallback determinístico de linguagem natural para Gomes / Contrato
-  const textoParaAnalise = (typeof userText !== "undefined" ? userText : (typeof promptUsuario !== "undefined" ? promptUsuario : "")) || "";
+  // Mesma regra do texto: na voz, o que o diretor disse é userText.
+  const textoParaAnalise = userText || "";
   if (toolCalls.length === 0 && textoParaAnalise) {
     const ehContrato =
       /(?:gomes|gerar|gera|emita|emitir|criar|cria)\s+(?:o\s+)?(?:contrato|minuta)|minuta\s+de\s+contrato/i.test(textoParaAnalise);
