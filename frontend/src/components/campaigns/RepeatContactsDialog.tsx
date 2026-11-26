@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useContext, useRef, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -68,60 +68,76 @@ export function RepeatContactsDialog({
  * Pergunta antes de disparar (pedido do Conrado, 26/11/2026: "pergunta sempre").
  * guard(run): confere os repetidos; sem repetido, roda direto; com repetido, abre a pergunta, grava a escolha e roda.
  * "Não disparar" não roda nada. Se a conferência falhar, roda: o motor para o lote sozinho se houver repetido sem decisão.
- * decide(decisao): responde direto (faixa do lote parado esperando a decisão) e libera os lotes parados.
  */
-export function useRepeatContactsGuard(campaignId: string) {
+export type RepeatCheckOutcome = "sem_repetidos" | "pular" | "enviar" | "cancelado" | "erro";
+
+export function useRepeatContactsGuard(campaignId?: string) {
   const auth = useAuth();
   const getIdToken = useCallback(async () => (auth ? auth.getIdToken() : null), [auth]);
-  const qc = useQueryClient();
+  // Atualizar a tela depois da escolha é bônus: fora de um QueryClientProvider (tela de teste) só não atualiza.
+  const qc = useContext(QueryClientContext);
   const [info, setInfo] = useState<RepeatContactsInfo | null>(null);
   const resolver = useRef<((d: RepeatDecision | null) => void) | null>(null);
 
   const invalidate = useCallback(() => {
+    if (!qc) return;
     qc.invalidateQueries({ queryKey: ["dispatch-summary"] });
     qc.invalidateQueries({ queryKey: ["campaign-dispatches"] });
     qc.invalidateQueries({ queryKey: ["all-dispatches"] });
     qc.invalidateQueries({ queryKey: ["campaigns"] });
   }, [qc]);
 
+  /** Responde direto (faixa do lote parado): grava e libera os lotes que pararam esperando a decisão. */
   const decide = useCallback(
-    async (decisao: RepeatDecision) => {
-      const token = await getIdToken();
-      const r = await putRepeatDecision(token, campaignId, decisao);
+    async (decisao: RepeatDecision, { liberarLotes = true, id }: { liberarLotes?: boolean; id?: string } = {}) => {
+      const alvo = id || campaignId;
+      if (!alvo) throw new Error("Campanha não identificada");
+      const r = await putRepeatDecision(await getIdToken(), alvo, decisao, { liberarLotes });
       invalidate();
       return r;
     },
     [campaignId, getIdToken, invalidate]
   );
 
-  const guard = useCallback(
-    async (run: () => void) => {
+  /**
+   * Confere os repetidos e, se houver, pergunta e grava a escolha (sem liberar lote: quem chamou é que dispara).
+   * "erro" = a conferência falhou; o motor para o lote sozinho se houver repetido sem decisão.
+   */
+  const ensureDecision = useCallback(
+    async (id?: string): Promise<RepeatCheckOutcome> => {
+      const alvo = id || campaignId;
+      if (!alvo) return "erro";
       let atual: RepeatContactsInfo | null = null;
       try {
-        atual = await getRepeatContacts(await getIdToken(), campaignId);
+        atual = await getRepeatContacts(await getIdToken(), alvo);
       } catch {
-        run();
-        return;
+        return "erro";
       }
-      if (!atual || !(Number(atual.jaReceberam) > 0)) {
-        run();
-        return;
-      }
+      if (!atual || !(Number(atual.jaReceberam) > 0)) return "sem_repetidos";
       resolver.current?.(null);
       setInfo(atual);
       const escolha = await new Promise<RepeatDecision | null>((resolve) => {
         resolver.current = resolve;
       });
-      if (!escolha) return;
+      if (!escolha) return "cancelado";
       try {
-        await decide(escolha);
+        await decide(escolha, { liberarLotes: false, id: alvo });
       } catch (err) {
         toast({ title: "Não foi possível gravar a escolha", description: err instanceof Error ? err.message : "Tente de novo.", variant: "destructive" });
-        return;
+        return "cancelado";
       }
-      run();
+      return escolha;
     },
     [campaignId, decide, getIdToken]
+  );
+
+  /** Antes de "Disparar Agora"/"Retomar": roda a ação, salvo se a pessoa escolher "Não disparar". */
+  const guard = useCallback(
+    async (run: () => void) => {
+      if ((await ensureDecision()) === "cancelado") return;
+      run();
+    },
+    [ensureDecision]
   );
 
   const choose = useCallback((d: RepeatDecision | null) => {
@@ -131,7 +147,7 @@ export function useRepeatContactsGuard(campaignId: string) {
   }, []);
 
   const repeatContactsDialog = <RepeatContactsDialog info={info} onChoose={choose} />;
-  return { guard, decide, repeatContactsDialog };
+  return { guard, ensureDecision, decide, repeatContactsDialog };
 }
 
 /**

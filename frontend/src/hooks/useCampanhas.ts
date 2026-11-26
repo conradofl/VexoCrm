@@ -1203,6 +1203,8 @@ export interface DispatchRecipientItem {
 export interface DispatchRecipientsResponse {
   dispatchId: string;
   dispatchName: string;
+  /** Para conferir, antes de "Disparar não processados", quem já recebeu outra campanha. */
+  campaignId?: string | null;
   campaignName: string;
   total: number;
   sentCount: number;

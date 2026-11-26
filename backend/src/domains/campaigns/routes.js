@@ -3904,6 +3904,7 @@ export function registerCampaignsRoutes(app, deps) {
       res.json({
         dispatchId: dispatch.id,
         dispatchName: dispatch.name,
+        campaignId: dispatch.campaign_id || null,
         campaignName: campaign.name,
         // Estado e motivo do lote: a tela diz por que os não processados estão parados, em vez de "Pendente na fila".
         dispatchStatus: dispatch.status || null,
@@ -3995,13 +3996,19 @@ export function registerCampaignsRoutes(app, deps) {
           WHERE id::text = $1 AND client_id = $2`,
         [String(campaign.id), clientId, decisao]
       );
-      const { rowCount } = await pgDatabasePool.query(
-        `UPDATE public.campaign_dispatches
-            SET status = 'scheduled', scheduled_at = now(), error_message = NULL, updated_at = now()
-          WHERE campaign_id::text = $1 AND client_id = $2 AND status = 'paused' AND error_message LIKE $3`,
-        [String(campaign.id), clientId, `${REPEAT_PAUSE_MARKER}%`]
-      );
-      return res.json({ ok: true, decisao, lotesLiberados: rowCount || 0 });
+      // liberarLotes=false: quem pergunta antes de "Retomar"/"Disparar Agora" só grava a escolha; a própria ação retoma o
+      // lote. Liberar aqui também fazia o "Retomar" não achar lote pausado e dar erro (26/11/2026).
+      let lotesLiberados = 0;
+      if (req.body?.liberarLotes !== false) {
+        const { rowCount } = await pgDatabasePool.query(
+          `UPDATE public.campaign_dispatches
+              SET status = 'scheduled', scheduled_at = now(), error_message = NULL, updated_at = now()
+            WHERE campaign_id::text = $1 AND client_id = $2 AND status = 'paused' AND error_message LIKE $3`,
+          [String(campaign.id), clientId, `${REPEAT_PAUSE_MARKER}%`]
+        );
+        lotesLiberados = rowCount || 0;
+      }
+      return res.json({ ok: true, decisao, lotesLiberados });
     } catch (error) {
       console.error("[repeat-contacts] falha ao gravar decisão:", error?.message || error);
       return sendError(res, 500, "REPEAT_DECISION_FAILED", "Não foi possível gravar a decisão.");

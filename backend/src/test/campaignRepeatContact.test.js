@@ -224,7 +224,7 @@ async function mundo({ instancias = [CHIP_2, CHIP_3] } = {}) {
     return out;
   };
   const repetidos = (campaignId) => porCampanha("GET", "/api/campaigns/:campaignId/repeat-contacts", campaignId);
-  const decidir = (campaignId, decisao) => porCampanha("PUT", "/api/campaigns/:campaignId/repeat-contacts-decision", campaignId, { decisao });
+  const decidir = (campaignId, decisao, extra = {}) => porCampanha("PUT", "/api/campaigns/:campaignId/repeat-contacts-decision", campaignId, { decisao, ...extra });
   const runs = async (id) => (await db.query("SELECT phone, status, error_message FROM campaign_dispatch_runs WHERE dispatch_id = $1 ORDER BY phone", [id])).rows;
   return { db, campanha, lote, estado, disparar, naoProcessados, tick, esperarNenhumRodando, outroProcesso, repetidos, decidir, runs };
 }
@@ -290,6 +290,18 @@ describe("[OBRIGATÓRIO] lead que já recebeu outra campanha: pergunta antes de 
     await w.esperarNenhumRodando();
     expect(new Set(envios.map((e) => e.number)).size).toBe(4);
     expect((await w.estado(loteB)).status).toBe("done");
+  }, SLOW);
+
+  it("'Retomar' depois da pergunta: grava sem liberar (liberarLotes=false); o lote parado continua parado para a própria ação retomar", async () => {
+    const { w, b, loteB } = await cenario();
+    await w.disparar(loteB);
+    await w.esperarNenhumRodando();
+    const d = await w.decidir(b, "enviar", { liberarLotes: false });
+    expect(d.body).toMatchObject({ ok: true, decisao: "enviar", lotesLiberados: 0 });
+    expect((await w.estado(loteB)).status).toBe("paused");
+    await w.disparar(loteB); // a ação que a pessoa clicou
+    await w.esperarNenhumRodando();
+    expect(new Set(envios.map((e) => e.number)).size).toBe(4);
   }, SLOW);
 
   it("decisão inválida é recusada", async () => {

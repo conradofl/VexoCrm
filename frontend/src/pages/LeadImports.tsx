@@ -81,6 +81,7 @@ import { API_BASE_URL } from "@/lib/api";
 import { pendingDispatchesForUpdate, planAfterCampaignSave, resolveEffectiveTrigger } from "@/lib/campaignSaveActions";
 import { PendingDispatchesUpdateDialog } from "@/components/campaigns/PendingDispatchesUpdateDialog";
 import { useOutsideSendWindowConfirm } from "@/components/campaigns/OutsideSendWindowDialog";
+import { useRepeatContactsGuard, type RepeatCheckOutcome } from "@/components/campaigns/RepeatContactsDialog";
 import { triggerDispatchWithWindowConfirm, type DispatchTriggerOutcome } from "@/lib/dispatchTrigger";
 import {
   campaignLocalDateTimeToUtcIso,
@@ -280,6 +281,8 @@ export default function LeadImports({
   const [pendingDispatchUpdate, setPendingDispatchUpdate] = useState<{ dispatchIds: string[]; steps: unknown[] } | null>(null);
   const [isUpdatingPendingDispatches, setIsUpdatingPendingDispatches] = useState(false);
   const { askToForce: askToForceOutsideWindow, outsideWindowDialog } = useOutsideSendWindowConfirm();
+  // Lead que já recebeu outra campanha: pergunta logo depois de criar, antes do lote 1 sair (26/11/2026).
+  const { ensureDecision: ensureRepeatDecision, repeatContactsDialog } = useRepeatContactsGuard();
   const crmClient = useOptionalCrmClient();
   const selectedClientId = crmClient?.selectedClientId;
   const activeClientId = fixedClientId || selectedClientId || "";
@@ -1809,6 +1812,7 @@ export default function LeadImports({
         },
       });
       const campaignId = savedCampaign.id;
+      let repetidos: RepeatCheckOutcome | null = null;
 
       // A edição removeu proteção anti-ban: o salvar respeita, mas nunca em silêncio.
       const protecaoRemovida = savedCampaign.dispatchProtectionWarnings || [];
@@ -1945,14 +1949,25 @@ export default function LeadImports({
           const dispatchData = await dispatchRes.json();
           const dispatchId = dispatchData.dispatch.id;
 
-          // Se for manual e for o primeiro lote, dispara imediatamente
+          // Se for manual e for o primeiro lote, dispara imediatamente (depois de perguntar sobre quem já recebeu outra campanha)
           if (i === 0 && batchTriggerType === "manual") {
-            setSubmittingStatus(`Disparando lote 1/${numBatches}...`);
-            firstBatchTrigger = await triggerDispatchWithWindowConfirm(token, dispatchId, askToForceOutsideWindow);
+            setSubmittingStatus("Conferindo quem já recebeu outra campanha...");
+            repetidos = await ensureRepeatDecision(campaignId);
+            if (repetidos !== "cancelado") {
+              setSubmittingStatus(`Disparando lote 1/${numBatches}...`);
+              firstBatchTrigger = await triggerDispatchWithWindowConfirm(token, dispatchId, askToForceOutsideWindow);
+            }
           }
         }
+        // Agendada (sem lote imediato): pergunta agora; a escolha vale quando os lotes saírem no horário.
+        if (repetidos === null && gatilho !== "draft") repetidos = await ensureRepeatDecision(campaignId);
         const hasConnectedChips = evolutionInstanceOptions.length > 0 || Boolean(selectedLeadClient?.n8n_settings?.dispatch_webhook_url);
-        if (firstBatchTrigger?.kind === "declined") {
+        if (repetidos === "cancelado") {
+          toast({
+            title: `${numBatches} lotes criados, nada disparado`,
+            description: "Você escolheu não disparar. Os lotes que tiverem quem já recebeu outra campanha param e esperam sua escolha na Fila de Envios.",
+          });
+        } else if (firstBatchTrigger?.kind === "declined") {
           toast({
             title: `${numBatches} lotes criados`,
             description: `O lote 1 não foi disparado: fora da janela de envio (${firstBatchTrigger.details.start}–${firstBatchTrigger.details.end}). A janela abre ${firstBatchTrigger.details.nextOpeningLocal}; dispare pela fila quando quiser.`,
@@ -1996,7 +2011,16 @@ export default function LeadImports({
         const hasConnectedChips = evolutionInstanceOptions.length > 0 || Boolean(selectedLeadClient?.n8n_settings?.dispatch_webhook_url);
 
         // 3. Trigger immediate execution if manual
-        if (effectiveTriggerType === "manual") {
+        if (effectiveTriggerType !== "draft") {
+          setSubmittingStatus("Conferindo quem já recebeu outra campanha...");
+          repetidos = await ensureRepeatDecision(campaignId);
+        }
+        if (effectiveTriggerType === "manual" && repetidos === "cancelado") {
+          toast({
+            title: "Campanha salva, nada disparado",
+            description: "Você escolheu não disparar. O lote fica na Fila de Envios; dispare de lá quando quiser.",
+          });
+        } else if (effectiveTriggerType === "manual") {
           setSubmittingStatus("Disparando lote de envios...");
           const trigger = await triggerDispatchWithWindowConfirm(token, dispatchId, askToForceOutsideWindow);
           if (trigger.kind === "declined") {
@@ -2872,6 +2896,7 @@ export default function LeadImports({
       )}
 
       {outsideWindowDialog}
+      {repeatContactsDialog}
 
       <PendingDispatchesUpdateDialog
         open={Boolean(pendingDispatchUpdate)}
