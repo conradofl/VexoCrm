@@ -22,7 +22,7 @@ const SLOW = 120_000;
 const MIGRATION_LEASES = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "supabase", "migrations", "20261125150000_campaign_chip_leases.sql");
 const T = "tenant-trava";
 const SEQ = [{ id: "s1", type: "text", text: "Oi {{nome}}", order: 1, enabled: true, delayAfterSeconds: 0 }];
-const SEQ_AGENDA = [{ id: "s1", type: "text", text: "Agende: {{scheduling_link}}", order: 1, enabled: true, delayAfterSeconds: 0 }];
+const SEQ_AGENDA = [{ id: "s-agenda", type: "text", text: "Agende: {{scheduling_link}}", order: 1, enabled: true, delayAfterSeconds: 0 }];
 const chip = (n, id) => ({
   id,
   name: `Chip ${n}`,

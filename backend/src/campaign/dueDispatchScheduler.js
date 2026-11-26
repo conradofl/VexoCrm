@@ -16,6 +16,7 @@ import { getDateKey } from "../services/analytics.js";
 import { findConcurrentRunningDispatch } from "../services/campaignRecurrenceOccurrences.js";
 import { describeChipBusyForScheduler } from "./chipDispatchLock.js";
 import { syncDailyStalledNotificationsForAllTenants } from "../services/leadReactivationEngine.js";
+import { resolveEffectiveCampaignSequence } from "./dispatch.js";
 
 let _dueDispatchTimerStarted = false;
 let _dueDispatchInterval = null;
@@ -300,7 +301,7 @@ export function createDueDispatchRunner(deps) {
               const campaignMeta = normalizeCampaignAnalyticsMeta(campaign.analytics_meta || {});
               const plan = getCampaignStepPlan({
                 ...campaignMeta,
-                sequence: Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? dispatch.steps : campaignMeta.sequence,
+                sequence: Array.isArray(dispatch.steps) && dispatch.steps.length > 0 ? resolveEffectiveCampaignSequence(dispatch.steps, campaignMeta.sequence, null) : campaignMeta.sequence,
               });
               const passos = plan.shouldUseReplyFlow && plan.immediateSteps.length > 0 ? plan.immediateSteps : plan.enabledSteps;
               const needed = Math.max(countBurstSteps(passos), 1);

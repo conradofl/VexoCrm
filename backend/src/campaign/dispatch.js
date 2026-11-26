@@ -1441,7 +1441,19 @@ export function resolveEffectiveCampaignSequence(loteSteps, liveSteps, nextStepI
     return liveSteps;
   }
 
-  return loteSteps;
+  // O lote guarda a ESTRUTURA (quantos passos, quais existiam quando saiu o passo 1), não o conteúdo. Passo que ainda
+  // existe na campanha (mesmo id) sai com o conteúdo editado: tipo, texto, link, imagem, variações, botões. Antes a cópia
+  // do lote vencia inteira e a edição era ignorada: o passo trocado para "Link / Página" com a URL do Instagram saía só
+  // com a legenda antiga (Advocacia Almeida, 26/11/2026). Passo removido da campanha continua vindo do lote.
+  const liveById = new Map();
+  for (const step of liveSteps) {
+    const id = step && step.id !== undefined && step.id !== null ? String(step.id).trim() : "";
+    if (id) liveById.set(id, step);
+  }
+  return loteSteps.map((step) => {
+    const id = step && step.id !== undefined && step.id !== null ? String(step.id).trim() : "";
+    return (id && liveById.get(id)) || step;
+  });
 }
 
 export function resolveMatchedImportItemForCampaign(importItems, campaign) {
