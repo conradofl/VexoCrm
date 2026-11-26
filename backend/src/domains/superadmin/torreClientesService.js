@@ -251,15 +251,15 @@ export async function editarContatoTorreCliente(
     historico = historico.map((c) =>
       c.id === contatoId
         ? {
-            ...c,
-            horarioContato: horarioFinal,
-            futuroContato: futuroFinal,
-            responsavel: responsavelFinal || c.responsavel || "Não definido",
-            resumo: resumoFinal || c.resumo,
-            proximoAssunto: assuntoFuturoFinal,
-            editadoEm: agoraIso,
-            editadoPor: updatedBy,
-          }
+          ...c,
+          horarioContato: horarioFinal,
+          futuroContato: futuroFinal,
+          responsavel: responsavelFinal || c.responsavel || "Não definido",
+          resumo: resumoFinal || c.resumo,
+          proximoAssunto: assuntoFuturoFinal,
+          editadoEm: agoraIso,
+          editadoPor: updatedBy,
+        }
         : c
     );
   } else if (historico.length > 0) {
@@ -346,15 +346,14 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
   let chipsRows = [];
   let usageRows = [];
   let runsByChipRows = [];
-  let msgsByChipRows = [];
   let campaignsRows = [];
   let dispatchesRows = [];
-  let msgStatsRows = [];
+  let campaignReplyRows = [];
   let waitingLeadsRows = [];
   let stuckStepRows = [];
 
   if (pool && typeof pool.query === "function") {
-    const [cRes, chRes, uRes, rChipRes, mChipRes, campRes, dispRes, mRes, wRes, stRes] = await Promise.all([
+    const [cRes, chRes, uRes, rChipRes, campRes, dispRes, cReplyRes, wRes, stRes] = await Promise.all([
       pool
         .query(`SELECT id, name, created_at FROM public.leads_clients ORDER BY name ASC`)
         .catch(() => ({ rows: [] })),
@@ -402,18 +401,6 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         .catch(() => ({ rows: [] })),
       pool
         .query(
-          `SELECT
-             client_id,
-             LOWER(TRIM(instance_name)) AS instance_key,
-             COUNT(*) FILTER (WHERE direction = 'outbound' AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '24 hours')::int AS msgs_today,
-             COUNT(*) FILTER (WHERE direction = 'outbound')::int AS msgs_total
-           FROM public.lead_messages
-           WHERE instance_name IS NOT NULL AND TRIM(instance_name) <> ''
-           GROUP BY client_id, LOWER(TRIM(instance_name))`
-        )
-        .catch(() => ({ rows: [] })),
-      pool
-        .query(
           `SELECT *
              FROM public.campaigns
             WHERE archived_at IS NULL
@@ -447,47 +434,53 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
       pool
         .query(
           `SELECT
-             client_id,
-             COUNT(*) FILTER (WHERE direction = 'outbound' AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '24 hours')::int AS sent_today,
-             COUNT(*) FILTER (WHERE direction = 'inbound' AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '24 hours')::int AS replies_today,
-             COUNT(*) FILTER (WHERE direction = 'outbound')::int AS sent_30d,
-             COUNT(*) FILTER (WHERE direction = 'inbound')::int AS replies_30d,
-             COUNT(DISTINCT phone) FILTER (WHERE direction = 'inbound')::int AS unique_repliers_30d,
-             MAX(COALESCE(message_timestamp, created_at)) FILTER (WHERE direction = 'outbound') AS last_outbound_at,
-             MAX(COALESCE(message_timestamp, created_at)) FILTER (WHERE direction = 'inbound') AS last_inbound_at
-           FROM public.lead_messages
-           WHERE COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '30 days'
-           GROUP BY client_id`
+             d.client_id,
+             COUNT(*) FILTER (WHERE r.status = 'sent' AND COALESCE(r.sent_at, r.created_at) >= NOW() - INTERVAL '24 hours')::int AS sent_today,
+             COUNT(*) FILTER (WHERE r.status = 'sent')::int AS sent_total,
+             MAX(COALESCE(r.sent_at, r.created_at)) FILTER (WHERE r.status = 'sent') AS last_campaign_sent_at,
+             COUNT(DISTINCT r.phone) FILTER (
+               WHERE r.status = 'sent'
+                 AND r.phone IS NOT NULL
+                 AND r.phone <> ''
+                 AND EXISTS (
+                   SELECT 1
+                     FROM public.lead_messages lm
+                    WHERE lm.client_id = d.client_id
+                      AND lm.direction = 'inbound'
+                      AND RIGHT(REGEXP_REPLACE(COALESCE(lm.phone, ''), '\\D', '', 'g'), 8) =
+                          RIGHT(REGEXP_REPLACE(COALESCE(r.phone, ''), '\\D', '', 'g'), 8)
+                      AND COALESCE(lm.message_timestamp, lm.created_at) >= COALESCE(r.sent_at, r.created_at)
+                 )
+             )::int AS campaign_replied_leads
+           FROM public.campaign_dispatch_runs r
+           JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+           GROUP BY d.client_id`
         )
-        .catch(() =>
-          pool
-            .query(
-              `SELECT
-                 client_id,
-                 COUNT(*) FILTER (WHERE direction = 'outbound' AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '24 hours')::int AS sent_today,
-                 COUNT(*) FILTER (WHERE direction = 'inbound' AND COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '24 hours')::int AS replies_today,
-                 COUNT(*) FILTER (WHERE direction = 'outbound')::int AS sent_30d,
-                 COUNT(*) FILTER (WHERE direction = 'inbound')::int AS replies_30d,
-                 MAX(COALESCE(message_timestamp, created_at)) FILTER (WHERE direction = 'outbound') AS last_outbound_at,
-                 MAX(COALESCE(message_timestamp, created_at)) FILTER (WHERE direction = 'inbound') AS last_inbound_at
-               FROM public.lead_messages
-               WHERE COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '30 days'
-               GROUP BY client_id`
-            )
-            .catch(() => ({ rows: [] }))
-        ),
+        .catch(() => ({ rows: [] })),
       pool
         .query(
-          `SELECT client_id, COUNT(*)::int AS waiting_cnt
-             FROM (
-               SELECT DISTINCT ON (client_id, phone)
-                 client_id, phone, direction, COALESCE(message_timestamp, created_at) AS ts
-               FROM public.lead_messages
-               WHERE COALESCE(message_timestamp, created_at) >= NOW() - INTERVAL '14 days'
-               ORDER BY client_id, phone, COALESCE(message_timestamp, created_at) DESC
-             ) last_m
-            WHERE direction = 'inbound' AND ts < NOW() - INTERVAL '2 hours'
-            GROUP BY client_id`
+          `SELECT d.client_id, COUNT(DISTINCT r.phone)::int AS waiting_cnt
+             FROM public.campaign_dispatch_runs r
+             JOIN public.campaign_dispatches d ON d.id = r.dispatch_id
+            WHERE r.status = 'sent'
+              AND r.phone IS NOT NULL
+              AND r.phone <> ''
+              AND EXISTS (
+                SELECT 1
+                  FROM (
+                    SELECT DISTINCT ON (lm.client_id, lm.phone)
+                      lm.client_id, lm.phone, lm.direction, COALESCE(lm.message_timestamp, lm.created_at) AS ts
+                    FROM public.lead_messages lm
+                    WHERE lm.client_id = d.client_id
+                      AND COALESCE(lm.message_timestamp, lm.created_at) >= NOW() - INTERVAL '14 days'
+                    ORDER BY lm.client_id, lm.phone, COALESCE(lm.message_timestamp, lm.created_at) DESC
+                  ) last_m
+                 WHERE last_m.direction = 'inbound'
+                   AND last_m.ts < NOW() - INTERVAL '2 hours'
+                   AND RIGHT(REGEXP_REPLACE(COALESCE(last_m.phone, ''), '\\D', '', 'g'), 8) =
+                       RIGHT(REGEXP_REPLACE(COALESCE(r.phone, ''), '\\D', '', 'g'), 8)
+              )
+            GROUP BY d.client_id`
         )
         .catch(() => ({ rows: [] })),
       pool
@@ -506,10 +499,9 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     chipsRows = chRes.rows || [];
     usageRows = uRes.rows || [];
     runsByChipRows = rChipRes.rows || [];
-    msgsByChipRows = mChipRes.rows || [];
     campaignsRows = campRes.rows || [];
     dispatchesRows = dispRes.rows || [];
-    msgStatsRows = mRes.rows || [];
+    campaignReplyRows = cReplyRes.rows || [];
     waitingLeadsRows = wRes.rows || [];
     stuckStepRows = stRes.rows || [];
   }
@@ -530,15 +522,6 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     });
   }
 
-  const msgsByClientAndKey = new Map();
-  for (const m of msgsByChipRows) {
-    const key = `${String(m.client_id || "")}|${String(m.instance_key || "")}`;
-    msgsByClientAndKey.set(key, {
-      msgsToday: Number(m.msgs_today) || 0,
-      msgsTotal: Number(m.msgs_total) || 0,
-    });
-  }
-
   const chipsByClient = new Map();
   for (const ch of chipsRows) {
     const cid = String(ch.client_id || "");
@@ -546,21 +529,14 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     const limit = resolveChipDailyLimit(ch);
     const chipIdStr = String(ch.id);
     const slug = ch.dispatch_webhook_url ? String(ch.dispatch_webhook_url).split("/").filter(Boolean).pop() : null;
-    const nameKey = String(ch.name || "").trim().toLowerCase();
-    const slugKey = String(slug || "").trim().toLowerCase();
 
     const uStat = usageByChipId.get(chipIdStr) || { sentToday: 0, sentTotal: 0 };
     const rStat = runsByChipId.get(chipIdStr) || { runsToday: 0, runsTotal: 0 };
-    const mStatName = nameKey ? msgsByClientAndKey.get(`${cid}|${nameKey}`) : null;
-    const mStatSlug = slugKey && slugKey !== nameKey ? msgsByClientAndKey.get(`${cid}|${slugKey}`) : null;
-    const mStatId = msgsByClientAndKey.get(`${cid}|${chipIdStr.toLowerCase()}`) || null;
 
-    const msgsToday = (mStatName?.msgsToday || 0) + (mStatSlug?.msgsToday || 0) + (mStatId?.msgsToday || 0);
-    const msgsTotal = (mStatName?.msgsTotal || 0) + (mStatSlug?.msgsTotal || 0) + (mStatId?.msgsTotal || 0);
-
-    // Prioriza a cota oficial do dia (evolution_instance_daily_usage, igual à tela Chips WhatsApp), com fallback para runs/mensagens
-    const usedToday = uStat.sentToday > 0 ? uStat.sentToday : Math.max(rStat.runsToday, msgsToday);
-    const totalSent = Math.max(uStat.sentTotal, rStat.runsTotal, msgsTotal, usedToday);
+    // Conta SOMENTE disparos reais de campanha / cota oficial (evolution_instance_daily_usage e campaign_dispatch_runs),
+    // NUNCA misturando conversas manuais sincronizadas do aparelho em lead_messages.
+    const usedToday = uStat.sentToday > 0 ? uStat.sentToday : rStat.runsToday;
+    const totalSent = Math.max(uStat.sentTotal, rStat.runsTotal, usedToday);
 
     const isConnected = ch.connection_state === "open" || !ch.connection_state || ch.connection_state === "unknown";
     chipsByClient.get(cid).push({
@@ -606,9 +582,14 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     campaignsByClient.get(cid).push(c);
   }
 
-  const msgStatsByClient = new Map();
-  for (const m of msgStatsRows) {
-    msgStatsByClient.set(String(m.client_id || ""), m);
+  const campaignStatsByClient = new Map();
+  for (const cr of campaignReplyRows) {
+    campaignStatsByClient.set(String(cr.client_id || ""), {
+      sentToday: Number(cr.sent_today) || 0,
+      sentTotal: Number(cr.sent_total) || 0,
+      repliedLeads: Number(cr.campaign_replied_leads) || 0,
+      lastCampaignSentAt: cr.last_campaign_sent_at || null,
+    });
   }
 
   const waitingLeadsByClient = new Map();
@@ -656,8 +637,8 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
       const stepsArr = Array.isArray(camp.message_sequence)
         ? camp.message_sequence
         : Array.isArray(camp.steps)
-        ? camp.steps
-        : [];
+          ? camp.steps
+          : [];
 
       const lotesTargetSum = lotes.reduce(
         (acc, l) => acc + (Number(l.target_count) || Number(l.total_leads) || 0),
@@ -763,7 +744,12 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
       };
     });
 
-    const msgStat = msgStatsByClient.get(cid) || {};
+    const campStat = campaignStatsByClient.get(cid) || {
+      sentToday: 0,
+      sentTotal: 0,
+      repliedLeads: 0,
+      lastCampaignSentAt: null,
+    };
     const controle = entries.get(`torre_cliente:${cid}`) || {
       clientId: cid,
       responsavel: "",
@@ -785,8 +771,8 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
     const stuckStepsCount = stuckStepsByClient.get(cid) || 0;
     const waitingLeadsCount = waitingLeadsByClient.get(cid) || 0;
 
-    // Cálculo de inatividade: dias sem disparar e dias sem criar campanha
-    const ultimoDisparoAt = msgStat.last_outbound_at || campanhas[0]?.lastTriggeredAt || null;
+    // Cálculo de inatividade: dias sem disparar campanha e dias sem criar campanha
+    const ultimoDisparoAt = campStat.lastCampaignSentAt || campanhas[0]?.lastTriggeredAt || null;
     const diasSemDisparo = ultimoDisparoAt
       ? Math.max(0, Math.floor((now.getTime() - new Date(ultimoDisparoAt).getTime()) / (24 * 3600 * 1000)))
       : null;
@@ -800,23 +786,26 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         ? Math.max(0, Math.floor((now.getTime() - latestCampaignCreatedIso) / (24 * 3600 * 1000)))
         : null;
 
-    // Métricas de Performance & Retorno para o Pódio Top 5
-    const enviadosTotalBase = Math.max(
-      Number(msgStat.sent_30d) || 0,
-      totalSentAllChips || 0,
+    // Métricas REAIS de Disparos de Campanhas (sem inflar com conversas manuais sincronizadas do celular)
+    const enviadosCampanhaTotal = Math.max(
       clientTotalSent || 0,
+      campStat.sentTotal || 0,
+      totalSentAllChips || 0,
       usedQuotaToday || 0
     );
-    const respostasTotal30d = Number(msgStat.replies_30d) || Number(msgStat.replies_today) || 0;
-    const leadsQueResponderam = Number(msgStat.unique_repliers_30d) || respostasTotal30d;
+    const enviadosCampanhaHoje = usedQuotaToday > 0 ? usedQuotaToday : campStat.sentToday || 0;
+    const respostasCampanhaTotal = Math.min(enviadosCampanhaTotal, campStat.repliedLeads || 0);
+    const leadsQueResponderam = respostasCampanhaTotal;
     const taxaRetornoPct =
-      enviadosTotalBase > 0 ? Math.min(100, Number(((respostasTotal30d / enviadosTotalBase) * 100).toFixed(1))) : 0;
+      enviadosCampanhaTotal > 0
+        ? Math.min(100, Number(((respostasCampanhaTotal / enviadosCampanhaTotal) * 100).toFixed(1)))
+        : 0;
     const taxaFalhaPct =
       clientTotalSent + clientTotalFailed > 0
         ? Number(((clientTotalFailed / (clientTotalSent + clientTotalFailed)) * 100).toFixed(1))
         : 0;
     const scorePerformance = Math.round(
-      enviadosTotalBase * 0.25 + respostasTotal30d * 2.2 + taxaRetornoPct * 4 - taxaFalhaPct * 1.5
+      enviadosCampanhaTotal * 1.0 + respostasCampanhaTotal * 3.5 + taxaRetornoPct * 2 - taxaFalhaPct * 1.2
     );
 
     // Semáforo inteligente da empresa & Alimentação do Quadro de Avisos/Alertas
@@ -882,9 +871,8 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         categoria: "futuro_contato",
         severidade: "critico",
         titulo: "Futuro contato vencido / atrasado",
-        detalhe: `Retorno agendado para ${dataFuturoStr}${
-          controle.proximoAssunto ? ` (${controle.proximoAssunto})` : ""
-        } ainda não foi realizado.`,
+        detalhe: `Retorno agendado para ${dataFuturoStr}${controle.proximoAssunto ? ` (${controle.proximoAssunto})` : ""
+          } ainda não foi realizado.`,
         responsavel: controle.responsavel || "Sem responsável",
       });
     } else if (futuroContatoStatus === "hoje") {
@@ -904,9 +892,8 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         categoria: "futuro_contato",
         severidade: "atencao",
         titulo: "Futuro contato agendado para HOJE",
-        detalhe: `Retorno programado para hoje (${dataFuturoStr})${
-          controle.proximoAssunto ? ` · Assunto: ${controle.proximoAssunto}` : ""
-        }.`,
+        detalhe: `Retorno programado para hoje (${dataFuturoStr})${controle.proximoAssunto ? ` · Assunto: ${controle.proximoAssunto}` : ""
+          }.`,
         responsavel: controle.responsavel || "Sem responsável",
       });
     } else if (futuroContatoStatus === "sem_agendamento") {
@@ -974,9 +961,8 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
       const textoInatividade =
         diasSemDisparo === null
           ? "Sem disparos registrados nos últimos 30 dias"
-          : `${diasSemDisparo} dia(s) sem disparar${
-              diasSemCriarCampanha !== null ? ` · ${diasSemCriarCampanha}d sem criar campanha` : ""
-            }`;
+          : `${diasSemDisparo} dia(s) sem disparar${diasSemCriarCampanha !== null ? ` · ${diasSemCriarCampanha}d sem criar campanha` : ""
+          }`;
       alertas.push(textoInatividade);
       quadroAlertas.push({
         id: `al-inativo-${cid}`,
@@ -988,11 +974,10 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
           diasSemDisparo === null
             ? "Empresa sem disparos recentes"
             : `Há ${diasSemDisparo} dia(s) sem fazer disparo`,
-        detalhe: `${textoInatividade}. ${
-          campanhas.length === 0
-            ? "Nenhuma campanha criada."
-            : `Última campanha há ${diasSemCriarCampanha ?? 0} dia(s).`
-        }`,
+        detalhe: `${textoInatividade}. ${campanhas.length === 0
+          ? "Nenhuma campanha criada."
+          : `Última campanha há ${diasSemCriarCampanha ?? 0} dia(s).`
+          }`,
         responsavel: controle.responsavel || "Sem responsável",
       });
     }
@@ -1038,10 +1023,10 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         items: campanhas.slice(0, 8),
       },
       disparos: {
-        enviadosHoje: Number(msgStat.sent_today) || usedQuotaToday || 0,
-        respostasHoje: Number(msgStat.replies_today) || 0,
-        enviados30d: enviadosTotalBase,
-        respostas30d: respostasTotal30d,
+        enviadosHoje: enviadosCampanhaHoje,
+        respostasHoje: respostasCampanhaTotal,
+        enviados30d: enviadosCampanhaTotal,
+        respostas30d: respostasCampanhaTotal,
         leadsQueResponderam,
         taxaRetornoPct,
         taxaFalhaPct,
@@ -1049,7 +1034,7 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
         leadsAguardandoResposta: waitingLeadsCount,
         diasSemDisparo,
         ultimoDisparoAt,
-        ultimaRespostaAt: msgStat.last_inbound_at || null,
+        ultimaRespostaAt: null,
       },
       relacionamento: {
         responsavel: controle.responsavel || "",
@@ -1086,7 +1071,15 @@ export async function buildTorreClientesOverview(pool, { now = new Date() } = {}
   const rankingPodium = {
     maisDispararam: buildTop5((a, b) => b.disparos.enviados30d - a.disparos.enviados30d),
     maisResponderam: buildTop5((a, b) => b.disparos.respostas30d - a.disparos.respostas30d),
-    maiorTaxaRetorno: buildTop5((a, b) => b.disparos.taxaRetornoPct - a.disparos.taxaRetornoPct),
+    maiorTaxaRetorno: buildTop5((a, b) => {
+      const aQualified = a.disparos.enviados30d >= 5 ? 1 : 0;
+      const bQualified = b.disparos.enviados30d >= 5 ? 1 : 0;
+      if (bQualified !== aQualified) return bQualified - aQualified;
+      if (b.disparos.taxaRetornoPct !== a.disparos.taxaRetornoPct) {
+        return b.disparos.taxaRetornoPct - a.disparos.taxaRetornoPct;
+      }
+      return b.disparos.respostas30d - a.disparos.respostas30d;
+    }),
     melhorPerformance: buildTop5((a, b) => b.disparos.scorePerformance - a.disparos.scorePerformance),
   };
 
@@ -1168,8 +1161,8 @@ export async function cobrarColaboradorTorreViaWandinha(
     const textoEmpresa =
       mensagemCustomizada ||
       `Olá, equipe *${clientName || clientId}*! Aqui é a *Wandinha*, assistente executiva da *Vexo OS*.\n\n` +
-        `${instrucaoFinal}\n\n` +
-        `Qualquer dúvida ou alinhamento, estamos à disposição!`;
+      `${instrucaoFinal}\n\n` +
+      `Qualquer dúvida ou alinhamento, estamos à disposição!`;
 
     const envioEmpresa = await enviarMensagemWhatsAppComFallback({
       numero: telefoneEmpresaFinal,
@@ -1202,12 +1195,12 @@ export async function cobrarColaboradorTorreViaWandinha(
   const texto =
     mensagemCustomizada ||
     `⚡ *Cobrança da Torre de Controle Vexo OS · Wandinha*\n\n` +
-      `Olá, *${colab.nome}*! Cobrança de acompanhamento sobre a empresa *${clientName || clientId}*:\n\n` +
-      `🎯 *Instrução / O que cobrar:* ${instrucaoFinal}\n` +
-      (telefoneEmpresaFinal ? `📱 *WhatsApp da Empresa:* +${telefoneEmpresaFinal}\n` : "") +
-      `🕒 *Último Contato:* ${horarioStr}\n` +
-      `📅 *Futuro Contato Programado:* ${futuroStr}${controle.proximoAssunto ? ` (${controle.proximoAssunto})` : ""}\n\n` +
-      `Por favor, execute e atualize o status na Torre de Controle.`;
+    `Olá, *${colab.nome}*! Cobrança de acompanhamento sobre a empresa *${clientName || clientId}*:\n\n` +
+    `🎯 *Instrução / O que cobrar:* ${instrucaoFinal}\n` +
+    (telefoneEmpresaFinal ? `📱 *WhatsApp da Empresa:* +${telefoneEmpresaFinal}\n` : "") +
+    `🕒 *Último Contato:* ${horarioStr}\n` +
+    `📅 *Futuro Contato Programado:* ${futuroStr}${controle.proximoAssunto ? ` (${controle.proximoAssunto})` : ""}\n\n` +
+    `Por favor, execute e atualize o status na Torre de Controle.`;
 
   const envio = await enviarMensagemWhatsAppComFallback({
     numero: colab.telefone,
