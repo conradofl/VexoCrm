@@ -64,7 +64,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
   const guardPropostaVexo = makeVexoCommercialRowGuard(pool, "gd_proposals");
   const guardBriefingVexo = makeVexoCommercialRowGuard(pool, "gd_implementation_briefings");
 
-  // Inicialização defensiva de todas as tabelas e seeds de Geração Digital no PostgreSQL
+  // Seeds de Geração Digital no PostgreSQL. As TABELAS (CREATE/ALTER que rodavam a cada boot) estão na migration
+  // 20261126040000 desde o untangle (26/11/2026); aqui ficam só os INSERT ... ON CONFLICT DO NOTHING.
   async function ensureGdTablesAndSeeds(dbPool) {
   // Falha de DDL no boot NAO pode morrer calada. Cada ALTER tinha `.catch(() => {})`,
   // entao coluna que nao foi criada nao deixava rastro nenhum — foi assim que as oito
@@ -81,77 +82,15 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
     try {
       // 0. Core CRM Tables (leads_clients, lead_client_n8n_settings, leads, lead_conversations, lead_messages)
       await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.leads_clients (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
         INSERT INTO public.leads_clients (id, name)
         VALUES ('geracao-digital', 'Geração Digital')
         ON CONFLICT (id) DO NOTHING;
-
-        CREATE TABLE IF NOT EXISTS public.lead_client_n8n_settings (
-          client_id TEXT PRIMARY KEY REFERENCES public.leads_clients(id) ON DELETE CASCADE,
-          dispatch_webhook_url TEXT,
-          dispatch_webhook_token TEXT,
-          inbound_bearer_token TEXT,
-          active BOOLEAN DEFAULT true,
-          chatbot_enabled BOOLEAN DEFAULT false,
-          chatbot_model TEXT,
-          chatbot_llm_model TEXT,
-          agent_name TEXT,
-          persona_template TEXT,
-          segmentation_config JSONB DEFAULT '{}'::jsonb,
-          sdr_whatsapp_number TEXT,
-          allowed_tabs JSONB DEFAULT '[]'::jsonb,
-          updated_at TIMESTAMPTZ DEFAULT now(),
-          updated_by_uid TEXT,
-          updated_by_email TEXT
-        );
-        ALTER TABLE public.lead_client_n8n_settings ADD COLUMN IF NOT EXISTS agent_name TEXT;
-        ALTER TABLE public.lead_client_n8n_settings ADD COLUMN IF NOT EXISTS plan_tier TEXT DEFAULT 'essencial';
-        ALTER TABLE public.lead_client_n8n_settings ADD COLUMN IF NOT EXISTS modulos_avulsos JSONB DEFAULT '[]'::jsonb;
-        ALTER TABLE public.lead_client_n8n_settings ADD COLUMN IF NOT EXISTS degustacao_expira_em TIMESTAMPTZ;
-
         INSERT INTO public.lead_client_n8n_settings (client_id, active, chatbot_enabled)
         VALUES ('geracao-digital', true, false)
         ON CONFLICT (client_id) DO NOTHING;
-
-        -- public.leads NÃO é criada aqui. O schema desta função era mínimo (sem
-        -- UNIQUE (client_id, telefone), sem stage/temperature/tags/phone/
-        -- extracted_from_wa), e recriava a tabela degradada sempre que ela
-        -- faltava, derrubando em silêncio a extração de contatos. O schema
-        -- correto é responsabilidade das migrations em supabase/migrations
-        -- (20260703000000 + 20260730000000 + 20260801120000).
-
-        CREATE TABLE IF NOT EXISTS public.lead_conversations (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
-          lead_id UUID REFERENCES public.leads(id) ON DELETE CASCADE,
-          telefone TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
-        CREATE TABLE IF NOT EXISTS public.lead_messages (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          client_id TEXT NOT NULL REFERENCES public.leads_clients(id) ON DELETE CASCADE,
-          lead_id UUID REFERENCES public.leads(id) ON DELETE CASCADE,
-          direction TEXT NOT NULL DEFAULT 'inbound',
-          sender_type TEXT,
-          text_content TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `).catch((err) => console.warn("[crm-setup] Aviso ao criar tabelas core CRM:", err.message));
+      `);
 
       // 1. Tenants table
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.tenants (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          name TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
       await dbPool.query(`
         INSERT INTO public.tenants (id, name)
         VALUES ('00000000-0000-0000-0000-000000000000', 'Geração Digital')
@@ -163,18 +102,6 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       `));
 
       // 2. geracao_digital_briefings (Briefings de captação)
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.geracao_digital_briefings (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          prospect_name TEXT,
-          whatsapp_number TEXT,
-          theme_preset TEXT,
-          briefing_data JSONB DEFAULT '{}'::jsonb,
-          status TEXT DEFAULT 'pendente',
-          slack_status TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
       const briefingCount = await dbPool.query("SELECT count(*)::int AS count FROM public.geracao_digital_briefings");
       if ((briefingCount.rows[0]?.count || 0) === 0) {
         console.log("[gd-setup] Inserindo briefings iniciais de captação...");
@@ -188,34 +115,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
 
       // 3. gd_segments
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_segments (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          nome TEXT NOT NULL,
-          faturamento_min NUMERIC NOT NULL DEFAULT 50000,
-          ativo BOOLEAN NOT NULL DEFAULT true
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_segments DROP CONSTRAINT IF EXISTS gd_segments_tenant_id_fkey`).catch(alterLogado(`ALTER TABLE public.gd_segments DROP CONSTRAINT IF EXISTS gd_segments_tenant_id_fkey`));
-      await dbPool.query(`ALTER TABLE public.gd_segments ALTER COLUMN tenant_id TYPE text USING tenant_id::text`).catch(alterLogado(`ALTER TABLE public.gd_segments ALTER COLUMN tenant_id TYPE text USING tenant_id::text`));
 
       // 4. gd_products (Catálogo)
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_products (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          nome TEXT NOT NULL,
-          descricao TEXT,
-          categoria TEXT NOT NULL DEFAULT 'gd',
-          valor_padrao NUMERIC NOT NULL DEFAULT 0,
-          valor_vp NUMERIC DEFAULT 0,
-          recorrencia TEXT NOT NULL DEFAULT 'mensal',
-          ativo BOOLEAN NOT NULL DEFAULT true
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_products DROP CONSTRAINT IF EXISTS gd_products_tenant_id_fkey`).catch(alterLogado(`ALTER TABLE public.gd_products DROP CONSTRAINT IF EXISTS gd_products_tenant_id_fkey`));
-      await dbPool.query(`ALTER TABLE public.gd_products ALTER COLUMN tenant_id TYPE text USING tenant_id::text`).catch(alterLogado(`ALTER TABLE public.gd_products ALTER COLUMN tenant_id TYPE text USING tenant_id::text`));
 
       // Seed catálogo se estiver vazio
       const prodCheck = await dbPool.query("SELECT count(*)::int AS count FROM public.gd_products");
@@ -246,81 +147,8 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
 
       // 5. gd_presentations
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_presentations (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          prospect_name TEXT,
-          prospect_logo TEXT,
-          segment_id UUID,
-          venda_casada BOOLEAN NOT NULL DEFAULT false,
-          produtos_selecionados JSONB,
-          roi JSONB,
-          status TEXT NOT NULL DEFAULT 'rascunho',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_presentations DROP CONSTRAINT IF EXISTS gd_presentations_tenant_id_fkey`).catch(alterLogado(`ALTER TABLE public.gd_presentations DROP CONSTRAINT IF EXISTS gd_presentations_tenant_id_fkey`));
-      await dbPool.query(`ALTER TABLE public.gd_presentations ALTER COLUMN tenant_id TYPE text USING tenant_id::text`).catch(alterLogado(`ALTER TABLE public.gd_presentations ALTER COLUMN tenant_id TYPE text USING tenant_id::text`));
 
       // 6. gd_proposals (Propostas Comerciais)
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_proposals (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          presentation_id UUID,
-          prospect_name TEXT,
-          itens JSONB NOT NULL DEFAULT '[]'::jsonb,
-          valor_total NUMERIC NOT NULL DEFAULT 0,
-          condicoes TEXT,
-          status TEXT NOT NULL DEFAULT 'rascunho',
-          payment_link TEXT,
-          sent_at TIMESTAMPTZ,
-          assinatura TEXT,
-          signer_name TEXT,
-          signed_at TIMESTAMPTZ,
-          signer_ip TEXT,
-          termo_aceite TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_proposals DROP CONSTRAINT IF EXISTS gd_proposals_tenant_id_fkey`).catch(alterLogado(`ALTER TABLE public.gd_proposals DROP CONSTRAINT IF EXISTS gd_proposals_tenant_id_fkey`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ALTER COLUMN tenant_id TYPE text USING tenant_id::text`).catch(alterLogado(`ALTER TABLE public.gd_proposals ALTER COLUMN tenant_id TYPE text USING tenant_id::text`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS package_id UUID`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS package_id UUID`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS package_vexo_id UUID`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS package_vexo_id UUID`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS prospect_logo TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS prospect_logo TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS segment_id UUID`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS segment_id UUID`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS cobrar_setup BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS cobrar_setup BOOLEAN DEFAULT false`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS valor_setup_vexo NUMERIC`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS valor_setup_vexo NUMERIC`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS condicoes_pagamento JSONB`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS condicoes_pagamento JSONB`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS periodo_plano TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS periodo_plano TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS validade_ate TIMESTAMPTZ`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS validade_ate TIMESTAMPTZ`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS valor_apos_validade NUMERIC`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS valor_apos_validade NUMERIC`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS observacao_validade TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS observacao_validade TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS valor_vp NUMERIC`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS valor_vp NUMERIC`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS pacotes_ofertados JSONB`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS pacotes_ofertados JSONB`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS condicoes_especiais TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS condicoes_especiais TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS desconto_setup_pct NUMERIC DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS desconto_setup_pct NUMERIC DEFAULT 0`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS desconto_mensal_pct NUMERIC DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS desconto_mensal_pct NUMERIC DEFAULT 0`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexi_plan VARCHAR(50)`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexi_plan VARCHAR(50)`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexi_price NUMERIC DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexi_price NUMERIC DEFAULT 0`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexo_plan VARCHAR(50)`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexo_plan VARCHAR(50)`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexo_price NUMERIC DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vexo_price NUMERIC DEFAULT 0`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS presentation_slides JSONB`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS presentation_slides JSONB`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS meeting_notes TEXT`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS meeting_notes TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS descontos_por_periodo JSONB NULL`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS vp_percent NUMERIC NULL`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS esconder_valores BOOLEAN DEFAULT false`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS assinatura_metodo TEXT DEFAULT 'desenho'`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS assinatura_metodo TEXT DEFAULT 'desenho'`));
-      await dbPool.query(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS dados_cadastrais JSONB`).catch(alterLogado(`ALTER TABLE public.gd_proposals ADD COLUMN IF NOT EXISTS dados_cadastrais JSONB`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
-      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS owner_company TEXT NOT NULL DEFAULT 'geracao-digital'`));
-      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_path TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_path TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_name TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_name TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_at TIMESTAMPTZ`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_at TIMESTAMPTZ`));
-      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_by TEXT`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_uploaded_by TEXT`));
-      await dbPool.query(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_history JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_contracts ADD COLUMN IF NOT EXISTS signed_file_history JSONB DEFAULT '[]'::jsonb`));
 
       // Seed de propostas históricas se a tabela estiver vazia
       const propCount = await dbPool.query("SELECT count(*)::int AS count FROM public.gd_proposals");
@@ -338,110 +166,20 @@ export function registerGeracaoDigitalRoutes(app, pool, requireFirebaseAuth, req
       }
 
       // 7. gd_packages
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_packages (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          nome TEXT NOT NULL,
-          tipo TEXT DEFAULT 'gd',
-          periodo TEXT DEFAULT 'mensal',
-          produtos_incluidos JSONB NOT NULL DEFAULT '[]'::jsonb,
-          valor NUMERIC NOT NULL DEFAULT 0,
-          valor_tabela NUMERIC,
-          valor_vp NUMERIC,
-          destaque BOOLEAN NOT NULL DEFAULT false,
-          ativo BOOLEAN NOT NULL DEFAULT true,
-          ad_hoc BOOLEAN NOT NULL DEFAULT false,
-          segmento TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'gd'`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'gd'`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS periodo TEXT DEFAULT 'mensal'`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS periodo TEXT DEFAULT 'mensal'`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS produtos_incluidos JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS produtos_incluidos JSONB DEFAULT '[]'::jsonb`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS valor NUMERIC DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS valor NUMERIC DEFAULT 0`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS valor_tabela NUMERIC`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS valor_tabela NUMERIC`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS valor_vp NUMERIC`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS valor_vp NUMERIC`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS destaque BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS destaque BOOLEAN DEFAULT false`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS ad_hoc BOOLEAN DEFAULT false`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS ad_hoc BOOLEAN DEFAULT false`));
-      await dbPool.query(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS segmento TEXT`).catch(alterLogado(`ALTER TABLE public.gd_packages ADD COLUMN IF NOT EXISTS segmento TEXT`));
 
       // 8. gd_payment_terms
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_payment_terms (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          nome TEXT NOT NULL,
-          tipo TEXT DEFAULT 'custom',
-          config JSONB DEFAULT '{}'::jsonb,
-          ativo BOOLEAN NOT NULL DEFAULT true,
-          aplica_a TEXT DEFAULT 'setup',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_payment_terms ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'custom'`).catch(alterLogado(`ALTER TABLE public.gd_payment_terms ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'custom'`));
-      await dbPool.query(`ALTER TABLE public.gd_payment_terms ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_payment_terms ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'::jsonb`));
-      await dbPool.query(`ALTER TABLE public.gd_payment_terms ADD COLUMN IF NOT EXISTS aplica_a TEXT DEFAULT 'setup'`).catch(alterLogado(`ALTER TABLE public.gd_payment_terms ADD COLUMN IF NOT EXISTS aplica_a TEXT DEFAULT 'setup'`));
 
       // 9. gd_contracts
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_contracts (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          proposal_id UUID,
-          client_name TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'rascunho',
-          file_url TEXT,
-          signed_at TIMESTAMPTZ,
-          signed_file_path TEXT,
-          signed_file_name TEXT,
-          signed_uploaded_at TIMESTAMPTZ,
-          signed_uploaded_by TEXT,
-          signed_file_history JSONB DEFAULT '[]'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
 
       // 10. gd_implementation_briefings
-      await dbPool.query(`
-        CREATE TABLE IF NOT EXISTS public.gd_implementation_briefings (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id TEXT NOT NULL DEFAULT 'geracao-digital',
-          client_name TEXT NOT NULL,
-          model_type TEXT NOT NULL DEFAULT 'essencial',
-          suggested_model TEXT DEFAULT 'essencial',
-          num_employees INTEGER DEFAULT 1,
-          has_commercial_sector BOOLEAN DEFAULT false,
-          prerequisites JSONB DEFAULT '{}'::jsonb,
-          operacao JSONB DEFAULT '{}'::jsonb,
-          inteligencia JSONB DEFAULT '{}'::jsonb,
-          agente_ia JSONB DEFAULT '{}'::jsonb,
-          canais JSONB DEFAULT '{}'::jsonb,
-          modulos_custom JSONB DEFAULT '{}'::jsonb,
-          fechamento JSONB DEFAULT '{}'::jsonb,
-          team_users JSONB DEFAULT '[]'::jsonb,
-          knowledge_files JSONB DEFAULT '[]'::jsonb,
-          cinco_pilares JSONB DEFAULT '{}'::jsonb,
-          status TEXT NOT NULL DEFAULT 'em_andamento',
-          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-      `);
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings DROP CONSTRAINT IF EXISTS gd_implementation_briefings_tenant_id_fkey`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings DROP CONSTRAINT IF EXISTS gd_implementation_briefings_tenant_id_fkey`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ALTER COLUMN tenant_id TYPE text USING tenant_id::text`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ALTER COLUMN tenant_id TYPE text USING tenant_id::text`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS team_users JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS team_users JSONB DEFAULT '[]'::jsonb`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS knowledge_files JSONB DEFAULT '[]'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS knowledge_files JSONB DEFAULT '[]'::jsonb`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS cinco_pilares JSONB DEFAULT '{}'::jsonb`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS cinco_pilares JSONB DEFAULT '{}'::jsonb`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_performed_at TIMESTAMPTZ`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_performed_at TIMESTAMPTZ`));
-      await dbPool.query(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_questions_count INTEGER DEFAULT 0`).catch(alterLogado(`ALTER TABLE public.gd_implementation_briefings ADD COLUMN IF NOT EXISTS test_questions_count INTEGER DEFAULT 0`));
       // Bloco de auto-migração de background REMOVIDO: a migração já foi feita
       // manualmente e o código anterior embutia a senha do banco em texto puro
       // (3 connection strings hardcoded). Migração é operação pontual, não deve
       // rodar a cada boot nem carregar segredo no fonte.
       if (_ddlFalhas.length > 0) {
-        console.error("[gd-setup] schema GD incompleto:", _ddlFalhas.length, "DDL falharam", _ddlFalhas);
+        console.error("[gd-setup] seeds GD incompletos:", _ddlFalhas.length, "comandos falharam", _ddlFalhas);
       } else {
-        console.log("[gd-setup] schema GD verificado, nenhuma DDL falhou");
+        console.log("[gd-setup] seeds GD verificados, nenhum comando falhou");
       }
     } catch (err) {
       console.error("[ensureGdTablesAndSeeds] falhou ao verificar tabelas GD:", err.message);

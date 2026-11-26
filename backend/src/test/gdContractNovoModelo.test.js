@@ -92,6 +92,8 @@ describe("Chat GD · Atualização e Unificação do Modelo Oficial de Contrato 
     await db.exec(MIGRATION_BRIEFING);
     await db.exec(MIGRATION_FRENTE5);
     await db.exec(MIGRATION_FRENTE6);
+    // Tabelas da GD que o boot criava (gd_proposals, gd_packages...): migration 20261126040000, a ÚLTIMA (como em produção).
+    await db.exec(readFileSync(resolve("supabase/migrations/20261126040000_gd_ddl_de_runtime.sql"), "utf8"));
 
     const app = express();
     app.use(express.json());
