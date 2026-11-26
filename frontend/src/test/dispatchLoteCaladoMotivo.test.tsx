@@ -37,6 +37,11 @@ const estado = vi.hoisted(() => ({
   triggerMutate: null as any,
 }));
 
+// Conferência de leads repetidos (antes de disparar): aqui nenhum lead repetido, o botão dispara depois de conferir.
+vi.mock("@/lib/repeatContacts", async (importOriginal) => {
+  const actual: any = await importOriginal();
+  return { ...actual, getRepeatContacts: async () => ({ pendentes: 0, jaReceberam: 0, campanhas: [], decisao: null }) };
+});
 vi.mock("@/hooks/useCampanhas", async (importOriginal) => {
   const actual: any = await importOriginal();
   return {
@@ -248,7 +253,7 @@ describe("Cartão da campanha: motivo do lote e fila de resposta parada", () => 
     const botao = screen.getByTestId("btn-trigger-batch-1-c-nous");
     expect(botao.textContent).toContain("Disparar Lote 1 Agora");
     fireEvent.click(botao);
-    expect(estado.triggerMutate).toHaveBeenCalledWith("lote-1", expect.any(Object));
+    await waitFor(() => expect(estado.triggerMutate).toHaveBeenCalledWith("lote-1", expect.any(Object)));
   });
 
   it("lote 1 'interrupted' e lote 2 agendado: antes o botão 'Lote 1' disparava o lote 2; agora dispara o 1", async () => {
@@ -262,7 +267,7 @@ describe("Cartão da campanha: motivo do lote e fila de resposta parada", () => 
     );
     await renderTracker();
     fireEvent.click(screen.getByTestId("btn-trigger-batch-1-c-nous"));
-    expect(estado.triggerMutate).toHaveBeenCalledWith("lote-1", expect.any(Object));
+    await waitFor(() => expect(estado.triggerMutate).toHaveBeenCalledWith("lote-1", expect.any(Object)));
   });
 
   it("lote concluído sem motivo: nenhum aviso", async () => {
