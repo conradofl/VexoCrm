@@ -1360,6 +1360,9 @@ async function dispatchCampaignSequenceSemRegistro({
               lead,
               phone,
               step: stepForPayload,
+              // O texto que saiu de fato (com a URL do passo de link, os botões e as variáveis já trocadas). A conversa
+              // grava isto, não step.text: o passo "Link / Página" aparecia sem a URL, ou nem aparecia (26/11/2026).
+              sentText: typeof payload.text === "string" ? payload.text : (typeof payload.caption === "string" ? payload.caption : null),
               stepIndex,
               totalSteps: enabledSteps.length,
               sentAt,
