@@ -770,7 +770,73 @@ export function buildImagePayload(phone, step, context = {}) {
   };
 }
 
+// Últimas falhas de envio para a Evolution (memória do processo), para o /health dizer POR QUE um passo não saiu sem
+// precisar dos logs do servidor (26/11/2026: "não está enviando o link"). Sem telefone: sequências longas de dígitos
+// viram "…".
+const ULTIMAS_FALHAS_MAX = 20;
+const ultimasFalhasDeEnvio = [];
+function registrarFalhaDeEnvio(payload, err, { semPrevia = false } = {}) {
+  ultimasFalhasDeEnvio.unshift({
+    em: new Date().toISOString(),
+    tipoPasso: payload?.stepType || payload?.type || null,
+    comPrevia: Boolean(payload?.linkPreview),
+    semPreviaNaRetentativa: semPrevia,
+    status: Number.isInteger(err?.statusCode) ? err.statusCode : null,
+    codigo: err?.code || (err?.name === "AbortError" ? "TIMEOUT" : null),
+    resposta: String(err?.message || err).replace(/\d{8,}/g, "…").slice(0, 240),
+  });
+  ultimasFalhasDeEnvio.length = Math.min(ultimasFalhasDeEnvio.length, ULTIMAS_FALHAS_MAX);
+}
+export function getRecentOutboundFailures() {
+  return ultimasFalhasDeEnvio.slice(0, 10);
+}
+export function _resetOutboundFailuresForTesting() {
+  ultimasFalhasDeEnvio.length = 0;
+}
+
+/**
+ * Envia um passo. Passo de texto com prévia de link (passo "Link / Página") que a Evolution RECUSA com resposta HTTP de
+ * erro — a mensagem não saiu — é reenviado UMA vez sem a prévia: o link chega clicável, só sem o card de imagem/título.
+ * A prévia é montada pela Evolution buscando a página (Instagram costuma barrar), e uma prévia que falha não pode custar
+ * o passo inteiro. Timeout NÃO reenvia (a mensagem pode ter saído), nem chip desconectado, token inválido ou bloqueio
+ * da guarda de saída.
+ */
 async function postEvolutionPayload(webhookUrl, webhookToken, payload) {
+  try {
+    return await postEvolutionPayloadOnce(webhookUrl, webhookToken, payload);
+  } catch (err) {
+    registrarFalhaDeEnvio(payload, err);
+    const respondeuComErro = Number.isInteger(err?.statusCode) && err.statusCode >= 400;
+    const podeTentarSemPrevia =
+      payload?.type === "text" &&
+      payload?.linkPreview === true &&
+      respondeuComErro &&
+      !err?.isConnectionClosed &&
+      !err?.isUnauthorized &&
+      err?.code !== "OUTBOUND_GUARD_BLOCKED";
+    if (!podeTentarSemPrevia) throw err;
+    console.warn("[campaign-outbound] passo com link recusado com prévia; reenviando UMA vez sem a prévia", {
+      stepId: payload?.stepId || null,
+      phone: maskOutboundPhone(payload?.number),
+      status: err.statusCode,
+    });
+    const semPrevia = {
+      ...payload,
+      linkPreview: false,
+      generateHighQualityLinkPreview: false,
+      options: { ...(payload.options || {}), linkPreview: false, generateHighQualityLinkPreview: false },
+    };
+    try {
+      const r = await postEvolutionPayloadOnce(webhookUrl, webhookToken, semPrevia);
+      return { ...r, semPrevia: true };
+    } catch (err2) {
+      registrarFalhaDeEnvio(semPrevia, err2, { semPrevia: true });
+      throw err2;
+    }
+  }
+}
+
+async function postEvolutionPayloadOnce(webhookUrl, webhookToken, payload) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
   const stepWebhookUrl = resolveStepWebhookUrl(webhookUrl, payload);
