@@ -130,6 +130,8 @@ import { validateOutboundMessage } from "../../services/jsonExtractor.js";
 import { getCampaignStepPlan, normalizeCampaignAnalyticsMeta } from "../../campaign-outbound.js";
 import { normalizeCampaignPendingStepIndex } from "../../campaign/dispatch.js";
 import { pickCampaignAwaitingReply } from "../../campaign/replyRouting.js";
+import { enfileirarEtapaAtrasada } from "../../campaign/etapaAtrasadaFila.js";
+import { registrarIdadeDaEntrada } from "../../services/inboundDelayAlert.js";
 import { parseSimulationState } from "./simulationState.js";
 
 function isTerminalCampaignProgressState(progress) {
@@ -3507,6 +3509,8 @@ export function registerChatbotRoutes(app, deps) {
           horaReal: messageData.messageTimestamp,
           chegada: new Date(startTime).toISOString(),
         });
+        // Alerta no Slack quando a Evolution começa a entregar com atraso (services/inboundDelayAlert.js). Nunca lança.
+        void registrarIdadeDaEntrada({ clientId, idadeMs: atrasoEntregaMs });
       }
     }
 
@@ -3825,6 +3829,13 @@ export function registerChatbotRoutes(app, deps) {
       descartar("mensagem_atrasada", { clientId, phone: maskPhoneForLog(phone), idadeMin: atrasada.idadeMin, instancia: instanceName || null });
       return true;
     };
+    // Etapa de CAMPANHA atrasada não é descartada: entra na fila (campaign/etapaAtrasadaFila.js) e sai aos poucos, na
+    // janela de envio, pelo mesmo caminho da resposta. O agente continua sem responder mensagem atrasada.
+    const enfileirarEtapaSeAtrasada = async () => {
+      if (!atrasada) return false;
+      await enfileirarEtapaAtrasada(pgDatabasePool, { clientId, waMessageId: msgKeyDaEntrada });
+      return barrarSeAtrasada();
+    };
 
     // ── ETAPA 4: CAMPAIGN ROUTING (AVANÇA PASSO DE CAMPANHA, SE HOUVER) ──
     // Se o lead respondeu a uma campanha com passo pós-resposta (waitForReply),
@@ -3990,7 +4001,7 @@ export function registerChatbotRoutes(app, deps) {
       responder({ status: "skipped_human_pause", motivo: "atendimento_humano" }, { clientId, phone: maskPhoneForLog(phone) });
       return;
     }
-    if (activeWaitCampaignToDispatch && (await barrarSeAtrasada())) return;
+    if (activeWaitCampaignToDispatch && (await enfileirarEtapaSeAtrasada())) return;
     if (activeWaitCampaignToDispatch) {
       // 1. Responde 200 IMEDIATAMENTE ao Evolution (evita timeout e retry)
       responder({ status: "campaign_step_dispatched" }, {
@@ -4144,7 +4155,7 @@ export function registerChatbotRoutes(app, deps) {
           responder({ status: "skipped_human_pause", motivo: "atendimento_humano" }, { clientId, phone: maskPhoneForLog(phone) });
           return;
         }
-        if (pendingCampaignMatch && (await barrarSeAtrasada())) return;
+        if (pendingCampaignMatch && (await enfileirarEtapaSeAtrasada())) return;
         if (pendingCampaignMatch) {
           console.log("[campaign-routing] bypass chatbot_disabled: lead tem campanha aguardando resposta", {
             clientId,

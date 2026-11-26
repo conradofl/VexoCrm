@@ -28,6 +28,8 @@ import { listChipDiary } from "../../services/chipDiary.js";
 import { computeRestartBlockers } from "../../services/restartBlockers.js";
 import { computeEvolutionConfigStatus } from "../../services/evolutionConfigStatus.js";
 import { computeLlmConfigStatus } from "../../services/llmConfigStatus.js";
+import { getInboundDelayAlertStatus } from "../../services/inboundDelayAlert.js";
+import { getEtapaAtrasadaFilaStatus } from "../../campaign/etapaAtrasadaFila.js";
 import { getDueDispatchSchedulerStatus } from "../../campaign/dueDispatchScheduler.js";
 import { enviosEmAndamento, estaDesligando } from "../../services/shutdownSignal.js";
 
@@ -214,6 +216,9 @@ export function registerInsightsRoutes(app, deps) {
       llmConfig: computeLlmConfigStatus(),
       // Agendador dos lotes (tick de 30 s, ligado pelo server.js): prova de que está vivo.
       dueDispatchScheduler: getDueDispatchSchedulerStatus(),
+      // Atraso de entrega da Evolution (alerta no Slack) e fila da etapa de campanha que chegou atrasada.
+      inboundDelayAlert: getInboundDelayAlertStatus(),
+      filaEtapaAtrasada: getEtapaAtrasadaFilaStatus(),
     });
   });
 
