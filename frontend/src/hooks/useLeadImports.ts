@@ -40,6 +40,8 @@ export interface LeadImportItem {
   created_at: string;
   /** Importação em lotes: "incomplete" até o fechamento. Ausente (servidor antigo) = planilha completa. */
   status?: "incomplete" | "completed";
+  /** Nota da planilha (antibloqueio): inexistentes / tentativas de envio. null = ainda sem envio. */
+  nota?: { tentativas: number; inexistentes: number; taxa: number | null; ruim: boolean } | null;
   expected_rows?: number | null;
   /** Linhas do arquivo já recebidas pelo servidor (ponto de retomada). */
   received_offset?: number;
@@ -600,4 +602,11 @@ export function useDispatchCampaign() {
 
 export function useCreateN8nDispatch() {
   return useDispatchCampaign();
+}
+
+/** Texto curto da nota da planilha para a lista: "· 30% sem WhatsApp ⚠" (ruim) ou "· 4% sem WhatsApp". */
+export function textoNotaPlanilha(nota: LeadImportItem["nota"]): string {
+  if (!nota || nota.taxa == null || nota.tentativas <= 0) return "";
+  const pct = Math.round(nota.taxa * 100);
+  return ` · ${pct}% sem WhatsApp${nota.ruim ? " ⚠" : ""}`;
 }

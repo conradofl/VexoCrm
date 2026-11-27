@@ -21,8 +21,17 @@ export const ANTIBLOQUEIO = Object.freeze({
     falhasSeguidas: 5,
   }),
   limpeza: Object.freeze({
-    // Número que a Evolution já recusou como inexistente fica fora por este tempo (lido do banco, sem consultar o WhatsApp).
-    inexistenteValidadeDias: 90,
+    // Número que a Evolution recusou como inexistente fica fora por este tempo (lido do banco, sem consultar o WhatsApp).
+    // null = para sempre (decisão de 27/11/2026: "nunca mais é tentado"). Lista global: inexistente é para todas as empresas.
+    inexistenteValidadeDias: null,
+  }),
+  planilha: Object.freeze({
+    // Nota da planilha = inexistentes / tentativas (runs dos leads dela). Ruim a partir desta taxa...
+    taxaRuim: 0.25,
+    // ...com pelo menos estas tentativas (5 envios não dizem nada sobre a planilha).
+    amostraMinima: 20,
+    // Lote de planilha ruim começa com este envio de prova: o freio avalia a taxa já com esta quantidade.
+    envioDeProva: 10,
   }),
 });
 
@@ -115,15 +124,98 @@ export async function carregarInexistentesConhecidos(pool, telefones = [], { dia
   const variantes = chaves.flatMap((c) => [c, `55${c}`]);
   try {
     const { rows } = await pool.query(
-      `SELECT phone FROM public.whatsapp_number_validations
-        WHERE phone = ANY($1::text[]) AND exists_whatsapp = false AND validated_at >= now() - make_interval(days => $2)`,
-      [variantes, dias]
+      dias == null
+        ? `SELECT phone FROM public.whatsapp_number_validations WHERE phone = ANY($1::text[]) AND exists_whatsapp = false`
+        : `SELECT phone FROM public.whatsapp_number_validations
+            WHERE phone = ANY($1::text[]) AND exists_whatsapp = false AND validated_at >= now() - make_interval(days => $2)`,
+      dias == null ? [variantes] : [variantes, dias]
     );
     return new Set((rows || []).map((r) => chaveDoTelefone(r.phone)));
   } catch (err) {
-    console.error("[antibloqueio] não consegui ler os números já inexistentes; a limpeza segue só pelo formato:", err?.message || err);
+    relatarFalhaDeLeitura(err);
     return new Set();
   }
+}
+
+let avisouTabelaAusente = false;
+function relatarFalhaDeLeitura(err) {
+  if (err?.code === "42P01") {
+    if (!avisouTabelaAusente) {
+      avisouTabelaAusente = true;
+      console.error("[antibloqueio] tabela whatsapp_number_validations ausente: a limpeza segue só pelo formato.");
+    }
+    return;
+  }
+  console.error("[antibloqueio] não consegui ler os números já inexistentes; a limpeza segue só pelo formato:", err?.message || err);
+}
+
+/** Um telefone só (motor de envio, caminhos que não passam pela limpeza do lote). Erro de leitura = false. */
+export async function ehInexistenteConhecido(pool, telefone) {
+  const r = await carregarInexistentesConhecidos(pool, [telefone]);
+  return r.size > 0;
+}
+
+/**
+ * Grava na lista global o número que a Evolution recusou COM CERTEZA ("não existe no WhatsApp"). Só é chamado quando
+ * classificarFalhaDeEnvio devolve "inexistente": erro de rede, timeout ou chip desconectado nunca chegam aqui.
+ * Nunca lança: a lista é proteção extra, o envio já falhou.
+ */
+export async function registrarInexistente(pool, telefone) {
+  const phone = String(telefone ?? "").replace(/\D/g, "");
+  if (!pool || !phone) return false;
+  try {
+    await pool.query(
+      `INSERT INTO public.whatsapp_number_validations (phone, exists_whatsapp, validated_at)
+       VALUES ($1, false, now())
+       ON CONFLICT (phone) DO UPDATE SET exists_whatsapp = false, validated_at = now()`,
+      [phone]
+    );
+    return true;
+  } catch (err) {
+    console.error("[antibloqueio] não consegui gravar o número inexistente na lista:", err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Nota de cada planilha: quantos leads dela chegaram à Evolution (sent, failed, invalid_number recusado no envio) e
+ * quantos deram inexistente. O que a limpeza tirou antes do envio não conta (não foi tentativa). Calculada na hora pelos
+ * runs (campaign_dispatch_runs.lead_import_item_id); sem tabela nova.
+ * @returns {Promise<Map<string, { tentativas: number, inexistentes: number, taxa: number|null, ruim: boolean }>>}
+ */
+export async function notasDasPlanilhas(pool, importIds = [], cfg = ANTIBLOQUEIO.planilha) {
+  const ids = [...new Set((importIds || []).map((x) => String(x ?? "").trim()).filter(Boolean))];
+  const notas = new Map();
+  if (!pool || ids.length === 0) return notas;
+  const { rows } = await pool.query(
+    `SELECT i.import_id::text AS import_id,
+            count(*) FILTER (WHERE r.status IN ('sent', 'failed', 'invalid_number'))::int AS tentativas,
+            count(*) FILTER (WHERE r.status = 'invalid_number')::int AS inexistentes
+       FROM public.campaign_dispatch_runs r
+       JOIN public.lead_import_items i ON i.id = r.lead_import_item_id
+      WHERE i.import_id::text = ANY($1::text[])
+        AND coalesce(r.error_message, '') NOT LIKE '${PREFIXO_LIMPEZA}%'
+      GROUP BY 1`,
+    [ids]
+  );
+  for (const r of rows || []) {
+    const tentativas = Number(r.tentativas) || 0;
+    const inexistentes = Number(r.inexistentes) || 0;
+    const taxa = tentativas > 0 ? inexistentes / tentativas : null;
+    notas.set(r.import_id, { tentativas, inexistentes, taxa, ruim: tentativas >= cfg.amostraMinima && taxa >= cfg.taxaRuim });
+  }
+  return notas;
+}
+
+/** Planilhas de onde vêm estes itens (lead_import_items.id). */
+export async function planilhasDosItens(pool, itemIds = []) {
+  const ids = [...new Set((itemIds || []).map((x) => String(x ?? "").trim()).filter(Boolean))];
+  if (!pool || ids.length === 0) return [];
+  const { rows } = await pool.query(
+    `SELECT DISTINCT import_id::text AS import_id FROM public.lead_import_items WHERE id::text = ANY($1::text[])`,
+    [ids]
+  );
+  return (rows || []).map((r) => r.import_id).filter(Boolean);
 }
 
 const RE_INEXISTENTE = /"exists"\s*:\s*false|não existe no whatsapp|number does not exist|not on whatsapp/i;
@@ -138,7 +230,8 @@ export function classificarFalhaDeEnvio(err) {
   const status = Number.isInteger(err.statusCode) ? err.statusCode : null;
   const texto = String(err.message || "");
   if (err.isUnauthorized || status === 401 || status === 403 || RE_CONTA_RESTRITA.test(texto)) return "chip_restrito";
-  if (RE_INEXISTENTE.test(texto)) return "inexistente";
+  // Só a recusa da Evolution (resposta HTTP 4xx) é certeza de "não existe". Rede, timeout e 5xx não são.
+  if (status !== null && status >= 400 && status < 500 && RE_INEXISTENTE.test(texto)) return "inexistente";
   return "outra";
 }
 

@@ -8,6 +8,7 @@
 // registerAllDomainRoutes.js (domínio integrations).
 
 import { registerCampaignAgentLeadBatchRoutes, registerCampaignAgentLeadImportRoute } from "../../campaign/agentDraft.js";
+import { notasDasPlanilhas } from "../../campaign/antiBloqueio.js";
 import { registerLeadBatchSeparationRoutes } from "./batchSeparationRoutes.js";
 import {
   checkLeadClientTableStatus as checkDynamicLeadClientTableStatus,
@@ -3474,7 +3475,16 @@ export function registerLeadsRoutes(app, deps) {
     try {
       // Com Postgres direto, a lista traz também status/progresso da importação em lotes (e funciona com o schema antigo).
       if (pgDatabasePool) {
-        res.json({ items: await listLeadImports(pgDatabasePool, clientId, 20) });
+        const items = await listLeadImports(pgDatabasePool, clientId, 20);
+        // Nota da planilha (antibloqueio): taxa de "não existe no WhatsApp" nas tentativas de envio. Falha ao calcular
+        // não derruba a lista: a planilha sai sem nota e o erro vai para o log.
+        let notas = new Map();
+        try {
+          notas = await notasDasPlanilhas(pgDatabasePool, items.map((i) => i.id));
+        } catch (notaErr) {
+          console.error("[lead-imports] nota das planilhas indisponível:", notaErr?.message || notaErr);
+        }
+        res.json({ items: items.map((i) => ({ ...i, nota: notas.get(String(i.id)) || null })) });
         return;
       }
       const { data, error } = await supabase

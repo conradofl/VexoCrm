@@ -11,7 +11,7 @@ import { readOccurrenceInfo } from "../services/campaignRecurrenceOccurrences.js
 import { releaseEvolutionInstanceDailyQuota, reserveEvolutionInstanceDailyQuota, resolveEvolutionInstanceDailyLimit } from "../services/chipQuota.js";
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../services/dispatchRunChip.js";
 import { isEvolutionOpenState, resolveInstanceIdentifier } from "../services/evolution.js";
-import { carregarInexistentesConhecidos, limparLeadsDoLote } from "./antiBloqueio.js";
+import { ANTIBLOQUEIO, carregarInexistentesConhecidos, limparLeadsDoLote, notasDasPlanilhas, planilhasDosItens } from "./antiBloqueio.js";
 import { markRunSendStarted, markRunSequenceCut } from "../services/runSendMarker.js";
 import { isWithinSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
 import { extractCampaignProgress, findLeadsAlreadyReachedInCycle, isLeadBlockedByActiveCycleProgress, markCampaignLeadWaitingReply, resolveCampaignImportSelection, resolveCampaignImportSelectionStrict, resolveDispatchLeadLimit, resolveEffectiveCampaignSequence } from "./dispatch.js";
@@ -1109,10 +1109,32 @@ export function createCampaignDispatchEngine(deps) {
     const sendingChip = sendingChipId ? tenantInstances.find((i) => String(i.id).toLowerCase() === sendingChipId) || null : null;
     const quotaGate = createChipQuotaGate({ chip: sendingChip, timezone: tenantTimezone, pool: pgDatabasePool });
 
+    // Planilha com nota ruim (25%+ de inexistente nas tentativas anteriores): o lote começa com um envio de prova de 10;
+    // o freio avalia a taxa já nos 10 primeiros em vez de esperar 20. Erro de leitura = freio normal.
+    let freioConfig = ANTIBLOQUEIO.freio;
+    if (pgDatabasePool && validLeads.length > 0) {
+      try {
+        const planilhas = await planilhasDosItens(pgDatabasePool, validLeads.map(importItemIdOf).filter(Boolean));
+        const notas = await notasDasPlanilhas(pgDatabasePool, planilhas);
+        const ruins = [...notas.entries()].filter(([, n]) => n.ruim);
+        if (ruins.length > 0) {
+          freioConfig = { ...ANTIBLOQUEIO.freio, amostraMinima: ANTIBLOQUEIO.planilha.envioDeProva };
+          console.warn("[campaign-dispatch] planilha com nota ruim: lote começa com envio de prova", {
+            dispatchId,
+            planilhas: ruins.map(([id, n]) => ({ id, tentativas: n.tentativas, inexistentes: n.inexistentes })),
+            envioDeProva: ANTIBLOQUEIO.planilha.envioDeProva,
+          });
+        }
+      } catch (err) {
+        console.error("[campaign-dispatch] não consegui ler a nota da planilha; freio normal:", err?.message || err);
+      }
+    }
+
     const result = await dispatchCampaignSequence({
       webhookUrl,
       webhookToken,
       chipProvider,
+      freioConfig,
       quotaGate,
       leads: validLeads,
       analyticsMeta: usaFluxoDeResposta

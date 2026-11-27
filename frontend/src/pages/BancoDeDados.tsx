@@ -160,6 +160,7 @@ import {
   useCreateBancoImport,
   useAnalyzeLeadImport,
   useLeadCustomFields,
+  textoNotaPlanilha,
   useLeadImports,
   useDeleteLeadImport,
   useResumeLeadImport,
@@ -3734,7 +3735,7 @@ export default function BancoDeDados() {
                 <option value="">Todas as planilhas</option>
                 {pastImports.map((imp) => (
                   <option key={imp.id} value={imp.id}>
-                    {imp.source_name} ({imp.imported_rows})
+                    {imp.source_name} ({imp.imported_rows}){textoNotaPlanilha(imp.nota)}
                   </option>
                 ))}
               </select>
