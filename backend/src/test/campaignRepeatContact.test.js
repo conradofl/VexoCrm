@@ -140,7 +140,7 @@ async function mundo({ instancias = [CHIP_2, CHIP_3] } = {}) {
   await db.query("INSERT INTO leads_clients (id, name) VALUES ($1, 'Empresa da trava')", [T]);
   for (let i = 0; i < 20; i += 1) {
     await db.query("INSERT INTO leads (client_id, telefone, nome, created_at) VALUES ($1, $2, $3, $4)", [
-      T, `5534991${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 0, 10, 12, 0, i)).toISOString(),
+      T, `553499991${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 0, 10, 12, 0, i)).toISOString(),
     ]);
   }
   const pool = { query: (sql, params) => db.query(sql, params) };

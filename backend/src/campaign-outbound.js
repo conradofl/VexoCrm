@@ -6,6 +6,16 @@ import { validateOutboundMessage } from "./services/jsonExtractor.js";
 import { registerSystemSentFromResponse } from "./services/systemSentMessages.js";
 import { pgDatabasePool } from "./services/database.js";
 import { isPhoneOptedOut } from "./services/optOut.js";
+import {
+  ANTIBLOQUEIO,
+  TEXTO_INEXISTENTE_NO_ENVIO,
+  avaliarFreio,
+  avisarFreioNoWhatsApp,
+  classificarFalhaDeEnvio,
+  limparTelefone,
+  motivoChipRestrito,
+  textoDaLimpeza,
+} from "./campaign/antiBloqueio.js";
 
 export { applyMessagePlaceholders, findUnresolvedPlaceholders, postEvolutionPayload };
 
@@ -1047,6 +1057,8 @@ async function dispatchCampaignSequenceSemRegistro({
   transformStepText = null,
   manualSingleSend = false,
   optOutPool = pgDatabasePool,
+  freioConfig = ANTIBLOQUEIO.freio,
+  avisarFreio = avisarFreioNoWhatsApp,
 }) {
   const normalizedMeta = normalizeCampaignAnalyticsMeta(analyticsMeta);
   const enabledSteps = normalizedMeta.sequence.filter((step) => step.enabled);
@@ -1065,8 +1077,29 @@ async function dispatchCampaignSequenceSemRegistro({
     chipDisconnected: false,
     disconnectedChipName: null,
     allChipsExhausted: false,
+    // Antibloqueio (campaign/antiBloqueio.js): { tipo, motivo } quando o freio ou o chip restrito pausou o lote.
+    freio: null,
+    chipRestrito: false,
   };
   const failedPhones = new Set();
+  // Um por lead que chegou à Evolution, em ordem: "ok" | "inexistente" | "falha". O envio de teste de um número não freia.
+  const resultadosDoFreio = [];
+  const freiar = async (freio) => {
+    summary.freio = freio;
+    summary.paused = true;
+    console.warn("[campaign-outbound] lote pausado pelo antibloqueio", {
+      tipo: freio.tipo,
+      motivo: freio.motivo,
+      campanha: context?.campaign?.id || null,
+      lote: context?.dispatchId || context?.campaign?.dispatchId || null,
+    });
+    await avisarFreio({
+      motivo: freio.motivo,
+      campanha: context?.campaign?.name || context?.campaign?.id || null,
+      lote: context?.campaign?.dispatchName || context?.dispatchId || context?.campaign?.dispatchId || null,
+      empresa: context?.client?.name || context?.client?.id || null,
+    });
+  };
 
   for (let leadIndex = 0; leadIndex < leads.length; leadIndex += 1) {
     // Desligamento (SIGTERM): nenhum lead novo é reivindicado. O lote fica como o boot já trata.
@@ -1119,6 +1152,28 @@ async function dispatchCampaignSequenceSemRegistro({
         stepType: null,
         reason: "Lead está na lista de Opt-out.",
       });
+      continue;
+    }
+
+    // Limpeza sem consulta (antibloqueio): formato, DDD, celular, sem fixo e sem "5500" inventado. Nada é perguntado ao
+    // WhatsApp. O lote de campaign_dispatches já chega limpo (dispatchEngine); isto cobre os outros caminhos. A
+    // continuação para quem RESPONDEU não passa aqui: o número existe (e às vezes está guardado como LID).
+    const respondeu = Boolean(context?.isReplyTrigger) || context?.campaign?.mode === "campaign_reply_progression";
+    const limpeza = manualSingleSend || respondeu ? { ok: true } : limparTelefone(phone);
+    if (!limpeza.ok) {
+      const reason = textoDaLimpeza(limpeza.motivo);
+      failedPhones.add(phone);
+      summary.failures.push({ phone, stepId: null, stepType: null, reason });
+      if (typeof onLeadFailed === "function") {
+        try {
+          await onLeadFailed({ lead, phone, reason });
+        } catch (callbackError) {
+          console.warn("[campaign-outbound] lead_failed_callback_failed", {
+            phone: maskOutboundPhone(phone),
+            reason: callbackError instanceof Error ? callbackError.message : String(callbackError),
+          });
+        }
+      }
       continue;
     }
 
@@ -1242,6 +1297,8 @@ async function dispatchCampaignSequenceSemRegistro({
     let leadFailed = false;
     let leadFailReason = null;
     let leadSentAnything = false;
+    // Antibloqueio: este lead chegou a ter resposta da Evolution (sucesso ou recusa)? Só esses entram no freio.
+    let resultadoDaEvolution = null;
     let lastSuccessfulStep = null;
     let lastSuccessfulStepIndex = null;
     let lastSentAt = null;
@@ -1351,6 +1408,7 @@ async function dispatchCampaignSequenceSemRegistro({
         await postEvolutionPayload(leadWebhookUrl, leadWebhookToken, payload);
         quotaSentCount += 1;
         leadSentAnything = true;
+        if (!resultadoDaEvolution) resultadoDaEvolution = "ok";
         lastSuccessfulStep = step;
         lastSuccessfulStepIndex = stepIndex;
         lastSentAt = sentAt;
@@ -1415,10 +1473,36 @@ async function dispatchCampaignSequenceSemRegistro({
           break;
         }
 
+        // Antibloqueio: chip restrito (401/403 ou conta restrita) para o lote NA HORA, sem nova tentativa. O lead da vez
+        // volta para a fila (não foi entregue), como no chip desconectado.
+        const tipoFalha = classificarFalhaDeEnvio(error);
+        if (tipoFalha === "chip_restrito" && !manualSingleSend) {
+          summary.chipRestrito = true;
+          leadFailed = true;
+          if (typeof onLeadClaimRollback === "function") {
+            try {
+              await onLeadClaimRollback({ lead, phone, leadIndex, reason: "chip_restricted" });
+            } catch {
+              /* rollback best-effort */
+            }
+          }
+          await releaseUnusedQuota();
+          await freiar({
+            tipo: "chip_restrito",
+            motivo: motivoChipRestrito(error, error?.instanceName || activeChip?.instanceName || activeChip?.name || null),
+          });
+          break;
+        }
+
         leadFailed = true;
         failedPhones.add(phone);
+        if (error?.code !== "OUTBOUND_GUARD_BLOCKED" && error?.name !== "AbortError") {
+          resultadoDaEvolution = tipoFalha === "inexistente" ? "inexistente" : "falha";
+        }
         const failureReason =
-          error?.name === "AbortError"
+          tipoFalha === "inexistente"
+            ? TEXTO_INEXISTENTE_NO_ENVIO
+            : error?.name === "AbortError"
             ? "Timeout ao chamar a integracao Evolution."
             : error instanceof Error
               ? error.message
@@ -1431,7 +1515,8 @@ async function dispatchCampaignSequenceSemRegistro({
           reason: failureReason,
         });
 
-        if (normalizedMeta.dispatchOptions.stopOnStepFailure) {
+        // Número inexistente não recebe os passos seguintes.
+        if (tipoFalha === "inexistente" || normalizedMeta.dispatchOptions.stopOnStepFailure) {
           break;
         }
       }
@@ -1527,6 +1612,16 @@ async function dispatchCampaignSequenceSemRegistro({
           phone: maskOutboundPhone(phone),
           reason: callbackError instanceof Error ? callbackError.message : String(callbackError),
         });
+      }
+    }
+
+    // Freio por lote (antibloqueio): lista ruim ou falhas seguidas pausam o lote antes do próximo lead.
+    if (resultadoDaEvolution && !manualSingleSend) {
+      resultadosDoFreio.push(leadFailed ? resultadoDaEvolution : "ok");
+      const freio = avaliarFreio(resultadosDoFreio, freioConfig);
+      if (freio) {
+        await freiar(freio);
+        break;
       }
     }
 

@@ -801,6 +801,16 @@ export async function executeCampaignDispatch(campaign, { triggerSource = "manua
     });
     dispatchSummary = summary;
 
+    // Antibloqueio: o freio do lote (lista ruim, falhas seguidas) ou o chip restrito parou o envio. A campanha fica
+    // 'failed' com o motivo na tela; o aviso no WhatsApp já saiu no motor de envio.
+    if (summary.freio) {
+      const error = new Error(summary.freio.motivo);
+      error.statusCode = 409;
+      error.code = "EVOLUTION_TRIGGER_FAILED";
+      await markCampaignDispatchFailed(claimedCampaign, { triggerSource, error, webhookStatus: 409 });
+      throw error;
+    }
+
     if (summary.successCount <= 0) {
       const firstReason = summary.failures[0]?.reason || "Evolution dispatch returned no successful sends";
       const error = new Error(firstReason);

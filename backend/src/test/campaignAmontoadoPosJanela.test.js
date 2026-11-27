@@ -171,7 +171,7 @@ beforeAll(async () => {
   const nLeads = POR_LOTE * (LOTES.length + 1);
   for (let i = 0; i < nLeads; i += 1) {
     await db.query("INSERT INTO leads (client_id, telefone, nome, created_at) VALUES ($1, $2, $3, $4)", [
-      T, `5534990${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 10, 10, 12, 0, i)).toISOString(),
+      T, `553499990${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 10, 10, 12, 0, i)).toISOString(),
     ]);
   }
   for (const l of LOTES) {

@@ -192,7 +192,7 @@ async function mundo({
   for (let i = 0; i < nLeads; i += 1) {
     await db.query(
       "INSERT INTO leads (client_id, telefone, nome, created_at) VALUES ($1, $2, $3, $4)",
-      [T, `5534990${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 10, 10, 12, 0, i)).toISOString()]
+      [T, `553499990${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 10, 10, 12, 0, i)).toISOString()]
     );
   }
   const { rows: [lote] } = await db.query(
@@ -335,20 +335,16 @@ describe("item 2: exceção no meio do lote termina 'failed' com a mensagem (ant
 });
 
 describe("item 4: todo caminho de saída sem envio grava o motivo (um caso por caminho)", () => {
-  it("[OBRIGATÓRIO] chip desconectado (o caso Nous): 2 inválidos na pré-validação, chip 'close' → 'paused' com o nome do chip", async () => {
+  it("[OBRIGATÓRIO] chip desconectado (o caso Nous): 2 inválidos na limpeza, chip 'close' → 'paused' com o nome do chip", async () => {
     vi.setSystemTime(new Date(SEGUNDA_15H_SP));
     estadoDoChip = "close";
     const w = await mundo({ nLeads: 10, instancias: () => [CHIP], chipDoLote: CHIP_ID });
-    // Pré-validação devolve 2 números inexistentes, como no lote da Nous.
-    const fetchBase = globalThis.fetch;
-    globalThis.fetch = vi.fn(async (url, init) => {
-      if (/whatsappNumbers/.test(String(url))) {
-        const numeros = JSON.parse(init?.body || "{}").numbers || [];
-        const body = JSON.stringify(numeros.map((n, i) => ({ number: n, exists: i >= 2, jid: `${n}@s.whatsapp.net` })));
-        return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body };
-      }
-      return fetchBase(url, init);
-    });
+    // 2 números inválidos, como no lote da Nous. Desde o antibloqueio (27/11/2026) a limpeza os tira sem perguntar ao
+    // WhatsApp: aqui, 2 telefones fixos.
+    await w.db.query(
+      `UPDATE leads SET telefone = '5534321' || substr(telefone, length(telefone) - 4)
+        WHERE id IN (SELECT id FROM leads ORDER BY created_at LIMIT 2)`
+    );
     const out = await w.disparar();
     expect(out.status).toBe(200);
     const fim = await w.esperarFim();

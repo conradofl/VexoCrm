@@ -153,7 +153,7 @@ async function mundo({ falharContagem = false, nLeads = 7 } = {}) {
   for (let i = 0; i < nLeads; i += 1) {
     const { rows: [l] } = await db.query(
       "INSERT INTO leads (client_id, telefone, nome, created_at) VALUES ($1, $2, $3, $4) RETURNING id, telefone",
-      [T, `5511990${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 9, 20, 12, 0, i)).toISOString()]
+      [T, `551199990${1000 + i}`, `Lead ${i}`, new Date(Date.UTC(2026, 9, 20, 12, 0, i)).toISOString()]
     );
     leads.push(l);
   }

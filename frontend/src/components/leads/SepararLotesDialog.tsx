@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Download, Layers, Loader2, PhoneOff, ShieldCheck, Square, Trash2, Users } from "lucide-react";
+import { CheckCircle2, Download, Layers, Loader2, PhoneOff, ShieldCheck, Trash2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
@@ -41,17 +40,6 @@ interface PreviaLimpeza {
 
 const CRITERIO_LIMPEZA = { type: "inutilizaveis" } as const;
 
-export interface ConferenciaStatus {
-  rodando: boolean;
-  chipNome?: string | null;
-  totalNaFila?: number;
-  conferidos?: number;
-  comWhatsapp?: number;
-  semWhatsapp?: number;
-  ultimoErro?: string | null;
-  motivoFim?: string | null;
-}
-
 interface PlanilhaCriada {
   id: string;
   nome: string;
@@ -76,7 +64,8 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clientId: string;
-  chips: ChipOption[];
+  /** Não é mais usado: a conferência de WhatsApp, que escolhia o chip, foi desligada (27/11/2026). */
+  chips?: ChipOption[];
   onSeparated?: () => void;
   /** Tags da empresa, para "De onde tirar: uma tag". */
   tags?: { tag: string; count?: number }[];
@@ -88,21 +77,7 @@ interface Props {
   origemInicial?: OrigemLote;
 }
 
-const MOTIVO_FIM: Record<string, string> = {
-  concluida: "Conferência concluída.",
-  parada_pelo_usuario: "Conferência parada.",
-  falhas_seguidas: "Conferência parou sozinha: o chip não respondeu duas vezes seguidas.",
-  nada_a_conferir: "Nada a conferir: todos os números já foram conferidos.",
-  erro: "A conferência parou por erro.",
-};
-
 const fmt = (n: number | undefined | null) => Number(n || 0).toLocaleString("pt-BR");
-
-/** Horas estimadas para conferir `n` números: 25 por vez, uma pausa de cerca de 2 minutos entre as vezes. */
-export function estimarHorasConferencia(n: number): number {
-  const vezes = Math.ceil(Math.max(0, n) / 25);
-  return Math.max(0, Math.round(((vezes * 2.25) / 60) * 10) / 10);
-}
 
 function Numero({ rotulo, valor, destaque, testId }: { rotulo: string; valor: number; destaque?: boolean; testId: string }) {
   return (
@@ -126,7 +101,6 @@ export function SepararLotesDialog({
   open,
   onOpenChange,
   clientId,
-  chips,
   onSeparated,
   tags = [],
   planilhas = [],
@@ -147,14 +121,12 @@ export function SepararLotesDialog({
   const origemIncompleta = origemTipo !== "empresa" && origem.tipo === "empresa";
   const origemParam = origem.tipo === "empresa" ? "" : `&origem=${encodeURIComponent(JSON.stringify(origem))}`;
   const [previa, setPrevia] = useState<PreviaLotes | null>(null);
-  const [conferencia, setConferencia] = useState<ConferenciaStatus>({ rodando: false });
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [chipId, setChipId] = useState<string>("");
   const [tamanho, setTamanho] = useState("50");
   const [quantidade, setQuantidade] = useState("1");
   const [nomeBase, setNomeBase] = useState("");
-  const [exigirWhatsapp, setExigirWhatsapp] = useState(true);
+  const [exigirWhatsapp, setExigirWhatsapp] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [criadas, setCriadas] = useState<PlanilhaCriada[] | null>(null);
   const [limpeza, setLimpeza] = useState<PreviaLimpeza | null>(null);
@@ -162,11 +134,6 @@ export function SepararLotesDialog({
   const [numeroDigitado, setNumeroDigitado] = useState("");
   const [apagando, setApagando] = useState(false);
   const [apagados, setApagados] = useState<number | null>(null);
-
-  const chipsConectados = useMemo(
-    () => chips.filter((c) => !c.connection_state || c.connection_state === "open"),
-    [chips]
-  );
 
   const chamar = useCallback(
     async (path: string, init: RequestInit = {}) => {
@@ -188,7 +155,6 @@ export function SepararLotesDialog({
     try {
       const dados = await chamar(`/api/leads/lotes/previa?clientId=${encodeURIComponent(clientId)}${origemParam}`);
       setPrevia(dados.previa);
-      setConferencia(dados.conferencia || { rodando: false });
       try {
         const vista = await chamar("/api/leads/mass-delete/preview", {
           method: "POST",
@@ -224,40 +190,6 @@ export function SepararLotesDialog({
     setApagados(null);
     void carregar();
   }, [open, carregar]);
-
-  useEffect(() => {
-    if (!chipId && chipsConectados.length > 0) setChipId(chipsConectados[0].id);
-  }, [chipId, chipsConectados]);
-
-  // Enquanto confere, atualiza os números a cada 15 s.
-  useEffect(() => {
-    if (!open || !conferencia.rodando) return;
-    const t = setInterval(() => void carregar(), 15_000);
-    return () => clearInterval(t);
-  }, [open, conferencia.rodando, carregar]);
-
-  const iniciarConferencia = async () => {
-    setErro(null);
-    try {
-      const dados = await chamar("/api/leads/conferencia-whatsapp", {
-        method: "POST",
-        body: JSON.stringify({ clientId, chipId }),
-      });
-      setConferencia(dados.conferencia);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Falha ao iniciar a conferência");
-    }
-  };
-
-  const pararConferencia = async () => {
-    try {
-      const dados = await chamar(`/api/leads/conferencia-whatsapp?clientId=${encodeURIComponent(clientId)}`, { method: "DELETE" });
-      setConferencia(dados.conferencia);
-      void carregar();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Falha ao parar a conferência");
-    }
-  };
 
   const disponiveis = exigirWhatsapp ? previa?.disponivel_confirmado ?? 0 : previa?.disponivel_sem_conferir ?? 0;
   const t = Number.parseInt(tamanho, 10);
@@ -338,8 +270,6 @@ export function SepararLotesDialog({
     }
   };
 
-  const fila = conferencia.totalNaFila || 0;
-  const progresso = fila > 0 ? Math.round(((conferencia.conferidos || 0) / fila) * 100) : 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -448,64 +378,16 @@ export function SepararLotesDialog({
               <Numero testId="previa-disponivel" rotulo="Disponíveis agora" valor={disponiveis} destaque />
             </section>
 
-            <section className="space-y-2 rounded-lg border border-border p-3">
+            <section className="space-y-1 rounded-lg border border-border p-3" data-testid="conferencia-desligada">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                Conferir quem tem WhatsApp
+                Conferência de WhatsApp desligada
               </div>
               <p className="text-xs text-muted-foreground">
-                Pergunta ao WhatsApp, devagar, quais números existem. Não manda mensagem. Número inexistente é o que mais
-                restringe chip, então vale conferir antes de disparar.
+                Perguntar ao WhatsApp, em massa, se os números existem derrubou chips. Agora o lote faz uma limpeza sem
+                consulta (formato, DDD, sem fixo, sem número inventado, sem repetido) e pausa sozinho se muitos números
+                derem inexistente durante o envio, com aviso.
               </p>
-              {conferencia.rodando ? (
-                <div className="space-y-2" data-testid="conferencia-rodando">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <span>
-                      Conferindo pelo chip <strong>{conferencia.chipNome || "selecionado"}</strong>: {fmt(conferencia.conferidos)} de{" "}
-                      {fmt(fila)} ({fmt(conferencia.comWhatsapp)} com WhatsApp, {fmt(conferencia.semWhatsapp)} sem)
-                    </span>
-                    <Button size="sm" variant="outline" onClick={pararConferencia} className="h-7 gap-1 text-xs">
-                      <Square className="h-3 w-3" /> Parar
-                    </Button>
-                  </div>
-                  <Progress value={progresso} />
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="min-w-[12rem] flex-1 space-y-1">
-                    <Label className="text-xs">Chip que confere</Label>
-                    <Select value={chipId} onValueChange={setChipId} disabled={chipsConectados.length === 0}>
-                      <SelectTrigger className="h-9 text-xs" data-testid="conferencia-chip">
-                        <SelectValue placeholder={chipsConectados.length === 0 ? "Nenhum chip conectado" : "Escolha o chip"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {chipsConectados.map((c) => (
-                          <SelectItem key={c.id} value={c.id} className="text-xs">
-                            {c.name || c.id}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={iniciarConferencia}
-                    disabled={!chipId || previa.nao_conferido === 0}
-                    className="h-9 gap-1.5 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
-                    data-testid="btn-conferir"
-                  >
-                    <ShieldCheck className="h-3.5 w-3.5" />
-                    Conferir {fmt(previa.nao_conferido)} números
-                    {previa.nao_conferido > 0 ? ` (cerca de ${estimarHorasConferencia(previa.nao_conferido).toLocaleString("pt-BR")} h)` : ""}
-                  </Button>
-                </div>
-              )}
-              {!conferencia.rodando && conferencia.motivoFim && (
-                <p className="text-xs text-muted-foreground" data-testid="conferencia-fim">
-                  {MOTIVO_FIM[conferencia.motivoFim] || "Conferência encerrada."}
-                  {conferencia.ultimoErro && conferencia.motivoFim !== "concluida" ? ` (${conferencia.ultimoErro})` : ""}
-                </p>
-              )}
             </section>
 
             <section className="space-y-3 rounded-lg border border-border p-3">
@@ -530,8 +412,8 @@ export function SepararLotesDialog({
               <label className="flex items-start gap-2 text-xs">
                 <Switch checked={exigirWhatsapp} onCheckedChange={setExigirWhatsapp} data-testid="exigir-whatsapp" />
                 <span>
-                  <strong>Só números com WhatsApp confirmado</strong> (recomendado). Desligado, entram também celulares ainda não
-                  conferidos; o disparo confere na hora, usando o chip de envio.
+                  <strong>Só números já confirmados no WhatsApp</strong> (conferidos antes de 27/11). Desligado (padrão), entram
+                  os celulares que passaram na limpeza; o lote pausa sozinho se a lista se mostrar ruim.
                 </span>
               </label>
               {!pedidoValido && (

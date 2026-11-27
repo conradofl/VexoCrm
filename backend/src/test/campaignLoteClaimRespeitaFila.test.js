@@ -162,7 +162,7 @@ async function mundo({ falharContagem = false, falharRegistroDoPulo = false, nLe
     // do mais novo para o mais antigo: o lote lê created_at DESC, então o lead 0 é o primeiro a ser enviado
     const { rows: [l] } = await db.query(
       "INSERT INTO lead_import_items (client_id, import_id, telefone, created_at) VALUES ($1, $2, $3, $4) RETURNING id, telefone",
-      [T, IMP, `5511990${1000 + i}`, new Date(Date.UTC(2026, 9, 20, 12, 0, 59 - i)).toISOString()]
+      [T, IMP, `551199990${1000 + i}`, new Date(Date.UTC(2026, 9, 20, 12, 0, 59 - i)).toISOString()]
     );
     leads.push(l);
   }

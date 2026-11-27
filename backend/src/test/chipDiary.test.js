@@ -387,10 +387,10 @@ describe("[OBRIGATÓRIO] número inválido da pré-validação grava o chip que 
     const url = `${EVO}/message/sendText/${C2.instancia}`;
     globalThis.fetch = vi.fn(async (u, init) => {
       const s = String(u);
-      if (/whatsappNumbers/.test(s)) {
-        const numeros = JSON.parse(init?.body || "{}").numbers || [];
-        const body = JSON.stringify(numeros.map((n, i) => ({ number: n, exists: i >= 2, jid: `${n}@s.whatsapp.net` })));
-        return { ok: true, status: 200, json: async () => JSON.parse(body), text: async () => body };
+      // Sem pré-validação desde o antibloqueio (27/11/2026): a Evolution recusa no envio os 2 primeiros (exists:false).
+      if (/sendText/.test(s) && /200[01]$/.test(JSON.parse(init?.body || "{}").number || "")) {
+        const body = '{"status":400,"response":{"message":[{"exists":false}]}}';
+        return { ok: false, status: 400, json: async () => JSON.parse(body), text: async () => body };
       }
       if (/connectionState/.test(s)) {
         const body = JSON.stringify({ instance: { state: "open" } });
@@ -431,7 +431,7 @@ describe("[OBRIGATÓRIO] número inválido da pré-validação grava o chip que 
       [NOUS, JSON.stringify({ importSource: "__crm__", sequence: seq })]
     );
     for (let i = 0; i < 5; i += 1) {
-      await db.query("INSERT INTO leads (client_id, telefone, nome) VALUES ($1, $2, $3)", [NOUS, `5534990${2000 + i}`, `Lead ${i}`]);
+      await db.query("INSERT INTO leads (client_id, telefone, nome) VALUES ($1, $2, $3)", [NOUS, `553499990${2000 + i}`, `Lead ${i}`]);
     }
     const { rows: [lote] } = await db.query(
       `INSERT INTO campaign_dispatches (campaign_id, client_id, name, steps, status, trigger_type, "offset", limit_per_run, target_count, evolution_instance_id)

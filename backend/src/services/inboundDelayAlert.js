@@ -14,7 +14,7 @@ export const ATRASO_LIMITE = 5;
 export const ALERTA_INTERVALO_MS = 2 * 60 * 60 * 1000;
 
 /** Envia o aviso por WhatsApp. Lança se não saiu (o erro vai para o /health). Import tardio: heloisaEngine é pesado. */
-async function enviarAvisoWhatsApp({ texto }) {
+export async function enviarAvisoWhatsApp({ texto }) {
   const { enviarMensagemWhatsAppComFallback, DIRETORES_AUTORIZADOS } = await import("../domains/goclaw/heloisaEngine.js");
   const numero = String(process.env.ADMIN_ALERT_PHONE || "").trim() || DIRETORES_AUTORIZADOS?.conrado?.telefone;
   if (!numero) throw new Error("sem número de destino para o alerta");

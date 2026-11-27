@@ -10,7 +10,8 @@ import { createChipQuotaGate } from "../services/campaignQuotaGate.js";
 import { readOccurrenceInfo } from "../services/campaignRecurrenceOccurrences.js";
 import { releaseEvolutionInstanceDailyQuota, reserveEvolutionInstanceDailyQuota, resolveEvolutionInstanceDailyLimit } from "../services/chipQuota.js";
 import { chipIdFromDispatchSettings, createRunChipTracker, finalizeRunSent } from "../services/dispatchRunChip.js";
-import { isEvolutionOpenState, resolveInstanceIdentifier, validateWhatsappNumbersWithCache } from "../services/evolution.js";
+import { isEvolutionOpenState, resolveInstanceIdentifier } from "../services/evolution.js";
+import { carregarInexistentesConhecidos, limparLeadsDoLote } from "./antiBloqueio.js";
 import { markRunSendStarted, markRunSequenceCut } from "../services/runSendMarker.js";
 import { isWithinSendWindow, resolveSendWindowConfig } from "../services/sendWindow.js";
 import { extractCampaignProgress, findLeadsAlreadyReachedInCycle, isLeadBlockedByActiveCycleProgress, markCampaignLeadWaitingReply, resolveCampaignImportSelection, resolveCampaignImportSelectionStrict, resolveDispatchLeadLimit, resolveEffectiveCampaignSequence } from "./dispatch.js";
@@ -272,82 +273,53 @@ export function createCampaignDispatchEngine(deps) {
       return;
     }
 
-    // ── Item 2: Validação prévia de números via Evolution API com cache ─────────
+    // ── Limpeza sem consulta (antibloqueio, 27/11/2026) ─────────────────────────
+    // Até aqui o lote perguntava ao WhatsApp, pelo chip que ia disparar, se cada número existia (whatsappNumbers em blocos
+    // de 50). Consulta em massa derrubou três chips: saiu. No lugar, só formato (DDD, celular, sem fixo, sem "5500"),
+    // repetido no lote e número que a Evolution já recusou como inexistente (lido do nosso banco). O freio por lote, no
+    // envio, pega a lista ruim que passar daqui (campaign-outbound.js + antiBloqueio.js).
     let validLeads = cycleLeads;
     if (cycleLeads.length > 0) {
-      try {
-        const candidatePhones = cycleLeads
-          .map((l) => normalizeString(l.telefone).replace(/\D/g, ""))
-          .filter(Boolean);
+      const inexistentes = await carregarInexistentesConhecidos(
+        pgDatabasePool,
+        cycleLeads.map((l) => l.telefone)
+      );
+      const { aptos, descartados } = limparLeadsDoLote(cycleLeads, { inexistentes, telefoneDe: (l) => l?.telefone });
+      validLeads = aptos;
 
-        const validationMap = await validateWhatsappNumbersWithCache({
-          pool: pgDatabasePool,
-          webhookUrl,
-          webhookToken,
-          phones: candidatePhones,
-        });
+      if (descartados.length > 0) {
+        const porMotivo = {};
+        for (const d of descartados) porMotivo[d.motivo] = (porMotivo[d.motivo] || 0) + 1;
+        console.warn("[campaign-dispatch] limpeza antes do envio tirou leads do lote:", { dispatchId, campaignId: campaign.id, porMotivo });
 
-        const invalidLeads = [];
-        validLeads = [];
-
-        for (const l of cycleLeads) {
-          const cleanPhone = normalizeString(l.telefone).replace(/\D/g, "");
-          const validation = cleanPhone ? validationMap.get(cleanPhone) : null;
-
-          if (validation && validation.exists === false) {
-            invalidLeads.push(l);
-          } else {
-            validLeads.push(l);
-          }
-        }
-
-        if (invalidLeads.length > 0) {
-          console.warn(
-            `[campaign-dispatch] ${invalidLeads.length} número(s) INEXISTENTE(S) no WhatsApp detectado(s) na pré-validação — envio cancelado para eles:`,
-            {
-              dispatchId,
-              campaignId: campaign.id,
-              invalidCount: invalidLeads.length,
-            }
-          );
-
-          if (pgDatabasePool) {
-            // O chip que fez a pré-validação (dono do webhook do lote). Sem ele, o diário do chip não conta quantos
-            // números inexistentes passaram por cada chip antes de uma queda. null = não identificado, como no 'sent'.
-            const chipDaValidacao = chipIdFromDispatchSettings(dispatchSettings);
-            for (const invLead of invalidLeads) {
-              const cleanPhone = normalizeString(invLead.telefone).replace(/\D/g, "");
-              if (invLead.id) {
-                await pgDatabasePool.query(
-                  `INSERT INTO public.campaign_dispatch_runs
-                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id, evolution_instance_id)
-                   VALUES ($1, $2, $3, $4, $5, 'invalid_number', 'Número não existe no WhatsApp', now(), $6, $7)
-                   ON CONFLICT (dispatch_id, lead_id) DO UPDATE
-                     SET status = 'invalid_number',
-                         error_message = 'Número não existe no WhatsApp',
-                         evolution_instance_id = COALESCE(EXCLUDED.evolution_instance_id, public.campaign_dispatch_runs.evolution_instance_id)`,
-                  [dispatchId, campaign.id, clientId, invLead.id, cleanPhone, importItemIdOf(invLead), chipDaValidacao]
-                ).catch((err) => {
-                  console.warn("[campaign-dispatch] falha ao registrar lead inválido:", err?.message || err);
-                });
-              } else if (cleanPhone) {
-                await pgDatabasePool.query(
-                  `INSERT INTO public.campaign_dispatch_runs
-                     (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, evolution_instance_id)
-                   VALUES ($1, $2, $3, NULL, $4, 'invalid_number', 'Número não existe no WhatsApp', now(), $5)`,
-                  [dispatchId, campaign.id, clientId, cleanPhone, chipDaValidacao]
-                ).catch((err) => {
-                  console.warn("[campaign-dispatch] falha ao registrar lead inválido por fone:", err?.message || err);
-                });
-              }
+        if (pgDatabasePool) {
+          // Repetido = 'skipped' (o mesmo telefone segue no lote por outro lead); o resto = 'invalid_number'.
+          for (const { lead: invLead, motivo, texto } of descartados) {
+            const status = motivo === "repetido" ? "skipped" : "invalid_number";
+            const cleanPhone = normalizeString(invLead.telefone).replace(/\D/g, "");
+            if (invLead.id) {
+              await pgDatabasePool.query(
+                `INSERT INTO public.campaign_dispatch_runs
+                   (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at, lead_import_item_id)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
+                 ON CONFLICT (dispatch_id, lead_id) DO UPDATE
+                   SET status = EXCLUDED.status, error_message = EXCLUDED.error_message`,
+                [dispatchId, campaign.id, clientId, invLead.id, cleanPhone, status, texto, importItemIdOf(invLead)]
+              ).catch((err) => {
+                console.warn("[campaign-dispatch] falha ao registrar lead tirado pela limpeza:", err?.message || err);
+              });
+            } else if (cleanPhone) {
+              await pgDatabasePool.query(
+                `INSERT INTO public.campaign_dispatch_runs
+                   (dispatch_id, campaign_id, client_id, lead_id, phone, status, error_message, created_at)
+                 VALUES ($1, $2, $3, NULL, $4, $5, $6, now())`,
+                [dispatchId, campaign.id, clientId, cleanPhone, status, texto]
+              ).catch((err) => {
+                console.warn("[campaign-dispatch] falha ao registrar lead tirado pela limpeza por fone:", err?.message || err);
+              });
             }
           }
         }
-      } catch (valErr) {
-        console.warn("[campaign-dispatch] erro na pré-validação de números (disparo continuará sem travar):", valErr?.message || valErr);
-        // Era validLeads = leads: a lista ANTES da exclusão por ciclo e da trava de sequência em andamento. Uma falha na
-        // pré-validação devolvia ao envio quem já tinha recebido em outro lote deste ciclo.
-        validLeads = cycleLeads;
       }
     }
 
@@ -1022,13 +994,17 @@ export function createCampaignDispatchEngine(deps) {
         )
       );
       const newStatus = isInvalidNumber ? "invalid_number" : "failed";
+      // O chip que tentou o envio (dono do webhook do lote): o diário do chip conta quantos inexistentes passaram por
+      // cada chip antes de uma queda. null = não identificado, como no 'sent'.
+      const chipDaFalha = chipIdFromDispatchSettings(dispatchSettings);
       const cleanPhone = normalizeString(phone || lead?.telefone).replace(/\D/g, "");
 
       if (lead?.id) {
         await pgDatabasePool
           .query(
-            `UPDATE public.campaign_dispatch_runs SET status = $1, error_message = $2 WHERE dispatch_id = $3 AND lead_id = $4`,
-            [newStatus, reason || null, dispatchId, lead.id]
+            `UPDATE public.campaign_dispatch_runs SET status = $1, error_message = $2, evolution_instance_id = COALESCE(evolution_instance_id, $5)
+              WHERE dispatch_id = $3 AND lead_id = $4`,
+            [newStatus, reason || null, dispatchId, lead.id, chipDaFalha]
           )
           .catch((err) => {
             console.warn("[campaign-dispatch] finalize_failed_failed:", err?.message || err);
@@ -1036,8 +1012,9 @@ export function createCampaignDispatchEngine(deps) {
       } else if (cleanPhone) {
         await pgDatabasePool
           .query(
-            `UPDATE public.campaign_dispatch_runs SET status = $1, error_message = $2 WHERE dispatch_id = $3 AND regexp_replace(phone, '\\D', '', 'g') = $4`,
-            [newStatus, reason || null, dispatchId, cleanPhone]
+            `UPDATE public.campaign_dispatch_runs SET status = $1, error_message = $2, evolution_instance_id = COALESCE(evolution_instance_id, $5)
+              WHERE dispatch_id = $3 AND regexp_replace(phone, '\\D', '', 'g') = $4`,
+            [newStatus, reason || null, dispatchId, cleanPhone, chipDaFalha]
           )
           .catch((err) => {
             console.warn("[campaign-dispatch] finalize_failed_failed by phone:", err?.message || err);
@@ -1326,6 +1303,19 @@ export function createCampaignDispatchEngine(deps) {
         clientId,
         mensagens: quotaGate.unavailableMessages,
       });
+    }
+
+    // Antibloqueio: freio por lote (lista ruim, falhas seguidas) ou chip restrito. Pausa com o motivo na tela; NÃO é
+    // retomado sozinho pelo agendador (só janela e cota são). O aviso no WhatsApp já saiu no motor de envio.
+    if (result?.summary?.freio) {
+      await db.from("campaign_dispatches").update({
+        status: "paused",
+        sent_count: totalSent,
+        failed_count: totalFailed,
+        error_message: result.summary.freio.motivo,
+        updated_at: new Date().toISOString(),
+      }).eq("id", dispatchId);
+      return;
     }
 
     if (result?.summary?.chipDisconnected) {
