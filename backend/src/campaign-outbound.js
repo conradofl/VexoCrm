@@ -12,8 +12,10 @@ import {
   avaliarFreio,
   avisarFreioNoWhatsApp,
   classificarFalhaDeEnvio,
+  ehInexistenteConhecido,
   limparTelefone,
   motivoChipRestrito,
+  registrarInexistente,
   textoDaLimpeza,
 } from "./campaign/antiBloqueio.js";
 
@@ -1159,7 +1161,11 @@ async function dispatchCampaignSequenceSemRegistro({
     // WhatsApp. O lote de campaign_dispatches já chega limpo (dispatchEngine); isto cobre os outros caminhos. A
     // continuação para quem RESPONDEU não passa aqui: o número existe (e às vezes está guardado como LID).
     const respondeu = Boolean(context?.isReplyTrigger) || context?.campaign?.mode === "campaign_reply_progression";
-    const limpeza = manualSingleSend || respondeu ? { ok: true } : limparTelefone(phone);
+    let limpeza = manualSingleSend || respondeu ? { ok: true } : limparTelefone(phone);
+    // Número que a Evolution já recusou como inexistente nunca mais é tentado (lista global, lida do nosso banco).
+    if (limpeza.ok && !manualSingleSend && !respondeu && (await ehInexistenteConhecido(optOutPool, phone))) {
+      limpeza = { ok: false, motivo: "inexistente_conhecido" };
+    }
     if (!limpeza.ok) {
       const reason = textoDaLimpeza(limpeza.motivo);
       failedPhones.add(phone);
@@ -1499,6 +1505,8 @@ async function dispatchCampaignSequenceSemRegistro({
         if (error?.code !== "OUTBOUND_GUARD_BLOCKED" && error?.name !== "AbortError") {
           resultadoDaEvolution = tipoFalha === "inexistente" ? "inexistente" : "falha";
         }
+        // Recusa certa da Evolution ("não existe"): entra na lista e nunca mais é tentado.
+        if (tipoFalha === "inexistente") await registrarInexistente(optOutPool, phone);
         const failureReason =
           tipoFalha === "inexistente"
             ? TEXTO_INEXISTENTE_NO_ENVIO

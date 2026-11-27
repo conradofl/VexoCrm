@@ -115,11 +115,12 @@ describe("[OBRIGATÓRIO] limpeza sem consulta", () => {
     const query = vi.fn(async () => ({ rows: [{ phone: "5534991110000" }] }));
     const r = await carregarInexistentesConhecidos({ query }, ["34991110000", "5511987654321"]);
     expect([...r]).toEqual(["34991110000"]);
-    const [sql, [variantes, dias]] = query.mock.calls[0];
+    const [sql, params] = query.mock.calls[0];
     expect(sql).toContain("whatsapp_number_validations");
     expect(sql).toContain("exists_whatsapp = false");
-    expect(variantes).toEqual(expect.arrayContaining(["34991110000", "5534991110000", "11987654321", "5511987654321"]));
-    expect(dias).toBe(ANTIBLOQUEIO.limpeza.inexistenteValidadeDias);
+    expect(sql).not.toContain("validated_at"); // para sempre (inexistenteValidadeDias: null)
+    expect(ANTIBLOQUEIO.limpeza.inexistenteValidadeDias).toBeNull();
+    expect(params[0]).toEqual(expect.arrayContaining(["34991110000", "5534991110000", "11987654321", "5511987654321"]));
   });
 
   it("erro de leitura não derruba o lote: segue só pelo formato", async () => {
@@ -284,6 +285,153 @@ describe("[OBRIGATÓRIO] nenhuma consulta de existência ao WhatsApp sobrou no b
     ]) {
       const fonte = readFileSync(resolve(f), "utf8");
       expect(fonte, f).not.toMatch(/\/chat\/whatsappNumbers\/\$\{|checkWhatsappNumbers\(|validateWhatsappNumbersWithCache\(|onWhatsApp\(/);
+    }
+  });
+});
+
+// ── PR 2 (27/11/2026, opção A sem migration): lista global de recusados, nota da planilha e envio de prova ──────────
+import { createPgliteDb } from "./helpers/pgliteDb.js";
+import {
+  ehInexistenteConhecido,
+  notasDasPlanilhas,
+  planilhasDosItens,
+  registrarInexistente,
+} from "../campaign/antiBloqueio.js";
+
+const SCHEMA_REAL = `
+  CREATE TABLE whatsapp_number_validations (
+    phone TEXT PRIMARY KEY, exists_whatsapp BOOLEAN NOT NULL DEFAULT false, jid TEXT,
+    validated_at TIMESTAMPTZ NOT NULL DEFAULT now(), created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+  CREATE TABLE lead_import_items (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), import_id UUID NOT NULL, telefone TEXT);
+  CREATE TABLE campaign_dispatch_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), dispatch_id UUID, lead_import_item_id UUID,
+    phone TEXT, status TEXT NOT NULL, error_message TEXT);
+`;
+
+describe("[OBRIGATÓRIO] lista global de números recusados (Postgres real)", () => {
+  it("só a recusa certa entra; para sempre; com e sem 55", async () => {
+    const db = await createPgliteDb(SCHEMA_REAL);
+    try {
+      // antigo (há 2 anos): continua valendo, a lista é para sempre
+      await db.query("INSERT INTO whatsapp_number_validations (phone, exists_whatsapp, validated_at) VALUES ('5534991110000', false, now() - interval '2 years')");
+      await db.query("INSERT INTO whatsapp_number_validations (phone, exists_whatsapp) VALUES ('5534991112222', true)");
+      expect(await ehInexistenteConhecido(db, "34991110000")).toBe(true);
+      expect(await ehInexistenteConhecido(db, "5534991112222")).toBe(false);
+      expect(await registrarInexistente(db, "+55 (34) 99111-3333")).toBe(true);
+      expect(await ehInexistenteConhecido(db, "34991113333")).toBe(true);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("4xx com exists:false é certeza; 5xx, rede e timeout não são", () => {
+    expect(classificarFalhaDeEnvio({ statusCode: 400, message: '{"exists":false}' })).toBe("inexistente");
+    expect(classificarFalhaDeEnvio({ statusCode: 500, message: '{"exists":false}' })).toBe("outra");
+    expect(classificarFalhaDeEnvio({ message: "não existe no whatsapp" })).toBe("outra");
+    expect(classificarFalhaDeEnvio({ name: "AbortError", message: "aborted" })).toBe("outra");
+  });
+});
+
+describe("[OBRIGATÓRIO] nota da planilha (Postgres real)", () => {
+  it("conta tentativas e inexistentes por planilha; a limpeza não conta; ruim a partir de 25% com 20 tentativas", async () => {
+    const db = await createPgliteDb(SCHEMA_REAL);
+    try {
+      const A = "00000000-0000-4000-8000-00000000000a";
+      const B = "00000000-0000-4000-8000-00000000000b";
+      const item = async (imp) => (await db.query("INSERT INTO lead_import_items (import_id) VALUES ($1) RETURNING id::text AS id", [imp])).rows[0].id;
+      const run = (it, status, msg = null) => db.query("INSERT INTO campaign_dispatch_runs (lead_import_item_id, status, error_message) VALUES ($1, $2, $3)", [it, status, msg]);
+      // A: 20 tentativas, 5 inexistentes (25%) = ruim; mais 3 tiradas pela limpeza, que não contam
+      for (let i = 0; i < 15; i += 1) await run(await item(A), "sent");
+      for (let i = 0; i < 5; i += 1) await run(await item(A), "invalid_number", "Número não existe no WhatsApp (recusado no envio)");
+      for (let i = 0; i < 3; i += 1) await run(await item(A), "invalid_number", "Limpeza antes do envio: telefone fixo");
+      await run(await item(A), "skipped");
+      // B: 10 tentativas, 5 inexistentes (50%) mas amostra pequena = não é ruim ainda
+      const itB = await item(B);
+      for (let i = 0; i < 5; i += 1) await run(await item(B), "sent");
+      for (let i = 0; i < 5; i += 1) await run(await item(B), "invalid_number", "Número não existe no WhatsApp");
+
+      const notas = await notasDasPlanilhas(db, [A, B]);
+      expect(notas.get(A)).toEqual({ tentativas: 20, inexistentes: 5, taxa: 0.25, ruim: true });
+      expect(notas.get(B)).toMatchObject({ tentativas: 10, inexistentes: 5, ruim: false });
+      expect(await planilhasDosItens(db, [itB])).toEqual([B]);
+      // 24%: 25 tentativas com 6 inexistentes
+      const C = "00000000-0000-4000-8000-00000000000c";
+      for (let i = 0; i < 19; i += 1) await run(await item(C), "sent");
+      for (let i = 0; i < 6; i += 1) await run(await item(C), "invalid_number", "x");
+      expect((await notasDasPlanilhas(db, [C])).get(C)).toMatchObject({ tentativas: 25, inexistentes: 6, ruim: false });
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+describe("[OBRIGATÓRIO] motor: recusado nunca mais é tentado", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+  const seq = [{ id: "s1", type: "text", order: 1, enabled: true, triggerMode: "immediate", text: "Olá" }];
+  const disparar = (pool, leads) =>
+    dispatchCampaignSequence({
+      webhookUrl: "https://evo.teste/message/sendText/chip",
+      leads,
+      analyticsMeta: { sequence: seq, dispatchOptions: { leadDelaySeconds: 0 } },
+      context: { campaign: { id: "c" }, client: { id: "t" } },
+      optOutPool: pool,
+      avisarFreio: async () => true,
+    });
+
+  it("recusa 400 exists:false grava na lista; o próximo lote pula o número sem chamar a Evolution", async () => {
+    const db = await createPgliteDb(SCHEMA_REAL + "CREATE TABLE lead_optouts (client_id TEXT, phone TEXT, revoked_at TIMESTAMPTZ);");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const chamadas = [];
+      vi.stubGlobal("fetch", vi.fn(async (_u, init) => {
+        chamadas.push(JSON.parse(init.body));
+        return { ok: false, status: 400, text: async () => '{"response":{"message":[{"exists":false}]}}' };
+      }));
+      await disparar(db, [{ id: "a", telefone: "5534991093607" }]);
+      expect(chamadas).toHaveLength(1);
+      const { rows } = await db.query("SELECT phone, exists_whatsapp FROM whatsapp_number_validations");
+      expect(rows).toEqual([{ phone: "5534991093607", exists_whatsapp: false }]);
+      const onLeadFailed = vi.fn();
+      const r = await dispatchCampaignSequence({
+        webhookUrl: "https://evo.teste/message/sendText/chip",
+        leads: [{ id: "b", telefone: "34991093607" }],
+        analyticsMeta: { sequence: seq, dispatchOptions: { leadDelaySeconds: 0 } },
+        context: { campaign: { id: "c" }, client: { id: "t" } },
+        optOutPool: db,
+        onLeadFailed,
+        avisarFreio: async () => true,
+      });
+      expect(chamadas).toHaveLength(1);
+      expect(r.summary.successCount).toBe(0);
+      expect(onLeadFailed.mock.calls[0][0].reason).toBe('Limpeza antes do envio: número que já deu "não existe no WhatsApp"');
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("erro de rede ou 500 NÃO entra na lista", async () => {
+    const db = await createPgliteDb(SCHEMA_REAL + "CREATE TABLE lead_optouts (client_id TEXT, phone TEXT, revoked_at TIMESTAMPTZ);");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      let n = 0;
+      vi.stubGlobal("fetch", vi.fn(async () => {
+        n += 1;
+        if (n === 1) throw new TypeError("fetch failed");
+        return { ok: false, status: 500, text: async () => '{"exists":false}' };
+      }));
+      await disparar(db, [{ id: "a", telefone: "5534991093607" }, { id: "b", telefone: "5534991093608" }]);
+      expect(n).toBe(2);
+      const { rows } = await db.query("SELECT count(*)::int AS n FROM whatsapp_number_validations");
+      expect(rows[0].n).toBe(0);
+    } finally {
+      await db.close();
     }
   });
 });
