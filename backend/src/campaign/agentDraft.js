@@ -332,7 +332,7 @@ export function registerCampaignAgentLeadBatchRoutes(app, { pgDatabasePool }) {
         tamanho: req.body.tamanho,
         quantidade: req.body.quantidade,
         nomeBase: req.body.nomeBase,
-        exigirWhatsapp: req.body.exigirWhatsapp !== false,
+        exigirWhatsapp: req.body.exigirWhatsapp === true,
         actor: { uid: null, email: CAMPAIGN_AGENT_ACTOR },
         leadIds,
         origem: origem.tipo === "empresa" ? null : { tipo: origem.tipo, rotulo: rotuloDaOrigem(origem), grupo: leadIds.length },

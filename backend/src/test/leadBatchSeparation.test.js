@@ -252,13 +252,13 @@ describe("prévia e separação", () => {
 
   it("separa em planilhas do tamanho pedido; quem entrou num lote não entra no próximo", async () => {
     await baseDeTeste();
-    const r1 = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 3, quantidade: 2, nomeBase: "Natal" } });
+    const r1 = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 3, quantidade: 2, nomeBase: "Natal", exigirWhatsapp: true } });
     expect(r1.status).toBe(201);
     expect(r1.json.planilhas.map((p) => p.leads)).toEqual([3, 3]);
     expect(r1.json.planilhas[0].nome).toBe("Natal · Lote 01 · 3 leads");
     expect(r1.json.disponiveisRestantes).toBe(1);
 
-    const r2 = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 3, quantidade: 5, nomeBase: "Natal" } });
+    const r2 = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 3, quantidade: 5, nomeBase: "Natal", exigirWhatsapp: true } });
     expect(r2.status).toBe(201);
     expect(r2.json.planilhas).toHaveLength(1);
     expect(r2.json.planilhas[0]).toMatchObject({ numero: 3, leads: 1 });
@@ -415,68 +415,28 @@ describe("lote de um grupo: tag, planilha ou filtro da tela (24/11/2026)", () =>
   }, SLOW);
 });
 
-describe("conferir WhatsApp", () => {
-  it("confere só o que falta, pelo chip da empresa, e grava no cache do disparo", async () => {
+describe("conferir WhatsApp: desligada (antibloqueio, 27/11/2026)", () => {
+  it("a rota responde 410 com a explicação e nada é perguntado ao WhatsApp", async () => {
     await lead(T, cel(1));
-    await lead(T, cel(2));
-    await lead(T, cel(3));
-    await lead(T, "5500123456789"); // inválido: nunca é perguntado
-    await lead(T, cel(4));
-    await confirmar(cel(4), true); // já conferido: não é perguntado de novo
-    const perguntas = [];
-    const checkNumbers = vi.fn(async ({ webhookUrl, webhookToken, numbers }) => {
-      perguntas.push({ webhookUrl, webhookToken, numbers });
-      return { results: numbers.map((n) => ({ number: n, exists: n !== cel(2), jid: `${n}@s.whatsapp.net` })), error: null };
-    });
-    const inicio = await iniciarConferencia(pool, { clientId: T, chipId: chipT }, { checkNumbers, pausaMs: 0, lote: 2 });
-    expect(inicio).toMatchObject({ rodando: true, totalNaFila: 3, chipNome: "Comercial" });
-    expect(inicio).not.toHaveProperty("controle");
-    await __aguardarConferenciaParaTeste(T);
-
-    expect(perguntas.map((p) => p.numbers)).toEqual([[cel(1), cel(2)], [cel(3)]]);
-    expect(perguntas.every((p) => p.webhookToken === "segredo-do-chip" && p.webhookUrl.includes("tinge-comercial"))).toBe(true);
-    const { rows } = await db.query("SELECT phone, exists_whatsapp FROM whatsapp_number_validations ORDER BY phone");
-    expect(rows).toEqual([
-      { phone: cel(1), exists_whatsapp: true },
-      { phone: cel(2), exists_whatsapp: false },
-      { phone: cel(3), exists_whatsapp: true },
-      { phone: cel(4), exists_whatsapp: true },
-    ]);
-    expect(statusConferencia(T)).toMatchObject({ rodando: false, conferidos: 3, comWhatsapp: 2, semWhatsapp: 1, motivoFim: "concluida" });
-    expect(JSON.stringify(statusConferencia(T))).not.toContain("segredo");
-  }, SLOW);
-
-  it("para sozinha depois de duas falhas seguidas e não inventa resultado", async () => {
-    for (let i = 1; i <= 6; i += 1) await lead(T, cel(i));
-    const checkNumbers = vi.fn(async () => ({ results: [], error: "Evolution HTTP 500" }));
-    await iniciarConferencia(pool, { clientId: T, chipId: chipT }, { checkNumbers, pausaMs: 0, lote: 2 });
-    await __aguardarConferenciaParaTeste(T);
-    expect(checkNumbers).toHaveBeenCalledTimes(2);
-    expect(statusConferencia(T)).toMatchObject({ rodando: false, motivoFim: "falhas_seguidas", conferidos: 0 });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const r = await call("POST", "/api/leads/conferencia-whatsapp", { access: DONO_T, body: { clientId: T, chipId: chipT } });
+    expect(r.status).toBe(410);
+    expect(r.json.error.code).toBe("CONFERENCIA_DESLIGADA");
+    expect(r.json.error.message).toContain("derrubou chips");
+    expect(fetchSpy.mock.calls.filter(([u]) => /whatsappNumbers/.test(String(u)))).toHaveLength(0);
+    await expect(iniciarConferencia(pool, { clientId: T, chipId: chipT })).rejects.toMatchObject({ status: 410 });
+    expect(statusConferencia(T)).toEqual({ rodando: false });
     const { rows } = await db.query("SELECT count(*)::int n FROM whatsapp_number_validations");
     expect(rows[0].n).toBe(0);
+    fetchSpy.mockRestore();
   }, SLOW);
 
-  it("chip de outra empresa, desconectado ou inexistente é recusado pela rota", async () => {
+  it("separar sem dizer nada não exige WhatsApp confirmado (a conferência não existe mais)", async () => {
     await lead(T, cel(1));
-    expect((await call("POST", "/api/leads/conferencia-whatsapp", { access: DONO_T, body: { clientId: T, chipId: chipO } })).status).toBe(404);
-    expect((await call("POST", "/api/leads/conferencia-whatsapp", { access: DONO_T, body: { clientId: T, chipId: "00000000-0000-4000-8000-000000000000" } })).status).toBe(404);
-    await db.query("UPDATE lead_client_evolution_instances SET connection_state = 'close' WHERE id = $1", [chipT]);
-    const r = await call("POST", "/api/leads/conferencia-whatsapp", { access: DONO_T, body: { clientId: T, chipId: chipT } });
-    expect(r.status).toBe(409);
-    expect(r.json.error.code).toBe("CHIP_DISCONNECTED");
-    expect((await call("POST", "/api/leads/conferencia-whatsapp", { access: DONO_T, body: { clientId: OUTRA, chipId: chipO } })).status).toBe(403);
-  }, SLOW);
-
-  it("parar interrompe a conferência em andamento", async () => {
-    for (let i = 1; i <= 6; i += 1) await lead(T, cel(i));
-    const checkNumbers = vi.fn(async ({ numbers }) => ({ results: numbers.map((n) => ({ number: n, exists: true })), error: null }));
-    await iniciarConferencia(pool, { clientId: T, chipId: chipT }, { checkNumbers, pausaMs: 60_000, lote: 2 });
-    await vi.waitFor(() => expect(statusConferencia(T).conferidos).toBe(2));
-    const parada = await call("DELETE", `/api/leads/conferencia-whatsapp?clientId=${T}`, { access: DONO_T });
-    expect(parada.json.conferencia).toMatchObject({ rodando: false, motivoFim: "parada_pelo_usuario" });
-    await __aguardarConferenciaParaTeste(T);
-    expect(checkNumbers).toHaveBeenCalledTimes(1);
+    await lead(T, cel(2));
+    const r = await call("POST", "/api/leads/lotes", { access: DONO_T, body: { clientId: T, tamanho: 50, quantidade: 1 } });
+    expect(r.status).toBe(201);
+    expect(r.json.planilhas.map((p) => p.leads)).toEqual([2]);
   }, SLOW);
 });
 

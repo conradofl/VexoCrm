@@ -70,7 +70,7 @@ export function registerLeadBatchSeparationRoutes(app, deps) {
         tamanho: body.tamanho,
         quantidade: body.quantidade,
         nomeBase: body.nomeBase,
-        exigirWhatsapp: body.exigirWhatsapp !== false,
+        exigirWhatsapp: body.exigirWhatsapp === true,
         actor: actor(req),
         leadIds,
         origem: origem.tipo === "empresa" ? null : { tipo: origem.tipo, rotulo: rotuloDaOrigem(origem), grupo: leadIds.length },

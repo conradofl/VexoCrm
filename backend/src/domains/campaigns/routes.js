@@ -35,8 +35,6 @@ import { buildPhoneLookupVariants } from "../../services/leadImport.js";
 import { isScheduledDateInPast, BACKEND_SCHEDULE_GRACE_MS } from "../../services/campaignScheduleValidation.js";
 import {
   isEvolutionOpenState,
-  checkWhatsappNumbers,
-  validateWhatsappNumbersWithCache,
   resolveInstanceIdentifier,
 } from "../../services/evolution.js";
 import {
@@ -794,6 +792,16 @@ export function registerCampaignsRoutes(app, deps) {
         });
       }
 
+      if (summary.freio) {
+        sendError(res, 409, "DISPATCH_BRAKE", summary.freio.motivo, {
+          total: leads.length,
+          successCount: summary.successCount,
+          failureCount: summary.failureCount,
+          failures: summary.failures,
+        });
+        return;
+      }
+
       if (summary.allChipsExhausted) {
         sendError(
           res,
@@ -1239,6 +1247,11 @@ export function registerCampaignsRoutes(app, deps) {
 
       if (quotaGate.unavailableMessages > 0) {
         logDirectDispatch("error", "quota_unavailable", { requestId, clientId, mensagens: quotaGate.unavailableMessages });
+      }
+
+      if (summary.freio) {
+        sendError(res, 409, "DISPATCH_BRAKE", summary.freio.motivo, { requestId, settingsSource: dispatchSettings.source });
+        return;
       }
 
       if (summary.allChipsExhausted) {

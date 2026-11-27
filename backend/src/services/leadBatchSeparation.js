@@ -9,20 +9,17 @@
 //   - separar: cria N planilhas de até T leads cada, só com disponíveis. Cada planilha é uma importação normal
 //     (lead_imports + lead_import_items, pelo mesmo serviço da importação em lotes), marcada em
 //     import_params.loteSeparado. Quem entra num lote não entra no próximo;
-//   - conferir WhatsApp: pergunta à Evolution, devagar e por um chip escolhido, quais números existem no WhatsApp. O
-//     resultado vai para o MESMO cache que o disparo consulta (whatsapp_number_validations, 30 dias), então na hora do
-//     envio o chip de disparo não precisa perguntar de novo. Não envia mensagem.
+//   - conferir WhatsApp: DESLIGADO em 27/11/2026. Perguntar ao WhatsApp, em massa, quais números existem derrubou três
+//     chips. A rota responde 410 com a explicação; o que já tinha sido conferido continua valendo (whatsapp_number_validations).
 //
 // Disponível = sem opt-out, número de celular (ou fixo com WhatsApp confirmado), nunca recebeu campanha desta empresa,
-// fora de lote separado anterior e, por padrão, com WhatsApp confirmado. Nada aqui apaga lead.
+// fora de lote separado anterior e sem "não existe" conhecido. Exigir WhatsApp confirmado é opcional (padrão: não).
+// Nada aqui apaga lead.
 
-import { checkWhatsappNumbers as defaultCheckWhatsappNumbers } from "./evolution.js";
 import { ImportError, appendLeadImportBatch, closeLeadImport, openLeadImport, IMPORT_BATCH_SIZE } from "./leadImportBatches.js";
 
 export const LOTE_TAMANHO_MAX = 500;
 export const LOTE_QUANTIDADE_MAX = 50;
-export const CONFERENCIA_LOTE = 25;
-export const CONFERENCIA_PAUSA_MS = 120_000;
 export const CONFERENCIA_VALIDADE_DIAS = 30;
 const ACTOR_AGENTE = "agente-campanha";
 
@@ -172,7 +169,7 @@ const separandoAgora = new Set();
  * Cria até `quantidade` planilhas de até `tamanho` leads disponíveis. A última pode sair menor; não cria planilha vazia.
  * Devolve as planilhas criadas e quantos disponíveis sobraram.
  */
-export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBase, exigirWhatsapp = true, actor = {}, leadIds = null, origem = null }) {
+export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBase, exigirWhatsapp = false, actor = {}, leadIds = null, origem = null }) {
   const grupo = Array.isArray(leadIds);
   const pedido = validarPedido({ tamanho, quantidade });
   const nome = String(nomeBase ?? "").trim().slice(0, 120) || "Lote";
@@ -246,46 +243,10 @@ export async function separarLotes(pool, { clientId, tamanho, quantidade, nomeBa
   }
 }
 
-// ── Conferência de WhatsApp em segundo plano ─────────────────────────────────────────────────────────────────────────
-// Uma por empresa. Vive no processo: um reinício do backend interrompe, e o que já foi conferido fica no cache (a
-// próxima conferência só pergunta o que falta). O estado é para a tela mostrar o andamento.
+// ── Conferência de WhatsApp: desligada (27/11/2026) ──────────────────────────────────────────────────────────────────
+// O estado em memória continua só para a tela antiga não quebrar: sempre "não rodando".
 
 const conferencias = new Map();
-
-function dormir(ms, sinal) {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    sinal?.addEventListener?.("abort", () => { clearTimeout(t); resolve(); }, { once: true });
-  });
-}
-
-async function numerosPendentes(pool, clientId) {
-  const { rows } = await pool.query(
-    `${baseSql()}
-     SELECT d FROM marcada
-      WHERE tem_whatsapp IS NULL AND classe <> 'invalido' AND NOT opt_out
-      ORDER BY created_at, d`,
-    [clientId]
-  );
-  return [...new Set(rows.map((r) => r.d))];
-}
-
-async function carregarChip(pool, { clientId, chipId }) {
-  const { rows } = await pool.query(
-    `SELECT id, name, dispatch_webhook_url, dispatch_webhook_token, active, connection_state
-       FROM public.lead_client_evolution_instances WHERE id::text = $1 AND client_id = $2`,
-    [String(chipId ?? ""), clientId]
-  );
-  const chip = rows[0];
-  if (!chip) throw new ImportError(404, "CHIP_NOT_FOUND", "Chip não encontrado nesta empresa.");
-  if (chip.active === false || !chip.dispatch_webhook_url) {
-    throw new ImportError(409, "CHIP_INACTIVE", "Este chip está desativado ou sem conexão configurada.");
-  }
-  if (chip.connection_state && chip.connection_state !== "open") {
-    throw new ImportError(409, "CHIP_DISCONNECTED", "Este chip não está conectado. Conecte o chip antes de conferir.");
-  }
-  return chip;
-}
 
 function publico(estado) {
   if (!estado) return { rodando: false };
@@ -308,92 +269,14 @@ export function pararConferencia(clientId) {
   return publico(estado);
 }
 
-/**
- * Começa a conferir os números ainda não conferidos. Devolve logo (a conferência segue sozinha).
- * `deps` existe para teste: checkNumbers (Evolution), pausaMs, lote.
- */
-export async function iniciarConferencia(pool, { clientId, chipId, actor = {} }, deps = {}) {
-  const atual = conferencias.get(clientId);
-  if (atual?.rodando) return publico(atual);
+export const CONFERENCIA_DESLIGADA_MSG =
+  "A conferência de WhatsApp foi desligada: perguntar ao WhatsApp, em massa, se os números existem derrubou chips. " +
+  "Agora o lote faz uma limpeza sem consulta (formato, DDD, sem fixo, sem número inventado) e pausa sozinho se a lista " +
+  "se mostrar ruim durante o envio.";
 
-  const chip = await carregarChip(pool, { clientId, chipId });
-  const fila = await numerosPendentes(pool, clientId);
-  const checkNumbers = deps.checkNumbers || defaultCheckWhatsappNumbers;
-  const pausaMs = deps.pausaMs ?? CONFERENCIA_PAUSA_MS;
-  const tamanhoLote = deps.lote ?? CONFERENCIA_LOTE;
-  const controle = new AbortController();
-  const estado = {
-    rodando: fila.length > 0,
-    chipId: chip.id,
-    chipNome: chip.name || null,
-    iniciadoPor: actor.email || null,
-    iniciadoEm: new Date().toISOString(),
-    totalNaFila: fila.length,
-    conferidos: 0,
-    comWhatsapp: 0,
-    semWhatsapp: 0,
-    ultimoErro: null,
-    terminouEm: fila.length > 0 ? null : new Date().toISOString(),
-    motivoFim: fila.length > 0 ? null : "nada_a_conferir",
-    controle,
-  };
-  conferencias.set(clientId, estado);
-  if (fila.length === 0) return publico(estado);
-
-  const rodar = async () => {
-    let falhasSeguidas = 0;
-    for (let i = 0; i < fila.length && !controle.signal.aborted; i += tamanhoLote) {
-      const lote = fila.slice(i, i + tamanhoLote);
-      const { results, error } = await checkNumbers({
-        webhookUrl: chip.dispatch_webhook_url,
-        webhookToken: chip.dispatch_webhook_token,
-        numbers: lote,
-      });
-      const respondidos = new Map();
-      for (const r of results || []) {
-        const n = String(r.number ?? "").replace(/\D/g, "");
-        if (n) respondidos.set(n, r);
-      }
-      if (error || respondidos.size === 0) {
-        falhasSeguidas += 1;
-        estado.ultimoErro = error ? String(error).slice(0, 200) : "Evolution não respondeu nenhum número";
-        if (falhasSeguidas >= 2) {
-          estado.motivoFim = "falhas_seguidas";
-          break;
-        }
-      } else {
-        falhasSeguidas = 0;
-        for (const n of lote) {
-          const r = respondidos.get(n);
-          if (!r) continue; // sem resposta para este número: não inventa resultado
-          await pool.query(
-            `INSERT INTO public.whatsapp_number_validations (phone, exists_whatsapp, jid, validated_at)
-             VALUES ($1, $2, $3, now())
-             ON CONFLICT (phone) DO UPDATE SET exists_whatsapp = EXCLUDED.exists_whatsapp, jid = EXCLUDED.jid, validated_at = now()`,
-            [n, Boolean(r.exists), r.jid || null]
-          );
-          estado.conferidos += 1;
-          if (r.exists) estado.comWhatsapp += 1;
-          else estado.semWhatsapp += 1;
-        }
-      }
-      if (i + tamanhoLote < fila.length) {
-        await dormir(pausaMs + Math.floor(Math.random() * Math.min(30_000, pausaMs / 4 + 1)), controle.signal);
-      }
-    }
-    if (!estado.motivoFim) estado.motivoFim = controle.signal.aborted ? "parada_pelo_usuario" : "concluida";
-    estado.rodando = false;
-    estado.terminouEm = estado.terminouEm || new Date().toISOString();
-  };
-
-  estado.promessa = rodar().catch((err) => {
-    estado.rodando = false;
-    estado.ultimoErro = String(err?.message || err).slice(0, 200);
-    estado.motivoFim = "erro";
-    estado.terminouEm = new Date().toISOString();
-    console.error("[conferencia-whatsapp] erro:", err?.message || err);
-  });
-  return publico(estado);
+/** Desligada em 27/11/2026 (antibloqueio). Mantida para a rota responder 410 com a explicação. */
+export async function iniciarConferencia() {
+  throw new ImportError(410, "CONFERENCIA_DESLIGADA", CONFERENCIA_DESLIGADA_MSG);
 }
 
 /** Só para teste: espera a conferência da empresa terminar e limpa o estado. */

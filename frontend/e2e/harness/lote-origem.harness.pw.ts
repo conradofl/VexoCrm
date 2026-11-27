@@ -68,7 +68,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 375, height: 740 
 
     await expect(page.getByTestId("previa-total")).toContainText("Leads no grupo");
     await expect(page.getByTestId("previa-total")).toContainText("685");
-    await expect(page.getByTestId("previa-disponivel")).toContainText("380");
+    await expect(page.getByTestId("previa-disponivel")).toContainText("660"); // sem exigir confirmados (padrão desde o antibloqueio)
     expect(previas.at(-1)).toEqual({ tipo: "tag", tag: TAG });
     await semEstouro(page, viewport.width);
     await page.screenshot({ path: `${SHOTS}/lote-origem-${viewport.width}-tag.png`, fullPage: true });

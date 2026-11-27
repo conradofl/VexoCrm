@@ -1,8 +1,9 @@
 // "Separar lotes" do Banco de Dados em Chromium de verdade. O que este arquivo prova, e que jsdom não prova:
 //   - o botão "Separar lotes" aparece na barra do Banco, e a janela abre POR CIMA da página (fora do <main>), inteira
 //     dentro da tela, em 1366 px e em 375 px, mesmo com a página rolada;
-//   - a prévia mostra os números da base da empresa certa, a conferência de WhatsApp manda o chip escolhido e mostra o
-//     andamento, e separar manda tamanho, quantidade e "só confirmados" e lista as planilhas criadas;
+//   - a prévia mostra os números da base da empresa certa; a conferência de WhatsApp está desligada (antibloqueio,
+//     27/11/2026): só um aviso, sem botão e sem chamada; separar manda tamanho, quantidade e "só confirmados" desligado
+//     por padrão, e lista as planilhas criadas;
 //   - nada estoura a largura da janela no celular.
 //
 // Uso: npx playwright test --config playwright.harness.config.ts separar-lotes
@@ -87,7 +88,7 @@ async function abrir(page: Page) {
   await page.getByTestId("btn-separate-batches").click();
   const janela = page.getByRole("dialog");
   await expect(janela).toBeVisible();
-  await expect(page.getByTestId("previa-disponivel")).toContainText("644");
+  await expect(page.getByTestId("previa-disponivel")).toContainText("2.216");
   return { pedidos, janela };
 }
 
@@ -125,15 +126,14 @@ for (const [nome, viewport] of [
   });
 }
 
-test("conferir manda o chip escolhido e mostra o andamento; parar para", async ({ page }) => {
+test("conferência de WhatsApp desligada: só o aviso, sem botão e sem chamada", async ({ page }) => {
   const { pedidos } = await abrir(page);
-  await expect(page.getByTestId("btn-conferir")).toContainText("1.548");
-  await page.getByTestId("btn-conferir").click();
-  await expect(page.getByTestId("conferencia-rodando")).toBeVisible();
-  const post = pedidos.find((p) => p.metodo === "POST" && p.url.includes("conferencia-whatsapp"));
-  expect(post?.corpo).toEqual({ clientId: "tinge-brasil", chipId: "chip-comercial" });
-  await page.getByRole("button", { name: "Parar", exact: true }).click();
-  await expect(page.getByTestId("conferencia-fim")).toContainText("parada");
+  await expect(page.getByTestId("conferencia-desligada")).toContainText("Conferência de WhatsApp desligada");
+  await expect(page.getByTestId("btn-conferir")).toHaveCount(0);
+  expect(pedidos.some((p) => p.url.includes("conferencia-whatsapp"))).toBe(false);
+  // Ligar "só confirmados" ainda funciona para quem foi conferido antes.
+  await page.getByTestId("exigir-whatsapp").click();
+  await expect(page.getByTestId("previa-disponivel")).toContainText("644");
 });
 
 test("separar manda tamanho, quantidade e só confirmados, e lista as planilhas criadas", async ({ page }) => {
@@ -150,7 +150,7 @@ test("separar manda tamanho, quantidade e só confirmados, e lista as planilhas 
   await criadas.scrollIntoViewIfNeeded();
   await expect(criadas).toContainText("Natal · Lote 02 · 50 leads");
   const post = pedidos.find((p) => p.metodo === "POST" && p.url.endsWith("/api/leads/lotes"));
-  expect(post?.corpo).toEqual({ clientId: "tinge-brasil", tamanho: 50, quantidade: 2, nomeBase: "Natal", exigirWhatsapp: true });
+  expect(post?.corpo).toEqual({ clientId: "tinge-brasil", tamanho: 50, quantidade: 2, nomeBase: "Natal", exigirWhatsapp: false });
   const box = await criadas.boundingBox();
   expect(box!.y + box!.height).toBeLessThanOrEqual(740 + 0.5);
   await page.screenshot({ path: `${SHOTS}/separar-lotes-criadas-celular.png` });

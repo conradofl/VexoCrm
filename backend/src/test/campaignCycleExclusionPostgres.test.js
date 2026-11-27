@@ -154,11 +154,11 @@ const contagem = (lista) => lista.reduce((m, t) => m.set(t, (m.get(t) || 0) + 1)
 describe("[OBRIGATÓRIO] exclusão por ciclo entre lotes da mesma campanha", () => {
   it("(a) lead importado entre o lote 0 e o lote 1: ninguém recebe duas vezes", async () => {
     const w = await mundo();
-    await w.inserirLeads(30, "5511990");
+    await w.inserirLeads(30, "551199990");
     const lotes = [await w.lote({ offset: 0, limit: 10 }), await w.lote({ offset: 10, limit: 10 }), await w.lote({ offset: 20, limit: 10 })];
 
     await w.rodar(lotes[0]);
-    await w.inserirLeads(1, "5521980", "2026-10-15T09:00:00.000Z"); // importado depois: entra na posição 0
+    await w.inserirLeads(1, "552199980", "2026-10-15T09:00:00.000Z"); // importado depois: entra na posição 0
     await w.rodar(lotes[1]);
     await w.rodar(lotes[2]);
 
@@ -171,7 +171,7 @@ describe("[OBRIGATÓRIO] exclusão por ciclo entre lotes da mesma campanha", () 
 
   it("(b) campanha recorrente com 2 ocorrências: o MESMO lead recebe nas duas", async () => {
     const w = await mundo();
-    await w.inserirLeads(5, "5511990");
+    await w.inserirLeads(5, "551199990");
     await w.rodar(await w.lote({ occurrenceAt: "2026-11-15T12:00:00Z" }));
     await w.rodar(await w.lote({ occurrenceAt: "2026-12-15T12:00:00Z" }));
 
@@ -181,7 +181,7 @@ describe("[OBRIGATÓRIO] exclusão por ciclo entre lotes da mesma campanha", () 
 
   it("(c) quem não recebeu nada continua entrando normalmente", async () => {
     const w = await mundo();
-    await w.inserirLeads(20, "5511990");
+    await w.inserirLeads(20, "551199990");
     await w.rodar(await w.lote({ offset: 0, limit: 10 }));
     const primeiros = new Set(enviados);
     await w.rodar(await w.lote({ offset: 10, limit: 10 }));
@@ -192,12 +192,12 @@ describe("[OBRIGATÓRIO] exclusão por ciclo entre lotes da mesma campanha", () 
 
   it("(d) MEDIÇÃO: quem escorrega para fora de todos os lotes continua sem receber — fica para o caminho 1", async () => {
     const w = await mundo();
-    await w.inserirLeads(30, "5511990");
+    await w.inserirLeads(30, "551199990");
     const lotes = [await w.lote({ offset: 0, limit: 10 }), await w.lote({ offset: 10, limit: 10 }), await w.lote({ offset: 20, limit: 10 })];
     const ordemAntes = (await buildDispatchLeads({ clientId: T, importId: "__crm__" })).map((l) => l.telefone);
 
     await w.rodar(lotes[0]);
-    await w.inserirLeads(1, "5521980", "2026-10-15T09:00:00.000Z");
+    await w.inserirLeads(1, "552199980", "2026-10-15T09:00:00.000Z");
     await w.rodar(lotes[1]);
     await w.rodar(lotes[2]);
 
@@ -209,7 +209,7 @@ describe("[OBRIGATÓRIO] exclusão por ciclo entre lotes da mesma campanha", () 
     const recebeu = new Set(enviados);
     expect(enviados).toHaveLength(29);
     expect(recebeu.size).toBe(29);
-    const todos = [...ordemAntes, "55219801000"];
-    expect(todos.filter((t) => !recebeu.has(t)).sort()).toEqual([ordemAntes[29], "55219801000"].sort());
+    const todos = [...ordemAntes, "5521999801000"];
+    expect(todos.filter((t) => !recebeu.has(t)).sort()).toEqual([ordemAntes[29], "5521999801000"].sort());
   }, SLOW);
 });
