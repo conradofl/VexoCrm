@@ -180,6 +180,18 @@ describe("retrato da operação", () => {
     ]);
   });
 
+  it("por empresa conta pessoa distinta: quem recebeu de duas campanhas conta uma vez", async () => {
+    await db.query(
+      `INSERT INTO campaign_dispatch_runs (campaign_id, client_id, phone, status, sent_at, created_at) VALUES
+        ($1, 'tinge', '5534999990001', 'sent', now() - interval '1 day', now() - interval '1 day')`,
+      [C2]
+    );
+    const { json } = await get("/api/analyst/overview?dias=7");
+    expect(json.campanhas.porEmpresa).toEqual([{ empresa: "tinge", campanhas: 2, enviados: 3, falharam: 1, responderam: 2 }]);
+    expect(json.campanhas.ranking.map((c) => [c.id, c.enviados])).toEqual([[C1, 3], [C2, 1]]);
+    expect(json.campanhas.regraPorEmpresa).toMatch(/pessoas distintas/);
+  });
+
   it("período maior pega a campanha antiga, mas resposta fora da janela de 14 dias não conta", async () => {
     const { json } = await get("/api/analyst/overview?dias=35");
     const c2 = json.campanhas.ranking.find((c) => c.id === C2);

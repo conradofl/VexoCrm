@@ -80,10 +80,11 @@ const num = (v) => (v === null || v === undefined ? 0 : Number(v));
 async function campanhas(pool, dias) {
   const casa = `(lm.phone = r.phone OR ${SQL_CANONICAL_PHONE("lm.phone")} = ${SQL_CANONICAL_PHONE("r.phone")})`;
   const quando = "COALESCE(lm.message_timestamp, lm.delivered_at, lm.created_at)";
-  const { rows } = await pool.query(
-    `WITH r AS (
+  // Só envios de campanha que existe na empresa (o JOIN deixa de fora registro órfão).
+  const cte = `WITH r AS (
        SELECT r.campaign_id, r.client_id, r.phone, r.status, r.sent_at
          FROM public.campaign_dispatch_runs r
+         JOIN public.campaigns c ON c.id = r.campaign_id AND c.client_id = r.client_id
         WHERE (r.status = 'sent' AND r.sent_at >= now() - make_interval(days => $1))
            OR (r.status = 'failed' AND r.created_at >= now() - make_interval(days => $1))
      ), resp AS (
@@ -95,7 +96,9 @@ async function campanhas(pool, dias) {
              AND (lm.direction = 'inbound' OR lm.engagement_signal = 'reply')
              AND ${quando} > r.sent_at
              AND ${quando} <= r.sent_at + interval '${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} days')
-     )
+     )`;
+  const { rows } = await pool.query(
+    `${cte}
      SELECT c.id, c.client_id, c.name, c.status,
             COUNT(DISTINCT r.phone) FILTER (WHERE r.status = 'sent')::int AS enviados,
             COUNT(DISTINCT r.phone) FILTER (WHERE r.status = 'failed')::int AS falharam,
@@ -105,21 +108,29 @@ async function campanhas(pool, dias) {
       GROUP BY c.id, c.client_id, c.name, c.status`,
     [dias]
   );
-  const porEmpresa = {};
-  for (const c of rows) {
-    const e = (porEmpresa[c.client_id] ||= { empresa: c.client_id, campanhas: 0, enviados: 0, falharam: 0, responderam: 0 });
-    e.campanhas += 1;
-    e.enviados += num(c.enviados);
-    e.falharam += num(c.falharam);
-    e.responderam += num(c.responderam);
-  }
+  // Por empresa conta PESSOA: quem recebeu de duas campanhas conta uma vez só (mesma conta do Dashboard).
+  const { rows: empresas } = await pool.query(
+    `${cte}
+     SELECT r.client_id,
+            COUNT(DISTINCT r.campaign_id)::int AS campanhas,
+            COUNT(DISTINCT r.phone) FILTER (WHERE r.status = 'sent')::int AS enviados,
+            COUNT(DISTINCT r.phone) FILTER (WHERE r.status = 'failed')::int AS falharam,
+            (SELECT COUNT(DISTINCT resp.phone)::int FROM resp WHERE resp.client_id = r.client_id) AS responderam
+       FROM r
+      GROUP BY r.client_id`,
+    [dias]
+  );
+  const porEmpresa = empresas
+    .map((e) => ({ empresa: e.client_id, campanhas: num(e.campanhas), enviados: num(e.enviados), falharam: num(e.falharam), responderam: num(e.responderam) }))
+    .sort((a, b) => b.enviados - a.enviados || a.empresa.localeCompare(b.empresa));
   const ranking = rows
     .map((c) => ({ id: c.id, empresa: c.client_id, nome: c.name, status: c.status, enviados: num(c.enviados), falharam: num(c.falharam), responderam: num(c.responderam) }))
     .sort((a, b) => b.enviados - a.enviados || b.responderam - a.responderam)
     .slice(0, MAX_CAMPANHAS_NO_RANKING);
   return {
     regra: `respondeu = recebeu envio no período e mandou mensagem de volta em até ${MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS} dias`,
-    porEmpresa: Object.values(porEmpresa).sort((a, b) => b.enviados - a.enviados),
+    regraPorEmpresa: "por empresa conta pessoas distintas; no ranking, cada campanha conta as suas",
+    porEmpresa,
     ranking,
   };
 }
