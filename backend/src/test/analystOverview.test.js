@@ -4,9 +4,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import express from "express";
 import http from "node:http";
 import { createPgliteDb } from "./helpers/pgliteDb.js";
-import { ANALYST_TOKEN_ENV, analystToken, lerDias, registerAnalystRoutes } from "../analyst/overview.js";
+import { ANALYST_TOKEN_HASH_ENV, analystTokenHash, isAnalystAuthorized, lerDias, registerAnalystRoutes, sha256Hex } from "../analyst/overview.js";
 
 const TOKEN = "a".repeat(24) + "-token-da-analista-geral-01";
+const HASH = sha256Hex(TOKEN);
 const C1 = "11111111-1111-4111-8111-111111111111";
 const C2 = "22222222-2222-4222-8222-222222222222";
 const C3 = "33333333-3333-4333-8333-333333333333";
@@ -56,8 +57,8 @@ beforeAll(async () => {
 }, 60_000);
 
 beforeEach(async () => {
-  for (const k of [ANALYST_TOKEN_ENV, "GOCLAW_READ_TOKEN", "CAMPAIGN_AGENT_TOKENS", "TRAFFIC_GOCLAW_TOKENS"]) delete process.env[k];
-  process.env[ANALYST_TOKEN_ENV] = TOKEN;
+  for (const k of [ANALYST_TOKEN_HASH_ENV, "GOCLAW_READ_TOKEN", "CAMPAIGN_AGENT_TOKENS", "TRAFFIC_GOCLAW_TOKENS"]) delete process.env[k];
+  process.env[ANALYST_TOKEN_HASH_ENV] = HASH;
   for (const t of ["lead_messages", "campaign_dispatch_runs", "campaigns", "llm_usage", "evolution_instance_events", "traffic_metrics_daily", "dashboard_metrics_cache"]) {
     await db.query(`DELETE FROM ${t}`);
   }
@@ -131,16 +132,25 @@ describe("token da analista", () => {
   it("sem token, token errado ou variável ausente: 401", async () => {
     expect((await get("/api/analyst/overview", null)).status).toBe(401);
     expect((await get("/api/analyst/overview", "x".repeat(40))).status).toBe(401);
-    delete process.env[ANALYST_TOKEN_ENV];
+    delete process.env[ANALYST_TOKEN_HASH_ENV];
     expect((await get("/api/analyst/overview")).status).toBe(401);
   });
 
-  it("token curto ou repetido de outro serviço não abre a porta", () => {
-    expect(analystToken({ [ANALYST_TOKEN_ENV]: "curto" })).toBeNull();
-    expect(analystToken({ [ANALYST_TOKEN_ENV]: TOKEN, GOCLAW_READ_TOKEN: TOKEN })).toBeNull();
-    expect(analystToken({ [ANALYST_TOKEN_ENV]: TOKEN, CAMPAIGN_AGENT_TOKENS: `tinge=${TOKEN}` })).toBeNull();
-    expect(analystToken({ [ANALYST_TOKEN_ENV]: TOKEN, TRAFFIC_GOCLAW_TOKENS: `udi=${TOKEN}` })).toBeNull();
-    expect(analystToken({ [ANALYST_TOKEN_ENV]: TOKEN })).toBe(TOKEN);
+  it("o servidor guarda só o hash; hash mal formado ou de outro segredo de serviço não abre a porta", () => {
+    expect(HASH).toMatch(/^[0-9a-f]{64}$/);
+    expect(analystTokenHash({ [ANALYST_TOKEN_HASH_ENV]: TOKEN })).toBeNull();
+    expect(analystTokenHash({ [ANALYST_TOKEN_HASH_ENV]: "abc" })).toBeNull();
+    expect(analystTokenHash({ [ANALYST_TOKEN_HASH_ENV]: HASH, GOCLAW_READ_TOKEN: TOKEN })).toBeNull();
+    expect(analystTokenHash({ [ANALYST_TOKEN_HASH_ENV]: HASH, CAMPAIGN_AGENT_TOKENS: `tinge=${TOKEN}` })).toBeNull();
+    expect(analystTokenHash({ [ANALYST_TOKEN_HASH_ENV]: HASH, TRAFFIC_GOCLAW_TOKENS: `udi=${TOKEN}` })).toBeNull();
+    expect(analystTokenHash({ [ANALYST_TOKEN_HASH_ENV]: ` ${HASH.toUpperCase()} ` })).toBe(HASH);
+  });
+
+  it("o hash em si não serve de token, e token curto é recusado mesmo com hash certo", () => {
+    expect(isAnalystAuthorized(`Bearer ${TOKEN}`, { [ANALYST_TOKEN_HASH_ENV]: HASH })).toBe(true);
+    expect(isAnalystAuthorized(`Bearer ${HASH}`, { [ANALYST_TOKEN_HASH_ENV]: HASH })).toBe(false);
+    expect(isAnalystAuthorized("Bearer curto", { [ANALYST_TOKEN_HASH_ENV]: sha256Hex("curto") })).toBe(false);
+    expect(isAnalystAuthorized(TOKEN, { [ANALYST_TOKEN_HASH_ENV]: HASH })).toBe(false);
   });
 
   it("dias fora de 1 a 90 é recusado com 400", async () => {

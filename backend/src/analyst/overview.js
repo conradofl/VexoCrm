@@ -2,9 +2,10 @@
 //
 // Uma rota só: GET /api/analyst/overview?dias=7. Junta, de todas as empresas, os números que o Painel geral e a
 // analista precisam, sem o robô ter login de pessoa. Regras, de propósito:
-//   - token de serviço PRÓPRIO, ANALYST_READ_TOKEN, comparado em tempo constante. Token curto (menos de 32
-//     caracteres) ou que repete o valor de outro segredo de serviço do backend não abre nada. Sem a variável, a
-//     porta fica fechada para todo mundo (401);
+//   - token de serviço PRÓPRIO. O servidor guarda só o SHA-256 dele (ANALYST_READ_TOKEN_SHA256, 64 hex): o token
+//     em si fica só com o robô e não aparece no EasyPanel. Comparação em tempo constante. Hash mal formado, ou igual
+//     ao hash de outro segredo de serviço do backend, não abre nada; token apresentado com menos de 32 caracteres
+//     também não. Sem a variável, a porta fica fechada para todo mundo (401);
 //   - só GET e só leitura: nenhuma consulta daqui escreve, e nenhuma rota de campanha, lote, disparo, verba ou
 //     agendamento aceita este token (este módulo não registra nenhuma);
 //   - só agregados por empresa: nunca telefone, nome de lead, texto de mensagem, token de plataforma ou e-mail;
@@ -17,7 +18,7 @@ import { pgDatabasePool } from "../services/database.js";
 import { SQL_CANONICAL_PHONE } from "../services/canonicalPhone.js";
 import { MESSAGE_EFFECTIVENESS_REPLY_WINDOW_DAYS } from "../services/messageEffectiveness.js";
 
-export const ANALYST_TOKEN_ENV = "ANALYST_READ_TOKEN";
+export const ANALYST_TOKEN_HASH_ENV = "ANALYST_READ_TOKEN_SHA256";
 export const MIN_ANALYST_TOKEN_LENGTH = 32;
 export const MAX_DIAS = 90;
 export const MAX_CAMPANHAS_NO_RANKING = 30;
@@ -42,24 +43,22 @@ function foreignSecrets(env) {
   return valores;
 }
 
-/** Token válido do ambiente, ou null. Nunca loga o valor. */
-export function analystToken(env = process.env) {
-  const token = String(env?.[ANALYST_TOKEN_ENV] || "").trim();
-  if (token.length < MIN_ANALYST_TOKEN_LENGTH || foreignSecrets(env).has(token)) return null;
-  return token;
-}
+export const sha256Hex = (texto) => crypto.createHash("sha256").update(String(texto), "utf8").digest("hex");
 
-function safeEqual(a, b) {
-  const esquerda = Buffer.from(a);
-  const direita = Buffer.from(b);
-  return esquerda.length === direita.length && crypto.timingSafeEqual(esquerda, direita);
+/** Hash válido do ambiente (64 hex, minúsculo), ou null. Nunca loga o valor. */
+export function analystTokenHash(env = process.env) {
+  const hash = String(env?.[ANALYST_TOKEN_HASH_ENV] || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+  for (const alheio of foreignSecrets(env)) if (sha256Hex(alheio) === hash) return null;
+  return hash;
 }
 
 export function isAnalystAuthorized(authorization, env = process.env) {
-  const esperado = analystToken(env);
+  const esperado = analystTokenHash(env);
   if (!esperado || typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return false;
   const apresentado = authorization.slice("Bearer ".length).trim();
-  return Boolean(apresentado) && safeEqual(apresentado, esperado);
+  if (apresentado.length < MIN_ANALYST_TOKEN_LENGTH) return false;
+  return crypto.timingSafeEqual(Buffer.from(sha256Hex(apresentado), "hex"), Buffer.from(esperado, "hex"));
 }
 
 function deny(res, status, code, message) {
