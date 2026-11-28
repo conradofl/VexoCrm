@@ -78,6 +78,9 @@ export function registerLeadCaptureRoutes(app, deps) {
       mainPain,
       instanceName,
       adOrigin,
+      form,
+      isOwner,
+      dailyMessages,
     } = validation.data;
 
     const pool = pgDatabasePool;
@@ -97,6 +100,7 @@ export function registerLeadCaptureRoutes(app, deps) {
         responseTime,
         followupProcess,
         mainPain,
+        ...(form ? { isOwner, dailyMessages } : {}),
       };
 
       await saveCaptureLead(pool, {
@@ -106,9 +110,22 @@ export function registerLeadCaptureRoutes(app, deps) {
         email,
         answers,
         adOrigin,
+        form,
       });
 
       console.log(`[leadCapture] Lead ${fullName} salvo com sucesso para tenant ${clientId} (${maskPhoneForLog(phone)})`);
+
+      // Formulário com regra própria (ex.: turno-zero-kit): ninguém manda mensagem
+      // para o lead e a equipe de vendas da Vexo não recebe o aviso de diagnóstico.
+      if (form && !form.autoReply && !form.ownerAlert) {
+        console.log(`[leadCapture] Formulário ${form.key}: lead salvo sem auto-resposta e sem aviso ao dono (${maskPhoneForLog(phone)})`);
+        return res.status(200).json({
+          success: true,
+          message: "Pronto! Recebemos seus dados.",
+          phoneMasked: maskPhoneForDisplay(phone),
+          leadPhone: phone,
+        });
+      }
 
       // 5. Monta a Mensagem que o Visitante recebe
       const visitorMessage = formatVisitorDiagnosticMessage({

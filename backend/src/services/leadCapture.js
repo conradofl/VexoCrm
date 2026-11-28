@@ -150,8 +150,54 @@ export function validateCapturePayload(body = {}) {
       instanceName: String(body.instance_name || body.instanceName || "").trim() || null,
       // Parâmetros de campanha lidos da URL pela página. null = sem origem registrada.
       adOrigin: parseAdAttribution(body.attribution),
+      // Formulário conhecido (ex.: "turno-zero-kit"). null = diagnóstico padrão do site.
+      form: resolveCaptureForm(body.formulario || body.form),
+      isOwner: String(body.isOwner || body.ehDono || "").trim() || null,
+      dailyMessages: String(body.dailyMessages || body.mensagensDia || "").trim() || null,
     },
   };
+}
+
+/**
+ * Formulários de captura com regra própria. Fora desta lista, vale o
+ * diagnóstico padrão do site (etiqueta diagnostico-site, auto-resposta e aviso ao dono).
+ *
+ * turno-zero-kit: cadastro do Kit Madrugada (anúncios do Turno Zero). O lead pediu
+ * o Kit e entra na comunidade pela tela de obrigado; ninguém manda mensagem para ele,
+ * e o aviso de diagnóstico da Vexo não sai para a equipe de vendas da Vexo.
+ */
+export const CAPTURE_FORMS = Object.freeze({
+  "turno-zero-kit": Object.freeze({
+    tag: "turno-zero",
+    origin: "turno-zero-kit",
+    autoReply: false,
+    ownerAlert: false,
+    notificationTitle: "Cadastro Turno Zero",
+  }),
+});
+
+/**
+ * @param {unknown} raw
+ * @returns {null | { key: string, tag: string, origin: string, autoReply: boolean, ownerAlert: boolean, notificationTitle: string }}
+ */
+export function resolveCaptureForm(raw) {
+  const key = String(raw || "").trim().toLowerCase();
+  if (!key || !Object.prototype.hasOwnProperty.call(CAPTURE_FORMS, key)) return null;
+  return { key, ...CAPTURE_FORMS[key] };
+}
+
+/**
+ * Lead qualificado do Turno Zero: é o dono (ou decide as compras) e recebe
+ * 10 ou mais mensagens por dia. Resposta ausente ou fora das opções = não qualificado.
+ * @param {{ isOwner?: string|null, dailyMessages?: string|null }} answers
+ * @returns {boolean}
+ */
+export function isQualifiedTurnoZeroLead({ isOwner, dailyMessages } = {}) {
+  const dono = normalizeOptionString(isOwner);
+  const msgs = normalizeOptionString(dailyMessages);
+  const ehDono = dono === "sim" || dono === "true";
+  const volume = /^(de )?10 a 30$/.test(msgs) || /^mais de 30$/.test(msgs);
+  return ehDono && volume;
 }
 
 /**
@@ -417,22 +463,25 @@ export function formatOwnerAlertMessage({ fullName, phone, email, answers, clien
  * @param {object} params
  * @returns {Promise<{ leadId?: string, action: "inserted"|"updated" }>}
  */
-export async function saveCaptureLead(pool, { clientId, phone, fullName, email, answers, adOrigin = null }) {
+export async function saveCaptureLead(pool, { clientId, phone, fullName, email, answers, adOrigin = null, form = null }) {
   if (!pool) throw new Error("Pool de banco indisponível");
+  const tag = form?.tag || "diagnostico-site";
+  const captureOrigin = form?.origin || "landing-page-diagnostico";
 
   // lead_source só com prova: anúncio pago vira "trafego_pago". Sem prova a
   // coluna não é escrita (lead novo fica sem origem = "Não informado"; lead
   // antigo mantém a dele). Antes daqui todo formulário virava "organico".
   const fields = {
     nome: fullName,
-    tags: ["diagnostico-site"],
-    lead_origin: "diagnostico-site",
+    tags: [tag],
+    lead_origin: form?.origin || "diagnostico-site",
     lead_source: leadSourceForAdOrigin(adOrigin),
     status: "NOVO",
     dados: {
       ...answers,
       email: email || null,
-      captura_origem: "landing-page-diagnostico",
+      captura_origem: captureOrigin,
+      ...(form?.key === "turno-zero-kit" ? { qualificado: isQualifiedTurnoZeroLead(answers) } : {}),
       submitted_at: new Date().toISOString(),
     },
   };
@@ -458,8 +507,10 @@ export async function saveCaptureLead(pool, { clientId, phone, fullName, email, 
        VALUES ($1, 'lead_capture', $2, $3, '/crm/leads')`,
       [
         clientId,
-        `Novo Lead: ${fullName}`,
-        `Solicitação de diagnóstico recebida pelo site (${answers.company || "Empresa"}).`,
+        form ? `${form.notificationTitle}: ${fullName}` : `Novo Lead: ${fullName}`,
+        form
+          ? `Cadastro pelo formulário ${form.key} (${answers.segment || "negócio não informado"}).`
+          : `Solicitação de diagnóstico recebida pelo site (${answers.company || "Empresa"}).`,
       ]
     );
   } catch (notifErr) {
