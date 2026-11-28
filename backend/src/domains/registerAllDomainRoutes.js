@@ -9,6 +9,7 @@ import { registerRagRoutes } from "../rag/routes.js";
 import { registerAudioLibraryRoutes } from "../audioLibrary/routes.js";
 import { registerTrafficRoutes } from "../traffic/routes.js";
 import { registerTrafficGoclawRoutes } from "../traffic/goclawRead.js";
+import { registerAnalystRoutes } from "../analyst/overview.js";
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { registerEventosRoutes } from "./eventos/routes.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -90,6 +91,9 @@ export function registerAllDomainRoutes(app) {
   registerTrafficRoutes(app);
   // Leitura do tráfego para o GoClaw: token próprio por empresa, só GET.
   registerTrafficGoclawRoutes(app);
+
+  // ─── Porta de leitura da Analista geral (robô do dono): token próprio, só GET, só agregados ───
+  registerAnalystRoutes(app);
 
   // ─── Módulo de Onboarding (criação transacional de empresa + campanha + templates) ───
   registerOnboardingRoutes(app, requireFirebaseAuth, requireInternalAccess);
